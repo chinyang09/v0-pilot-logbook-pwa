@@ -18,12 +18,17 @@ import type { UserSession } from "@/types/entities/user.types"
 import type { UserPreferences } from "@/types/db/stores.types"
 import type { SyncQueueItem, SyncMeta } from "@/types/sync/sync.types"
 import type { ScheduleEntry, Currency, Discrepancy } from "@/types/entities/roster.types"
+import type { UserSettingsRecord } from "@/types/entities/settings.types"
+import type { DevicePreferences } from "@/lib/settings/user-settings"
 
 class UserDatabase extends Dexie {
   flights!: Table<FlightLog, string>
   aircraft!: Table<Aircraft, string>
   personnel!: Table<Personnel, string>
-  preferences!: Table<UserPreferences, string>
+  /** The legacy per-device row (`user-prefs`) and the device's own (`device`). */
+  preferences!: Table<UserPreferences | DevicePreferences, string>
+  /** The user's synced settings — one row, id `settings`. */
+  settings!: Table<UserSettingsRecord, string>
   syncQueue!: Table<SyncQueueItem, string>
   syncMeta!: Table<SyncMeta, string>
   userSession!: Table<UserSession, string>
@@ -97,6 +102,13 @@ class UserDatabase extends Dexie {
             row.recordId = row?.data?.id
           })
       })
+
+    // Version 5 (additive): the user's settings, synced like every other
+    // collection (lib/settings/user-settings.ts). The legacy preferences row
+    // is carried up once, after the first complete pull.
+    this.version(5).stores({
+      settings: "id, syncStatus",
+    })
   }
 
   /**
@@ -110,6 +122,7 @@ class UserDatabase extends Dexie {
         this.aircraft,
         this.personnel,
         this.preferences,
+        this.settings,
         this.syncQueue,
         this.syncMeta,
         this.userSession,
@@ -122,7 +135,10 @@ class UserDatabase extends Dexie {
           this.flights.clear(),
           this.aircraft.clear(),
           this.personnel.clear(),
-          this.preferences.clear(),
+          // The device's own row (theme, palette) stays: the next person to
+          // sign in is looking at the same screen. Everything else was the user's.
+          this.preferences.where("key").notEqual("device").delete(),
+          this.settings.clear(),
           this.syncQueue.clear(),
           this.syncMeta.clear(),
           this.userSession.clear(),
@@ -189,6 +205,7 @@ class UserDatabase extends Dexie {
       ["scheduleEntries", this.scheduleEntries],
       ["currencies", this.currencies],
       ["discrepancies", this.discrepancies],
+      ["settings", this.settings],
     ] as const
     await this.transaction("rw", [...tables.map(([, t]) => t), this.syncQueue], async () => {
       const queued = new Set((await this.syncQueue.toArray()).map((q) => `${q.collection}:${q.recordId ?? q.data?.id}`))

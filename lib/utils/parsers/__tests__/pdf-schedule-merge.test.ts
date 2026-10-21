@@ -51,6 +51,16 @@ vi.mock("@/lib/db", () => {
       createdAt: 0,
       syncStatus: "pending" as const,
     })),
+    getLoggingProfile: vi.fn(async () => ({
+      id: "self",
+      name: "Lim Chin Yang",
+      crewId: "9766",
+      organization: "Scoot",
+      roles: ["SIC"],
+      isMe: true,
+      createdAt: 0,
+      syncStatus: "pending" as const,
+    })),
     // The parser reads the user's PICUS-vs-SIC convention so a PF/PM change
     // can carry the matching pilotRole correction.
     getUserPreferences: vi.fn(async () => null),

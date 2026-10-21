@@ -3,6 +3,8 @@
  */
 
 import { pickSelfCard } from "@/lib/utils/self-card";
+import { withLoggingPreferences } from "@/lib/utils/roster/pilot-role";
+import { getSyncedPreferences } from "./preferences.store";
 import { userDb } from "../../user-db";
 import type {
   Personnel,
@@ -104,6 +106,16 @@ export async function getCurrentUserPersonnel(): Promise<Personnel | null> {
   // Every flagged card, then ONE rule for which is the pilot (`pickSelfCard`):
   // `.first()` was table order, which differs per device.
   return pickSelfCard(await userDb.personnel.filter((p) => p.isMe === true).toArray());
+}
+
+/**
+ * The pilot's own card with Settings › Logging laid over it (seat, PF
+ * convention, PICUS check-out) — what every new and imported flight reads to
+ * decide the pilot's role. Null with no self card: the importers need its id.
+ */
+export async function getLoggingProfile(): Promise<Personnel | null> {
+  const [self, synced] = await Promise.all([getCurrentUserPersonnel(), getSyncedPreferences()]);
+  return self ? withLoggingPreferences(self, synced.logging) : null;
 }
 
 /**

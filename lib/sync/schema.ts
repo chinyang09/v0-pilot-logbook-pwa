@@ -33,6 +33,8 @@ import type { Personnel } from "@/types/entities/crew.types"
 import type { ScheduleEntry, Currency, Discrepancy } from "@/types/entities/roster.types"
 import type { SyncCollection } from "@/types/sync/sync.types"
 import { toTimestamp } from "./authorship"
+import { getEntryType } from "@/lib/utils/entry-type"
+import { SETTINGS_FIELD_KEYS } from "@/lib/settings/user-settings"
 
 /**
  * Bump when a field table below changes in a way the server must rewrite
@@ -42,14 +44,22 @@ import { toTimestamp } from "./authorship"
  * so the server knows whether the payload is COMPLETE (see `writeMode`).
  *
  * 1 is the implicit legacy version: no envelope, no defaults.
+ * 2 is the canonical envelope + field tables.
+ * 3 fills the self card's `pfRole`/`pfRoleFrom` (added after 2 had already
+ *   run, so no stored crew card carried them), settles a flight's
+ *   `entryType`/`isSimulator`/`isLocked` and a crew card's switches to one
+ *   representation each (`NORMALIZE`), retires the dead `isDraft` key (`RETIRED_KEYS`),
+ *   and declares a type for every field (`opt`, `conformValue`). It also
+ *   brings the `settings` collection, which needs no rewrite (it is new).
  */
-export const SYNC_SCHEMA_VERSION = 2
+export const SYNC_SCHEMA_VERSION = 3
 
 /**
  * Push/pull order: dependency-light collections first, so a flight never
  * arrives referencing an aircraft or crew member the other side hasn't seen.
  */
 export const SYNC_COLLECTIONS: readonly SyncCollection[] = [
+  "settings",
   "aircraft",
   "personnel",
   "scheduleEntries",
@@ -92,8 +102,71 @@ type PayloadKeys<T> = Exclude<keyof T, EnvelopeKey>
  * built (and returns a fresh value, so an array default is never shared
  * between two documents).
  */
-type FieldDefault = string | number | boolean | null | ((src: Record<string, unknown>) => unknown)
+type FieldDefault = string | number | boolean | null | Optional | ((src: Record<string, unknown>) => unknown)
 type FieldTable<T> = { [K in PayloadKeys<T>]-?: FieldDefault }
+
+/**
+ * THE TYPE RULE — every field has one type and one way of saying "nothing":
+ *
+ * | declared as | the field is | "nothing" is |
+ * |---|---|---|
+ * | a value (`""`, `0`, `false`, `"00:00"`, `emptyArray`, …) | REQUIRED, of that value's type | its default — never `null` |
+ * | `opt(kind)` | OPTIONAL, of that kind | `null` |
+ * | `null` | OPTIONAL, any type — kept for a value whose type genuinely varies | `null` |
+ *
+ * So a switch is `true` or `false`, never `null` (production held "unlocked"
+ * as both `false` and `null`); a list is `[]`, never `null`; a time is
+ * "00:00". An optional fact that was never recorded is `null`, and a recorded
+ * one has its declared type.
+ *
+ * `canonicalizeDocument` enforces it on every write (`conformField`). A value of the wrong type is
+ * CONVERTED when that is unambiguous (`"true"` → `true`, `"90"` → `90`,
+ * `8` → `"8"`) — and when it is not, the value is not thrown away: it goes to
+ * `schemaRejects` on the document and the field takes its default. Unknown
+ * keys are kept as ever, which is the room a future build needs.
+ */
+type Kind = "string" | "number" | "boolean" | "array" | "object"
+interface Optional {
+  optional: Kind
+}
+const opt = (kind: Kind): Optional => ({ optional: kind })
+const isOptional = (d: unknown): d is Optional => !!d && typeof d === "object" && "optional" in (d as object)
+
+/** Where a value that could not be made to fit its field is kept. */
+export const SCHEMA_REJECTS_KEY = "schemaRejects"
+
+function kindOf(def: FieldDefault): Kind | null {
+  if (def === null) return null
+  if (isOptional(def)) return def.optional
+  const value = typeof def === "function" ? def({}) : def
+  if (Array.isArray(value)) return "array"
+  if (value === null || value === undefined) return null
+  return typeof value === "object" ? "object" : (typeof value as Kind)
+}
+
+/** The value as `kind`, or `undefined` when it cannot honestly be one. */
+export function conformValue(value: unknown, kind: Kind): unknown {
+  switch (kind) {
+    case "string":
+      if (typeof value === "string") return value
+      if (typeof value === "number" && Number.isFinite(value)) return String(value)
+      if (typeof value === "boolean") return String(value)
+      return undefined
+    case "number":
+      if (typeof value === "number") return Number.isFinite(value) ? value : undefined
+      if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) return Number(value)
+      return undefined
+    case "boolean":
+      if (typeof value === "boolean") return value
+      if (value === "true" || value === 1) return true
+      if (value === "false" || value === 0) return false
+      return undefined
+    case "array":
+      return Array.isArray(value) ? value : undefined
+    case "object":
+      return value && typeof value === "object" && !Array.isArray(value) ? value : undefined
+  }
+}
 
 const emptyArray = () => []
 const emptyObject = () => ({})
@@ -115,7 +188,7 @@ const FLIGHT_FIELDS = {
   arrivalIata: "",
   departureTimezone: 0,
   arrivalTimezone: 0,
-  reportTime: null,
+  reportTime: opt("string"),
   scheduledOut: "",
   scheduledIn: "",
   outTime: "",
@@ -153,18 +226,18 @@ const FLIGHT_FIELDS = {
   approaches: emptyArray,
   holds: 0,
   ipcIcc: false,
-  isLocked: null,
-  signature: null,
-  lastSyncedAt: null,
-  reportGeneratedAt: null,
-  scheduleReportAt: null,
-  logbookReportAt: null,
-  importSource: null,
-  toLdgDecidedAt: null,
-  importDecisions: null,
-  entryType: null,
-  isSimulator: null,
-  simSessionCode: null,
+  isLocked: false,
+  signature: opt("object"),
+  lastSyncedAt: opt("number"),
+  reportGeneratedAt: opt("number"),
+  scheduleReportAt: opt("number"),
+  logbookReportAt: opt("number"),
+  importSource: opt("string"),
+  toLdgDecidedAt: opt("number"),
+  importDecisions: opt("object"),
+  entryType: opt("string"),
+  isSimulator: opt("boolean"),
+  simSessionCode: opt("string"),
 } satisfies FieldTable<FlightLog>
 
 const AIRCRAFT_FIELDS = {
@@ -176,44 +249,45 @@ const AIRCRAFT_FIELDS = {
   engineType: "SEP",
   isComplex: false,
   isHighPerformance: false,
-  serialNumber: null,
-  operator: null,
-  owner: null,
-  year: null,
-  notes: null,
+  serialNumber: opt("string"),
+  operator: opt("string"),
+  owner: opt("string"),
+  year: opt("string"),
+  notes: opt("string"),
 } satisfies FieldTable<Aircraft>
 
 const PERSONNEL_FIELDS = {
   name: "",
-  crewId: null,
-  organization: null,
+  crewId: opt("string"),
+  organization: opt("string"),
   roles: emptyArray,
-  licenceNumber: null,
+  licenceNumber: opt("string"),
   contact: emptyObject,
-  comment: null,
-  isMe: null,
-  favorite: null,
-  defaultPIC: null,
-  defaultSIC: null,
-  pfRole: null,
+  comment: opt("string"),
+  isMe: false,
+  favorite: false,
+  defaultPIC: false,
+  defaultSIC: false,
+  pfRole: opt("string"),
+  pfRoleFrom: opt("string"),
 } satisfies FieldTable<Personnel>
 
 const SCHEDULE_ENTRY_FIELDS = {
   date: "",
-  timeReference: null,
-  reportTime: null,
-  debriefTime: null,
-  dutyType: null,
-  dutyCode: null,
-  dutyDescription: null,
+  timeReference: opt("string"),
+  reportTime: opt("string"),
+  debriefTime: opt("string"),
+  dutyType: opt("string"),
+  dutyCode: opt("string"),
+  dutyDescription: opt("string"),
   sectors: emptyArray,
   crew: emptyArray,
-  indicators: null,
-  memo: null,
-  training: null,
-  standbyWindow: null,
-  linkedFlightIds: null,
-  sourceFile: null,
+  indicators: opt("array"),
+  memo: opt("string"),
+  training: opt("object"),
+  standbyWindow: opt("object"),
+  linkedFlightIds: opt("array"),
+  sourceFile: opt("string"),
   importedAt: (src) => toTimestamp(src.createdAt) ?? 0,
 } satisfies FieldTable<ScheduleEntry>
 
@@ -223,30 +297,66 @@ const CURRENCY_FIELDS = {
   expiryDate: "",
   warningDays: 30,
   criticalDays: 7,
-  issuedDate: null,
-  issuingAuthority: null,
-  documentNumber: null,
-  notes: null,
+  issuedDate: opt("string"),
+  issuingAuthority: opt("string"),
+  documentNumber: opt("string"),
+  notes: opt("string"),
   autoUpdate: true,
-  lastUpdatedFrom: null,
+  lastUpdatedFrom: opt("string"),
 } satisfies FieldTable<Currency>
 
 const DISCREPANCY_FIELDS = {
-  type: null,
+  type: opt("string"),
   severity: "info",
-  scheduleEntryId: null,
-  flightLogId: null,
-  field: null,
+  scheduleEntryId: opt("string"),
+  flightLogId: opt("string"),
+  field: opt("string"),
   scheduleValue: null,
   logbookValue: null,
-  message: null,
-  holding: null,
-  acceptedAt: null,
+  message: opt("string"),
+  holding: opt("string"),
+  acceptedAt: opt("number"),
   resolved: false,
-  resolvedAt: null,
-  resolvedBy: null,
-  resolutionNotes: null,
+  resolvedAt: opt("number"),
+  resolvedBy: opt("string"),
+  resolutionNotes: opt("string"),
 } satisfies FieldTable<Discrepancy>
+
+/**
+ * A user's settings record is SPARSE by design: every field is `null` until
+ * the pilot sets it, and null reads as the app default. Writing the defaults
+ * themselves would make a new device's untouched settings look like choices.
+ * The keys come from `lib/settings/user-settings.ts`, which derives them from
+ * the preference groups' default objects.
+ */
+const SETTINGS_FIELDS: Record<string, FieldDefault> = Object.fromEntries(SETTINGS_FIELD_KEYS.map((k) => [k, null]))
+
+/**
+ * Fields a table cannot give ONE default, because the right value follows from
+ * another field — applied to every document written, so a collection never
+ * holds the same fact two ways. Production carried `entryType` on 14 flights
+ * and `null` on 307, `isSimulator` the same, and `isLocked` as `false` on 250
+ * and `null` on 71: three ways of saying "an ordinary unlocked flight", which
+ * any query on those fields had to know about.
+ */
+const NORMALIZE: Partial<Record<SyncCollection, (doc: Doc) => void>> = {
+  flights: (doc) => {
+    const type = getEntryType(doc as Pick<FlightLog, "entryType" | "isSimulator">)
+    doc.entryType = type
+    doc.isSimulator = type === "simulator"
+  },
+}
+
+/**
+ * Keys a collection once carried that nothing reads or writes any more. The
+ * rule is that an UNKNOWN key is kept (it may be a newer build's field), so a
+ * key is only dropped by being named here — after checking it is dead. `isDraft`
+ * was on 213 flights, every one of them `false`, and no code in this repo
+ * mentions it.
+ */
+const RETIRED_KEYS: Partial<Record<SyncCollection, ReadonlySet<string>>> = {
+  flights: new Set(["isDraft"]),
+}
 
 export const SYNC_FIELDS: Record<SyncCollection, Record<string, FieldDefault>> = {
   flights: FLIGHT_FIELDS,
@@ -255,6 +365,7 @@ export const SYNC_FIELDS: Record<SyncCollection, Record<string, FieldDefault>> =
   scheduleEntries: SCHEDULE_ENTRY_FIELDS,
   currencies: CURRENCY_FIELDS,
   discrepancies: DISCREPANCY_FIELDS,
+  settings: SETTINGS_FIELDS,
 }
 
 export interface Envelope {
@@ -329,21 +440,40 @@ export function buildEnvelope(args: {
  */
 export function canonicalizeDocument(collection: SyncCollection, source: Doc, envelope: Envelope): Doc {
   const out: Doc = { ...envelope }
+  const rejects: Doc = {}
   for (const [key, def] of Object.entries(SYNC_FIELDS[collection])) {
-    const value = source[key]
-    out[key] = value !== undefined ? value : typeof def === "function" ? def(source) : def
+    out[key] = conformField(source[key], def, source, (bad) => (rejects[key] = bad))
   }
+  const retired = RETIRED_KEYS[collection]
   for (const [key, value] of Object.entries(source)) {
-    if (value === undefined || RESERVED.has(key) || key in out) continue
+    if (value === undefined || RESERVED.has(key) || key in out || retired?.has(key)) continue
     out[key] = value
   }
+  if (Object.keys(rejects).length > 0) {
+    const earlier = out[SCHEMA_REJECTS_KEY]
+    out[SCHEMA_REJECTS_KEY] = { ...(earlier && typeof earlier === "object" ? (earlier as Doc) : {}), ...rejects }
+  }
+  NORMALIZE[collection]?.(out)
   return out
+}
+
+/** One field under the type rule (see `Optional`). */
+function conformField(value: unknown, def: FieldDefault, source: Doc, reject: (bad: unknown) => void): unknown {
+  const fallback = () => (isOptional(def) || def === null ? null : typeof def === "function" ? def(source) : def)
+  if (value === undefined || value === null) return fallback()
+  const kind = kindOf(def)
+  if (!kind) return value
+  const fitted = conformValue(value, kind)
+  if (fitted !== undefined) return fitted
+  reject(value)
+  return fallback()
 }
 
 /** The keys of `doc` that the field table does not know (excluding reserved). */
 export function extraKeys(collection: SyncCollection, doc: Doc): string[] {
   const fields = SYNC_FIELDS[collection]
-  return Object.keys(doc).filter((k) => !RESERVED.has(k) && !(k in fields))
+  const retired = RETIRED_KEYS[collection]
+  return Object.keys(doc).filter((k) => !RESERVED.has(k) && !(k in fields) && !retired?.has(k))
 }
 
 /**

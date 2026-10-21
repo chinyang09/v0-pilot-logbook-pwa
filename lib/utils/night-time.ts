@@ -99,24 +99,12 @@ function calculateSolarElevation(date: Date, lat: number, lon: number): number {
   const sinElevation =
     Math.sin(toRadians(lat)) * Math.sin(toRadians(declination)) +
     Math.cos(toRadians(lat)) * Math.cos(toRadians(declination)) * Math.cos(toRadians(hourAngle))
-  const elevation = toDegrees(Math.asin(sinElevation))
-  let refraction = 0
-  if (elevation > 85) {
-    refraction = 0
-  } else if (elevation > 5) {
-    refraction =
-      58.1 / Math.tan(toRadians(elevation)) -
-      0.07 / Math.pow(Math.tan(toRadians(elevation)), 3) +
-      0.000086 / Math.pow(Math.tan(toRadians(elevation)), 5)
-  } else if (elevation > -0.575) {
-    refraction =
-      1735 +
-      elevation * (-518.2 + elevation * (103.4 + elevation * (-12.79 + elevation * 0.711)))
-  } else {
-    refraction = -20.772 / Math.tan(toRadians(elevation))
-  }
-  refraction = refraction / 3600
-  return elevation + refraction
+  // GEOMETRIC elevation, deliberately: civil twilight is defined by the
+  // centre of the sun's disc being 6° below the horizon, and the almanac
+  // tables state it without refraction. Adding the NOAA refraction term
+  // (+0.055° at −6°) moved every dusk ~13 seconds later and every dawn ~13
+  // seconds earlier — enough to call a takeoff at −6.02° "day".
+  return toDegrees(Math.asin(sinElevation))
 }
 
 export function isNight(date: Date, lat: number, lon: number): boolean {

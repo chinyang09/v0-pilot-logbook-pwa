@@ -68,6 +68,18 @@ describe("generateTimelineData — rolling sums", () => {
     }
   })
 
+  it("walks every calendar day, across month, year and leap-day boundaries", () => {
+    const points = generateTimelineData([duty("2023-12-30", 60, 30), duty("2024-03-02", 60, 30)], LIMITS)
+    const days = points.map((p) => p.date)
+    const expected: string[] = []
+    for (let d = new Date("2023-12-30T00:00:00Z"); expected.length < days.length; d.setUTCDate(d.getUTCDate() + 1)) {
+      expected.push(d.toISOString().split("T")[0])
+    }
+    expect(days).toEqual(expected)
+    expect(days).toContain("2024-02-29")
+    expect(days).toContain("2024-01-01")
+  })
+
   it("labels each day without the locale formatter", () => {
     const points = generateTimelineData([duty("2026-04-04", 60, 30), duty("2026-12-31", 60, 30)], LIMITS)
     expect(points[0].dateLabel).toBe("04 Apr")

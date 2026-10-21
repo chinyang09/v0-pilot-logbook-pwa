@@ -86,11 +86,35 @@ interface DetailPanelProviderProps {
  * changes in the tap, so the detail opens from state and `pendingUrlWriteRef`
  * covers the task in between, exactly as it covered the router catching up.
  */
+let pendingWrite: { kind: "push" | "replace"; timer: number } | null = null
 function writeUrlAfterTap(kind: "push" | "replace", url: string) {
-  window.setTimeout(() => {
-    if (kind === "push") window.history.pushState(null, "", url)
-    else window.history.replaceState(null, "", url)
-  }, 0)
+  // One write in flight at a time. A second inside the task SUPERSEDES the
+  // first but keeps its push — otherwise the entry the open owed is lost.
+  if (pendingWrite) {
+    window.clearTimeout(pendingWrite.timer)
+    if (pendingWrite.kind === "push") kind = "push"
+  }
+  // Written for THIS page. If the route changed in the meantime, writing it
+  // would put the old page's URL on top of the new one.
+  const path = window.location.pathname
+  const write = {
+    kind,
+    timer: window.setTimeout(() => {
+      if (pendingWrite === write) pendingWrite = null
+      if (window.location.pathname !== path) return
+      if (kind === "push") window.history.pushState(null, "", url)
+      else window.history.replaceState(null, "", url)
+    }, 0),
+  }
+  pendingWrite = write
+}
+
+/** Drop an open's push that has not landed yet. True if there was one. */
+function cancelPendingPush(): boolean {
+  if (pendingWrite?.kind !== "push") return false
+  window.clearTimeout(pendingWrite.timer)
+  pendingWrite = null
+  return true
 }
 
 export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
@@ -257,7 +281,10 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
         // Closing it in-app: go back rather than replace, so the entry we
         // pushed is consumed instead of lingering as a dead back press.
         pushedBaseRef.current = null
-        router.back()
+        // Closed inside the task that was going to push it: there is no entry
+        // to go back over yet, and a `back()` would pop the page before it.
+        if (cancelPendingPush()) writeUrlAfterTap("replace", newUrl || "/")
+        else router.back()
       } else {
         // Switching between items isn't a new move — it would pile up an entry
         // per tap and turn back into a tour of everything you looked at.

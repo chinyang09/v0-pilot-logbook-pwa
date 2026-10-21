@@ -35,15 +35,18 @@ import {
   updatePersonnel,
   getFlightById,
   isLiveFlight,
+  getAirportTimeInfo,
 } from "@/lib/db";
 import { useDebounce } from "@/hooks/use-debounce";
 import { formPatch, rebaseForm } from "@/lib/utils/form-patch";
+import { insertFlightSorted } from "@/lib/utils/flight-sort";
 import { pickSelfCard } from "@/lib/utils/self-card";
 import { useAirportByIcao, prefetchAirports } from "@/hooks/data";
 import {
   createEmptyFlightLog,
   calculateBlockTime,
   calculateFlightTime,
+  airborneTimes,
   calculateDayTime,
   calculateTakeoffsLandings,
   calculateRoleTimes,
@@ -62,7 +65,7 @@ import {
   minutesToHHMM,
 } from "@/lib/utils/time";
 import { usePersonnel } from "@/hooks/data";
-import { nonPicPfRoleOf, reconcilePilotRole } from "@/lib/utils/roster/pilot-role";
+import { nonPicPfRoleOf, reconcilePilotRole, withLoggingPreferences } from "@/lib/utils/roster/pilot-role";
 import { usePreferences } from "@/components/providers/preferences-provider";
 import { ImageImportButton } from "@/components/image-import-button";
 import { GlassContainer } from "@/components/ui/glass-container";
@@ -73,6 +76,7 @@ import {
   ENTRY_TYPES,
   entryTypePatch,
   getEntryType,
+  withoutSimulatorPins,
 } from "@/lib/utils/entry-type";
 import type { EntryType } from "@/types/entities/flight.types";
 import type { DisplayPreferences } from "@/types/db/stores.types";
@@ -504,25 +508,20 @@ export function FlightForm({
   // Get airport data
   // The two airports this flight names — looked up by ICAO, not by loading the
   // whole ~29k-row table to find them (see `useAirportByIcao`).
-  const depAirport = useAirportByIcao(formData.departureIcao) ?? null;
-  const arrAirport = useAirportByIcao(formData.arrivalIcao) ?? null;
+  const depLookup = useAirportByIcao(formData.departureIcao);
+  const arrLookup = useAirportByIcao(formData.arrivalIcao);
+  const depAirport = depLookup ?? null;
+  const arrAirport = arrLookup ?? null;
+  // An airport still being LOOKED UP is not a missing one. Computed against the
+  // gap, night time and the takeoffs/landings came out as zeros, and if the
+  // lookup was slow enough those zeros were what the form saved.
+  const airportsPending =
+    (!!formData.departureIcao && depLookup === undefined) ||
+    (!!formData.arrivalIcao && arrLookup === undefined);
 
   // Helper to get numeric offset from IANA string
-  const getNumericOffset = (tzString?: string) => {
-    if (!tzString) return 0;
-    try {
-      const parts = new Intl.DateTimeFormat("en-US", {
-        timeZone: tzString,
-        timeZoneName: "longOffset",
-      }).formatToParts(new Date());
-      const offsetPart =
-        parts.find((p) => p.type === "timeZoneName")?.value || "";
-      const match = offsetPart.match(/([+-]\d+)/);
-      return match ? parseInt(match[1]) : 0;
-    } catch {
-      return 0;
-    }
-  };
+  const getNumericOffset = (tzString?: string) =>
+    tzString ? getAirportTimeInfo(tzString).offset : 0;
 
   // Replace your old timezone constants with these dynamic ones
   const depTimezone = useMemo(
@@ -625,8 +624,9 @@ export function FlightForm({
   useEffect(() => {
     if (resolvedFlight || !personnel.length) return;
 
-    const selfCrew = pickSelfCard(personnel);
-    if (selfCrew) {
+    // The card as Settings › Logging says it is (seat, PF convention).
+    const selfCrew = withLoggingPreferences(pickSelfCard(personnel), preferences.logging);
+    if (selfCrew?.id) {
       if (selfCrew.defaultPIC) {
         setFormData((prev) => ({
           ...prev,
@@ -651,6 +651,29 @@ export function FlightForm({
 
   // Calculate derived fields
   const calculatedFields = useMemo(() => {
+    // A simulator derives nothing from its OUT/IN: its duration is
+    // `simulatedInstrumentTime`, and a block time computed here was written
+    // back on every open — four hours of block, and four of SIC from it,
+    // for every session the pilot looked at.
+    if (getEntryType({ entryType: formData.entryType, isSimulator: formData.isSimulator }) === "simulator") {
+      return {
+        blockTime: "00:00",
+        flightTime: "00:00",
+        nightTime: formData.nightTime || "00:00",
+        dayTime: "00:00",
+        dayTakeoffs: formData.dayTakeoffs ?? 0,
+        dayLandings: formData.dayLandings ?? 0,
+        nightTakeoffs: formData.nightTakeoffs ?? 0,
+        nightLandings: formData.nightLandings ?? 0,
+        picTime: "00:00",
+        sicTime: "00:00",
+        picusTime: "00:00",
+        dualTime: "00:00",
+        instructorTime: "00:00",
+        crossCountryTime: "00:00",
+      };
+    }
+
     const blockTime =
       formData.outTime &&
       formData.inTime &&
@@ -659,35 +682,25 @@ export function FlightForm({
         ? calculateBlockTime(formData.outTime, formData.inTime)
         : "00:00";
 
-    const flightTime =
-      formData.offTime &&
-      formData.onTime &&
-      isValidHHMM(formData.offTime) &&
-      isValidHHMM(formData.onTime)
-        ? calculateFlightTime(formData.offTime, formData.onTime)
-        : "00:00";
+    // Off→on, or out→in when OFF/ON were not recorded (`airborneTimes`).
+    const airborne = airborneTimes({
+      outTime: formData.outTime,
+      offTime: formData.offTime,
+      onTime: formData.onTime,
+      inTime: formData.inTime,
+    });
+    const flightTime = airborne ? calculateFlightTime(airborne.off, airborne.on) : "00:00";
 
     let nightTime = "00:00";
     let dayTime = "00:00";
     const af = preferences.autoFill;
 
-    // FALLBACK LOGIC: Create effective times for calculation
-    // If OFF/ON are missing or invalid, fallback to OUT/IN to ensure we have a valid timeline
-    const calcOffTime =
-      formData.offTime &&
-      isValidHHMM(formData.offTime) &&
-      formData.offTime !== "00:00"
-        ? formData.offTime
-        : formData.outTime;
 
-    const calcOnTime =
-      formData.onTime &&
-      isValidHHMM(formData.onTime) &&
-      formData.onTime !== "00:00"
-        ? formData.onTime
-        : formData.inTime;
-
-    if (
+    if (airportsPending) {
+      // Hold what the flight already has until both airports are known.
+      nightTime = formData.nightTime || "00:00";
+      dayTime = calculateDayTime(blockTime, nightTime);
+    } else if (
       af.night !== false &&
       formData.date &&
       formData.outTime &&
@@ -719,16 +732,6 @@ export function FlightForm({
         nightTime = nightResult.nightTimeHHMM;
         dayTime = nightResult.dayTimeHHMM;
 
-        console.log("[v0] Night calc result:", {
-          date: formData.date,
-          using: {
-            out: formData.outTime,
-            off: calcOffTime,
-            on: calcOnTime,
-            in: formData.inTime,
-          },
-          result: nightResult,
-        });
       } else {
         // Airports are present but lack usable coordinates (a custom airport
         // saved blank reads 0°N 0°E): there is no night time to compute, so
@@ -742,15 +745,22 @@ export function FlightForm({
       dayTime = calculateDayTime(blockTime, nightTime);
     }
 
-    const toLdg =
-      formData.date && calcOffTime && calcOnTime && depAirport && arrAirport
+    const toLdg = airportsPending
+      ? {
+          dayTakeoffs: formData.dayTakeoffs ?? 0,
+          dayLandings: formData.dayLandings ?? 0,
+          nightTakeoffs: formData.nightTakeoffs ?? 0,
+          nightLandings: formData.nightLandings ?? 0,
+        }
+      : formData.date && airborne && depAirport && arrAirport
         ? calculateTakeoffsLandings(
             formData.date,
-            calcOffTime,
-            calcOnTime,
+            airborne.off,
+            airborne.on,
             depAirport,
             arrAirport,
-            formData.pilotFlying ?? true
+            formData.pilotFlying ?? true,
+            formData.outTime
           )
         : {
             dayTakeoffs: 0,
@@ -798,8 +808,15 @@ export function FlightForm({
     formData.departureIcao,
     formData.arrivalIcao,
     formData.nightTime,
+    formData.dayTakeoffs,
+    formData.dayLandings,
+    formData.nightTakeoffs,
+    formData.nightLandings,
     depAirport,
     arrAirport,
+    airportsPending,
+    formData.entryType,
+    formData.isSimulator,
     preferences.autoFill,
   ]);
 
@@ -886,7 +903,7 @@ export function FlightForm({
     async (
       data: Partial<FlightLog>,
       overrides: FlightLog["manualOverrides"],
-    ): Promise<boolean> => {
+    ): Promise<FlightLog | boolean> => {
       if (!data?.id) return false;
 
       const stored = await getFlightById(data.id);
@@ -903,11 +920,35 @@ export function FlightForm({
       baselineRef.current = { ...data };
       baselineOverridesRef.current = overrides;
       if (Object.keys(patch).length === 0) return true;
-      await updateFlight(data.id, patch);
-      return true;
+      return (await updateFlight(data.id, patch)) ?? true;
     },
     []
   );
+
+  /**
+   * Put a saved flight into the logbook's cache IN PLACE.
+   *
+   * Auto-save runs every half-second of typing, and each save used to
+   * revalidate the whole list — every flight read back out of IndexedDB,
+   * re-sorted, then deep-compared against the cached copy by SWR — to reflect
+   * one changed row (~150ms at a 4× CPU throttle on 1,200 flights, per save,
+   * while the pilot is typing). `insertFlightSorted` drops the old copy by id
+   * and places the new one, so an edit that moves the flight's date or time
+   * still lands in the right place. Without the stored row to hand (`true`),
+   * it falls back to the full revalidation.
+   */
+  const refreshSavedFlight = useCallback((saved: FlightLog | boolean) => {
+    if (saved === false) return;
+    if (saved === true || !isLiveFlight(saved)) {
+      mutate(CACHE_KEYS.flights);
+      return;
+    }
+    mutate(
+      CACHE_KEYS.flights,
+      (prev: FlightLog[] | undefined) => (prev ? insertFlightSorted(prev, saved) : prev),
+      { revalidate: false }
+    );
+  }, []);
 
   // Auto-save to IndexedDB for existing flights (drafts or otherwise)
   // This replaces sessionStorage draft management
@@ -946,7 +987,7 @@ export function FlightForm({
         const written = await persistFlight(debouncedFormData, manualOverrides);
         if (!written) return;
         lastSavedStateRef.current = currentState;
-        mutate(CACHE_KEYS.flights);
+        refreshSavedFlight(written);
       } catch (error) {
         console.error("Auto-save failed:", error);
       }
@@ -1066,6 +1107,10 @@ export function FlightForm({
         ...patch,
         blockTime: duration,
         simulatedInstrumentTime: "00:00",
+        // A simulator pins its session time and its night time (00:00 — a
+        // sim has no sky). Carried into a FLIGHT those pins hold night at
+        // zero for good, because every recalculation respects a pin.
+        manualOverrides: withoutSimulatorPins(prev.manualOverrides ?? {}, prev.nightTime),
       };
     });
   }, []);
@@ -1160,13 +1205,13 @@ export function FlightForm({
       if (!written) return;
       lastSavedStateRef.current = currentState;
       // Refresh the list too. A forced save is the LAST write before the form
-      // goes away, so if it doesn't revalidate nothing else will — the logbook
-      // would keep showing pre-edit values until something unrelated refetched.
-      mutate(CACHE_KEYS.flights);
+      // goes away, so if it doesn't update the cache nothing else will — the
+      // logbook would keep showing pre-edit values until something refetched.
+      refreshSavedFlight(written);
     } catch (error) {
       console.error("Force save failed:", error);
     }
-  }, [formData, resolvedFlight?.id, flightIdProp, manualOverrides, persistFlight]);
+  }, [formData, resolvedFlight?.id, flightIdProp, manualOverrides, persistFlight, refreshSavedFlight]);
 
   // The latest `forceSave`, held in a ref.
   //
@@ -1991,8 +2036,9 @@ export function FlightForm({
                 currentRole: formData.pilotRole || "PIC",
                 pilotFlying: checked,
                 nonPicPfRole: nonPicPfRoleOf(
-                  pickSelfCard(personnel),
-                  preferences.importDefaults?.nonPicPfRole
+                  withLoggingPreferences(pickSelfCard(personnel), preferences.logging),
+                  preferences.importDefaults?.nonPicPfRole,
+                  formData.date
                 ),
               });
               if (nextRole !== formData.pilotRole) updateField("pilotRole", nextRole);

@@ -20,6 +20,7 @@
 
 import type { Personnel } from "@/types/entities/crew.types";
 import { getCurrentUserPersonnel, getAllPersonnel, getAirportTimeInfo } from "@/lib/db";
+import { suggestToLdg, type ToLdgSuggestion } from "./shared/to-ldg-suggestion";
 import {
   calculateNightTimeComplete,
   findDayBoundariesUtc,
@@ -535,16 +536,13 @@ export async function parseLogbookV2(
         // Planned sectors have no actuals, so pilot-flying is unknown.
         const isPilotFlying = !planned && totalUserTO + totalUserLDG > 0;
 
-        // Sun-position sanity check — both CSV and PDF are hand-entered in
-        // eCrew, so the day/night column is the most common manual-entry
-        // mistake we see. We DON'T silently override here; we compute the
-        // sun-based suggestion and surface it to the user via the diff so
-        // they can choose. The user's decision is then persisted in remarks
-        // (see executor) so subsequent imports don't re-flag the same row.
-        let suggestedDayTakeoffs: number | undefined;
-        let suggestedNightTakeoffs: number | undefined;
-        let suggestedDayLandings: number | undefined;
-        let suggestedNightLandings: number | undefined;
+        // Sun-position check — both CSV and PDF are hand-entered in eCrew,
+        // and the day/night columns disagree with the sun on about a third of
+        // a real year's sectors (the sun at −78° marked "day", at +35°
+        // "night"). The sun's answer is what gets applied, to a create and an
+        // update alike; the report's figure travels with it so the review can
+        // show the disagreement and the pilot can still take the company's.
+        let suggestion: ToLdgSuggestion = {};
         let toLdgContext: ParsedSector["toLdgContext"] | undefined;
 
         if (!planned && depAp && arrAp && row.outT && row.inT) {
@@ -562,22 +560,7 @@ export async function parseLogbookV2(
             arrAp
           );
 
-          if (totalUserTO > 0) {
-            const sunDay = takeoffAtNight ? 0 : totalUserTO;
-            const sunNight = takeoffAtNight ? totalUserTO : 0;
-            if (sunDay !== row.dayTakeoffs || sunNight !== row.nightTakeoffs) {
-              suggestedDayTakeoffs = sunDay;
-              suggestedNightTakeoffs = sunNight;
-            }
-          }
-          if (totalUserLDG > 0) {
-            const sunDay = landingAtNight ? 0 : totalUserLDG;
-            const sunNight = landingAtNight ? totalUserLDG : 0;
-            if (sunDay !== row.dayLandings || sunNight !== row.nightLandings) {
-              suggestedDayLandings = sunDay;
-              suggestedNightLandings = sunNight;
-            }
-          }
+          suggestion = suggestToLdg(row, isPilotFlying, takeoffAtNight, landingAtNight);
 
           const depBounds = findDayBoundariesUtc(
             row.flightDate,
@@ -628,10 +611,7 @@ export async function parseLogbookV2(
           nightTakeoffs: row.nightTakeoffs,
           dayLandings: row.dayLandings,
           nightLandings: row.nightLandings,
-          suggestedDayTakeoffs,
-          suggestedNightTakeoffs,
-          suggestedDayLandings,
-          suggestedNightLandings,
+          ...suggestion,
           toLdgContext,
           isPilotFlying,
           planned,

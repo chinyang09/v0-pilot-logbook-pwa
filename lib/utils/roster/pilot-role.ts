@@ -11,7 +11,7 @@
  */
 
 import type { PilotRole } from "@/types/entities/flight.types";
-import type { ImportDefaults } from "@/types/db/stores.types";
+import type { ImportDefaults, LoggingPreferences } from "@/types/db/stores.types";
 import type { Personnel } from "@/types/entities/crew.types";
 
 /** Roles that inherently mean "this pilot was flying the aircraft". */
@@ -89,7 +89,33 @@ export function isRoleConsistent(
 export type Seat = "captain" | "first_officer";
 export type NonPicPfRole = ImportDefaults["nonPicPfRole"];
 
-type SelfCard = Pick<Personnel, "defaultPIC" | "defaultSIC" | "roles" | "pfRole">;
+type SelfCard = Pick<Personnel, "defaultPIC" | "defaultSIC" | "roles" | "pfRole" | "pfRoleFrom">;
+
+/**
+ * The pilot's card as the LOGGING settings say it is. Settings › Logging is
+ * where the seat and the PF convention are set — a user preference, synced,
+ * never a fixed rule — and each value it holds wins over the card's. A value
+ * it leaves unset (null) falls back to the card, which is where they lived
+ * before, so a pilot who set them there keeps their choice.
+ *
+ * `pfRoleFrom: ""` in the settings means "no check-out date" stated outright,
+ * so it is not read through to a date left on the card.
+ */
+export function withLoggingPreferences<T extends SelfCard>(
+  self: T | null | undefined,
+  logging: Partial<LoggingPreferences> | null | undefined
+): T | null {
+  if (!logging || (logging.seat == null && logging.pfRole == null && logging.pfRoleFrom == null)) return self ?? null;
+  const base = (self ?? { roles: [] }) as T;
+  const seat = logging.seat ?? seatOf(self);
+  return {
+    ...base,
+    defaultPIC: seat === "captain",
+    defaultSIC: seat === "first_officer",
+    pfRole: logging.pfRole ?? self?.pfRole ?? null,
+    pfRoleFrom: logging.pfRoleFrom != null ? logging.pfRoleFrom || null : self?.pfRoleFrom ?? null,
+  };
+}
 
 /**
  * The self card's seat. `defaultPIC`/`defaultSIC` are what the card's seat
@@ -112,9 +138,54 @@ export function seatOf(self: SelfCard | null | undefined): Seat | null {
  */
 export function nonPicPfRoleOf(
   self: SelfCard | null | undefined,
-  fallback?: NonPicPfRole | null
+  fallback?: NonPicPfRole | null,
+  date?: string | null
 ): NonPicPfRole {
-  return self?.pfRole ?? fallback ?? "SIC";
+  return pfRoleOn(self?.pfRole ?? fallback ?? "SIC", self?.pfRoleFrom, date);
+}
+
+/**
+ * The convention as it stood on `date`. PICUS is creditable only from the
+ * pilot's check-out (`pfRoleFrom`), so a leg flown before it is SIC however
+ * the card reads today. With no date, or no check-out recorded, the
+ * convention applies as written.
+ */
+export function pfRoleOn(
+  role: NonPicPfRole,
+  from: string | null | undefined,
+  date: string | null | undefined
+): NonPicPfRole {
+  return role === "PICUS" && from && date && date < from ? "SIC" : role;
+}
+
+/**
+ * The role a flight should carry when its pilot-flying value is NOT changing
+ * but the pair it forms is wrong for the pilot's convention — what an import
+ * offers to put right. `convention` is the card's value as written and
+ * `onDate` is it resolved for this flight's date (`pfRoleOn`). Returns
+ * `currentRole` when nothing is wrong.
+ *
+ * - PM + PICUS is impossible: SIC.
+ * - PF + SIC, where the pilot logs flown legs as PICUS on that date: PICUS.
+ * - PF + PICUS BEFORE the check-out: SIC. A pilot whose convention is SIC
+ *   and who picked PICUS on one leg is left alone — that is their call.
+ */
+export function settledRole({
+  currentRole,
+  pilotFlying,
+  convention,
+  onDate,
+}: {
+  currentRole: PilotRole;
+  pilotFlying: boolean;
+  convention: NonPicPfRole;
+  onDate: NonPicPfRole;
+}): PilotRole {
+  if (ROLES_INDEPENDENT_OF_PF.has(currentRole)) return currentRole;
+  if (!pilotFlying) return PF_ONLY_ROLES.has(currentRole) ? "SIC" : currentRole;
+  if (currentRole === "SIC" && onDate === "PICUS") return "PICUS";
+  if (currentRole === "PICUS" && convention === "PICUS" && onDate === "SIC") return "SIC";
+  return currentRole;
 }
 
 /** The role a flight takes from the pilot's seat and who had the controls. */

@@ -63,6 +63,9 @@ export {
   restoreFlight,
   permanentlyDeleteFlight,
   purgeExpiredDeletedFlights,
+  repairSimulatorEntries,
+  repairFlightTimezones,
+  repairMissingFlightTimes,
   getDeletedFlights,
   isLiveFlight,
   silentDeleteFlight,
@@ -99,6 +102,7 @@ export {
   getAllPersonnel,
   getPersonnelById,
   getCurrentUserPersonnel,
+  getLoggingProfile,
   getPersonnelByRole,
   upsertPersonnelFromServer,
 } from "./stores/user/crew.store";
@@ -113,6 +117,9 @@ export {
 export {
   getUserPreferences,
   saveUserPreferences,
+  getSyncedPreferences,
+  getDevicePreferences,
+  migrateLegacyPreferences,
   getDefaultFieldOrder,
   addRecentlyUsedAirport,
   getRecentlyUsedAirports,
@@ -123,6 +130,13 @@ export {
   getDraftGenerationConfig,
   saveDraftGenerationConfig,
 } from "./stores/user/preferences.store";
+
+export {
+  getSettingsRow,
+  writeSettings,
+  normalizeSettingsFromServer,
+  silentDeleteSettings,
+} from "./stores/user/settings.store";
 
 export {
   addToSyncQueue,
@@ -237,6 +251,7 @@ export {
   getAirportLocalTime,
   getAirportDatabase,
   ensureAirportDatabase,
+  isAirportTableSeeded,
   onAirportSeedProgress,
   searchAirports,
   hasExactAirportCodeMatch,

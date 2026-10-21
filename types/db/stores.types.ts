@@ -74,6 +74,30 @@ export interface ImportDefaults {
   nonPicPfRole: "PICUS" | "SIC"
 }
 
+/**
+ * How the pilot logs their own seat — a USER setting (synced), not a device
+ * one. Every value is nullable: null is "not set here", and the pilot's "This
+ * is me" crew card answers instead, which is where these lived before
+ * (`withLoggingPreferences` in lib/utils/roster/pilot-role.ts).
+ */
+export interface LoggingPreferences {
+  /** Captain logs PIC whoever flies; a first officer logs SIC (or PICUS when flying). */
+  seat: "captain" | "first_officer" | null
+  /** What a first officer logs a leg they FLEW as. Never PICUS by default. */
+  pfRole: "PICUS" | "SIC" | null
+  /**
+   * The PICUS check-out date (YYYY-MM-DD) — a leg flown before it is SIC.
+   * `""` says "no date" explicitly, so the card's date does not show through.
+   */
+  pfRoleFrom: string | null
+}
+
+export const DEFAULT_LOGGING_PREFERENCES: LoggingPreferences = {
+  seat: null,
+  pfRole: null,
+  pfRoleFrom: null,
+}
+
 export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   timeFormat: "24h",
   clockSeparator: "colon",
@@ -138,6 +162,7 @@ export interface UserPreferences {
   dutyTimeDefaults?: DutyTimeDefaults
   navigation?: NavigationPreferences
   importDefaults?: ImportDefaults
+  logging?: LoggingPreferences
   createdAt: number
   updatedAt: number
 }

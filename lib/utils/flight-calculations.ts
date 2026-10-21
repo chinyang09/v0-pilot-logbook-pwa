@@ -3,11 +3,12 @@
  * Handles automatic calculation of derived fields
  */
 
-import { calculateDuration, subtractHHMM, isValidHHMM } from "./time"
+import { calculateDuration, subtractHHMM, isValidHHMM, hhmmToMinutes } from "./time"
 import { isNight, calculateNightTimeComplete } from "./night-time"
 import type { Airport } from "@/types/entities/airport.types"
 import type { FlightLog, Approach, PilotRole, ManualOverrides } from "@/types/entities/flight.types"
 import type { AutoFillPreferences } from "@/types/db/stores.types"
+import { isSimulatorEntry, simulatorRepairPatch } from "./entry-type"
 
 /**
  * A flight is "flown" once both OOOI gate times are populated.
@@ -33,6 +34,41 @@ export function calculateFlightTime(offTime: string, onTime: string): string {
 }
 
 /**
+ * The airborne window to compute from: OFF/ON when the flight records both,
+ * otherwise OUT/IN. OFF and ON are the times a pilot most often forgets to
+ * note, and OUT/IN — which the company records — are the next best evidence
+ * of when the aeroplane flew (the owner's rule). Without the fallback every
+ * flight missing them held a flight time of 00:00 and no takeoff or landing,
+ * which no recalculation would ever put right. `fromGate` says which it was.
+ */
+export function airborneTimes(f: {
+  outTime?: string | null
+  offTime?: string | null
+  onTime?: string | null
+  inTime?: string | null
+}): { off: string; on: string; fromGate: boolean } | null {
+  const ok = (t: string | null | undefined): t is string => !!t && isValidHHMM(t)
+  if (ok(f.offTime) && ok(f.onTime)) return { off: f.offTime, on: f.onTime, fromGate: false }
+  if (ok(f.outTime) && ok(f.inTime)) return { off: f.outTime, on: f.inTime, fromGate: true }
+  return null
+}
+
+/**
+ * The flight time a stored row SHOULD carry when it records no OFF/ON and
+ * holds none — `airborneTimes`' gate fallback, for rows written before it.
+ * Empty when there is nothing to fix: a simulator (no flight time at all), a
+ * row with OFF/ON (the recalculation owns it), a figure already there.
+ */
+export function flightTimeRepairPatch(f: Partial<FlightLog>): Partial<FlightLog> {
+  if (isSimulatorEntry({ entryType: f.entryType, isSimulator: f.isSimulator })) return {}
+  if (hhmmToMinutes(f.flightTime || "00:00") > 0) return {}
+  const airborne = airborneTimes(f)
+  if (!airborne?.fromGate) return {}
+  const flightTime = calculateFlightTime(airborne.off, airborne.on)
+  return hhmmToMinutes(flightTime) > 0 ? { flightTime } : {}
+}
+
+/**
  * Calculate day time (Total block time minus night time)
  */
 export function calculateDayTime(blockTime: string, nightTime: string): string {
@@ -55,18 +91,32 @@ export function hasCoordinates(airport: Pick<Airport, "latitude" | "longitude"> 
 }
 
 /**
+ * The UTC instant of a clock time on a flight. A flight is keyed on the UTC
+ * date of its OUT, so a time earlier in the day than OUT (an OFF at 00:07
+ * after an OUT at 23:52) belongs to the NEXT day — read on `date` it was a
+ * whole day early, and the sun a day early is a different sun at twilight.
+ */
+function instantOnFlight(date: string, time: string, outTime?: string): Date {
+  const [hours, mins] = time.split(":").map(Number)
+  const [y, m, d] = date.split("-").map(Number)
+  const at = new Date(Date.UTC(y, m - 1, d, hours, mins, 0, 0))
+  if (outTime && isValidHHMM(outTime) && hhmmToMinutes(time) < hhmmToMinutes(outTime)) {
+    at.setUTCDate(at.getUTCDate() + 1)
+  }
+  return at
+}
+
+/**
  * Check if takeoff is at night
  */
-export function isTakeoffAtNight(date: string, offTime: string, airport: Airport | null): boolean {
+export function isTakeoffAtNight(
+  date: string,
+  offTime: string,
+  airport: Airport | null,
+  outTime?: string
+): boolean {
   if (!date || !offTime || !airport || !isValidHHMM(offTime) || !hasCoordinates(airport)) return false
-  const lat = airport.latitude as number
-  const lon = airport.longitude as number
-
-  const [hours, mins] = offTime.split(":").map(Number)
-  const [y, m, d] = date.split("-").map(Number)
-  const offDate = new Date(Date.UTC(y, m - 1, d, hours, mins, 0, 0))
-
-  return isNight(offDate, lat, lon)
+  return isNight(instantOnFlight(date, offTime, outTime), airport.latitude as number, airport.longitude as number)
 }
 
 /**
@@ -76,24 +126,14 @@ export function isLandingAtNight(
   date: string,
   offTime: string,
   onTime: string,
-  airport: Airport | null
+  airport: Airport | null,
+  outTime?: string
 ): boolean {
   if (!date || !onTime || !offTime || !airport || !isValidHHMM(onTime) || !hasCoordinates(airport)) return false
-  const lat = airport.latitude as number
-  const lon = airport.longitude as number
-
-  const [y, m, d] = date.split("-").map(Number)
-  const [offH, offM] = offTime.split(":").map(Number)
-  const [onH, onM] = onTime.split(":").map(Number)
-
-  const offDate = new Date(Date.UTC(y, m - 1, d, offH, offM, 0, 0))
-  let onDate = new Date(Date.UTC(y, m - 1, d, onH, onM, 0, 0))
-
-  if (onDate <= offDate) {
-    onDate.setUTCDate(onDate.getUTCDate() + 1)
-  }
-
-  return isNight(onDate, lat, lon)
+  const offDate = instantOnFlight(date, offTime, outTime)
+  const onDate = instantOnFlight(date, onTime)
+  while (onDate <= offDate) onDate.setUTCDate(onDate.getUTCDate() + 1)
+  return isNight(onDate, airport.latitude as number, airport.longitude as number)
 }
 
 /**
@@ -105,7 +145,8 @@ export function calculateTakeoffsLandings(
   onTime: string,
   depAirport: Airport | null,
   arrAirport: Airport | null,
-  pilotFlying: boolean
+  pilotFlying: boolean,
+  outTime?: string
 ): {
   dayTakeoffs: number
   dayLandings: number
@@ -122,7 +163,7 @@ export function calculateTakeoffsLandings(
   if (!pilotFlying) return result
 
   if (offTime && isValidHHMM(offTime) && depAirport) {
-    const takeoffNight = isTakeoffAtNight(date, offTime, depAirport)
+    const takeoffNight = isTakeoffAtNight(date, offTime, depAirport, outTime)
     if (takeoffNight) {
       result.nightTakeoffs = 1
     } else {
@@ -131,7 +172,7 @@ export function calculateTakeoffsLandings(
   }
 
   if (onTime && isValidHHMM(onTime) && arrAirport) {
-    const landingNight = isLandingAtNight(date, offTime, onTime, arrAirport)
+    const landingNight = isLandingAtNight(date, offTime, onTime, arrAirport, outTime)
     if (landingNight) {
       result.nightLandings = 1
     } else {
@@ -260,6 +301,12 @@ export function recalculateFlightFields(
   arrAirport: Airport | null,
   autoFill?: AutoFillPreferences
 ): Partial<FlightLog> {
+  // A simulator has nothing to derive — its duration is its own field, and a
+  // block time computed from its OUT/IN would reach every flight-hour total.
+  if (isSimulatorEntry({ entryType: flight.entryType, isSimulator: flight.isSimulator })) {
+    return simulatorRepairPatch(flight)
+  }
+
   const updates: Partial<FlightLog> = {}
   const overrides = flight.manualOverrides || {}
 
@@ -268,9 +315,10 @@ export function recalculateFlightFields(
     updates.blockTime = calculateBlockTime(flight.outTime, flight.inTime)
   }
 
-  // Flight time
-  if (flight.offTime && flight.onTime) {
-    updates.flightTime = calculateFlightTime(flight.offTime, flight.onTime)
+  // Flight time — off→on, or out→in when the flight records no OFF/ON
+  const airborne = airborneTimes(flight)
+  if (airborne) {
+    updates.flightTime = calculateFlightTime(airborne.off, airborne.on)
   }
 
   // Night time — gated by autoFill.night (defaults to true if no prefs)
@@ -308,14 +356,15 @@ export function recalculateFlightFields(
   const shouldCalcTO = !overrides.dayTakeoffs && !overrides.nightTakeoffs
   const shouldCalcLdg = !overrides.dayLandings && !overrides.nightLandings
 
-  if ((shouldCalcTO || shouldCalcLdg) && flight.date && flight.offTime && flight.onTime) {
+  if ((shouldCalcTO || shouldCalcLdg) && flight.date && airborne) {
     const toLdg = calculateTakeoffsLandings(
       flight.date,
-      flight.offTime,
-      flight.onTime,
+      airborne.off,
+      airborne.on,
       depAirport,
       arrAirport,
-      flight.pilotFlying ?? true
+      flight.pilotFlying ?? true,
+      flight.outTime
     )
 
     if (shouldCalcTO) {

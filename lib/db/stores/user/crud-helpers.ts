@@ -68,6 +68,7 @@ export type SyncableTableName =
   | "scheduleEntries"
   | "currencies"
   | "discrepancies"
+  | "settings"
 
 /**
  * Generic add operation for syncable entities

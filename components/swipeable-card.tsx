@@ -273,6 +273,24 @@ export function SwipeableCard({
     dragControls.start(armingPointer.current)
     armingPointer.current = null
   }, [armed, dragControls])
+  // Keyboard: an unarmed row has no action buttons to Tab to, and most rows'
+  // content is not focusable, so nothing would ever arm them. A bare stand-in
+  // takes the actions' place in the tab order; focusing it arms the row and
+  // hands focus to the first real button, which opens the panel as before.
+  // (Its flag is set by the root's onFocusCapture below.)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const focusActionsOnArm = useRef(false)
+  useEffect(() => {
+    if (!armed || !focusActionsOnArm.current) return
+    // A task later: the arming render runs INSIDE Tab's focus change, and a
+    // focus() made there is overridden when the browser finishes it — on the
+    // stand-in this render just removed, which leaves focus on <body>.
+    const t = window.setTimeout(() => {
+      focusActionsOnArm.current = false
+      panelRef.current?.querySelector<HTMLElement>("button")?.focus()
+    }, 0)
+    return () => window.clearTimeout(t)
+  }, [armed])
   const menuOpen = useMenuOpen()
   const count = actions.length
   const trailingIndex = count - 1
@@ -496,15 +514,24 @@ export function SwipeableCard({
       // the menu wants everything behind it to be in.
       style={menuOpen ? { pointerEvents: "none" } : undefined}
       onPointerDownCapture={arm}
-      onFocusCapture={() => arm()}
+      onFocusCapture={(e) => {
+        // Read HERE, not in the stand-in's own onFocus: arming commits during
+        // the capture phase and removes the stand-in, so its handler never runs.
+        if ((e.target as HTMLElement).dataset?.swipeStandIn !== undefined) focusActionsOnArm.current = true
+        arm()
+      }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
     >
       {/* Separated, rounded action buttons that pop in and fill the row height */}
+      {hasActions && !armed && (
+        <button type="button" className="sr-only" aria-label="Show actions" data-swipe-stand-in="" />
+      )}
       {hasActions && armed && (
         <motion.div
+          ref={panelRef}
           // Marked so a consumer's own gesture can tell "the row" from "the
           // row's controls" — see the flight card's hold.
           data-swipe-actions

@@ -2,9 +2,11 @@
 
 import { Button } from "@/components/ui/button"
 import { FormSection } from "@/components/ui/form-section"
-import { SelectRow, SettingsRow, ToggleRow } from "@/components/ui/settings-row"
+import { SettingsRow, ToggleRow } from "@/components/ui/settings-row"
 import { usePreferences } from "@/components/providers/preferences-provider"
-import { seatOf, type Seat } from "@/lib/utils/roster/pilot-role"
+import Link from "next/link"
+import { ChevronRight } from "lucide-react"
+import { seatOf, withLoggingPreferences } from "@/lib/utils/roster/pilot-role"
 import {
   CREW_ROLE_OPTIONS,
   type CrewFormData,
@@ -32,15 +34,15 @@ export function CrewFormBody({
   toggleRole: (role: CrewRole) => void
 }) {
   const { preferences } = usePreferences()
-  // A card made before the seat control (an import's profile) still answers
-  // from its roles; the old Settings › Import Defaults value answers for the
-  // PF convention until the card sets its own.
-  const seat = seatOf(formData)
-  const pfRole = formData.pfRole ?? preferences.importDefaults?.nonPicPfRole ?? "SIC"
-  const setSeat = (next: Seat) => {
-    updateField("defaultPIC", next === "captain")
-    updateField("defaultSIC", next === "first_officer")
-  }
+  const effective = withLoggingPreferences(formData, preferences.logging)
+  const seat = seatOf(effective)
+  const pfRole = effective?.pfRole ?? "SIC"
+  const seatLabel =
+    seat === "captain"
+      ? "Captain — logged PIC"
+      : seat === "first_officer"
+        ? `First Officer — ${pfRole} when flying`
+        : "Not set"
 
   return (
     <div className="space-y-4">
@@ -114,43 +116,23 @@ export function CrewFormBody({
         )}
       </FormSection>
 
-      {/* The pilot's own seat decides what every new and imported flight is
-          logged as — see the table in lib/utils/roster/pilot-role.ts. It
-          replaces Settings › Import Defaults and the two "Default PIC / SIC"
-          toggles, which did nothing on anyone else's card. */}
+      {/* The seat and the PF convention are a USER setting now (Settings ›
+          Logging, synced): one place to set them, and never a fixed rule.
+          What the card still carries is read only as their fallback. */}
       {formData.isMe && (
         <FormSection title="Logging">
-          <SelectRow<Seat | "unset">
-            label="My seat"
-            description={
-              seat === "captain"
-                ? "New flights are logged PIC, flying or monitoring."
-                : seat === "first_officer"
-                  ? "New flights are logged SIC when monitoring."
-                  : "Sets the role new and imported flights start with."
-            }
-            value={seat ?? "unset"}
-            onValueChange={(v) => v !== "unset" && setSeat(v)}
-            disabled={!isEditing}
-            options={[
-              ...(seat ? [] : [{ value: "unset" as const, label: "Not set" }]),
-              { value: "captain", label: "Captain" },
-              { value: "first_officer", label: "First Officer" },
-            ]}
-          />
-          {seat === "first_officer" && (
-            <SelectRow<"SIC" | "PICUS">
-              label="When pilot flying, log as"
-              description="PICUS only where your operator's supervision method allows it — the captain countersigns it."
-              value={pfRole}
-              onValueChange={(v) => updateField("pfRole", v)}
-              disabled={!isEditing}
-              options={[
-                { value: "SIC", label: "SIC" },
-                { value: "PICUS", label: "PICUS" },
-              ]}
-            />
-          )}
+          <Link
+            href="/settings?selected=logging"
+            className="flex items-center justify-between px-4 py-3.5 row-divider hover:bg-secondary/50"
+          >
+            <span>
+              <span className="block text-foreground">Seat and logged role</span>
+              <span className="block text-xs text-muted-foreground">
+                {seatLabel}. Set in Settings › Logging.
+              </span>
+            </span>
+            <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden />
+          </Link>
         </FormSection>
       )}
 

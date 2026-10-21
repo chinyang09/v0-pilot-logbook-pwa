@@ -19,6 +19,10 @@ import type { FlightLog, FlightLogCreate } from "@/types/entities/flight.types"
 import { createEntity, updateEntity, purgeEntity, silentDeleteEntity, upsertFromServer } from "./crud-helpers"
 import { DELETED_RETENTION_MS, isWithinRetention } from "@/lib/utils/retention"
 import { sortFlights } from "@/lib/utils/flight-sort"
+import { isSimulatorEntry, simulatorRepairPatch } from "@/lib/utils/entry-type"
+import { timezoneRepairPatch } from "@/lib/utils/flight-timezone"
+import { flightTimeRepairPatch } from "@/lib/utils/flight-calculations"
+import { getAirportByIcao, getAirportTimeInfo, isAirportTableSeeded } from "../reference/airports.store"
 
 /**
  * Not in the recycle bin — i.e. a flight that still counts for anything.
@@ -122,6 +126,72 @@ export async function silentDeleteFlight(id: string): Promise<boolean> {
 export async function getAllFlights(): Promise<FlightLog[]> {
   const flights = await userDb.flights.toArray()
   return sortFlights(flights.filter(isLiveFlight))
+}
+
+/**
+ * Put right every simulator row that a recalculation gave a block or role time.
+ *
+ * Until the fix in `recalculateFlightFields` and the flight form, opening a
+ * simulator (or importing one from a schedule report) computed a block time
+ * from its OUT/IN and a role time from that block. The rows it left behind are
+ * repaired through `updateFlight`, so the correction is an ordinary field patch
+ * every device pulls — writing it to the server directly would skip the
+ * sequence the other devices pull from. Idempotent: a row already right gives
+ * an empty patch and is not written. Returns how many rows changed.
+ */
+export async function repairSimulatorEntries(): Promise<number> {
+  const sims = await userDb.flights.filter((f: FlightLog) => isLiveFlight(f) && isSimulatorEntry(f)).toArray()
+  let repaired = 0
+  for (const sim of sims) {
+    const patch = simulatorRepairPatch(sim)
+    if (Object.keys(patch).length === 0) continue
+    if (await updateFlight(sim.id, patch)) repaired++
+  }
+  return repaired
+}
+
+/**
+ * Puts each flight's stored UTC offsets right against its airports' zones
+ * (`timezoneRepairPatch`) — India had been stored as +5 for +5:30, and a flight
+ * written before its airport resolved kept 0. Like the simulator repair it runs
+ * through `updateFlight`, so the fix is an ordinary field patch every device
+ * pulls. Waits for the airport table: an unseeded table answers every lookup
+ * with nothing, which is a reason to try again next launch, not a zone.
+ */
+export async function repairFlightTimezones(): Promise<number> {
+  if (!isAirportTableSeeded()) return 0
+  const flights = await userDb.flights
+    .filter((f: FlightLog) => isLiveFlight(f) && !isSimulatorEntry(f) && !!f.departureIcao && !!f.arrivalIcao)
+    .toArray()
+  const zones = new Map<string, string | null>()
+  const zoneOf = async (icao: string) => {
+    if (!zones.has(icao)) zones.set(icao, (await getAirportByIcao(icao))?.tz || null)
+    return zones.get(icao) ?? null
+  }
+  const offsetAt = (tz: string, at: Date) => getAirportTimeInfo(tz, at).offset
+  let repaired = 0
+  for (const flight of flights) {
+    const patch = timezoneRepairPatch(flight, await zoneOf(flight.departureIcao), await zoneOf(flight.arrivalIcao), offsetAt)
+    if (Object.keys(patch).length === 0) continue
+    if (await updateFlight(flight.id, patch)) repaired++
+  }
+  return repaired
+}
+
+/**
+ * Give a flight with no OFF/ON its OUT→IN flight time (`flightTimeRepairPatch`)
+ * — rows written before the gate fallback carry 00:00. Through `updateFlight`,
+ * so it is an ordinary field patch every device pulls.
+ */
+export async function repairMissingFlightTimes(): Promise<number> {
+  const flights = await userDb.flights.filter((f: FlightLog) => isLiveFlight(f)).toArray()
+  let repaired = 0
+  for (const flight of flights) {
+    const patch = flightTimeRepairPatch(flight)
+    if (Object.keys(patch).length === 0) continue
+    if (await updateFlight(flight.id, patch)) repaired++
+  }
+  return repaired
 }
 
 /**

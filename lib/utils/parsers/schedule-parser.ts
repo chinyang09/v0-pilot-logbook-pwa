@@ -36,6 +36,7 @@ import {
   getAirportTimeInfo,
   getAllPersonnel,
   getCurrentUserPersonnel,
+  getLoggingProfile,
   getUserPreferences,
   DEFAULT_IMPORT_DEFAULTS,
 } from "@/lib/db";
@@ -996,7 +997,7 @@ export async function parseScheduleCSV(
       ...DEFAULT_IMPORT_DEFAULTS,
       ...(storedPrefs?.importDefaults ?? {}),
     };
-    const currentUser = await getCurrentUserPersonnel();
+    const currentUser = await getLoggingProfile();
     if (!currentUser) {
       throw new Error(
         "No user profile found. Please create a crew member with 'This is me' enabled."
@@ -1246,6 +1247,7 @@ export async function parseScheduleCSV(
       scheduleGeneratedAt: plan.generatedAt,
       currentUser: { id: currentUser.id, crewId: currentUser.crewId },
       nonPicPfRole: nonPicPfRoleOf(currentUser, importDefaults.nonPicPfRole),
+      pfRoleFrom: currentUser.pfRoleFrom ?? null,
       // Use the v2 safe/consult split so crew-only changes (incl. the
       // truncated→full name upgrade) auto-apply, while time/route changes on
       // already-flown flights still ask for confirmation.

@@ -2,6 +2,7 @@ import { useCallback } from "react"
 import {
   addFlight,
   getCurrentUserPersonnel,
+  getLoggingProfile,
   getUserPreferences,
   isLiveFlight,
   userDb,
@@ -35,7 +36,8 @@ async function lastPilotRole() {
 export function useCreateFlight() {
   return useCallback(async (date?: string) => {
     const emptyFlight = createEmptyFlightLog()
-    const self = await getCurrentUserPersonnel().catch(() => null)
+    const flightDate = date || new Date().toISOString().split("T")[0]
+    const self = await getLoggingProfile().catch(() => null)
     const seat = seatOf(self)
     let seating: Partial<typeof emptyFlight> = {}
     if (self && seat) {
@@ -43,7 +45,7 @@ export function useCreateFlight() {
       const pilotRole = roleForSeat(
         seat,
         emptyFlight.pilotFlying ?? true,
-        nonPicPfRoleOf(self, prefs?.importDefaults?.nonPicPfRole)
+        nonPicPfRoleOf(self, prefs?.importDefaults?.nonPicPfRole, flightDate)
       )
       seating =
         seat === "captain"
@@ -56,7 +58,7 @@ export function useCreateFlight() {
     return addFlight({
       ...emptyFlight,
       ...seating,
-      date: date || new Date().toISOString().split("T")[0],
+      date: flightDate,
     })
   }, [])
 }
