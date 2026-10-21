@@ -46,6 +46,13 @@ interface RosterMonthProps {
   onToday: () => void
 }
 
+/**
+ * One formatter for every cell's accessible name. `toLocaleDateString` builds a
+ * new one per call — 42 per render of the grid, which was most of the month's
+ * cost on the roster's first visit.
+ */
+const CELL_DATE = new Intl.DateTimeFormat("en-US", { weekday: "long", day: "numeric", month: "long" })
+
 export const RosterMonth = memo(function RosterMonth({
   selectedKey,
   todayKey,
@@ -172,7 +179,7 @@ export const RosterMonth = memo(function RosterMonth({
               tabIndex={isSelected ? 0 : -1}
               aria-pressed={isSelected}
               aria-current={isToday ? "date" : undefined}
-              aria-label={`${parseYMDLocal(cell.key).toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long" })}${items.length ? `, ${items.map(itemLabel).join(", ")}` : ", nothing rostered"}`}
+              aria-label={`${CELL_DATE.format(parseYMDLocal(cell.key))}${items.length ? `, ${items.map(itemLabel).join(", ")}` : ", nothing rostered"}`}
               onClick={() => onSelect(cell.key)}
               className={cn(
                 "flex min-h-[3.75rem] min-w-0 flex-col items-stretch gap-0.5 rounded-lg p-0.5 text-left transition-colors",

@@ -1,11 +1,12 @@
 "use client"
 
 import type React from "react"
-import { useCallback, useEffect, useId, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react"
 import {
   animate,
   AnimatePresence,
   motion,
+  useDragControls,
   useMotionValue,
   useSpring,
   useTransform,
@@ -235,6 +236,43 @@ export function SwipeableCard({
   const isCard = variant === "card"
 
   const hasActions = actions.length > 0 && !disabled
+
+  /**
+   * The row's gesture machinery is ARMED on first contact, not on mount.
+   *
+   * A row is mostly read, not swiped: the flight form has ~50 of them and a
+   * pilot opening a flight touches one or two. Each one used to mount, up
+   * front, a framer drag gesture (pointer listeners plus a layout measure),
+   * the action panel and, per button, two transforms and two springs — on the
+   * tap that opened the form, ~800ms of a 4×-throttled phone before the form
+   * could paint. Unarmed, the row is the same DOM without any of that.
+   *
+   * The arming touch must still SWIPE, so its pointerdown is handed to the
+   * drag controls once the drag feature exists (framer mounts features in the
+   * child's layout effect, which runs before ours). The content element stays
+   * a `motion.div` either way — only `drag` and `dragControls` toggle (framer
+   * mounts its drag feature for EITHER prop, so the controls must not be
+   * passed to an unarmed row) — because swapping it for
+   * a plain div would remount the row's children and drop the very field the
+   * tap was focusing. Keyboard focus arms it too, so Tab reaches the actions
+   * after the row, in that order.
+   */
+  const [armed, setArmed] = useState(false)
+  const armingPointer = useRef<PointerEvent | null>(null)
+  const dragControls = useDragControls()
+  const arm = useCallback(
+    (e?: React.PointerEvent) => {
+      if (armed || !hasActions) return
+      if (e) armingPointer.current = e.nativeEvent
+      setArmed(true)
+    },
+    [armed, hasActions]
+  )
+  useLayoutEffect(() => {
+    if (!armed || !armingPointer.current) return
+    dragControls.start(armingPointer.current)
+    armingPointer.current = null
+  }, [armed, dragControls])
   const menuOpen = useMenuOpen()
   const count = actions.length
   const trailingIndex = count - 1
@@ -457,13 +495,15 @@ export function SwipeableCard({
       // the compositor. Untouchable and still scrollable is exactly the state
       // the menu wants everything behind it to be in.
       style={menuOpen ? { pointerEvents: "none" } : undefined}
+      onPointerDownCapture={arm}
+      onFocusCapture={() => arm()}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
     >
       {/* Separated, rounded action buttons that pop in and fill the row height */}
-      {hasActions && (
+      {hasActions && armed && (
         <motion.div
           // Marked so a consumer's own gesture can tell "the row" from "the
           // row's controls" — see the flight card's hold.
@@ -500,7 +540,8 @@ export function SwipeableCard({
         // `menuOpen` is the load-bearing one: while a press-and-hold menu is
         // up, drag is torn down entirely rather than merely starved of events
         // (see lib/utils/menu-lock).
-        drag={hasActions && !confirmingAction && !menuOpen ? "x" : false}
+        drag={armed && hasActions && !confirmingAction && !menuOpen ? "x" : false}
+        dragControls={armed ? dragControls : undefined}
         dragDirectionLock
         dragConstraints={{ left: -openWidth, right: 0 }}
         dragElastic={DRAG_ELASTIC}

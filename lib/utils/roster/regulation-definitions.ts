@@ -262,6 +262,47 @@ export function acclimatisedOffsetMinutes(
 }
 
 /**
+ * `acclimatisedOffsetMinutes` as at the START of every duty, from the duties
+ * before it — `out[i]` equals
+ * `acclimatisedOffsetMinutes(duties.slice(0, i), home, duties[i].startMs)`.
+ *
+ * Asked once per duty, that walked every earlier duty and every day of every
+ * gap again: quadratic in the length of a career, and the larger part of the
+ * dashboard's first render on a long logbook. When the starts are in order the
+ * answer for duty i is the walk for duty i−1 carried one step further — the
+ * gap after duty i−1 runs exactly to duty i's start, which is also the "now"
+ * it is evaluated at — so one forward pass gives every answer. Out of order
+ * (two duties on one date entered in the wrong order) or unparseable, the
+ * per-duty walk is still the definition and is used as it stands.
+ */
+export function acclimatisedOffsetsAtEachDuty(
+  duties: DutyInterval[],
+  homeOffsetMinutes: number,
+): number[] {
+  for (let i = 0; i < duties.length; i++) {
+    if (Number.isNaN(duties[i].startMs) || (i > 0 && duties[i].startMs < duties[i - 1].startMs)) {
+      return duties.map((d, j) => acclimatisedOffsetMinutes(duties.slice(0, j), homeOffsetMinutes, d.startMs))
+    }
+  }
+  const out: number[] = []
+  let acclimatised = homeOffsetMinutes
+  for (let i = 0; i < duties.length; i++) {
+    if (i > 0) {
+      const prev = duties[i - 1]
+      const freeUntil = duties[i].startMs
+      if (
+        freeUntil > prev.endMs &&
+        countsConsecutiveLocalNights(prev.endMs, freeUntil, prev.endZoneOffsetMinutes) >= NIGHTS_TO_ACCLIMATISE
+      ) {
+        acclimatised = prev.endZoneOffsetMinutes
+      }
+    }
+    out.push(acclimatised)
+  }
+  return out
+}
+
+/**
  * How many CONSECUTIVE local nights an uninterrupted duty-free interval
  * contains, in a given zone.
  *

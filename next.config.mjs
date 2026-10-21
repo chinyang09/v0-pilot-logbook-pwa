@@ -40,6 +40,8 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // PROFILE_BUILD=1 only: ship source maps so a CPU profile names functions.
+  productionBrowserSourceMaps: process.env.PROFILE_BUILD === "1",
   compiler: {
     // Strip console.* from production client bundles (SWC transform — applies
     // even with the webpack bundler). The app logs verbosely ([Sync], [Auth],

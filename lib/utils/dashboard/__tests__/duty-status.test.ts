@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { deriveDutyStatus, deriveSectorLegs, dutyWindow, formatDutyClock } from "../duty-status"
+import { deriveDutyStatus, deriveSectorLegs, dutyWindow, formatDutyClock, indexWindows } from "../duty-status"
 import type { DutyPeriod } from "@/types/entities/roster.types"
 
 /**
@@ -320,5 +320,48 @@ describe("deriveDutyStatus — a part-flown duty is still a duty", () => {
       [planned],
     )
     expect(s.phase).toBe("post_duty")
+  })
+})
+
+describe("indexWindows — the overlap index deriveDutyStatus queries", () => {
+  // A brute-force scan in the original order, which is what the index replaced.
+  const bruteLatest = (ws: { s: number; e: number }[], w: { startMs: number; endMs: number }, after: number) => {
+    let best: number | null = null
+    let bestEnd = after
+    ws.forEach((x, i) => {
+      if (x.s > w.endMs || x.e < w.startMs) return
+      if (x.e > bestEnd) {
+        bestEnd = x.e
+        best = i
+      }
+    })
+    return best
+  }
+  const bruteAny = (ws: { s: number; e: number }[], w: { startMs: number; endMs: number }) =>
+    ws.some((x) => x.s <= w.endMs && x.e >= w.startMs)
+
+  it("answers exactly what a full scan answers, ties included", () => {
+    let seed = 7
+    const rnd = (n: number) => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) % n)
+    for (let round = 0; round < 200; round++) {
+      // Coarse grid so equal starts, equal ends and touching edges all happen.
+      const ws = Array.from({ length: 1 + rnd(40) }, () => {
+        const s = rnd(60) * 10
+        return { s, e: s + rnd(30) * 10 }
+      })
+      const index = indexWindows(ws.map((_, i) => i), (i) => ({ startMs: ws[i].s, endMs: ws[i].e }))
+      for (let q = 0; q < 30; q++) {
+        const s = rnd(70) * 10 - 50
+        const w = { startMs: s, endMs: s + rnd(30) * 10 }
+        expect(index.latestEndingOverlap(w, w.endMs)).toBe(bruteLatest(ws, w, w.endMs))
+        expect(index.anyOverlap(w)).toBe(bruteAny(ws, w))
+      }
+    }
+  })
+
+  it("skips items without a window", () => {
+    const index = indexWindows([null, { startMs: 0, endMs: 10 }], (w) => w)
+    expect(index.anyOverlap({ startMs: 5, endMs: 6 })).toBe(true)
+    expect(index.latestEndingOverlap({ startMs: 0, endMs: 5 }, 5)).toEqual({ startMs: 0, endMs: 10 })
   })
 })

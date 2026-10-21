@@ -4,6 +4,7 @@ import {
   containsLocalNight,
   countsConsecutiveLocalNights,
   acclimatisedOffsetMinutes,
+  acclimatisedOffsetsAtEachDuty,
   isEarlyStart,
   isLateFinish,
   isInWindowOfCircadianLow,
@@ -306,5 +307,48 @@ describe("applyAcclimatisation — para 14(1)(a) against the earned state", () =
     ]
     const out = applyAcclimatisation(timeline)
     expect(out[0].fdpTableUsed).toBe("A") // departed home, acclimated to home
+  })
+})
+
+describe("acclimatisedOffsetsAtEachDuty — one pass for the whole timeline", () => {
+  // Pinned to the per-duty definition it replaces in applyAcclimatisation.
+  const brute = (duties: { startMs: number; endMs: number; endZoneOffsetMinutes: number }[], home: number) =>
+    duties.map((d, i) => acclimatisedOffsetMinutes(duties.slice(0, i), home, d.startMs))
+
+  function rand(seed: number) {
+    return () => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296
+      return seed / 4294967296
+    }
+  }
+  const ZONES = [SGT, UTC, -5 * 60, 9 * 60, 5 * 60 + 30]
+
+  it("matches the per-duty walk on random rosters, including out-of-order and unparseable starts", () => {
+    for (let round = 0; round < 60; round++) {
+      const r = rand(round + 7)
+      let t = D("2026-01-01T00:00:00Z")
+      const duties = Array.from({ length: 2 + Math.floor(r() * 40) }, () => {
+        // Gaps from an hour to a week, so some reach three local nights.
+        t += Math.floor(r() * 7 * 24 + 1) * 3_600_000
+        const start = t
+        const end = start + Math.floor(r() * 14 + 1) * 3_600_000
+        t = end
+        return { startMs: start, endMs: end, endZoneOffsetMinutes: ZONES[Math.floor(r() * ZONES.length)] }
+      })
+      if (round % 5 === 3) [duties[1], duties[0]] = [duties[0], duties[1]]
+      if (round % 7 === 4) duties[Math.floor(duties.length / 2)].startMs = NaN
+      expect(acclimatisedOffsetsAtEachDuty(duties, SGT)).toEqual(brute(duties, SGT))
+    }
+  })
+
+  it("acclimatises after three local nights in a new zone, and not before", () => {
+    const duties = [
+      { startMs: D("2026-03-01T00:00:00Z"), endMs: D("2026-03-01T13:00:00Z"), endZoneOffsetMinutes: UTC },
+      // Two nights in London, then a duty: still on Singapore time.
+      { startMs: D("2026-03-03T09:00:00Z"), endMs: D("2026-03-03T12:00:00Z"), endZoneOffsetMinutes: UTC },
+      // Four nights more: acclimated to London.
+      { startMs: D("2026-03-08T09:00:00Z"), endMs: D("2026-03-08T12:00:00Z"), endZoneOffsetMinutes: UTC },
+    ]
+    expect(acclimatisedOffsetsAtEachDuty(duties, SGT)).toEqual([SGT, SGT, UTC])
   })
 })

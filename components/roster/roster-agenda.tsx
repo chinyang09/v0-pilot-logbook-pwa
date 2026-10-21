@@ -59,6 +59,9 @@ interface RosterAgendaProps {
   onAddDuty: () => void
 }
 
+/** One formatter for every day heading — `toLocaleDateString` builds one per call. */
+const DAY_HEADING = new Intl.DateTimeFormat("en-US", { weekday: "short", day: "numeric", month: "short" })
+
 export const RosterAgenda = memo(function RosterAgenda({
   agenda,
   todayKey,
@@ -76,7 +79,7 @@ export const RosterAgenda = memo(function RosterAgenda({
           <section key={dayKey} aria-labelledby={`roster-day-${dayKey}`} className="space-y-1.5">
             <div className="flex items-baseline justify-between px-1">
               <h3 id={`roster-day-${dayKey}`} className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {parseYMDLocal(dayKey).toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short" })}
+                {DAY_HEADING.format(parseYMDLocal(dayKey))}
               </h3>
               {rel && <span className={cn("text-[11px]", rel === "Today" ? "font-semibold text-primary" : "text-muted-foreground")}>{rel}</span>}
             </div>

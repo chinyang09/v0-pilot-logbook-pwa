@@ -150,9 +150,24 @@ function fitTextarea(el: HTMLTextAreaElement) {
   el.style.height = "auto";
   el.style.height = `${el.scrollHeight}px`;
 }
-/** Stable, so it runs on mount rather than on every render of the form. */
+/**
+ * Stable, so it runs on mount rather than on every render of the form.
+ *
+ * The first fit waits for a ResizeObserver callback. Reading `scrollHeight`
+ * straight from the ref ran in the middle of React's commit, so it forced a
+ * synchronous layout of the whole app for one textarea (~90ms of the tap that
+ * opens a flight, at a 4× CPU throttle) — and the rest of the commit then
+ * dirtied it again. An observer fires after the browser's own layout and
+ * before paint, so the read is free and the fitted height still lands in the
+ * first frame.
+ */
 const fitTextareaRef = (el: HTMLTextAreaElement | null) => {
-  if (el) fitTextarea(el);
+  if (!el) return;
+  const ro = new ResizeObserver(() => {
+    ro.disconnect();
+    fitTextarea(el);
+  });
+  ro.observe(el);
 };
 
 /** Fields only ever written straight to the database, by the pickers. */

@@ -48,7 +48,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 
 | Area | What it pins down |
 |---|---|
-| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp |
+| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp, and that the single-pass timeline sums and acclimatisation equal their per-item definitions |
 | `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation, and a REAL schedule PDF (`fixtures/schedule-oct-2026-local-base.pdf`) run through the actual extractor |
 | `lib/utils/parsers/shared/__tests__/pooled-map.test.ts` | the bounded fan-out both enrichment chains end in |
 | `lib/utils/__tests__/history-markers.test.ts` | overlay marker ordering — which dialog `history.back()` would actually take |
@@ -1220,6 +1220,53 @@ the date alone left same-day sectors in table order, so they could read in a
 different order here than in the logbook. `SortableFlight`'s `scheduledOut` is
 optional so a projection of a flown flight can use it.
 
+### Smoothness — the Oct 2026 performance pass
+
+Measured with Playwright + CDP on a 390×844 touch viewport at a **4× CPU
+throttle** with **1200 flights**: rAF frame gaps, long tasks and event timing
+(INP) per interaction, CPU profiles mapped through source maps
+(`PROFILE_BUILD=1 pnpm build` ships them), and a React commit hook to see which
+commits land inside an event.
+
+| | Before | After |
+|---|---|---|
+| idle on the logbook | 29 frames in 3s, every frame ~106ms | 60fps |
+| fling the logbook (4 flings) | 52/52 frames over 50ms | 1 |
+| swipe a card open | every frame over 50ms | 0 |
+| cold load → first card | 3.8s | 2.8s |
+| open a flight (tap → paint) | INP 1568ms | 96ms |
+| Dashboard, first open | the page froze ~38s | ~0.5s longest task |
+| Summary ⇄ Legal toggle | 2.0–2.4s task, INP ~2.9s | ~140ms task |
+| calendar open / close | INP 790 / 580ms | ~350 / 310ms |
+| tab switches | INP 750–830ms | 130–250ms |
+
+What it took, in order of size:
+
+- **The glass's specular drift is gone.** A registered `@property` animated on
+  every `.GlassContainer` restyled each glass surface's whole subtree every
+  frame, forever — and it never moved the glint (`--glass-rim` resolves its
+  `var()` on `:root`). The rim is now static at the angle it always showed.
+- **Whole-timeline calculations are single passes**: the FDP timeline's
+  rolling windows (`generateTimelineData`), the dashboard's plan/record overlap
+  (`indexWindows`), acclimatisation (`acclimatisedOffsetsAtEachDuty`). Each is
+  pinned to the old per-item definition by a randomized equivalence test.
+- **The FDP chart's timeline is built only on the FDP page** (`useFDPTimeline`).
+- **`SwipeableCard` rows arm on first contact** — no drag feature, no action
+  panel, no `dragControls` until a pointer or focus reaches the row.
+- **Opening a detail renders as a transition**, with the `?selected=` history
+  write moved one task out of the tap (`writeUrlAfterTap`).
+- **No forced layouts in commits or mount effects** (keep-alive stack, scroll
+  indicator, remarks textarea, glass ripple), and nav links pass
+  `scroll: false`.
+- **Formatters are hoisted** out of per-cell and per-row loops.
+
+Still open, measured: opening a flight still runs ~400ms of long tasks at 4×,
+but in yielding slices after the tap has painted. The rest is the form's ~300
+fibers mounting, mostly framer `motion` and Radix. The first Dashboard visit
+runs the FDP pipeline (~250ms of that 4× figure is `createDutyPeriodsFromFlights`
+and the pilot-status model). Back-from-flight is a `popstate`, which React
+renders synchronously by design.
+
 ### The Logbook's Virtualized List
 
 `components/flight-list.tsx` uses `@tanstack/react-virtual` with dynamic
@@ -1830,13 +1877,10 @@ the CPU throttled 3×). So:
 - **Threads = min(4, cores − 1)**, leaving a core for the UI. On a 4-core host
   four engine threads against the page's rendering ran recognition ~3× slower
   than the idle benchmark.
-- **The glass's ambient drift is HELD while a photo is read**
-  (`html[data-busy] .GlassContainer`, set by `holdAmbientMotion`). It repaints
-  every glass surface every frame and each repaint re-runs the backdrop-filters
-  around it — measured, a read took ~2.6s with it running and ~1.5s held.
-  `animation-play-state: paused`, so it resumes from the same angle; two
-  seconds of a 60-second drift is nothing to see. The import button's spinner
-  went for the same reason: the processing dialog covers it.
+- **Nothing on the page animates while a photo is read.** The glass's ambient
+  drift used to be paused for it (`html[data-busy]`); the drift is now gone
+  altogether (see "Smoothness" below), so there is nothing to hold. The import
+  button's spinner went for the same reason: the processing dialog covers it.
 
 #### Speed — where the time went, and the rules that keep it fast
 
@@ -1903,6 +1947,11 @@ Measured on the seven real photos (`lib/ocr/__tests__/fixtures/mcdu/`):
 detail rows). Built on **framer-motion** (motion values → no per-frame React
 re-renders).
 
+- **Armed on first contact.** An unarmed row has no drag feature, no
+  `dragControls` and no action panel — a row is mostly read, and the flight
+  form's ~50 of them mounting all that on the tap that opened it was ~800ms at
+  a 4× throttle. The first pointerdown (or focus) arms it and is handed to
+  `dragControls.start` in a layout effect, so that same touch swipes.
 - **Gesture:** `drag="x"` with `dragDirectionLock` + `touchAction: "pan-y"` — a
   vertical gesture scrolls the list natively and never fights the horizontal
   swipe. Release settles to open/closed with a spring (`SPRING`); a fast flick
@@ -3130,18 +3179,12 @@ Each of these was measured or read closely during a performance pass and left
 alone on purpose. The reason is recorded so the next pass doesn't re-derive it
 — and so that anyone who *does* action one knows what they are trading.
 
-- **`.GlassContainer`'s 60s specular drift is the largest continuous cost in
-  the app.** `--glass-specular-angle` is a registered `@property` feeding a
-  conic gradient, so it REPAINTS every frame rather than compositing, on every
-  glass surface, forever — to move 36° over a minute, i.e. ~0.01° per frame.
-  Every way to make it cheaper changes the material: stepping it introduces
-  visible micro-jumps in a specular highlight, and hoisting it to `:root` so
-  all surfaces share one animation puts them in phase (they currently drift
-  independently, which is the look). Only touch this with the owner.
 - **The glass rim adds three more `backdrop-filter`s per surface** on top of
   `.GlassBlur`'s one (`.GlassEdgeReflection`, `.GlassEmbossReflection`,
   `.GlassRefraction`). They are masked to a ~2px band but the filter still
-  processes the whole element box. Same rule as above — this IS the material.
+  processes the whole element box. This IS the material — only touch it with
+  the owner. (The specular DRIFT that used to sit beside it in this list was
+  actioned — see "Smoothness" — because it turned out to move nothing.)
 - **`dedupingInterval: 0` on every data hook** means the five keep-alive pages
   reading `useFlights()` each fire their own full IndexedDB read on first
   mount. Raising it is safe *in principle* — SWR only consults the interval for
@@ -3155,11 +3198,6 @@ alone on purpose. The reason is recorded so the next pass doesn't re-derive it
   cache would collapse them, but a cached offset would pin a PLACEHOLDER
   timezone if a custom airport were enriched later, and that feeds the FDP
   legality math. Do not cache it without invalidation tied to enrichment.
-- **`SwipeableCard` renders its action buttons for every row**, at `opacity: 0`
-  when closed — in the logbook that is ~48 hidden buttons carrying ~144 framer
-  motion values, torn down and rebuilt as the virtualiser recycles rows.
-  Deferring them to the first drag would cut that, but moves the cost into the
-  start of every swipe, which is an experience trade rather than a free win.
 - **The OCR preloader fires on a fixed 3s timer** (`ocr-models-preloader.tsx`),
   which lands while the user is making their first interactions. The ~16MB
   fetch itself is done by the service worker, so it is off the main thread and
@@ -4220,7 +4258,14 @@ When making changes, be aware of these high-impact files:
 - Do not let the browser OCR engine load its runtime from webpack's hashed URL, or import bare `onnxruntime-web` without the WASM-only alias — the hashed copy cannot be precached (the first offline OCR failed) and the default entry is 24MB of WebGPU build the engine never uses. And keep the alias on the NON-bundled `ort.wasm.min.mjs`: the bundle starts its threads from its own hashed URL, so a threaded engine could not start offline; the plain build takes the glue (and the thread script) from `wasmPaths.mjs` at `/models/`
 - Do not send a photo to the server first when the device can read it — the server path (re-encode, upload, a function in `iad1` that may be cold, a session lookup) was ~10s on a phone in Singapore, where the device engine reads it in ~1.5–3.5s. The device goes first, the server is the backstop (`HEDGE_MS`, or a device failure); `ocr-routing.test.ts` pins it
 - Do not run the device OCR engine on the page's main thread — it runs in `engine/ocr.worker.ts`, so the UI is not one of its compute threads; and do not give it every core (`ocrThreadCount` leaves one for the UI)
-- Do not let the glass's ambient drift run while a photo is being read — `holdAmbientMotion` sets `html[data-busy]`, which PAUSES it (not removes it). Each drift frame repaints every glass surface and re-runs their backdrop-filters, on the cores the engine is using; it cost ~1s a read. A spinner left animating behind the processing dialog is the same mistake in miniature
+- Do not animate a CSS custom property on a container — not a registered `@property`, not a keyframed `--var`. An inherited custom property changing every frame restyles the container's WHOLE subtree every frame: the glass's specular drift did that on every glass surface, which in the nav and the header is most of the app — ~1.8s of every 2s idle at a 4× CPU throttle, 29 frames in 3s on an idle logbook. And it did not even move the glint: `--glass-rim` is declared on `:root`, where its `var()` resolves, so the animated value never reached the paint. If something must move, animate a transform or opacity on the element that draws it. A spinner left running behind the OCR processing dialog is the same mistake in miniature
+- Do not compute something per DAY by filtering every duty period — `generateTimelineData` called `calculateRollingStats` three times per day over all duties (O(days × duties), ~40s at a 4× throttle on a long logbook, in the dashboard's first render, during which the page did not paint). The windows are read off a sorted index now and `timeline-data.test.ts` pins them to the original definition. The same goes for `deriveDutyStatus` (`indexWindows`) and `applyAcclimatisation` (`acclimatisedOffsetsAtEachDuty`): a whole-timeline pass must be one pass, and each keeps the per-item definition as its test oracle
+- Do not build the FDP chart's timeline in `computeFDPResult` — it is a point per day for a whole career, and only the FDP page draws it. `useFDPTimeline` builds it there; the dashboard's pipeline does not
+- Do not pass `dragControls` (or `drag`) to an unarmed `SwipeableCard` row — framer mounts its whole drag feature for EITHER prop, and fifty rows of it plus their action panels was ~800ms of the tap that opens a flight. The row arms on first pointerdown/focus and hands that pointerdown to the drag controls, so the first swipe still swipes
+- Do not write `?selected=` to history INSIDE the tap — Next applies the write as a router transition, but one made inside a click renders synchronously, in the click, and takes the selection's own transition with it (the whole flight form rendered before the tap could paint: INP 656ms at 4×, 96ms deferred). `writeUrlAfterTap` defers it one task, `pendingUrlWriteRef` covers the gap, and the selection itself commits as a transition. Keep `pushedBaseRef` in the "is it already open" test, or a second tap inside that task pushes a second entry
+- Do not let a navigation link scroll — every nav navigation passes `scroll: false`. Next's scroll-into-view after a route change is a forced layout of all six kept-alive pages to scroll a document that cannot scroll
+- Do not read layout (`getBoundingClientRect`, `scrollHeight`, `offsetHeight`) in a ref callback, a layout effect or a mount effect — that is the middle of React's commit, so it forces a synchronous layout of the whole app which the rest of the commit then dirties again. Take the first measurement from a ResizeObserver callback (it fires after the browser's own layout, before paint): the keep-alive stack, the scroll indicator and the remarks textarea all did this, at 90–290ms each per open at a 4× throttle. During a gesture, reuse the rect the last frame already read (`GlassContainer`'s release ripple)
+- Do not call `toLocaleDateString`/`toLocaleTimeString` per cell or per row — each call builds a new `Intl.DateTimeFormat`. Hoist a formatter to module scope (`CELL_DATE` in the roster month, `DAY_HEADING` in the agenda) or go through `tz-format.ts`. And for the device's own zone or UTC, `Date`'s getters ARE the answer — `dayKeyAt` only reaches for a formatter for a NAMED zone
 - Do not let a digit read from a blank (`----`) slot reach the extractors — `dropDashReads` drops a digit-bearing read below 0.75 confidence or 0.55 of the median line height. On the device engine photo 3's empty IN read as "1000"; the `device` fixtures pin it
 - Do not swap the OCR models for dynamically quantized int8 ones — measured in onnxruntime-web, recognition got slower and read none of the seven photos correctly
 - Do not recognise every detected box — the OCR pipeline reads top to bottom and STOPS at the MCDU screen's last line (`MCDU_STOP`), so the keypad (half the boxes) never reaches the recognition model. A change that sorts, filters or batches the boxes must keep that order and the drop of anything read past the stop

@@ -60,6 +60,79 @@ export function dutyWindow(dp: Pick<DutyPeriod, "date" | "reportTime" | "debrief
 }
 
 /**
+ * A set of duty windows, indexed for "which of these overlap that window".
+ *
+ * `deriveDutyStatus` asks it twice per duty — the plan covering each logged
+ * duty, and whether each plan is already covered by a logged one — and did it
+ * by re-parsing every window of the other list each time. With a career's
+ * logbook (~600 duties against ~600 planned) that was ~720k `Date.parse`
+ * calls per rebuild: 2.1s on a phone-class CPU, every time the legal page
+ * mounted. Here each window is parsed ONCE and sorted by start, and a query
+ * scans only the entries whose start lies within the longest duration of the
+ * window being asked about — any entry starting earlier than that has already
+ * ended — so a query costs a binary search and a handful of comparisons.
+ */
+export interface WindowIndex<T> {
+  /** The entry overlapping `w` that ends LATEST and strictly after `after`;
+   *  on equal ends the earliest in the original order wins (what a plain
+   *  first-to-last scan with a strict `>` picks). */
+  latestEndingOverlap(w: DutyWindow, after: number): T | null
+  anyOverlap(w: DutyWindow): boolean
+}
+
+export function indexWindows<T>(items: readonly T[], windowOf: (item: T) => DutyWindow | null): WindowIndex<T> {
+  const entries: { item: T; w: DutyWindow; order: number }[] = []
+  let maxSpan = 0
+  items.forEach((item, order) => {
+    const w = windowOf(item)
+    if (!w) return
+    entries.push({ item, w, order })
+    if (w.endMs - w.startMs > maxSpan) maxSpan = w.endMs - w.startMs
+  })
+  entries.sort((a, b) => a.w.startMs - b.w.startMs || a.order - b.order)
+  const starts = entries.map((e) => e.w.startMs)
+
+  /** First entry whose start is at or after `ms`. */
+  const lowerBound = (ms: number) => {
+    let lo = 0
+    let hi = starts.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (starts[mid] < ms) lo = mid + 1
+      else hi = mid
+    }
+    return lo
+  }
+
+  const each = (w: DutyWindow, visit: (e: (typeof entries)[number]) => boolean | void) => {
+    for (let i = lowerBound(w.startMs - maxSpan); i < entries.length && starts[i] <= w.endMs; i++) {
+      const e = entries[i]
+      if (e.w.endMs < w.startMs) continue
+      if (visit(e) === true) return
+    }
+  }
+
+  return {
+    latestEndingOverlap(w, after) {
+      let best: (typeof entries)[number] | null = null
+      each(w, (e) => {
+        if (e.w.endMs <= after) return
+        if (!best || e.w.endMs > best.w.endMs || (e.w.endMs === best.w.endMs && e.order < best.order)) best = e
+      })
+      return best ? (best as (typeof entries)[number]).item : null
+    },
+    anyOverlap(w) {
+      let found = false
+      each(w, () => {
+        found = true
+        return true
+      })
+      return found
+    },
+  }
+}
+
+/**
  * One leg of the duty, for the sector chain.
  *
  * A duty is not one route — it is up to four sectors across several airports —
@@ -314,6 +387,8 @@ export function deriveDutyStatus(
   scheduleDuties: DutyPeriod[] = [],
 ): DutyStatus {
   const nowMs = now.getTime()
+  const planIndex = indexWindows(scheduleDuties, dutyWindow)
+  const recordIndex = indexWindows(dutyPeriods, dutyWindow)
 
   /**
    * The PLAN covering a duty period, when the roster has one.
@@ -328,20 +403,7 @@ export function deriveDutyStatus(
    * logbook duty when their windows overlap at all, which is enough: two duties
    * on one date are separated by a rest period by construction.
    */
-  const planFor = (dp: DutyPeriod, w: DutyWindow): DutyPeriod | null => {
-    let best: DutyPeriod | null = null
-    let bestEnd = w.endMs
-    for (const sched of scheduleDuties) {
-      const sw = dutyWindow(sched)
-      if (!sw) continue
-      if (sw.startMs > w.endMs || sw.endMs < w.startMs) continue
-      if (sw.endMs > bestEnd) {
-        bestEnd = sw.endMs
-        best = sched
-      }
-    }
-    return best
-  }
+  const planFor = (w: DutyWindow): DutyPeriod | null => planIndex.latestEndingOverlap(w, w.endMs)
 
   const completedLegsOf = (dp: DutyPeriod): number => {
     if (!flightArrivals || !dp.flightIds?.length) return 0
@@ -416,7 +478,7 @@ export function deriveDutyStatus(
     // Where the roster runs later than the record, the duty is still in
     // progress and its PLANNED figures are the legal ones: under Reg 14 the
     // maximum FDP is set by the sectors PLANNED, not the sectors flown so far.
-    const plan = planFor(dp, logged)
+    const plan = planFor(logged)
     const planWindow = plan ? dutyWindow(plan) : null
     const w: DutyWindow = planWindow
       ? { startMs: Math.min(logged.startMs, planWindow.startMs), endMs: planWindow.endMs }
@@ -474,11 +536,7 @@ export function deriveDutyStatus(
   }
 
   /** Does the pipeline already describe this window? */
-  const coveredByRecord = (sw: DutyWindow): boolean =>
-    dutyPeriods.some((dp) => {
-      const w = dutyWindow(dp)
-      return w && w.startMs <= sw.endMs && w.endMs >= sw.startMs
-    })
+  const coveredByRecord = (sw: DutyWindow): boolean => recordIndex.anyOverlap(sw)
 
   // A plan duty the logbook has not touched at all. There are two of these and
   // both matter:

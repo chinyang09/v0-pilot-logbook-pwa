@@ -220,10 +220,27 @@ export function KeepAlivePages({ children }: { children: ReactNode }) {
   // once through its normal resize path.
   const stackRef = useRef<HTMLDivElement>(null)
   const pageElsRef = useRef(new Map<string, HTMLDivElement>())
+  // The stack's size, kept by an observer. Reading the box in the effect below
+  // forced a layout of the whole app on every tab switch (~160ms of it at a 4×
+  // CPU throttle) right before the browser laid it out again for the frame —
+  // an observer is told the size after a layout it was doing anyway.
+  const stackSizeRef = useRef<{ width: number; height: number } | null>(null)
   useEffect(() => {
     const stack = stackRef.current
     if (!stack) return
-    const { width, height } = stack.getBoundingClientRect()
+    const ro = new ResizeObserver(([entry]) => {
+      const box = entry.borderBoxSize?.[0]
+      stackSizeRef.current = box
+        ? { width: box.inlineSize, height: box.blockSize }
+        : { width: entry.contentRect.width, height: entry.contentRect.height }
+    })
+    ro.observe(stack)
+    return () => ro.disconnect()
+  }, [])
+  useEffect(() => {
+    const stack = stackRef.current
+    if (!stack) return
+    const { width, height } = stackSizeRef.current ?? stack.getBoundingClientRect()
     pageElsRef.current.forEach((el, key) => {
       if (key === routeKey) {
         el.style.width = ""
