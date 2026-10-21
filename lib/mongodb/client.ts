@@ -4,6 +4,7 @@
  */
 
 import { MongoClient, type Db } from "mongodb"
+import { SYNC_COLLECTIONS } from "@/lib/sync/schema"
 
 const uri = process.env.MONGODB_URI || ""
 
@@ -42,7 +43,7 @@ async function ensureIndexes(mongoClient: MongoClient): Promise<void> {
   }
 
   await Promise.all([
-    ...["flights", "aircraft", "personnel", "scheduleEntries", "currencies", "discrepancies"].flatMap((coll) => [
+    ...SYNC_COLLECTIONS.flatMap((coll) => [
       safe(`${coll}.userId+id`, () =>
         db.collection(coll).createIndex({ userId: 1, id: 1 }, { unique: true }),
       ),

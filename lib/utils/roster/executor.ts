@@ -35,6 +35,7 @@ import {
   getAirportByIcao,
   getAirportTimeInfo,
   getCurrentUserPersonnel,
+  getLoggingProfile,
   getUserPreferences,
   getAllAircraft,
   bulkUpsertScheduleEntries,
@@ -692,7 +693,7 @@ export async function executeRosterImport(
     errors: [],
   };
 
-  const currentUser = await getCurrentUserPersonnel();
+  const currentUser = await getLoggingProfile();
   if (!currentUser) {
     result.errors.push({
       operation: "prelude",

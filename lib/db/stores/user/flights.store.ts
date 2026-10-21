@@ -21,6 +21,7 @@ import { DELETED_RETENTION_MS, isWithinRetention } from "@/lib/utils/retention"
 import { sortFlights } from "@/lib/utils/flight-sort"
 import { isSimulatorEntry, simulatorRepairPatch } from "@/lib/utils/entry-type"
 import { timezoneRepairPatch } from "@/lib/utils/flight-timezone"
+import { flightTimeRepairPatch } from "@/lib/utils/flight-calculations"
 import { getAirportByIcao, getAirportTimeInfo, isAirportTableSeeded } from "../reference/airports.store"
 
 /**
@@ -171,6 +172,22 @@ export async function repairFlightTimezones(): Promise<number> {
   let repaired = 0
   for (const flight of flights) {
     const patch = timezoneRepairPatch(flight, await zoneOf(flight.departureIcao), await zoneOf(flight.arrivalIcao), offsetAt)
+    if (Object.keys(patch).length === 0) continue
+    if (await updateFlight(flight.id, patch)) repaired++
+  }
+  return repaired
+}
+
+/**
+ * Give a flight with no OFF/ON its OUT→IN flight time (`flightTimeRepairPatch`)
+ * — rows written before the gate fallback carry 00:00. Through `updateFlight`,
+ * so it is an ordinary field patch every device pulls.
+ */
+export async function repairMissingFlightTimes(): Promise<number> {
+  const flights = await userDb.flights.filter((f: FlightLog) => isLiveFlight(f)).toArray()
+  let repaired = 0
+  for (const flight of flights) {
+    const patch = flightTimeRepairPatch(flight)
     if (Object.keys(patch).length === 0) continue
     if (await updateFlight(flight.id, patch)) repaired++
   }

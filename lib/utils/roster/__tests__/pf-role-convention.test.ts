@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from "vitest";
 import { reconcileRoster, type ParsedSector } from "../reconciler";
-import { nonPicPfRoleOf, pfRoleOn, settledRole } from "../pilot-role";
+import { nonPicPfRoleOf, pfRoleOn, seatOf, settledRole, withLoggingPreferences } from "../pilot-role";
 import type { FlightLog } from "../../../../types/entities/flight.types";
 
 const CHECKOUT = "2025-07-27";
@@ -182,5 +182,34 @@ describe("reconcileRoster — the role beside PF/PM", () => {
     // And a flight an earlier build already left PM + PICUS is offered SIC.
     const broken = flight({ ...f, pilotRole: "PICUS" });
     expect(roleChange(broken, sector({ isPilotFlying: true, dayTakeoffs: 1, dayLandings: 1 })).role).toBe("SIC");
+  });
+});
+
+describe("withLoggingPreferences — the convention is a USER setting, not a fixed rule", () => {
+  const card = { defaultPIC: false, defaultSIC: true, roles: ["SIC" as const], pfRole: null, pfRoleFrom: null as string | null };
+
+  it("leaves a first officer SIC when flying unless the pilot chose PICUS", () => {
+    const self = withLoggingPreferences(card, { seat: null, pfRole: null, pfRoleFrom: null });
+    expect(nonPicPfRoleOf(self, undefined, "2026-01-01")).toBe("SIC");
+  });
+
+  it("takes the settings over the card, value by value, dated by the check-out", () => {
+    const self = withLoggingPreferences(card, { seat: null, pfRole: "PICUS", pfRoleFrom: "2025-07-27" });
+    expect(seatOf(self)).toBe("first_officer");
+    expect(nonPicPfRoleOf(self, undefined, "2025-07-26")).toBe("SIC");
+    expect(nonPicPfRoleOf(self, undefined, "2025-07-27")).toBe("PICUS");
+  });
+
+  it("falls back to the card for whatever the settings leave unset", () => {
+    const self = withLoggingPreferences({ ...card, pfRole: "PICUS" as const, pfRoleFrom: "2025-07-27" }, { seat: "captain", pfRole: null, pfRoleFrom: null });
+    expect(seatOf(self)).toBe("captain");
+    expect(self?.pfRole).toBe("PICUS");
+    expect(self?.pfRoleFrom).toBe("2025-07-27");
+  });
+
+  it("reads an explicit empty check-out date as 'no date', not the card's", () => {
+    const self = withLoggingPreferences({ ...card, pfRoleFrom: "2025-07-27" }, { seat: null, pfRole: "PICUS", pfRoleFrom: "" });
+    expect(self?.pfRoleFrom).toBeNull();
+    expect(nonPicPfRoleOf(self, undefined, "2020-01-01")).toBe("PICUS");
   });
 });

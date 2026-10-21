@@ -35,6 +35,16 @@ vi.mock("@/lib/db", () => ({
     createdAt: 0,
     syncStatus: "pending" as const,
   })),
+  getLoggingProfile: vi.fn(async () => ({
+    id: "self",
+    name: "Lim Chin Yang",
+    crewId: "9766",
+    organization: "Scoot",
+    roles: ["SIC"],
+    isMe: true,
+    createdAt: 0,
+    syncStatus: "pending" as const,
+  })),
   getUserPreferences: vi.fn(async () => null),
   DEFAULT_IMPORT_DEFAULTS: { nonPicPfRole: "SIC" as const },
 }));

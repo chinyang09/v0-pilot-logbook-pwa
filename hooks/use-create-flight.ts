@@ -2,6 +2,7 @@ import { useCallback } from "react"
 import {
   addFlight,
   getCurrentUserPersonnel,
+  getLoggingProfile,
   getUserPreferences,
   isLiveFlight,
   userDb,
@@ -36,7 +37,7 @@ export function useCreateFlight() {
   return useCallback(async (date?: string) => {
     const emptyFlight = createEmptyFlightLog()
     const flightDate = date || new Date().toISOString().split("T")[0]
-    const self = await getCurrentUserPersonnel().catch(() => null)
+    const self = await getLoggingProfile().catch(() => null)
     const seat = seatOf(self)
     let seating: Partial<typeof emptyFlight> = {}
     if (self && seat) {

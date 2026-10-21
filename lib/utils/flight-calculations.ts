@@ -34,6 +34,41 @@ export function calculateFlightTime(offTime: string, onTime: string): string {
 }
 
 /**
+ * The airborne window to compute from: OFF/ON when the flight records both,
+ * otherwise OUT/IN. OFF and ON are the times a pilot most often forgets to
+ * note, and OUT/IN — which the company records — are the next best evidence
+ * of when the aeroplane flew (the owner's rule). Without the fallback every
+ * flight missing them held a flight time of 00:00 and no takeoff or landing,
+ * which no recalculation would ever put right. `fromGate` says which it was.
+ */
+export function airborneTimes(f: {
+  outTime?: string | null
+  offTime?: string | null
+  onTime?: string | null
+  inTime?: string | null
+}): { off: string; on: string; fromGate: boolean } | null {
+  const ok = (t: string | null | undefined): t is string => !!t && isValidHHMM(t)
+  if (ok(f.offTime) && ok(f.onTime)) return { off: f.offTime, on: f.onTime, fromGate: false }
+  if (ok(f.outTime) && ok(f.inTime)) return { off: f.outTime, on: f.inTime, fromGate: true }
+  return null
+}
+
+/**
+ * The flight time a stored row SHOULD carry when it records no OFF/ON and
+ * holds none — `airborneTimes`' gate fallback, for rows written before it.
+ * Empty when there is nothing to fix: a simulator (no flight time at all), a
+ * row with OFF/ON (the recalculation owns it), a figure already there.
+ */
+export function flightTimeRepairPatch(f: Partial<FlightLog>): Partial<FlightLog> {
+  if (isSimulatorEntry({ entryType: f.entryType, isSimulator: f.isSimulator })) return {}
+  if (hhmmToMinutes(f.flightTime || "00:00") > 0) return {}
+  const airborne = airborneTimes(f)
+  if (!airborne?.fromGate) return {}
+  const flightTime = calculateFlightTime(airborne.off, airborne.on)
+  return hhmmToMinutes(flightTime) > 0 ? { flightTime } : {}
+}
+
+/**
  * Calculate day time (Total block time minus night time)
  */
 export function calculateDayTime(blockTime: string, nightTime: string): string {
@@ -280,9 +315,10 @@ export function recalculateFlightFields(
     updates.blockTime = calculateBlockTime(flight.outTime, flight.inTime)
   }
 
-  // Flight time
-  if (flight.offTime && flight.onTime) {
-    updates.flightTime = calculateFlightTime(flight.offTime, flight.onTime)
+  // Flight time — off→on, or out→in when the flight records no OFF/ON
+  const airborne = airborneTimes(flight)
+  if (airborne) {
+    updates.flightTime = calculateFlightTime(airborne.off, airborne.on)
   }
 
   // Night time — gated by autoFill.night (defaults to true if no prefs)
@@ -320,11 +356,11 @@ export function recalculateFlightFields(
   const shouldCalcTO = !overrides.dayTakeoffs && !overrides.nightTakeoffs
   const shouldCalcLdg = !overrides.dayLandings && !overrides.nightLandings
 
-  if ((shouldCalcTO || shouldCalcLdg) && flight.date && flight.offTime && flight.onTime) {
+  if ((shouldCalcTO || shouldCalcLdg) && flight.date && airborne) {
     const toLdg = calculateTakeoffsLandings(
       flight.date,
-      flight.offTime,
-      flight.onTime,
+      airborne.off,
+      airborne.on,
       depAirport,
       arrAirport,
       flight.pilotFlying ?? true,

@@ -304,6 +304,35 @@ describe("field-level merge — a device that has not caught up", () => {
   })
 })
 
+describe("settings — one record per user, written as patches only", () => {
+  // A device writes ONLY the settings the user changed, as an update from
+  // base 0 even when it holds no settings row. A fresh device at its defaults
+  // therefore states nothing, and two devices' settings merge.
+  it("inserts the first patch sparse, merges a second device's, and never writes a default", async () => {
+    const first = await push(
+      op("settings", "update", { id: "settings", display_timeFormat: "12h", updatedAt: 10, deviceId: "A" }, { changedFields: ["display_timeFormat"], baseSeq: 0 })
+    )
+    expect(first.results[0]).toMatchObject({ success: true })
+    // A NEW device, which has never pulled, changes one other setting.
+    await push(
+      op("settings", "update", { id: "settings", autoFill_night: false, updatedAt: 20, deviceId: "B" }, { changedFields: ["autoFill_night"], baseSeq: 0 })
+    )
+
+    const stored = await fake.collection("settings").findOne({ id: "settings" })
+    expect(stored).toMatchObject({ display_timeFormat: "12h", autoFill_night: false })
+    // Every other setting is null — unset, so it reads as the default — and
+    // nothing the new device did not touch was stated.
+    expect(stored!.display_useZuluTime).toBeNull()
+    expect(stored!.logging_pfRole).toBeNull()
+
+    const c = device()
+    await c.pull()
+    const pulled = c.state.records.get("settings:settings")!
+    expect(pulled).toMatchObject({ display_timeFormat: "12h", autoFill_night: false })
+    expect("display_useZuluTime" in pulled).toBe(false)
+  })
+})
+
 describe("the seq head", () => {
   it("moves on every write and every deletion — which is what the cheap poll compares", async () => {
     const h0 = await readHeadSeq(db, USER)

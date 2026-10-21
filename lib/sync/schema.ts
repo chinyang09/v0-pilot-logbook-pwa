@@ -34,6 +34,7 @@ import type { ScheduleEntry, Currency, Discrepancy } from "@/types/entities/rost
 import type { SyncCollection } from "@/types/sync/sync.types"
 import { toTimestamp } from "./authorship"
 import { getEntryType } from "@/lib/utils/entry-type"
+import { SETTINGS_FIELD_KEYS } from "@/lib/settings/user-settings"
 
 /**
  * Bump when a field table below changes in a way the server must rewrite
@@ -56,6 +57,7 @@ export const SYNC_SCHEMA_VERSION = 3
  * arrives referencing an aircraft or crew member the other side hasn't seen.
  */
 export const SYNC_COLLECTIONS: readonly SyncCollection[] = [
+  "settings",
   "aircraft",
   "personnel",
   "scheduleEntries",
@@ -256,6 +258,15 @@ const DISCREPANCY_FIELDS = {
 } satisfies FieldTable<Discrepancy>
 
 /**
+ * A user's settings record is SPARSE by design: every field is `null` until
+ * the pilot sets it, and null reads as the app default. Writing the defaults
+ * themselves would make a new device's untouched settings look like choices.
+ * The keys come from `lib/settings/user-settings.ts`, which derives them from
+ * the preference groups' default objects.
+ */
+const SETTINGS_FIELDS: Record<string, FieldDefault> = Object.fromEntries(SETTINGS_FIELD_KEYS.map((k) => [k, null]))
+
+/**
  * Fields a table cannot give ONE default, because the right value follows from
  * another field — applied to every document written, so a collection never
  * holds the same fact two ways. Production carried `entryType` on 14 flights
@@ -296,6 +307,7 @@ export const SYNC_FIELDS: Record<SyncCollection, Record<string, FieldDefault>> =
   scheduleEntries: SCHEDULE_ENTRY_FIELDS,
   currencies: CURRENCY_FIELDS,
   discrepancies: DISCREPANCY_FIELDS,
+  settings: SETTINGS_FIELDS,
 }
 
 export interface Envelope {

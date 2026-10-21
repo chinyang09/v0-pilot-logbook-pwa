@@ -28,6 +28,7 @@ import { normalizePersonnelFromServer } from "@/lib/db/stores/user/crew.store"
 import { normalizeScheduleEntryFromServer } from "@/lib/db/stores/user/schedule.store"
 import { normalizeCurrencyFromServer } from "@/lib/db/stores/user/currencies.store"
 import { normalizeDiscrepancyFromServer } from "@/lib/db/stores/user/discrepancies.store"
+import { normalizeSettingsFromServer, silentDeleteSettings } from "@/lib/db/stores/user/settings.store"
 import { referenceDb } from "@/lib/db/reference-db"
 import type { SyncQueueItem, SyncCollection, CollectionCursor } from "@/types/sync/sync.types"
 import { getSyncTriggerManager } from "./sync-trigger-manager"
@@ -115,6 +116,7 @@ const COLLECTION_HANDLERS: Record<
   scheduleEntries: { silentDelete: silentDeleteScheduleEntry, normalize: normalizeScheduleEntryFromServer },
   currencies: { silentDelete: silentDeleteCurrency, normalize: normalizeCurrencyFromServer },
   discrepancies: { silentDelete: silentDeleteDiscrepancy, normalize: normalizeDiscrepancyFromServer },
+  settings: { silentDelete: silentDeleteSettings, normalize: normalizeSettingsFromServer },
 }
 
 type SyncStatus = "online" | "offline" | "syncing"

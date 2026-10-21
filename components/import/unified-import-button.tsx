@@ -60,6 +60,7 @@ import {
   userDb,
   isLiveFlight,
   getCurrentUserPersonnel,
+  getLoggingProfile,
   getUserPreferences,
   DEFAULT_IMPORT_DEFAULTS,
   ensureAirportDatabase,
@@ -296,7 +297,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
 
         // Needed so the reconciler can resolve "Self" crew seats and diff the
         // full PIC + SIC crew (not just the logbook-derived PIC) on updates.
-        const currentUserForRecon = await getCurrentUserPersonnel().catch(
+        const currentUserForRecon = await getLoggingProfile().catch(
           () => null
         );
         const reconCurrentUser = currentUserForRecon

@@ -36,6 +36,7 @@ import {
   getAirportTimeInfo,
   getAllPersonnel,
   getCurrentUserPersonnel,
+  getLoggingProfile,
   getUserPreferences,
   DEFAULT_IMPORT_DEFAULTS,
 } from "@/lib/db";
@@ -996,7 +997,7 @@ export async function parseScheduleCSV(
       ...DEFAULT_IMPORT_DEFAULTS,
       ...(storedPrefs?.importDefaults ?? {}),
     };
-    const currentUser = await getCurrentUserPersonnel();
+    const currentUser = await getLoggingProfile();
     if (!currentUser) {
       throw new Error(
         "No user profile found. Please create a crew member with 'This is me' enabled."

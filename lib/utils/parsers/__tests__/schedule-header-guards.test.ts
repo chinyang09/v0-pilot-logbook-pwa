@@ -32,6 +32,13 @@ vi.mock("@/lib/db", () => ({
     createdAt: 0,
     syncStatus: "pending",
   })),
+  getLoggingProfile: vi.fn(async () => ({
+    id: "self",
+    name: "Lim Chin Yang",
+    crewId: "9766",
+    createdAt: 0,
+    syncStatus: "pending",
+  })),
   getUserPreferences: vi.fn(async () => null),
   DEFAULT_IMPORT_DEFAULTS: { nonPicPfRole: "PICUS" },
 }));

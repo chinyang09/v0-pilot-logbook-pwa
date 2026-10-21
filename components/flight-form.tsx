@@ -46,6 +46,7 @@ import {
   createEmptyFlightLog,
   calculateBlockTime,
   calculateFlightTime,
+  airborneTimes,
   calculateDayTime,
   calculateTakeoffsLandings,
   calculateRoleTimes,
@@ -64,7 +65,7 @@ import {
   minutesToHHMM,
 } from "@/lib/utils/time";
 import { usePersonnel } from "@/hooks/data";
-import { nonPicPfRoleOf, reconcilePilotRole } from "@/lib/utils/roster/pilot-role";
+import { nonPicPfRoleOf, reconcilePilotRole, withLoggingPreferences } from "@/lib/utils/roster/pilot-role";
 import { usePreferences } from "@/components/providers/preferences-provider";
 import { ImageImportButton } from "@/components/image-import-button";
 import { GlassContainer } from "@/components/ui/glass-container";
@@ -623,8 +624,9 @@ export function FlightForm({
   useEffect(() => {
     if (resolvedFlight || !personnel.length) return;
 
-    const selfCrew = pickSelfCard(personnel);
-    if (selfCrew) {
+    // The card as Settings › Logging says it is (seat, PF convention).
+    const selfCrew = withLoggingPreferences(pickSelfCard(personnel), preferences.logging);
+    if (selfCrew?.id) {
       if (selfCrew.defaultPIC) {
         setFormData((prev) => ({
           ...prev,
@@ -680,33 +682,19 @@ export function FlightForm({
         ? calculateBlockTime(formData.outTime, formData.inTime)
         : "00:00";
 
-    const flightTime =
-      formData.offTime &&
-      formData.onTime &&
-      isValidHHMM(formData.offTime) &&
-      isValidHHMM(formData.onTime)
-        ? calculateFlightTime(formData.offTime, formData.onTime)
-        : "00:00";
+    // Off→on, or out→in when OFF/ON were not recorded (`airborneTimes`).
+    const airborne = airborneTimes({
+      outTime: formData.outTime,
+      offTime: formData.offTime,
+      onTime: formData.onTime,
+      inTime: formData.inTime,
+    });
+    const flightTime = airborne ? calculateFlightTime(airborne.off, airborne.on) : "00:00";
 
     let nightTime = "00:00";
     let dayTime = "00:00";
     const af = preferences.autoFill;
 
-    // FALLBACK LOGIC: Create effective times for calculation
-    // If OFF/ON are missing or invalid, fallback to OUT/IN to ensure we have a valid timeline
-    const calcOffTime =
-      formData.offTime &&
-      isValidHHMM(formData.offTime) &&
-      formData.offTime !== "00:00"
-        ? formData.offTime
-        : formData.outTime;
-
-    const calcOnTime =
-      formData.onTime &&
-      isValidHHMM(formData.onTime) &&
-      formData.onTime !== "00:00"
-        ? formData.onTime
-        : formData.inTime;
 
     if (airportsPending) {
       // Hold what the flight already has until both airports are known.
@@ -744,16 +732,6 @@ export function FlightForm({
         nightTime = nightResult.nightTimeHHMM;
         dayTime = nightResult.dayTimeHHMM;
 
-        console.log("[v0] Night calc result:", {
-          date: formData.date,
-          using: {
-            out: formData.outTime,
-            off: calcOffTime,
-            on: calcOnTime,
-            in: formData.inTime,
-          },
-          result: nightResult,
-        });
       } else {
         // Airports are present but lack usable coordinates (a custom airport
         // saved blank reads 0°N 0°E): there is no night time to compute, so
@@ -774,11 +752,11 @@ export function FlightForm({
           nightTakeoffs: formData.nightTakeoffs ?? 0,
           nightLandings: formData.nightLandings ?? 0,
         }
-      : formData.date && calcOffTime && calcOnTime && depAirport && arrAirport
+      : formData.date && airborne && depAirport && arrAirport
         ? calculateTakeoffsLandings(
             formData.date,
-            calcOffTime,
-            calcOnTime,
+            airborne.off,
+            airborne.on,
             depAirport,
             arrAirport,
             formData.pilotFlying ?? true,
@@ -2058,7 +2036,7 @@ export function FlightForm({
                 currentRole: formData.pilotRole || "PIC",
                 pilotFlying: checked,
                 nonPicPfRole: nonPicPfRoleOf(
-                  pickSelfCard(personnel),
+                  withLoggingPreferences(pickSelfCard(personnel), preferences.logging),
                   preferences.importDefaults?.nonPicPfRole,
                   formData.date
                 ),

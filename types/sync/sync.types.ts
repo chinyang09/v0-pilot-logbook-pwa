@@ -6,6 +6,7 @@ import type { FlightLog } from "../entities/flight.types";
 import type { Aircraft } from "../entities/aircraft.types";
 import type { Personnel } from "../entities/crew.types";
 import type { ScheduleEntry, Currency, Discrepancy } from "../entities/roster.types";
+import type { UserSettingsRecord } from "../entities/settings.types";
 
 export type SyncCollection =
   | "flights"
@@ -13,7 +14,8 @@ export type SyncCollection =
   | "personnel"
   | "scheduleEntries"
   | "currencies"
-  | "discrepancies";
+  | "discrepancies"
+  | "settings";
 
 export type SyncOperationType = "create" | "update" | "delete";
 
@@ -25,7 +27,7 @@ export interface SyncQueueItem {
   // Underlying record id, denormalized onto the queue row so a [collection+
   // recordId] index can dedup at enqueue time (one live row per record).
   recordId?: string;
-  data: FlightLog | Aircraft | Personnel | ScheduleEntry | Currency | Discrepancy | { id: string };
+  data: FlightLog | Aircraft | Personnel | ScheduleEntry | Currency | Discrepancy | UserSettingsRecord | { id: string };
   retryCount?: number;
   /**
    * The fields this row changes (union across the edits collapsed into it).

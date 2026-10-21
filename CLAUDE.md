@@ -54,6 +54,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 | `lib/utils/__tests__/history-markers.test.ts` | overlay marker ordering — which dialog `history.back()` would actually take |
 | `lib/utils/parsers/logten/__tests__/` | the LogTen Pro migration, run against REAL exports in `fixtures/` — value coercion, the three parsers, UTC-vs-local detection + conversion, duplicate detection, and the cross-file pass |
 | `lib/ocr/__tests__/` | both OCR screenshot layouts from synthetic boxes, the engine's plumbing with stand-in models (boxes, CTC decode, the keypad never recognised), device-first routing with the server as the backstop, and SEVEN REAL MCDU PHOTOS (`fixtures/mcdu/`) — what the engine actually reads from each, on the server AND on the device, every slot checked; `OCR_ENGINE=1 pnpm test` runs the photos through the real server engine (`OCR_FIXTURE_WRITE=1` re-pins the reads) |
+| `lib/settings/__tests__/` | per-user settings — flat sparse fields, only moved keys written, the legacy carry-up seeding only non-default choices the account lacks, theme kept off the record |
 | `lib/theme/__tests__/` | the palette generator — contrast and gamut for every preset in both modes and a sweep of custom seeds, and that globals.css carries the default palette exactly |
 | `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, the 90-day window, the recycle bin, sync compaction, conflict resolution, the canonical document shape + write modes, push batching, the sync triggers |
 | `lib/sync/server/__tests__/` | the server engine end to end — two devices pushing and pulling, deletions, stale pushes, paging, the migration — against an in-memory Mongo stand-in (`fake-mongo.ts`; it implements only the operators the engine sends) |
@@ -741,12 +742,18 @@ explicit allowlist for them to survive a round trip (the same trap
 ### The Pilot's Seat (`lib/utils/roster/pilot-role.ts`)
 
 What a pilot logs follows from ONE fact about them — are they a captain — and
-it lives on their own "This is me" crew card (**My seat**), not in Settings:
+it is a USER SETTING: **Settings › Logging** (synced, so every device logs the
+same way). The "This is me" crew card is where it lived before; each value the
+settings leave unset (null) still falls back to the card
+(`withLoggingPreferences`), and the card's own Logging section is now a link
+to Settings. Everything that decides a role reads the card THROUGH the settings
+— `getLoggingProfile()` for the stores, `withLoggingPreferences(card,
+preferences.logging)` in the flight form:
 
 | seat | monitoring | flying |
 |---|---|---|
 | captain | PIC | PIC |
-| first officer | SIC | SIC, or PICUS (**When pilot flying, log as**, on the same card) |
+| first officer | SIC | SIC, or PICUS (**When pilot flying, log as**) — never PICUS unless the pilot chose it |
 
 A captain is PIC whoever has the controls; a first officer is never PIC.
 PICUS is co-pilot duties performed as PIC under the PIC's supervision, and is
@@ -2535,6 +2542,29 @@ contexts: the registered action nodes (which change on every tab switch, and
 are read only by the shell's header) and the SETTERS (which never change, and
 are all the register hooks need). Held together, one page registering its
 buttons re-rendered the other five.
+
+### Settings are the USER's; only the look is the device's (`lib/settings/user-settings.ts`)
+
+Preferences used to be one IndexedDB row per DEVICE, so signing in on a new
+phone meant every setting at its default, and the logbook was read and logged
+differently on each device. Now they are a synced collection, **`settings`** —
+one record per user, id `"settings"` — through the same engine as everything
+else. Only the theme, the palette and a custom palette stay on the device
+(`DEVICE_DISPLAY_KEYS`, in the `"device"` preferences row, which signing out
+does NOT clear: the next person is looking at the same screen).
+
+| | Rule | Why |
+|---|---|---|
+| shape | FLAT — one field per preference (`display_timeFormat`, `autoFill_night`, `duty_minutesBeforeOut`, `logging_pfRole`, `favoriteAircraft`) | the engine merges per field; a `display` OBJECT would let one device's clock-format change send its whole group back and revert another device's |
+| sparse | an unset key is `null` on the server and absent on the client, and reads as the default (`resolveSettings`) | a default written down is indistinguishable from a choice |
+| writes | only keys whose value MOVED (`settingsPatch`), always as an UPDATE patch from the row's base — base 0 with no row (`writeSettings`); the server inserts it if the account has none | a new device at its defaults states nothing, so it cannot overwrite the account |
+| keys | derived from each group's DEFAULT object (`GROUPS`) — add a preference to a default and it is a synced field | one place to add one |
+| upgrade | `migrateLegacyPreferences` carries the old per-device row up ONCE, after a complete pull (`knownSeq`), seeding only non-default choices the account lacks, then deletes it | two upgraded devices merge instead of the second overwriting the first |
+
+`getUserPreferences()` still returns the one familiar shape (synced settings +
+the device's look); `saveUserPreferences()` splits a save between the two. The
+provider reloads the synced half on `onDataChanged`, so a change on one device
+reaches the others' screens, and skips that while its own save is pending.
 
 ### Display Preferences
 
@@ -4342,6 +4372,9 @@ When making changes, be aware of these high-impact files:
 - Do not let recency read as met on or after its lapse date, whatever the counts say, and do not count a flight exactly 90 days back — `lapseIso` is the first day NOT current
 - Do not parse a date-only string with `new Date("YYYY-MM-DD")` for a LOCAL comparison — it is UTC midnight, the previous day west of UTC. Build it from its parts
 - Do not compute night time against an airport without `hasCoordinates` — a blank custom airport is 0°N 0°E — and do not write 00:00 over a stored night when the position is missing
+- Do not write a setting's DEFAULT into the synced `settings` record, and do not write a group as one field — a device states only what the user changed (`settingsPatch`), one field per preference, or a new device's untouched defaults overwrite the account and two devices' changes to one group revert each other. Theme, palette and custom palette are the only device settings; everything else goes through `saveUserPreferences`
+- Do not hardcode PICUS for a first officer's flown leg — it is the pilot's own setting (Settings › Logging), dated by the check-out, with SIC when unset. Read the role convention through `getLoggingProfile()` / `withLoggingPreferences`, never the bare crew card
+- Do not leave a flight with no OFF/ON at a flight time of 00:00 or without takeoffs and landings — `airborneTimes` falls back to OUT/IN for both (the owner's rule: OUT/IN are the next best evidence of when it flew), in `recalculateFlightFields` and the form alike
 - Do not recompute any role time once one of the five (PIC, SIC, PICUS, Dual, Instructor) is pinned
 - Do not mark a session expired on a 401 alone, and do not start a passkey ceremony from a background trigger — probe first, and require user activation
 - Do not let a sign-in as a different account inherit this device's data — `dataOwner` decides, and the switch clears it

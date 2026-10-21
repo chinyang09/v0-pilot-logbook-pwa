@@ -4,6 +4,7 @@ import type React from "react"
 import { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from "react"
 import { useTheme } from "next-themes"
 import { getUserPreferences, saveUserPreferences } from "@/lib/db"
+import { syncService } from "@/lib/sync/sync-service"
 import { resolveSeed } from "@/lib/theme/palette"
 import { applyPalette, syncThemeColor } from "@/lib/theme/apply"
 import type {
@@ -12,7 +13,9 @@ import type {
   DutyTimeDefaults,
   NavigationPreferences,
   ImportDefaults,
+  LoggingPreferences,
   ThemePreference,
+  UserPreferences,
 } from "@/types/db/stores.types"
 import {
   DEFAULT_DISPLAY_PREFERENCES,
@@ -20,6 +23,7 @@ import {
   DEFAULT_DUTY_TIME_DEFAULTS,
   DEFAULT_NAVIGATION_PREFERENCES,
   DEFAULT_IMPORT_DEFAULTS,
+  DEFAULT_LOGGING_PREFERENCES,
 } from "@/types/db/stores.types"
 
 export interface ResolvedPreferences {
@@ -28,6 +32,7 @@ export interface ResolvedPreferences {
   dutyTimeDefaults: DutyTimeDefaults
   navigation: NavigationPreferences
   importDefaults: ImportDefaults
+  logging: LoggingPreferences
 }
 
 interface PreferencesContextType {
@@ -38,6 +43,7 @@ interface PreferencesContextType {
   updateDutyTimeDefaults: (partial: Partial<DutyTimeDefaults>) => Promise<void>
   updateNavigation: (nav: NavigationPreferences) => Promise<void>
   updateImportDefaults: (partial: Partial<ImportDefaults>) => Promise<void>
+  updateLogging: (partial: Partial<LoggingPreferences>) => Promise<void>
 }
 
 const defaultResolved: ResolvedPreferences = {
@@ -46,6 +52,27 @@ const defaultResolved: ResolvedPreferences = {
   dutyTimeDefaults: DEFAULT_DUTY_TIME_DEFAULTS,
   navigation: DEFAULT_NAVIGATION_PREFERENCES,
   importDefaults: DEFAULT_IMPORT_DEFAULTS,
+  logging: DEFAULT_LOGGING_PREFERENCES,
+}
+
+/**
+ * The stored preferences as the provider holds them. Only `display.theme`
+ * needs care: it is this DEVICE's mode and may never have been chosen, in
+ * which case `shownTheme` (what next-themes is actually showing) is the truth.
+ */
+function resolve(prefs: UserPreferences, shownTheme: () => ThemePreference): ResolvedPreferences {
+  // The short-lived "night" theme was removed — map any stored value to dark
+  // so next-themes never receives an unknown theme name.
+  const stored = prefs.display?.theme as string | undefined
+  const theme = stored === "night" ? "dark" : (stored as ThemePreference | undefined)
+  return {
+    display: { ...DEFAULT_DISPLAY_PREFERENCES, ...prefs.display, theme: theme ?? shownTheme() },
+    autoFill: { ...DEFAULT_AUTO_FILL_PREFERENCES, ...prefs.autoFill },
+    dutyTimeDefaults: { ...DEFAULT_DUTY_TIME_DEFAULTS, ...prefs.dutyTimeDefaults },
+    navigation: { ...DEFAULT_NAVIGATION_PREFERENCES, ...prefs.navigation },
+    importDefaults: { ...DEFAULT_IMPORT_DEFAULTS, ...prefs.importDefaults },
+    logging: { ...DEFAULT_LOGGING_PREFERENCES, ...prefs.logging },
+  }
 }
 
 const PreferencesContext = createContext<PreferencesContextType | undefined>(undefined)
@@ -74,23 +101,10 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
         return DEFAULT_DISPLAY_PREFERENCES.theme
       }
       if (prefs) {
-        // The short-lived "night" theme was removed — map any stored value to
-        // dark so next-themes never receives an unknown theme name.
-        if (prefs.display && (prefs.display.theme as string) === "night") {
-          prefs.display = { ...prefs.display, theme: "dark" }
-        }
-        const storedTheme = prefs.display?.theme
-        const resolved = {
-          display: { ...DEFAULT_DISPLAY_PREFERENCES, ...prefs.display, theme: storedTheme ?? shownTheme() },
-          autoFill: { ...DEFAULT_AUTO_FILL_PREFERENCES, ...prefs.autoFill },
-          dutyTimeDefaults: { ...DEFAULT_DUTY_TIME_DEFAULTS, ...prefs.dutyTimeDefaults },
-          navigation: { ...DEFAULT_NAVIGATION_PREFERENCES, ...prefs.navigation },
-          importDefaults: { ...DEFAULT_IMPORT_DEFAULTS, ...prefs.importDefaults },
-        }
-        setPreferences(resolved)
-
+        setPreferences(resolve(prefs, shownTheme))
         // Sync a persisted mode with next-themes on mount
-        if (storedTheme) setTheme(storedTheme)
+        const storedTheme = prefs.display?.theme as string | undefined
+        if (storedTheme) setTheme(storedTheme === "night" ? "dark" : storedTheme)
       } else {
         setPreferences((prev) => ({ ...prev, display: { ...prev.display, theme: shownTheme() } }))
       }
@@ -99,6 +113,34 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       setIsLoading(false)
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Settings are the USER's now, synced: another device's change arrives in
+  // a pull and has to reach this one's screen. Only the synced half is taken
+  // — the theme and palette are this device's own and do not move under it —
+  // and not while an edit of ours is still waiting to be written, or the
+  // reload would put the old value back on screen until it lands.
+  useEffect(() => {
+    return syncService.onDataChanged(() => {
+      if (debounceRef.current) return
+      getUserPreferences()
+        .then((prefs) => {
+          if (!prefs || debounceRef.current) return
+          setPreferences((prev) => {
+            const next = resolve(prefs, () => prev.display.theme)
+            return {
+              ...next,
+              display: {
+                ...next.display,
+                theme: prev.display.theme,
+                palette: prev.display.palette,
+                customPalette: prev.display.customPalette,
+              },
+            }
+          })
+        })
+        .catch(() => {})
+    })
   }, [])
 
   // The palette is applied only once the stored preference has LOADED. Until
@@ -118,13 +160,16 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
 
   const persistPreferences = useCallback((updated: ResolvedPreferences) => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
+    // Whole groups are handed over; the store writes only the keys that
+    // actually moved (`settingsPatch`), so an untouched default is never sent.
     debounceRef.current = setTimeout(() => {
-      saveUserPreferences({
+      debounceRef.current = null
+      void saveUserPreferences({
         display: updated.display,
         autoFill: updated.autoFill,
         dutyTimeDefaults: updated.dutyTimeDefaults,
         navigation: updated.navigation,
-        importDefaults: updated.importDefaults,
+        logging: updated.logging,
       })
     }, 500)
   }, [])
@@ -184,6 +229,17 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     })
   }, [persistPreferences])
 
+  const updateLogging = useCallback(async (partial: Partial<LoggingPreferences>) => {
+    setPreferences((prev) => {
+      const updated = {
+        ...prev,
+        logging: { ...prev.logging, ...partial },
+      }
+      persistPreferences(updated)
+      return updated
+    })
+  }, [persistPreferences])
+
   const value = useMemo(
     () => ({
       preferences,
@@ -193,6 +249,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       updateDutyTimeDefaults,
       updateNavigation,
       updateImportDefaults,
+      updateLogging,
     }),
     [
       preferences,
@@ -202,6 +259,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       updateDutyTimeDefaults,
       updateNavigation,
       updateImportDefaults,
+      updateLogging,
     ]
   )
 

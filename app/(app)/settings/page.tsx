@@ -3,6 +3,9 @@
 import type React from "react"
 import { ScrollIndicator } from "@/components/ui/scroll-indicator"
 import { useCallback, useEffect } from "react"
+import { usePersonnel } from "@/hooks/data/use-crew"
+import { pickSelfCard } from "@/lib/utils/self-card"
+import { seatOf, withLoggingPreferences, type Seat } from "@/lib/utils/roster/pilot-role"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
@@ -16,7 +19,7 @@ import { useIsDesktop } from "@/hooks/use-is-desktop"
 import {
   Monitor, Clock, Plane, Sun,
   LayoutDashboard, Book, Calendar, Users, MapPin, Award,
-  Settings, UserCircle, Navigation, ChevronRight,
+  Settings, UserCircle, Navigation, ChevronRight, NotebookPen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { DisplayPreferences, AutoFillPreferences, BottomNavTab } from "@/types/db/stores.types"
@@ -58,9 +61,7 @@ const ALL_NAV_TABS: Array<{ value: BottomNavTab; label: string; icon: React.Comp
   { value: "account", label: "Account", icon: UserCircle },
 ]
 
-// No "imports" section: its one setting (what a first officer logs a flown leg
-// as) lives on the pilot's own crew card now, beside the seat it depends on.
-type SectionKey = "appearance" | "navigation" | "display" | "autofill" | "duty"
+type SectionKey = "appearance" | "logging" | "navigation" | "display" | "autofill" | "duty"
 
 interface SectionDef {
   key: SectionKey
@@ -71,6 +72,7 @@ interface SectionDef {
 
 const SECTIONS: SectionDef[] = [
   { key: "appearance", label: "Appearance", icon: Sun, description: "Mode and palette" },
+  { key: "logging", label: "Logging", icon: NotebookPen, description: "Your seat and the role you log" },
   { key: "navigation", label: "Navigation", icon: Navigation, description: "Bottom tab bar" },
   { key: "display", label: "Display Options", icon: Monitor, description: "Time, airport, coordinate format" },
   { key: "autofill", label: "Auto-Fill Fields", icon: Clock, description: "Auto-populate time fields" },
@@ -93,6 +95,78 @@ function SettingsDetailPanel({ children }: { children: React.ReactNode }) {
 }
 
 // ─── Detail panel content for each section ──────────────────
+
+/**
+ * The seat and the PF convention — what every new and imported flight is
+ * logged as. A USER setting: it syncs, and it is the pilot's own choice, never
+ * a fixed rule (PICUS in particular is creditable only under an operator's
+ * supervision method). Until it is set here, the "This is me" crew card's
+ * values answer, which is where these lived before (`withLoggingPreferences`).
+ */
+function LoggingSection({ preferences, updateLogging }: {
+  preferences: ReturnType<typeof usePreferences>["preferences"]
+  updateLogging: ReturnType<typeof usePreferences>["updateLogging"]
+}) {
+  const { personnel } = usePersonnel()
+  const self = pickSelfCard(personnel ?? [])
+  const effective = withLoggingPreferences(self, preferences.logging)
+  const seat = seatOf(effective)
+  const pfRole = effective?.pfRole ?? "SIC"
+  const pfRoleFrom = effective?.pfRoleFrom ?? ""
+
+  return (
+    <div className="px-panel py-4 space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold">Logging</h2>
+        <p className="text-sm text-muted-foreground">
+          The role new and imported flights start with. Saved to your account, so every device logs the same way.
+        </p>
+      </div>
+      <FormSection>
+        <SelectRow<Seat | "unset">
+          label="My seat"
+          description={
+            seat === "captain"
+              ? "Logged PIC, flying or monitoring."
+              : seat === "first_officer"
+                ? "Logged SIC when monitoring."
+                : "Sets the role new and imported flights start with."
+          }
+          value={seat ?? "unset"}
+          onValueChange={(v) => v !== "unset" && updateLogging({ seat: v })}
+          options={[
+            ...(seat ? [] : [{ value: "unset" as const, label: "Not set" }]),
+            { value: "captain", label: "Captain" },
+            { value: "first_officer", label: "First Officer" },
+          ]}
+        />
+        {seat === "first_officer" && (
+          <SelectRow<"SIC" | "PICUS">
+            label="When pilot flying, log as"
+            description="PICUS only where your operator's supervision method allows it — the captain countersigns it."
+            value={pfRole}
+            onValueChange={(v) => updateLogging({ pfRole: v })}
+            options={[
+              { value: "SIC", label: "SIC" },
+              { value: "PICUS", label: "PICUS" },
+            ]}
+          />
+        )}
+        {seat === "first_officer" && pfRole === "PICUS" && (
+          <SettingsRow
+            label="PICUS from"
+            description="Your check-out date. A leg flown before it is logged SIC."
+            value={pfRoleFrom}
+            // "" states "no date" outright, so a date left on the crew card
+            // does not show through.
+            onChange={(v) => updateLogging({ pfRoleFrom: v })}
+            type="date"
+          />
+        )}
+      </FormSection>
+    </div>
+  )
+}
 
 function NavigationSection({ preferences, updateNavigation }: {
   preferences: ReturnType<typeof usePreferences>["preferences"]
@@ -290,6 +364,8 @@ export default function SettingsPage() {
     switch (key) {
       case "appearance":
         return wrap(<AppearanceSettings />)
+      case "logging":
+        return wrap(<LoggingSection preferences={preferences} updateLogging={prefs.updateLogging} />)
       case "navigation":
         return wrap(<NavigationSection preferences={preferences} updateNavigation={prefs.updateNavigation} />)
       case "display":

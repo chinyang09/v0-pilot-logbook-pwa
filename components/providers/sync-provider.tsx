@@ -4,7 +4,7 @@ import type React from "react"
 import { useEffect, useRef } from "react"
 import { syncService } from "@/lib/sync"
 import { refreshAllData } from "@/hooks/data"
-import { repairFlightTimezones, repairSimulatorEntries } from "@/lib/db"
+import { migrateLegacyPreferences, repairFlightTimezones, repairMissingFlightTimes, repairSimulatorEntries } from "@/lib/db"
 import { useAuth } from "@/components/providers/auth-provider"
 
 /** One pass per sign-in or launch; each repair is idempotent and never fatal. */
@@ -24,7 +24,28 @@ async function repairStoredFlights(): Promise<number> {
   } catch (error) {
     console.error("[Sync] timezone repair failed:", error)
   }
+  try {
+    const times = await repairMissingFlightTimes()
+    if (times > 0) console.warn(`[Sync] gave ${times} flights without OFF/ON their OUT→IN flight time`)
+    repaired += times
+  } catch (error) {
+    console.error("[Sync] flight time repair failed:", error)
+  }
   return repaired
+}
+
+/**
+ * Carry this device's pre-sync settings row up into the account's settings,
+ * once. It waits for a complete pull by itself (see the store), so calling it
+ * after every cycle is safe and cheap — one keyed read when there is nothing
+ * left to carry.
+ */
+async function migrateSettings(): Promise<void> {
+  try {
+    if (await migrateLegacyPreferences()) console.warn("[Sync] carried this device's settings up to the account")
+  } catch (error) {
+    console.error("[Sync] settings migration failed:", error)
+  }
 }
 
 export function SyncProvider({ children }: { children: React.ReactNode }) {
@@ -80,6 +101,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           // Continue regardless - offline mode still works.
         }
         // After the pull, so the rows patched are the ones the server has.
+        await migrateSettings()
         await repairStoredFlights()
         await refreshAllData()
       })()
@@ -94,6 +116,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = syncService.onDataChanged(() => {
       console.log("[v0] Data changed - refreshing all caches")
       refreshAllData()
+      void migrateSettings()
     })
     return unsubscribe
   }, [])

@@ -11,7 +11,7 @@
  */
 
 import type { PilotRole } from "@/types/entities/flight.types";
-import type { ImportDefaults } from "@/types/db/stores.types";
+import type { ImportDefaults, LoggingPreferences } from "@/types/db/stores.types";
 import type { Personnel } from "@/types/entities/crew.types";
 
 /** Roles that inherently mean "this pilot was flying the aircraft". */
@@ -90,6 +90,32 @@ export type Seat = "captain" | "first_officer";
 export type NonPicPfRole = ImportDefaults["nonPicPfRole"];
 
 type SelfCard = Pick<Personnel, "defaultPIC" | "defaultSIC" | "roles" | "pfRole" | "pfRoleFrom">;
+
+/**
+ * The pilot's card as the LOGGING settings say it is. Settings › Logging is
+ * where the seat and the PF convention are set — a user preference, synced,
+ * never a fixed rule — and each value it holds wins over the card's. A value
+ * it leaves unset (null) falls back to the card, which is where they lived
+ * before, so a pilot who set them there keeps their choice.
+ *
+ * `pfRoleFrom: ""` in the settings means "no check-out date" stated outright,
+ * so it is not read through to a date left on the card.
+ */
+export function withLoggingPreferences<T extends SelfCard>(
+  self: T | null | undefined,
+  logging: Partial<LoggingPreferences> | null | undefined
+): T | null {
+  if (!logging || (logging.seat == null && logging.pfRole == null && logging.pfRoleFrom == null)) return self ?? null;
+  const base = (self ?? { roles: [] }) as T;
+  const seat = logging.seat ?? seatOf(self);
+  return {
+    ...base,
+    defaultPIC: seat === "captain",
+    defaultSIC: seat === "first_officer",
+    pfRole: logging.pfRole ?? self?.pfRole ?? null,
+    pfRoleFrom: logging.pfRoleFrom != null ? logging.pfRoleFrom || null : self?.pfRoleFrom ?? null,
+  };
+}
 
 /**
  * The self card's seat. `defaultPIC`/`defaultSIC` are what the card's seat
