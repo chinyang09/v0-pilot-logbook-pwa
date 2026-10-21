@@ -26,7 +26,13 @@ export const maxDuration = 60
 
 const MAX_AIRCRAFT_PER_RUN = 20
 const MAX_AIRPORTS_PER_RUN = 50
-const MAX_RETRIES = 3
+// A registration FR24 does not know yet is usually an aeroplane not yet
+// delivered or not yet flying, so it is asked again at a widening interval —
+// 1, 2, 4, 8, 16, 32 days — rather than given up on after three daily tries.
+const MAX_RETRIES = 6
+const DAY_MS = 24 * 60 * 60 * 1000
+const retryDue = (doc: Record<string, unknown>, now: number) =>
+  now - Number(doc.lastRetryAt ?? 0) >= 2 ** Number(doc.retryCount ?? 0) * DAY_MS
 // Stop starting new FR24 lookups past this point so the run finishes cleanly
 // within maxDuration; unprocessed pending docs are simply retried next run.
 const AIRCRAFT_TIME_BUDGET_MS = 45_000
@@ -64,9 +70,10 @@ async function runBatch(request: Request) {
         { retryCount: { $lt: MAX_RETRIES } },
       ],
     })
-    .sort({ submittedAt: 1 })
-    .limit(MAX_AIRCRAFT_PER_RUN)
+    .sort({ lastRetryAt: 1, submittedAt: 1 })
+    .limit(MAX_AIRCRAFT_PER_RUN * 5)
     .toArray()
+    .then((docs) => docs.filter((d) => retryDue(d, startedAt)).slice(0, MAX_AIRCRAFT_PER_RUN))
 
   for (const doc of pendingAircraft) {
     // Leave the rest pending (retryCount untouched) for the next run rather than

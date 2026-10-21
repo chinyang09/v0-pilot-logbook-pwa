@@ -533,7 +533,9 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
 **Enrichment Pipeline:**
 - Custom aircraft/airports are submitted fire-and-forget to `/api/submissions/aircraft` or `/api/submissions/airport`
 - Server attempts real-time enrichment (FR24 for aircraft, geo-tz for airports)
-- Failed enrichments are retried by `/api/enrichment/batch` (cron, max 3 retries) —
+- Failed enrichments are retried by `/api/enrichment/batch` (cron; a widening
+  1/2/4/8/16/32-day backoff, because an unknown tail is usually an aeroplane not
+  yet delivered — it rehydrates when FR24 lists it) —
   scheduled daily in `vercel.json`. Vercel Cron sends **GET** with
   `Authorization: Bearer $CRON_SECRET`; the route took POST only and there was
   no `vercel.json`, so for months nothing retried (9V-TNL sat `pending` from
@@ -4287,8 +4289,7 @@ When making changes, be aware of these high-impact files:
 
 **Report import:**
 - Do not concatenate the two parsers' new crew cards in a cross-hydrated import — each invents a card for a captain it cannot find (the logbook from a truncated name, the schedule from the full one), so the same person got two. `mergeImportPersonnel` keeps the schedule's card, points the logbook's sectors at it, and drops a logbook card nothing uses
-- Do not leave a flight pointing at a crew card or a fleet record nobody holds — `repairRecordReferences` (`lib/utils/roster/reference-repairs.ts`, run after the initial sync) repoints a dangling seat to a live card for the same person or creates the card under the id the flights carry, and gives every flown registration a fleet record. It runs only after a COMPLETE pull: before it a card not yet received looks missing, and recreating it would overwrite the real one. A binned card or fleet record counts as held — never resurrected
-- Do not create fleet records only for the flights an import TOUCHED — a sector the report repeated unchanged is never touched, so its aircraft never got one (9 registrations in production). The executor covers every flown registration (`missingFleetRegistrations`)
+- Do not create fleet records only for the flights an import TOUCHED — a sector the report repeated unchanged is never touched, so its aircraft never got one (9 registrations in production). The executor also covers the flights the report repeated unchanged (`skip_identical` / `skip_decided` / `skip_stale_report`)
 - Do not give a flight's `pilotFlying`/`pilotRole` or an aircraft's `engineType` a constant default — not in the schema, a normalizer or a form. A missing PF/PM or role is filled from the record's own figures (`lib/utils/flight-evidence.ts`: takeoffs/landings, role times, a simulator, the "Self" seat), the same rule on server and client; a NEW flight starts as Settings › Logging says (`newFlightPilotFlying`, the seat); an engine type the type data cannot classify stays UNKNOWN, because the dashboard then reads it off the DOC 8643 description, where a constant "SEP" would have counted an airliner as a piston single
 - Do not write an imported record with a bare `table.put()` — it is a raw Dexie write with NO sync-queue entry behind it, so the row lives only on the device that ran the import. The importers reached for it because their rows already carry the ids the flight rows point at, which rules out `addPersonnel`/`addCurrency`; `putManyWithSync` (`crud-helpers.ts`) is the shape that keeps the id AND enqueues, in one `bulkPut` + one `enqueueMany` rather than 2N round trips. Crew, currencies and discrepancies were all silently local for exactly this reason
 - Do not close the import status dialog when an execution finishes — it is the ONLY surface that renders the summary and the error message, and closing it in the `finally` meant every eCrew import ended in silence with the work done and nothing said. `onDone` closes it; a cancel closes it without setting a summary nobody will see

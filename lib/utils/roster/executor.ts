@@ -45,7 +45,6 @@ import {
   DEFAULT_IMPORT_DEFAULTS,
 } from "@/lib/db";
 import { putManyWithSync } from "@/lib/db/stores/user/crud-helpers";
-import { missingFleetRegistrations } from "@/lib/utils/record-references";
 import {
   toEngineType,
   toDashboardCategory,
@@ -426,9 +425,9 @@ async function postWriteRecalculate(
  * alone: it was binned by hand, and a second record beside it would be a
  * duplicate the moment it was restored.
  */
-export async function ensureAircraftForFlights(
+async function ensureAircraftForFlights(
   pairs: Array<{ reg: string; type: string }>,
-  result: Pick<ExecutionResult, "aircraftCreated" | "aircraftUpdated" | "errors">
+  result: ExecutionResult
 ): Promise<void> {
   const wanted = new Map<string, string>(); // REG → type designator
   for (const { reg, type } of pairs) {
@@ -1114,16 +1113,24 @@ export async function executeRosterImport(
 
   // ----- 7. Correlate flights with aircraft records (engine/category) so
   //          the dashboard reflects 2-engine / jet totals correctly. --------
-  //          Every registration the logbook flies is covered, not only the
-  //          flights this import touched: a sector the report repeated
-  //          unchanged (`skip_identical`) is never touched, so its aircraft
-  //          used to be left without a record for good.
+  //          Every flight the report COVERS, not only those it touched: a
+  //          sector the report repeated unchanged is never touched, so its
+  //          aircraft used to be left without a record for good.
+  for (const op of plan.operations) {
+    if (
+      (op.kind === "skip_identical" ||
+        op.kind === "skip_decided" ||
+        op.kind === "skip_stale_report") &&
+      op.flight.aircraftReg &&
+      !isSimulatorEntry(op.flight)
+    ) {
+      aircraftPairs.push({
+        reg: op.flight.aircraftReg,
+        type: op.flight.aircraftType || "",
+      });
+    }
+  }
   try {
-    const [allFlights, fleet] = await Promise.all([
-      userDb.flights.toArray(),
-      userDb.aircraft.toArray(),
-    ]);
-    aircraftPairs.push(...missingFleetRegistrations(allFlights, fleet));
     await ensureAircraftForFlights(aircraftPairs, result);
   } catch {
     // Non-fatal — flights are already written.
