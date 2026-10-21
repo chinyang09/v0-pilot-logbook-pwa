@@ -4,7 +4,20 @@ import type React from "react"
 import { useEffect, useRef } from "react"
 import { syncService } from "@/lib/sync"
 import { refreshAllData } from "@/hooks/data"
+import { repairSimulatorEntries } from "@/lib/db"
 import { useAuth } from "@/components/providers/auth-provider"
+
+/** One pass per sign-in or launch; the repair is idempotent and never fatal. */
+async function repairSimulators(): Promise<number> {
+  try {
+    const repaired = await repairSimulatorEntries()
+    if (repaired > 0) console.warn(`[Sync] repaired ${repaired} simulator entries carrying block or role time`)
+    return repaired
+  } catch (error) {
+    console.error("[Sync] simulator repair failed:", error)
+    return 0
+  }
+}
 
 export function SyncProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth()
@@ -54,14 +67,17 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
           const result = await Promise.race([syncPromise, timeoutPromise])
           console.log("[v0] Initial sync complete:", result)
-          await refreshAllData()
         } catch (error) {
           console.error("[v0] Initial sync failed:", error)
           // Continue regardless - offline mode still works.
         }
+        // After the pull, so the rows patched are the ones the server has.
+        await repairSimulators()
+        await refreshAllData()
       })()
     } else {
       console.log("[v0] Offline - skipping initial sync, triggers will handle it when online")
+      void repairSimulators().then((n) => (n > 0 ? refreshAllData() : undefined))
     }
   }, [userId])
 

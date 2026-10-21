@@ -19,6 +19,7 @@ import type { FlightLog, FlightLogCreate } from "@/types/entities/flight.types"
 import { createEntity, updateEntity, purgeEntity, silentDeleteEntity, upsertFromServer } from "./crud-helpers"
 import { DELETED_RETENTION_MS, isWithinRetention } from "@/lib/utils/retention"
 import { sortFlights } from "@/lib/utils/flight-sort"
+import { isSimulatorEntry, simulatorRepairPatch } from "@/lib/utils/entry-type"
 
 /**
  * Not in the recycle bin — i.e. a flight that still counts for anything.
@@ -122,6 +123,28 @@ export async function silentDeleteFlight(id: string): Promise<boolean> {
 export async function getAllFlights(): Promise<FlightLog[]> {
   const flights = await userDb.flights.toArray()
   return sortFlights(flights.filter(isLiveFlight))
+}
+
+/**
+ * Put right every simulator row that a recalculation gave a block or role time.
+ *
+ * Until the fix in `recalculateFlightFields` and the flight form, opening a
+ * simulator (or importing one from a schedule report) computed a block time
+ * from its OUT/IN and a role time from that block. The rows it left behind are
+ * repaired through `updateFlight`, so the correction is an ordinary field patch
+ * every device pulls — writing it to the server directly would skip the
+ * sequence the other devices pull from. Idempotent: a row already right gives
+ * an empty patch and is not written. Returns how many rows changed.
+ */
+export async function repairSimulatorEntries(): Promise<number> {
+  const sims = await userDb.flights.filter((f: FlightLog) => isLiveFlight(f) && isSimulatorEntry(f)).toArray()
+  let repaired = 0
+  for (const sim of sims) {
+    const patch = simulatorRepairPatch(sim)
+    if (Object.keys(patch).length === 0) continue
+    if (await updateFlight(sim.id, patch)) repaired++
+  }
+  return repaired
 }
 
 /**

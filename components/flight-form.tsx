@@ -660,6 +660,29 @@ export function FlightForm({
 
   // Calculate derived fields
   const calculatedFields = useMemo(() => {
+    // A simulator derives nothing from its OUT/IN: its duration is
+    // `simulatedInstrumentTime`, and a block time computed here was written
+    // back on every open — four hours of block, and four of SIC from it,
+    // for every session the pilot looked at.
+    if (getEntryType({ entryType: formData.entryType, isSimulator: formData.isSimulator }) === "simulator") {
+      return {
+        blockTime: "00:00",
+        flightTime: "00:00",
+        nightTime: formData.nightTime || "00:00",
+        dayTime: "00:00",
+        dayTakeoffs: formData.dayTakeoffs ?? 0,
+        dayLandings: formData.dayLandings ?? 0,
+        nightTakeoffs: formData.nightTakeoffs ?? 0,
+        nightLandings: formData.nightLandings ?? 0,
+        picTime: "00:00",
+        sicTime: "00:00",
+        picusTime: "00:00",
+        dualTime: "00:00",
+        instructorTime: "00:00",
+        crossCountryTime: "00:00",
+      };
+    }
+
     const blockTime =
       formData.outTime &&
       formData.inTime &&
@@ -824,6 +847,8 @@ export function FlightForm({
     depAirport,
     arrAirport,
     airportsPending,
+    formData.entryType,
+    formData.isSimulator,
     preferences.autoFill,
   ]);
 

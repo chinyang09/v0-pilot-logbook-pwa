@@ -107,6 +107,12 @@ async function ensureIndexes(mongoClient: MongoClient): Promise<void> {
     safe("sessions.userDevice", () =>
       db.collection("sessions").createIndex({ userId: 1, deviceId: 1 }),
     ),
+    // Expired sessions are never read (every lookup filters `expiresAt > now`)
+    // but nothing removed them either — 13 of 15 rows in production were dead.
+    // `expiresAt` is a BSON Date, which is what a TTL index needs.
+    safe("sessions.ttl", () =>
+      db.collection("sessions").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    ),
     // Submission dedup — back the upsert-by-key race fix.
     safe("aircraftSubmissions.reg", () =>
       db

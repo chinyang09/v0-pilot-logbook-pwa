@@ -8,6 +8,7 @@ import { isNight, calculateNightTimeComplete } from "./night-time"
 import type { Airport } from "@/types/entities/airport.types"
 import type { FlightLog, Approach, PilotRole, ManualOverrides } from "@/types/entities/flight.types"
 import type { AutoFillPreferences } from "@/types/db/stores.types"
+import { isSimulatorEntry, simulatorRepairPatch } from "./entry-type"
 
 /**
  * A flight is "flown" once both OOOI gate times are populated.
@@ -260,6 +261,12 @@ export function recalculateFlightFields(
   arrAirport: Airport | null,
   autoFill?: AutoFillPreferences
 ): Partial<FlightLog> {
+  // A simulator has nothing to derive — its duration is its own field, and a
+  // block time computed from its OUT/IN would reach every flight-hour total.
+  if (isSimulatorEntry({ entryType: flight.entryType, isSimulator: flight.isSimulator })) {
+    return simulatorRepairPatch(flight)
+  }
+
   const updates: Partial<FlightLog> = {}
   const overrides = flight.manualOverrides || {}
 
