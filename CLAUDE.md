@@ -755,6 +755,20 @@ convention, never the default.
 - The seat is stored as `defaultPIC`/`defaultSIC` on the SELF card only — on
   anyone else's card those toggles never did anything and are no longer shown.
   `seatOf` falls back to the card's `roles` for profiles created by an import.
+- **The convention is DATED** (`pfRoleFrom`, **PICUS from** on the card). PICUS
+  is creditable only from the pilot's check-out, so a leg flown before it is
+  SIC whatever the card says today. Every caller resolves the convention FOR
+  THE FLIGHT'S DATE (`nonPicPfRoleOf(card, fallback, date)` / `pfRoleOn`) —
+  new flights, the PF switch, both imports.
+- **An import keeps PF and role a PAIR.** Audited against the owner's eCrew
+  report, 13 flights carried a role that contradicted their own PF/PM: a PF/PM
+  change turned down at one import was remembered and withheld at the next,
+  but the role change that came WITH it was not, so it went through alone and
+  left a PM leg logged PICUS. The reconciler now withholds the role half with
+  the PF half, judges the role against the PF the flight KEEPS, and offers
+  `settledRole`'s correction on a flight whose PF already agrees with the
+  report (PM + PICUS, a flown SIC leg for a pilot who logs PICUS, PICUS before
+  the check-out). A one-off PICUS by a pilot whose convention is SIC is theirs.
 
 ### Entry Type (flight vs simulator)
 
@@ -4210,6 +4224,9 @@ When making changes, be aware of these high-impact files:
 - Do not skip `detectEditReasons` before classification — it is what protects a signed/remarked/manually-overridden flight regardless of which fields changed
 - Do not dedupe simulator sessions on `date|simSessionCode` alone — recognition must stay structural (no route, no registration), or sims written by an older build duplicate on every import
 - Do not read `FlightLog.entryType` directly — go through `getEntryType()`, and write through `entryTypePatch()` so the legacy `isSimulator` flag stays in step for the dashboard and FDP pipeline
+- Do not resolve the pilot's PF convention without the flight's DATE — `pfRoleFrom` is the PICUS check-out, and a flown leg before it is SIC. And do not let an import apply a `pilotRole` change whose `pilotFlying` half was withheld or declined: the role follows the PF the flight ends up with (`settledRole`), or a PM leg is logged PICUS
+- Do not take an eCrew report's day/night takeoff and landing split as fact — audited against a real year it disagrees with the sun on 86 of 283 events (a "day" landing with the sun 78° down). The sun's answer is applied to creates (`suggested*` in `hydrateFlightFromSector`) as it already was to updates, and a PF sector carries BOTH a takeoff and a landing even where the report recorded only one (`suggestToLdg`)
+- Do not read an OFF or ON on the flight's own date when it is earlier in the day than OUT — the flight is keyed on OUT's UTC date, so it is the NEXT day (`instantOnFlight`; pass `outTime` to `calculateTakeoffsLandings`). And civil twilight is GEOMETRIC: the sun's centre 6° below the horizon with no refraction term, which moved every dusk ~13 seconds and called a −6.02° takeoff "day"
 - Do not let a simulator's duration reach `blockTime` — it belongs in `simulatedInstrumentTime`, which is what keeps sims out of flight-hour totals — and do not let any RECALCULATION put it there. `recalculateFlightFields` returns `simulatorRepairPatch` for a simulator instead of deriving anything, and the flight form's `calculatedFields` returns zeros for one; both used to compute a block time from the session's OUT/IN and a role time from that block. Production carried seven sessions at 4–6h of block and two at 4h of SIC from exactly that (the form on every open, the roster import's `postWriteRecalculate`). `repairSimulatorEntries` puts such rows right once per launch, AFTER the initial sync and through `updateFlight`, so the fix is an ordinary field patch every device pulls — never correct synced data by writing to MongoDB directly, which skips the sequence the devices pull from
 
 **LogTen Pro migration:**

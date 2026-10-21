@@ -34,6 +34,8 @@ export interface CrewFormData {
   /** Self card, first officer: a flown leg is logged as this. Null = never
    *  set on the card (the old Import Defaults value still applies). */
   pfRole: "SIC" | "PICUS" | null
+  /** Self card: the PICUS check-out date (ISO), "" when not set. */
+  pfRoleFrom: string
 }
 
 const EMPTY_FORM: CrewFormData = {
@@ -50,6 +52,7 @@ const EMPTY_FORM: CrewFormData = {
   defaultPIC: false,
   defaultSIC: false,
   pfRole: null,
+  pfRoleFrom: "",
 }
 
 function formFromCrew(data: Personnel): CrewFormData {
@@ -67,6 +70,7 @@ function formFromCrew(data: Personnel): CrewFormData {
     defaultPIC: data.defaultPIC || false,
     defaultSIC: data.defaultSIC || false,
     pfRole: data.pfRole ?? null,
+    pfRoleFrom: data.pfRoleFrom ?? "",
   }
 }
 
@@ -93,6 +97,7 @@ function personnelFromForm(formData: CrewFormData) {
     defaultPIC: formData.isMe && formData.defaultPIC,
     defaultSIC: formData.isMe && formData.defaultSIC,
     pfRole: formData.isMe ? formData.pfRole : null,
+    pfRoleFrom: (formData.isMe && formData.pfRoleFrom) || null,
   }
 }
 

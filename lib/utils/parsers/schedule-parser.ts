@@ -1246,6 +1246,7 @@ export async function parseScheduleCSV(
       scheduleGeneratedAt: plan.generatedAt,
       currentUser: { id: currentUser.id, crewId: currentUser.crewId },
       nonPicPfRole: nonPicPfRoleOf(currentUser, importDefaults.nonPicPfRole),
+      pfRoleFrom: currentUser.pfRoleFrom ?? null,
       // Use the v2 safe/consult split so crew-only changes (incl. the
       // truncated→full name upgrade) auto-apply, while time/route changes on
       // already-flown flights still ask for confirmation.

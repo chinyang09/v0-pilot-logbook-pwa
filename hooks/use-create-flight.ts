@@ -35,6 +35,7 @@ async function lastPilotRole() {
 export function useCreateFlight() {
   return useCallback(async (date?: string) => {
     const emptyFlight = createEmptyFlightLog()
+    const flightDate = date || new Date().toISOString().split("T")[0]
     const self = await getCurrentUserPersonnel().catch(() => null)
     const seat = seatOf(self)
     let seating: Partial<typeof emptyFlight> = {}
@@ -43,7 +44,7 @@ export function useCreateFlight() {
       const pilotRole = roleForSeat(
         seat,
         emptyFlight.pilotFlying ?? true,
-        nonPicPfRoleOf(self, prefs?.importDefaults?.nonPicPfRole)
+        nonPicPfRoleOf(self, prefs?.importDefaults?.nonPicPfRole, flightDate)
       )
       seating =
         seat === "captain"
@@ -56,7 +57,7 @@ export function useCreateFlight() {
     return addFlight({
       ...emptyFlight,
       ...seating,
-      date: date || new Date().toISOString().split("T")[0],
+      date: flightDate,
     })
   }, [])
 }

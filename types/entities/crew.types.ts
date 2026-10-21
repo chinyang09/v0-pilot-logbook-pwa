@@ -32,6 +32,9 @@ export interface Personnel {
    *  logged as — SIC, or PICUS where their operator's supervision method
    *  allows it. Replaces Settings › Import Defaults. */
   pfRole?: "SIC" | "PICUS" | null
+  /** ISO date the pilot was checked out to log PICUS. A flown leg BEFORE it
+   *  is SIC whatever `pfRole` says — PICUS is not creditable until then. */
+  pfRoleFrom?: string | null
   createdAt: number
   updatedAt?: number
   /** Soft-delete stamp — the row is in Recently Deleted. `null` when cleared,

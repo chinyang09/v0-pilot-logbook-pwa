@@ -30,7 +30,7 @@ import type { FlightLog } from "../../../types/entities/flight.types";
 import type { ScheduledCrewMember } from "@/types/entities/roster.types";
 import { classifyChanges } from "./classification";
 import { newestStamp, type ReportSource } from "./report-tracking";
-import { reconcilePilotRole } from "./pilot-role";
+import { pfRoleOn, reconcilePilotRole, settledRole } from "./pilot-role";
 import { liveDecisions } from "./import-decisions";
 import {
   assignByCost,
@@ -285,6 +285,11 @@ export interface ReconcileInput {
    * import settings. Used to keep `pilotRole` consistent when PF/PM flips.
    */
   nonPicPfRole?: ImportDefaults["nonPicPfRole"];
+  /**
+   * The pilot's PICUS check-out date (`Personnel.pfRoleFrom`). A leg flown
+   * before it is SIC whatever `nonPicPfRole` says.
+   */
+  pfRoleFrom?: string | null;
   /**
    * Use legacy `update_conflict` op kind instead of the new
    * `update_safe` / `update_consult` split. Defaults to `true` so existing
@@ -688,9 +693,12 @@ function diffSectorVsFlight(
   sector: ParsedSector,
   flight: FlightLog,
   currentUser?: CurrentUserCrew,
-  nonPicPfRole?: ImportDefaults["nonPicPfRole"]
+  nonPicPfRole?: ImportDefaults["nonPicPfRole"],
+  pfRoleFrom?: string | null
 ): SectorDiff {
   const changes: FieldDiff[] = [];
+  const convention = nonPicPfRole ?? "SIC";
+  const conventionOnDate = pfRoleOn(convention, pfRoleFrom, flight.date || sector.date);
 
   const csvFullFlightNum =
     sector.flightNumber && sector.flightNumber.startsWith("TR")
@@ -818,10 +826,15 @@ function diffSectorVsFlight(
     // Keep the logged role consistent with who was flying: PICUS can't survive
     // a switch to Pilot Monitoring, and a plain SIC leg the user actually flew
     // becomes whatever they log such legs as (`nonPicPfRole`).
-    const nextRole = reconcilePilotRole({
-      currentRole: flight.pilotRole,
+    const nextRole = settledRole({
+      currentRole: reconcilePilotRole({
+        currentRole: flight.pilotRole,
+        pilotFlying: sector.isPilotFlying,
+        nonPicPfRole: conventionOnDate,
+      }),
       pilotFlying: sector.isPilotFlying,
-      nonPicPfRole: nonPicPfRole ?? "SIC",
+      convention,
+      onDate: conventionOnDate,
     });
     if (nextRole !== flight.pilotRole) {
       changes.push({
@@ -829,6 +842,20 @@ function diffSectorVsFlight(
         from: flight.pilotRole,
         to: nextRole,
       });
+    }
+  } else if (sector.isPilotFlying !== undefined && flight.pilotRole) {
+    // Pilot-flying agrees, but the role beside it may not: PM + PICUS, a flown
+    // leg logged SIC by a pilot who logs PICUS, or PICUS before the check-out.
+    // An earlier build could leave any of those, and nothing else revisits a
+    // flight whose PF/PM already matches the report.
+    const nextRole = settledRole({
+      currentRole: flight.pilotRole,
+      pilotFlying: sector.isPilotFlying,
+      convention,
+      onDate: conventionOnDate,
+    });
+    if (nextRole !== flight.pilotRole) {
+      changes.push({ field: "pilotRole", from: flight.pilotRole, to: nextRole });
     }
   }
 
@@ -946,6 +973,24 @@ function diffSectorVsFlight(
     if (decisions[change.field]?.declined === change.to) suppressed.push(change);
     else visible.push(change);
   }
+  // The role a PF/PM change carries is HALF of that change. With the PF half
+  // withheld, the role half on its own is the role for a flight that is not
+  // happening — a PM leg logged PICUS, which is what an earlier import left on
+  // flights where the pilot kept their PF/PM and the role went through anyway.
+  // The flight keeps its own PF/PM, so the role is judged against THAT.
+  if (suppressed.some((c) => c.field === "pilotFlying")) {
+    const role = visible.findIndex((c) => c.field === "pilotRole");
+    if (role !== -1) suppressed.push(...visible.splice(role, 1));
+    const kept = settledRole({
+      currentRole: flight.pilotRole,
+      pilotFlying: flight.pilotFlying ?? true,
+      convention,
+      onDate: conventionOnDate,
+    });
+    if (kept !== flight.pilotRole && decisions.pilotRole?.declined !== kept) {
+      visible.push({ field: "pilotRole", from: flight.pilotRole, to: kept });
+    }
+  }
   return { changes: visible, suppressed };
 }
 
@@ -1051,7 +1096,8 @@ export function reconcileRoster(
       sector,
       match,
       currentUser,
-      input.nonPicPfRole
+      input.nonPicPfRole,
+      input.pfRoleFrom
     );
     if (changes.length === 0) {
       // Nothing to ask — but if the silence is because of earlier decisions,

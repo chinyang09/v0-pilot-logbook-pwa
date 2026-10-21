@@ -151,6 +151,16 @@ export function CrewFormBody({
               ]}
             />
           )}
+          {seat === "first_officer" && pfRole === "PICUS" && (
+            <SettingsRow
+              label="PICUS from"
+              description="Your check-out date. A leg flown before it is logged SIC."
+              value={formData.pfRoleFrom}
+              onChange={(v) => updateField("pfRoleFrom", v)}
+              type="date"
+              readOnly={!isEditing}
+            />
+          )}
         </FormSection>
       )}
 

@@ -171,7 +171,7 @@ async function hydrateFlightFromSector(
   } else if (sector.isUserPic === false || sector.isPilotFlying !== undefined) {
     // Logbook-derived path: we know the user's flying status.
     pilotRole = pilotFlying
-      ? nonPicPfRoleOf(currentUser, importDefaults.nonPicPfRole)
+      ? nonPicPfRoleOf(currentUser, importDefaults.nonPicPfRole, sector.date)
       : "SIC";
   } else {
     // No sector hint: the seat on the pilot's own crew card decides.
@@ -222,10 +222,15 @@ async function hydrateFlightFromSector(
     picusTime: "00:00",
     dualTime: "00:00",
     instructorTime: "00:00",
-    dayTakeoffs: sector.dayTakeoffs ?? 0,
-    dayLandings: sector.dayLandings ?? 0,
-    nightTakeoffs: sector.nightTakeoffs ?? 0,
-    nightLandings: sector.nightLandings ?? 0,
+    // The sun's answer, not the report's: eCrew's day/night columns are hand
+    // filled and disagree with the sun on about a third of real sectors. The
+    // reconciler already applies the calculated split to an UPDATE; a create
+    // wrote the report's, and with no OFF/ON on a logbook row the recalculation
+    // afterwards never revisits it.
+    dayTakeoffs: sector.suggestedDayTakeoffs ?? sector.dayTakeoffs ?? 0,
+    dayLandings: sector.suggestedDayLandings ?? sector.dayLandings ?? 0,
+    nightTakeoffs: sector.suggestedNightTakeoffs ?? sector.nightTakeoffs ?? 0,
+    nightLandings: sector.suggestedNightLandings ?? sector.nightLandings ?? 0,
     autolands: 0,
     remarks,
     endorsements: "",

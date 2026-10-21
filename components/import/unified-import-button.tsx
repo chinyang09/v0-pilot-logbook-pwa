@@ -436,6 +436,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             useLegacyUpdateConflict: false,
             currentUser: reconCurrentUser,
             nonPicPfRole,
+            pfRoleFrom: currentUserForRecon?.pfRoleFrom ?? null,
           });
 
           const acceptedOps = applyDefaultAcceptance(operations);
@@ -483,6 +484,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             useLegacyUpdateConflict: false,
             currentUser: reconCurrentUser,
             nonPicPfRole,
+            pfRoleFrom: currentUserForRecon?.pfRoleFrom ?? null,
           });
 
           const acceptedOps = applyDefaultAcceptance(operations);

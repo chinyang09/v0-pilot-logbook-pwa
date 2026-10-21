@@ -792,7 +792,8 @@ export function FlightForm({
             calcOnTime,
             depAirport,
             arrAirport,
-            formData.pilotFlying ?? true
+            formData.pilotFlying ?? true,
+            formData.outTime
           )
         : {
             dayTakeoffs: 0,
@@ -2065,7 +2066,8 @@ export function FlightForm({
                 pilotFlying: checked,
                 nonPicPfRole: nonPicPfRoleOf(
                   pickSelfCard(personnel),
-                  preferences.importDefaults?.nonPicPfRole
+                  preferences.importDefaults?.nonPicPfRole,
+                  formData.date
                 ),
               });
               if (nextRole !== formData.pilotRole) updateField("pilotRole", nextRole);
