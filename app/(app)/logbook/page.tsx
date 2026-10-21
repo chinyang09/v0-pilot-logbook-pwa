@@ -138,7 +138,10 @@ export default function LogbookPage() {
     if (!el) return
     let rafId = 0
     const measure = () => setSearchBlockHeight(el.offsetHeight)
-    measure()
+    // No synchronous first measure: the observer reports the first size after
+    // the browser's own layout, where reading it here forced a layout of the
+    // whole app at mount (~60ms at a 4× throttle). The height is only read
+    // while search is OPEN, and the search starts stowed.
     const ro = new ResizeObserver(() => {
       cancelAnimationFrame(rafId)
       rafId = requestAnimationFrame(measure)
