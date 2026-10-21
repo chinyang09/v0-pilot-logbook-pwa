@@ -1,10 +1,14 @@
 /**
- * OCR Service — server when online, the browser when not.
+ * OCR Service — the DEVICE first, the server as the backstop.
  *
  * Both run the SAME pipeline (`./engine/core`) over the same PP-OCRv4 models;
- * only the runtime differs (onnxruntime-node vs onnxruntime-web). The server
- * is preferred because it has more cores and no model download, but the
- * browser engine is a complete offline answer, not a degraded one.
+ * only the runtime differs (onnxruntime-node vs onnxruntime-web). The device
+ * goes first because it has nothing to wait for: the server path is a resize
+ * and re-encode on the phone, an upload, a function that may be cold, a
+ * session lookup and a download — measured at ~10s on a Pixel from Singapore
+ * against a function in US-East, where the device engine reads the same photo
+ * in ~1-2s once warm. The server is still there for a device that cannot run
+ * the engine, or one that is slow enough to be overtaken (`HEDGE_MS`).
  */
 
 // Re-export type from extractor (single source of truth)
@@ -36,12 +40,27 @@ function markServerDown(): void {
   serverDownUntil = Date.now() + SERVER_RETRY_AFTER_MS
 }
 
+/**
+ * If the device engine has not answered by now, the server is asked as well
+ * and whichever answers first wins. A warm phone answers in 1-2s, so this only
+ * fires for a device that is genuinely slow (or still loading its models from
+ * the network rather than the service worker's cache).
+ */
+const HEDGE_MS = 4000
+
+/**
+ * The device engine failed this session — no WebAssembly SIMD (iOS before
+ * 16.4), out of memory, a model that would not load. The server goes first
+ * from then on rather than every photo paying for the failure again.
+ */
+let deviceFailed = false
+
 /** Load the browser engine's two models (cached by the service worker). */
 let browserReady = false
 
 async function initializeBrowserOCR(): Promise<void> {
-  const { primeBrowserModels } = await import("./engine/browser")
-  await primeBrowserModels()
+  const { primeDeviceEngine } = await import("./engine/device")
+  await primeDeviceEngine()
   browserReady = true
 }
 
@@ -53,8 +72,7 @@ async function initializeBrowserOCR(): Promise<void> {
  */
 export function warmBrowserOCR(): void {
   if (typeof window === "undefined" || !isOnline()) return
-  void import("./engine/browser").catch(() => {})
-  void import("onnxruntime-web").catch(() => {})
+  void import("./engine/device").then((m) => m.warmDeviceEngineCode()).catch(() => {})
 }
 
 let lastWarmAt = 0
@@ -62,28 +80,25 @@ let lastWarmAt = 0
 /**
  * Get the engine that WILL read the photo ready while the pilot is still
  * taking it — called when the camera menu opens, which is several seconds
- * before a photo arrives.
- *
- * Online, that is the server: the health check boots the function and loads
- * its models, so a cold start (~3-5s) is spent behind the camera instead of
- * in front of a progress bar. If the server says it has no engine, it is
- * marked down and the browser engine is started instead. Offline, the browser
- * engine is created now rather than after the photo.
+ * before a photo arrives. That is the device engine: its models load (from
+ * the service worker's cache) and run once, so the photo is not their first
+ * run. Only once the device has failed is the server woken instead — its
+ * health check boots the function and loads its models behind the camera.
  */
 export function warmOCR(): void {
   if (typeof window === "undefined") return
-  if (!serverUsable()) {
-    void initializeBrowserOCR().catch(() => {})
+  if (!deviceFailed) {
+    void initializeBrowserOCR().catch(() => {
+      deviceFailed = true
+    })
     return
   }
-  if (Date.now() - lastWarmAt < 60_000) return
+  if (!serverUsable() || Date.now() - lastWarmAt < 60_000) return
   lastWarmAt = Date.now()
   void fetch("/api/ocr", { method: "GET", cache: "no-store" })
     .then((r) => (r.ok ? r.json() : null))
     .then((d: { available?: boolean } | null) => {
-      if (d?.available) return
-      markServerDown()
-      void initializeBrowserOCR().catch(() => {})
+      if (!d?.available) markServerDown()
     })
     .catch(() => {})
 }
@@ -97,7 +112,7 @@ function isOnline(): boolean {
 }
 
 /**
- * Process image with server-side OCR (primary)
+ * Process image with server-side OCR (the backstop)
  */
 async function processWithServerOCR(file: File): Promise<OcrResult[]> {
   // Downscale before the upload (OCR_MAX_SIDE): a phone photo is 12MP and
@@ -144,40 +159,88 @@ async function processWithServerOCR(file: File): Promise<OcrResult[]> {
  * Process image with browser-based OCR (fallback)
  */
 async function processWithBrowserOCR(file: File): Promise<OcrResult[]> {
-  const { readImageInBrowser } = await import("./engine/browser")
-  const { lines } = await readImageInBrowser(file)
-  return lines
+  const { readOnDevice } = await import("./engine/device")
+  return readOnDevice(file)
 }
 
 /**
- * Extract text from image using hybrid OCR
- *
- * Tries server-side OCR first (faster, more reliable),
- * falls back to browser-based OCR when offline or on error.
+ * Read the photo: on the device, with the server racing it only if the device
+ * is slow (`HEDGE_MS`) or fails. The first answer wins; the other is left to
+ * finish and ignored (an ONNX run cannot be cancelled, and a request already
+ * uploaded costs nothing more to let land).
  */
-export async function extractTextFromImage(
-  file: File
-): Promise<OcrResult[]> {
-  // Try server-side OCR first if online
-  if (serverUsable()) {
-    try {
-      console.log("[OCR] Attempting server-side OCR...")
-      const results = await processWithServerOCR(file)
-      console.log("[OCR] Server-side OCR successful")
-      return results
-    } catch (error) {
-      console.warn("[OCR] Server-side OCR failed, falling back to browser:", error)
-      // Fall through to browser OCR
-    }
-  } else {
-    console.log("[OCR] Offline or server unavailable - using browser-based OCR")
+export async function extractTextFromImage(file: File): Promise<OcrResult[]> {
+  const release = holdAmbientMotion()
+  try {
+    return await readPhoto(file)
+  } finally {
+    release()
   }
+}
 
-  // Fallback to browser-based OCR
-  console.log("[OCR] Using browser-based OCR...")
-  const results = await processWithBrowserOCR(file)
-  console.log("[OCR] Browser-based OCR successful")
-  return results
+/**
+ * Pause the UI's ambient animation while a photo is read — see
+ * `html[data-busy]` in globals.css for what and why. Counted, so two reads
+ * overlapping release it only when both are done.
+ */
+let busyCount = 0
+function holdAmbientMotion(): () => void {
+  if (typeof document === "undefined") return () => {}
+  if (busyCount++ === 0) document.documentElement.dataset.busy = "ocr"
+  return () => {
+    if (--busyCount === 0) delete document.documentElement.dataset.busy
+  }
+}
+
+async function readPhoto(file: File): Promise<OcrResult[]> {
+  if (deviceFailed) {
+    if (serverUsable()) {
+      try {
+        return await processWithServerOCR(file)
+      } catch (error) {
+        console.warn("[OCR] Server failed, trying the device:", error)
+      }
+    }
+    return processWithBrowserOCR(file)
+  }
+  return readHedged(file, serverUsable())
+}
+
+function readHedged(file: File, serverAllowed: boolean): Promise<OcrResult[]> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    let pending = 0
+    let serverStarted = false
+
+    const succeed = (results: OcrResult[]) => {
+      if (settled) return
+      settled = true
+      clearTimeout(hedge)
+      resolve(results)
+    }
+    const fail = (error: unknown) => {
+      pending--
+      if (settled || pending > 0) return
+      settled = true
+      clearTimeout(hedge)
+      reject(error)
+    }
+    const startServer = () => {
+      if (settled || serverStarted || !serverAllowed) return
+      serverStarted = true
+      pending++
+      processWithServerOCR(file).then(succeed, fail)
+    }
+
+    pending++
+    processWithBrowserOCR(file).then(succeed, (error) => {
+      console.warn("[OCR] Device engine failed:", error)
+      deviceFailed = true
+      startServer()
+      fail(error)
+    })
+    const hedge = setTimeout(startServer, HEDGE_MS)
+  })
 }
 
 /**

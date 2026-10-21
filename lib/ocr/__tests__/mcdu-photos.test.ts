@@ -4,8 +4,10 @@
  * blank ("----") slots.
  *
  * Each fixture pins what the engine actually returned for that photo at
- * `OCR_MAX_SIDE`: `pipeline` is the app's own engine (lib/ocr/engine — one
- * box per line, keypad never read), and `node` / `browser` are what the
+ * `OCR_MAX_SIDE`: `pipeline` is the app's own engine on the server (sharp's
+ * resize of the committed jpg), `device` is the SAME engine in Chromium from
+ * the ORIGINAL 12MP photo (the browser's own resize — which is what read photo
+ * 3's blank IN dashes as "1000"), and `node` / `browser` are what the
  * @gutenye library it replaced returned on each runtime, which joined boxes
  * into rows and read the keypad too. Those are kept as harder inputs: the
  * extractor has to get every slot right from all three.
@@ -53,13 +55,13 @@ function slotsOf(data: ReturnType<typeof extractFlightData>): Slots {
   return Object.fromEntries(SLOTS.map((k) => [k, data[k]])) as Slots
 }
 
-function fixture(n: number): { pipeline: OcrResult[]; node: OcrResult[]; browser: OcrResult[] } {
+function fixture(n: number): Record<"pipeline" | "device" | "node" | "browser", OcrResult[]> {
   return JSON.parse(fs.readFileSync(path.join(DIR, `mcdu-${n}.ocr.json`), "utf8"))
 }
 
 describe("MCDU voyage report — real photos", () => {
   for (const [n, expected] of Object.entries(EXPECTED)) {
-    for (const engine of ["pipeline", "node", "browser"] as const) {
+    for (const engine of ["pipeline", "device", "node", "browser"] as const) {
       it(`photo ${n}, ${engine} engine: every slot, and nothing invented for a blank`, () => {
         expect(slotsOf(extractFlightData(fixture(Number(n))[engine]))).toEqual(expected)
       })
