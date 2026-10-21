@@ -38,6 +38,7 @@ import {
 } from "@/lib/db";
 import { useDebounce } from "@/hooks/use-debounce";
 import { formPatch, rebaseForm } from "@/lib/utils/form-patch";
+import { insertFlightSorted } from "@/lib/utils/flight-sort";
 import { pickSelfCard } from "@/lib/utils/self-card";
 import { useAirportByIcao, prefetchAirports } from "@/hooks/data";
 import {
@@ -909,7 +910,7 @@ export function FlightForm({
     async (
       data: Partial<FlightLog>,
       overrides: FlightLog["manualOverrides"],
-    ): Promise<boolean> => {
+    ): Promise<FlightLog | boolean> => {
       if (!data?.id) return false;
 
       const stored = await getFlightById(data.id);
@@ -926,11 +927,35 @@ export function FlightForm({
       baselineRef.current = { ...data };
       baselineOverridesRef.current = overrides;
       if (Object.keys(patch).length === 0) return true;
-      await updateFlight(data.id, patch);
-      return true;
+      return (await updateFlight(data.id, patch)) ?? true;
     },
     []
   );
+
+  /**
+   * Put a saved flight into the logbook's cache IN PLACE.
+   *
+   * Auto-save runs every half-second of typing, and each save used to
+   * revalidate the whole list — every flight read back out of IndexedDB,
+   * re-sorted, then deep-compared against the cached copy by SWR — to reflect
+   * one changed row (~150ms at a 4× CPU throttle on 1,200 flights, per save,
+   * while the pilot is typing). `insertFlightSorted` drops the old copy by id
+   * and places the new one, so an edit that moves the flight's date or time
+   * still lands in the right place. Without the stored row to hand (`true`),
+   * it falls back to the full revalidation.
+   */
+  const refreshSavedFlight = useCallback((saved: FlightLog | boolean) => {
+    if (saved === false) return;
+    if (saved === true || !isLiveFlight(saved)) {
+      mutate(CACHE_KEYS.flights);
+      return;
+    }
+    mutate(
+      CACHE_KEYS.flights,
+      (prev: FlightLog[] | undefined) => (prev ? insertFlightSorted(prev, saved) : prev),
+      { revalidate: false }
+    );
+  }, []);
 
   // Auto-save to IndexedDB for existing flights (drafts or otherwise)
   // This replaces sessionStorage draft management
@@ -969,7 +994,7 @@ export function FlightForm({
         const written = await persistFlight(debouncedFormData, manualOverrides);
         if (!written) return;
         lastSavedStateRef.current = currentState;
-        mutate(CACHE_KEYS.flights);
+        refreshSavedFlight(written);
       } catch (error) {
         console.error("Auto-save failed:", error);
       }
@@ -1183,13 +1208,13 @@ export function FlightForm({
       if (!written) return;
       lastSavedStateRef.current = currentState;
       // Refresh the list too. A forced save is the LAST write before the form
-      // goes away, so if it doesn't revalidate nothing else will — the logbook
-      // would keep showing pre-edit values until something unrelated refetched.
-      mutate(CACHE_KEYS.flights);
+      // goes away, so if it doesn't update the cache nothing else will — the
+      // logbook would keep showing pre-edit values until something refetched.
+      refreshSavedFlight(written);
     } catch (error) {
       console.error("Force save failed:", error);
     }
-  }, [formData, resolvedFlight?.id, flightIdProp, manualOverrides, persistFlight]);
+  }, [formData, resolvedFlight?.id, flightIdProp, manualOverrides, persistFlight, refreshSavedFlight]);
 
   // The latest `forceSave`, held in a ref.
   //
