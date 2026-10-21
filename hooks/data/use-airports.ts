@@ -9,6 +9,7 @@ import {
   getAirportByIcao,
   getAirportByICAO,
   ensureAirportDatabase,
+  isAirportTableSeeded,
   type Airport,
 } from "@/lib/db"
 import { useDBReady, CACHE_KEYS, checkDBReady } from "./use-db"
@@ -182,14 +183,27 @@ function peekAirport(code: string): Airport | null | undefined {
   return icaoLookups.get(code)
 }
 
-async function lookUpAirport(code: string): Promise<Airport | null> {
+/**
+ * The last answer per code, whatever revision it was read at. A write to the
+ * table (a custom airport, a favourite, a seed) invalidates `icaoLookups`, and
+ * a screen that is still open must not see its airports go missing while it
+ * looks them up again — the flight form read that gap as "no airport" and
+ * zeroed the night time and the takeoffs and landings it then saved.
+ */
+const lastKnown = new Map<string, Airport | null>()
+
+async function lookUpAirport(code: string): Promise<Airport | null | undefined> {
   const revision = getAirportsRevision()
   const airport = (await getAirportByIcao(code)) ?? null
+  // Not there, but the seed has not finished: it may simply not be written
+  // yet. Unknown, then — the seed's revision bump brings the hook back.
+  if (!airport && !isAirportTableSeeded()) return undefined
   if (icaoLookupsRevision !== revision) {
     icaoLookups.clear()
     icaoLookupsRevision = revision
   }
   icaoLookups.set(code, airport)
+  lastKnown.set(code, airport)
   return airport
 }
 
@@ -203,7 +217,12 @@ export function prefetchAirports(...icaos: (string | undefined | null)[]): void 
 
 export function useAirportByIcao(icao: string | undefined | null): Airport | null | undefined {
   const code = icao?.trim().toUpperCase() ?? ""
-  const [found, setFound] = useState<{ code: string; airport: Airport | null }>({ code: "", airport: null })
+  // Read on every render: a write moves it, and the lookup has to run again.
+  // Keyed on the code alone, the effect never noticed — so after any write the
+  // peek below came back empty and stayed empty for as long as the screen did.
+  const revision = getAirportsRevision()
+  // Only here to re-render when a lookup lands; the answer is in `lastKnown`.
+  const [, setFound] = useState<{ code: string; airport: Airport | null | undefined } | null>(null)
 
   useEffect(() => {
     if (!code) return
@@ -223,9 +242,10 @@ export function useAirportByIcao(icao: string | undefined | null): Airport | nul
     return () => {
       alive = false
     }
-  }, [code])
+  }, [code, revision])
 
   const cached = peekAirport(code)
   if (cached !== undefined) return cached
-  return found.code === code ? found.airport : undefined
+  // Stale while the re-read runs — the previous answer, not a gap.
+  return lastKnown.get(code)
 }

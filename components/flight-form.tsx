@@ -504,8 +504,16 @@ export function FlightForm({
   // Get airport data
   // The two airports this flight names — looked up by ICAO, not by loading the
   // whole ~29k-row table to find them (see `useAirportByIcao`).
-  const depAirport = useAirportByIcao(formData.departureIcao) ?? null;
-  const arrAirport = useAirportByIcao(formData.arrivalIcao) ?? null;
+  const depLookup = useAirportByIcao(formData.departureIcao);
+  const arrLookup = useAirportByIcao(formData.arrivalIcao);
+  const depAirport = depLookup ?? null;
+  const arrAirport = arrLookup ?? null;
+  // An airport still being LOOKED UP is not a missing one. Computed against the
+  // gap, night time and the takeoffs/landings came out as zeros, and if the
+  // lookup was slow enough those zeros were what the form saved.
+  const airportsPending =
+    (!!formData.departureIcao && depLookup === undefined) ||
+    (!!formData.arrivalIcao && arrLookup === undefined);
 
   // Helper to get numeric offset from IANA string
   const getNumericOffset = (tzString?: string) => {
@@ -687,7 +695,11 @@ export function FlightForm({
         ? formData.onTime
         : formData.inTime;
 
-    if (
+    if (airportsPending) {
+      // Hold what the flight already has until both airports are known.
+      nightTime = formData.nightTime || "00:00";
+      dayTime = calculateDayTime(blockTime, nightTime);
+    } else if (
       af.night !== false &&
       formData.date &&
       formData.outTime &&
@@ -742,8 +754,14 @@ export function FlightForm({
       dayTime = calculateDayTime(blockTime, nightTime);
     }
 
-    const toLdg =
-      formData.date && calcOffTime && calcOnTime && depAirport && arrAirport
+    const toLdg = airportsPending
+      ? {
+          dayTakeoffs: formData.dayTakeoffs ?? 0,
+          dayLandings: formData.dayLandings ?? 0,
+          nightTakeoffs: formData.nightTakeoffs ?? 0,
+          nightLandings: formData.nightLandings ?? 0,
+        }
+      : formData.date && calcOffTime && calcOnTime && depAirport && arrAirport
         ? calculateTakeoffsLandings(
             formData.date,
             calcOffTime,
@@ -798,8 +816,13 @@ export function FlightForm({
     formData.departureIcao,
     formData.arrivalIcao,
     formData.nightTime,
+    formData.dayTakeoffs,
+    formData.dayLandings,
+    formData.nightTakeoffs,
+    formData.nightLandings,
     depAirport,
     arrAirport,
+    airportsPending,
     preferences.autoFill,
   ]);
 

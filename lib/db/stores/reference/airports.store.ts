@@ -104,6 +104,17 @@ async function seedAirportsTable(rawData: Record<string, any>): Promise<Airport[
 }
 
 /**
+ * Whether the table is known to hold the whole bundled dataset. Until it does,
+ * a lookup that finds nothing means "not written YET", not "no such airport" —
+ * a new install seeds ~29k rows over ~15s, and a flight opened in that window
+ * read its airports as missing and saved its night time and landings as zeros.
+ */
+let airportsSeeded = false
+export function isAirportTableSeeded(): boolean {
+  return airportsSeeded
+}
+
+/**
  * Seed from the bundled file — in a WORKER where one can be started.
  *
  * The file is 5.7MB of JSON, and `response.json()` parses it on the calling
@@ -120,10 +131,12 @@ let sourceSeedInFlight: Promise<void> | null = null
 function seedFromSource(): Promise<void> {
   sourceSeedInFlight ??= (async () => {
     try {
-      if (await seedInWorker()) return
-      const response = await fetch(AIRPORT_SOURCE_URL)
-      if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`)
-      await rebuildAirportsTable(await response.json())
+      if (!(await seedInWorker())) {
+        const response = await fetch(AIRPORT_SOURCE_URL)
+        if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`)
+        await rebuildAirportsTable(await response.json())
+      }
+      airportsSeeded = true
     } finally {
       sourceSeedInFlight = null
     }
@@ -191,7 +204,10 @@ export function ensureAirportDatabase(): Promise<void> {
           referenceDb.getMetadata("airport_version"),
           referenceDb.airports.count(),
         ])
-        if (storedVersion === DATA_VERSION && count > 0) return
+        if (storedVersion === DATA_VERSION && count > 0) {
+          airportsSeeded = true
+          return
+        }
         await seedFromSource()
       } catch (error) {
         console.error("[Airport DB] Could not seed the airports table:", error)
@@ -213,6 +229,7 @@ export async function getAirportDatabase(): Promise<Airport[]> {
 
     // Check if cache is valid
     if (storedVersion === DATA_VERSION && count > 0) {
+      airportsSeeded = true
       return await referenceDb.airports.toArray()
     }
 
