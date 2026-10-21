@@ -29,6 +29,7 @@ import {
   decidePush,
   dedupeByRecord,
   editTime,
+  newestCopies,
   stampChangedFields,
   writtenKey,
   type FieldConflict,
@@ -220,7 +221,7 @@ async function pushCollection(
       const tombstoned = new Set(tombstones.map((t) => t.recordId as string))
 
       const existingDocs = await coll.find({ userId, id: { $in: recordIds } }, { session }).toArray()
-      const existingById = new Map(existingDocs.map((d) => [d.id as string, d as Document]))
+      const { byId: existingById, superseded: staleCopies } = newestCopies(existingDocs as Document[])
 
       const now = Date.now()
       // Decide everything BEFORE reserving seqs, because a patch whose every
@@ -291,7 +292,13 @@ async function pushCollection(
             id, userId, incoming: author, existing: p.existing, state: p.source, serverSeq, now, fieldVersions,
           })
           const replacement = canonicalizeDocument(collection, p.source, envelope)
-          dataOps.push({ replaceOne: { filter: { userId, id }, replacement, upsert: true } })
+          // Replace the copy that was READ (the newest), never "whichever
+          // matches first" — see `newestCopies`.
+          dataOps.push(
+            p.existing
+              ? { replaceOne: { filter: { _id: p.existing._id }, replacement } }
+              : { replaceOne: { filter: { userId, id }, replacement, upsert: true } }
+          )
           writes.push({ key: writtenKey(collection, id), seq: serverSeq })
           // A recreated derived id (see `decidePush`): the old tombstone goes
           // in the same commit, or a device that has not yet pulled it would
@@ -323,7 +330,8 @@ async function pushCollection(
               upsert: true,
             },
           })
-          dataOps.push({ deleteOne: { filter: { userId, id } } })
+          // Every copy: a stray duplicate left behind would outlive its purge.
+          dataOps.push({ deleteMany: { filter: { userId, id } } })
           results.push({ queueItemId: p.item.id, success: true })
         } else if (p.kind === "rejected") {
           results.push({
@@ -343,6 +351,12 @@ async function pushCollection(
           })
         }
       }
+
+      // A write supersedes every copy of its record, so the stale ones go in
+      // the same commit. A record this push did not touch keeps its copies.
+      const touched = new Set(planned.filter((p) => p.kind === "write").map((p) => p.item.data.id))
+      const strays = staleCopies.filter((d) => touched.has(d.id as string)).map((d) => d._id)
+      if (strays.length > 0) dataOps.push({ deleteMany: { filter: { _id: { $in: strays } } } })
 
       if (conflictDocs.length > 0) {
         await db.collection(SYNC_CONFLICTS).insertMany(conflictDocs, { session })

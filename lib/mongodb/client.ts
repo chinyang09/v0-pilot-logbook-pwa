@@ -44,20 +44,36 @@ async function ensureIndexes(mongoClient: MongoClient): Promise<void> {
 
   await Promise.all([
     ...SYNC_COLLECTIONS.flatMap((coll) => [
-      safe(`${coll}.userId+id`, () =>
-        db.collection(coll).createIndex({ userId: 1, id: 1 }, { unique: true }),
-      ),
-      // Server-assigned watermark used by delta-sync (see /api/sync/[collection]).
-      safe(`${coll}.userId+syncedAt`, () =>
-        db.collection(coll).createIndex({ userId: 1, syncedAt: 1 }),
-      ),
+      // One document per record. It CANNOT be built while a collection holds
+      // a duplicate, and until it exists every push looks a record up by
+      // scanning the user's documents and nothing stops two concurrent first
+      // pushes inserting a copy each — which is how production came to hold
+      // duplicates in the first place. The engine copes with them
+      // (`newestCopies`); this says which ids are blocking the index.
+      safe(`${coll}.userId+id`, async () => {
+        try {
+          await db.collection(coll).createIndex({ userId: 1, id: 1 }, { unique: true })
+        } catch (err) {
+          if ((err as { code?: number }).code === 11000) {
+            const dupes = await db
+              .collection(coll)
+              .aggregate([
+                { $group: { _id: { userId: "$userId", id: "$id" }, copies: { $sum: 1 } } },
+                { $match: { copies: { $gt: 1 } } },
+                { $limit: 20 },
+              ])
+              .toArray()
+            console.error(`[Mongo] ${coll}: duplicate { userId, id } blocks the unique index:`, JSON.stringify(dupes))
+          }
+          throw err
+        }
+      }),
       // Server-authored monotonic version — the delta-pull keyset cursor.
+      // (The old `userId+syncedAt` and `userId+createdAt` indexes backed the
+      // wall-clock delta query every route has since moved off; nothing reads
+      // them, so they are no longer created. Existing ones are harmless.)
       safe(`${coll}.userId+serverSeq+_id`, () =>
         db.collection(coll).createIndex({ userId: 1, serverSeq: 1, _id: 1 }),
-      ),
-      // Backs the legacy createdAt fallback branch of the delta query.
-      safe(`${coll}.userId+createdAt`, () =>
-        db.collection(coll).createIndex({ userId: 1, createdAt: 1 }),
       ),
     ]),
     // Tombstones — TTL + delta-sync lookups (mirrors /api/sync/setup-ttl).

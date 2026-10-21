@@ -214,6 +214,15 @@ All user data is stored locally in **IndexedDB via Dexie** and synced to **Mongo
 - **A comparison's id is derived** (`mismatch:<flight>:<field>`), so a CREATE
   of a tombstoned discrepancy id is a new record: inserted, with the tombstone
   removed in the same commit. Random-id collections keep the rejection
+- **One document per record, and the engine copes when there are two**
+  (`newestCopies`). The `{userId, id}` unique index cannot be built while a
+  collection holds a duplicate, and production carried two (two concurrent
+  first pushes, no index to refuse the second). A write used to `replaceOne`
+  whichever copy matched FIRST — the older one — and a purge's `deleteOne`
+  left the other standing. Now the newest copy (highest `serverSeq`) is the
+  record: a write replaces it by `_id` and deletes the superseded copies in the
+  same commit, and a purge is a `deleteMany`. `ensureIndexes` logs which ids
+  block the index
 
 ### The Sync Protocol (`/api/sync`, `lib/sync/`)
 
@@ -4112,6 +4121,9 @@ When making changes, be aware of these high-impact files:
 - Do not apply pulled records one at a time — `applyServerChanges` does one transaction, one `bulkGet` and one `bulkPut` per collection. The per-record double lookup + put was most of a first sync's cost
 - Do not raise the "syncing" status or fire `onDataChanged` for a poll that found nothing — it runs every 30s while the app is open
 - Do not delete a record on the server before its tombstone is written (`/api/sync/bulk`) — that order prevents deleted records resurrecting on other devices
+- Do not write or delete a synced record by `{ userId, id }` "first match" — pick the stored copy with `newestCopies` and replace it by `_id`, and purge with `deleteMany`. Until the unique index exists a record can have two copies, and first-match updated the stale one and left a purged record standing
+- Do not make `entryType`/`isSimulator` REQUIRED in the flight field table. The table's default is applied BEFORE `NORMALIZE`, so a required `entryType` would stamp "flight" on an old build's `isSimulator: true` row and turn a simulator into a flight; they are `opt` so the normalizer can still see the legacy flag
+- Do not write synced documents by hand with EJSON `$numberLong` values — the engine stores numbers as BSON double, and a long is one more spelling of the same field. An admin correction must also take a fresh seq per record (reserved from `counters`), stamp `fieldVersions`, and bump the counter once more at the end, or no device ever pulls it
 - Do not issue a session from a passkey route without calling `verifyAuthenticationResponse` — a `credential.id` lookup is not proof of possession (credential IDs aren't secret). Same for `register/complete`/`add-passkey`: bind the attestation to the server-issued challenge (`webauthn.create` + matching challenge)
 - Do not trust client-supplied `userId`/`callsign`/`totpSecret` in `register/complete` — read them from the consumed server-issued challenge doc
 - Do not re-tighten the WebAuthn counter check to always-strict — synced/platform passkeys report `signCount 0` forever; only enforce strict increase when a counter is in use (either side non-zero)
