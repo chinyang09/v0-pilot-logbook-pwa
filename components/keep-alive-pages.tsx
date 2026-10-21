@@ -240,7 +240,9 @@ export function KeepAlivePages({ children }: { children: ReactNode }) {
   useEffect(() => {
     const stack = stackRef.current
     if (!stack) return
-    const { width, height } = stackSizeRef.current ?? stack.getBoundingClientRect()
+    // Only a HIDDEN page needs the size, and on the first mount there is none —
+    // so the box is not read at all then, rather than forcing a layout at boot.
+    let size = stackSizeRef.current
     pageElsRef.current.forEach((el, key) => {
       if (key === routeKey) {
         el.style.width = ""
@@ -248,10 +250,11 @@ export function KeepAlivePages({ children }: { children: ReactNode }) {
         el.style.right = "0"
         el.style.bottom = "0"
       } else {
+        size ??= stack.getBoundingClientRect()
         el.style.right = "auto"
         el.style.bottom = "auto"
-        el.style.width = `${width}px`
-        el.style.height = `${height}px`
+        el.style.width = `${size.width}px`
+        el.style.height = `${size.height}px`
       }
     })
   }, [routeKey])

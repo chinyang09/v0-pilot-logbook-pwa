@@ -8,6 +8,21 @@
  */
 export function hhmmToMinutes(hhmm: string | undefined | null): number {
   if (!hhmm || typeof hhmm !== "string") return 0
+  // The stored form, read off the character codes. This runs inside every
+  // flight sort comparator and every duty-period loop — thousands of calls per
+  // render of the dashboard — and `split` allocated an array each time.
+  // Anything that is not plain `H:MM` / `HH:MM` digits takes the general parse
+  // below, which defines the result.
+  const n = hhmm.length
+  if ((n === 5 || n === 4) && hhmm.charCodeAt(n - 3) === 58) {
+    const h1 = n === 5 ? hhmm.charCodeAt(0) - 48 : 0
+    const h2 = hhmm.charCodeAt(n - 4) - 48
+    const m1 = hhmm.charCodeAt(n - 2) - 48
+    const m2 = hhmm.charCodeAt(n - 1) - 48
+    if (h1 >= 0 && h1 <= 9 && h2 >= 0 && h2 <= 9 && m1 >= 0 && m1 <= 9 && m2 >= 0 && m2 <= 9) {
+      return (h1 * 10 + h2) * 60 + m1 * 10 + m2
+    }
+  }
   const parts = hhmm.split(":")
   if (parts.length !== 2) return 0
   const hours = Number.parseInt(parts[0], 10)

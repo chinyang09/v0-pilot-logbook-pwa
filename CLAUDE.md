@@ -1260,6 +1260,34 @@ What it took, in order of size:
   `scroll: false`.
 - **Formatters are hoisted** out of per-cell and per-row loops.
 
+A second round measured the interactions the first one had not:
+
+| | Before | After |
+|---|---|---|
+| sidebar open / close (first of a session) | 637 / 698ms of long tasks, 12 janky frames | 230 / 240ms |
+| add a flight (new install) | 829ms of long tasks, a 643ms frame | ~480ms, ~200–300ms frame |
+| airports page load / fling during the seed | 874ms / 16 janky frames | 447ms / 1 |
+| Dashboard first open | 1503ms of long tasks | ~730ms |
+| Roster first visit | 923ms | ~450–700ms |
+
+- **The sidebar no longer prefetches as it opens.** Its links pass
+  `prefetch={false}`; every nav route is warmed once at idle instead
+  (`prefetchNavRoutesWhenIdle`, one route per idle period, 4s after boot).
+  Opening the sidebar used to fire ~40 requests and evaluate every section's
+  page chunk during the 300ms morph.
+- **The flight form looks up its two airports by key** (`useAirportByIcao`)
+  instead of loading all ~29k rows (`useAirportDatabase`) on the first open of
+  every cold start. `primeFlightCache` starts the lookups on the tap.
+- **The airport seed runs in a worker** (`airport-seed.worker.ts`): fetch,
+  the 5.7MB `JSON.parse`, the mapping and every chunked write. The page only
+  hears progress and the end. `writeAirportRows` is the one implementation both
+  sides call; with no worker it runs on the page as before.
+- **`hhmmToMinutes` reads `H:MM` off the character codes** — it runs inside
+  every flight sort and duty loop, and `split` allocated per call.
+- **No Radix Accordion/Collapsible for content that mounts OPEN** — it measures
+  with `getBoundingClientRect` in a layout effect. The signature section is a
+  plain disclosure (a grid-rows transition, nothing to measure).
+
 Still open, measured: opening a flight still runs ~400ms of long tasks at 4×,
 but in yielding slices after the tap has painted. The rest is the form's ~300
 fibers mounting, mostly framer `motion` and Radix. The first Dashboard visit
@@ -4265,6 +4293,11 @@ When making changes, be aware of these high-impact files:
 - Do not write `?selected=` to history INSIDE the tap — Next applies the write as a router transition, but one made inside a click renders synchronously, in the click, and takes the selection's own transition with it (the whole flight form rendered before the tap could paint: INP 656ms at 4×, 96ms deferred). `writeUrlAfterTap` defers it one task, `pendingUrlWriteRef` covers the gap, and the selection itself commits as a transition. Keep `pushedBaseRef` in the "is it already open" test, or a second tap inside that task pushes a second entry
 - Do not let a navigation link scroll — every nav navigation passes `scroll: false`. Next's scroll-into-view after a route change is a forced layout of all six kept-alive pages to scroll a document that cannot scroll
 - Do not read layout (`getBoundingClientRect`, `scrollHeight`, `offsetHeight`) in a ref callback, a layout effect or a mount effect — that is the middle of React's commit, so it forces a synchronous layout of the whole app which the rest of the commit then dirties again. Take the first measurement from a ResizeObserver callback (it fires after the browser's own layout, before paint): the keep-alive stack, the scroll indicator and the remarks textarea all did this, at 90–290ms each per open at a 4× throttle. During a gesture, reuse the rect the last frame already read (`GlassContainer`'s release ripple)
+- Do not let a `<Link>` that only becomes visible during an animation prefetch on visibility — Next's viewport prefetch downloads AND evaluates the route's chunks, and the sidebar's links all came into view on the morph's first frame (~40 requests, ~650ms of long tasks at 4×, on the first open of every session). Sidebar links pass `prefetch={false}` and `prefetchNavRoutesWhenIdle` warms the same routes when nothing is moving. A new nav item goes in `nav-sections.tsx` and is warmed with the rest
+- Do not load the whole airport table to find one or two airports — `useAirportByIcao` is a primary-key `get` (answered from the in-memory list when something already loaded it at the current revision). `useAirportDatabase` is for screens that LIST or SEARCH airports; the flight form read all ~29k rows on its first open of every cold start to answer two lookups
+- Do not parse or write the airport dataset on the main thread when a worker can — `seedFromSource` runs `airport-seed.worker.ts` (the 5.7MB `response.json()` alone was a ~500ms task on a new install's first flight open) and falls back to the page only when no worker starts. Keep `writeAirportRows` the ONE implementation both call, keep its chunking and its version-stamped-LAST rule, and keep the revision bump on the PAGE side when the worker reports done — the worker's module copy of the counter is not the one anything reads
+- Do not mount a Radix Accordion/Collapsible OPEN in a screen that opens on a tap — its content measures itself with `getBoundingClientRect` in a layout effect, which is a forced layout of the whole app in the middle of that commit (~100ms at 4× on every signed flight). A disclosure that opens with a `grid-template-rows` 0fr→1fr transition needs no measurement
+- Do not slow down `hhmmToMinutes` — it is called inside every flight sort comparator and every duty-period loop. The `H:MM`/`HH:MM` fast path reads character codes; anything else falls through to the general parse, and `hhmm-to-minutes.test.ts` pins the two to each other
 - Do not call `toLocaleDateString`/`toLocaleTimeString` per cell or per row — each call builds a new `Intl.DateTimeFormat`. Hoist a formatter to module scope (`CELL_DATE` in the roster month, `DAY_HEADING` in the agenda) or go through `tz-format.ts`. And for the device's own zone or UTC, `Date`'s getters ARE the answer — `dayKeyAt` only reaches for a formatter for a NAMED zone
 - Do not let a digit read from a blank (`----`) slot reach the extractors — `dropDashReads` drops a digit-bearing read below 0.75 confidence or 0.55 of the median line height. On the device engine photo 3's empty IN read as "1000"; the `device` fixtures pin it
 - Do not swap the OCR models for dynamically quantized int8 ones — measured in onnxruntime-web, recognition got slower and read none of the seven photos correctly
@@ -4281,7 +4314,7 @@ When making changes, be aware of these high-impact files:
 - Do not let a sign-in as a different account inherit this device's data — `dataOwner` decides, and the switch clears it
 - Do not compare a pulled record against the local one by clock — rebase it (`planLocalApply`): the server's copy plus whatever this device has pending. Only a pending create or a dead-lettered row falls back to last-write-wins
 - Do not revoke a session before pushing — every sign-out path runs `confirmUnsyncedLoss` FIRST, while the session still works
-- Do not reload a whole reference table on mount to notice a write — `useAirportDatabase` re-read all ~10k airports from IndexedDB every time it mounted, and the flight form mounts on every flight tap. Writers bump `getAirportsRevision()` and the hook reloads only on a mismatch. Every write to `referenceDb.airports` lives in `airports.store.ts` (rebuild / addCustom / toggleFavorite) — a NEW writer must bump it too, or a cached copy goes stale. Capture the revision BEFORE the read, so a write landing mid-load leaves the cache looking stale rather than falsely current
+- Do not reload a whole reference table on mount to notice a write — `useAirportDatabase` re-read all ~10k airports from IndexedDB every time it mounted, and the flight form mounts on every flight tap. Writers bump `getAirportsRevision()` and the hook reloads only on a mismatch. Every write to `referenceDb.airports` starts in `airports.store.ts` (the seed — which may run in `airport-seed.worker.ts` and bumps the revision when it reports done — addCustom and toggleFavorite) — a NEW writer must bump it too, or a cached copy goes stale. Capture the revision BEFORE the read, so a write landing mid-load leaves the cache looking stale rather than falsely current
 - Do not compute a list twice in JSX — `xs.some(p)` for the section guard and `xs.filter(p)` for the rows is two full passes per render, and on the airports page that was two scans of the whole reference table for a handful of pinned entries. Derive it once in a `useMemo` and test `.length`
 - Do not pass a memoized list card an INLINE arrow (`onDelete={() => performDelete(item)}`) — it hands every row new props on each render of the page and defeats the `memo` outright, which is the whole reason the card is memoized. The card takes its own item back (`onDelete: (item) => void`) and the page passes ONE `useCallback`'d handler; a plain function declared in the page body is just as bad as the arrow, so the handler itself has to be stable. This bit the logbook, crew and aircraft lists independently
 - Do not put a `backdrop-filter` (`backdrop-blur-*`) on a surface whose backdrop is a FLAT colour — blurring a uniform field returns that same field, so it is pixel-identical to no filter while still forcing a backdrop root, a readback and a blur pass every frame the layer is painted. The dashboard's widget cards each carried `backdrop-blur-sm` over `bg-background`, which has no gradient and nothing behind it (the blocks are stacked in one column, so they never overlap). Glass surfaces, the chrome fade and the modal backdrops keep theirs — those sit over real, moving content, which is the case the filter exists for

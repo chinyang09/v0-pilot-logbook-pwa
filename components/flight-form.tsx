@@ -4,7 +4,7 @@ import { CODE_INPUT_PROPS } from "@/lib/utils/input-props";
 import type React from "react";
 import { ScrollIndicator } from "@/components/ui/scroll-indicator";
 
-import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, useId } from "react";
 import { useRouter } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { userDb } from "@/lib/db/user-db";
@@ -28,25 +28,18 @@ import { Button } from "@/components/ui/button";
 import { TimePicker } from "@/components/time-picker";
 import { DatePicker } from "@/components/date-picker";
 import type { FlightLog, AdditionalCrew, Approach, FlightSignature } from "@/lib/db";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
 import { type SignatureCrewMember } from "@/components/signature-canvas";
 import { SignatureDialog } from "@/components/signature-dialog";
 import {
   updateFlight,
   updatePersonnel,
-  getAirportByICAO,
   getFlightById,
   isLiveFlight,
 } from "@/lib/db";
 import { useDebounce } from "@/hooks/use-debounce";
 import { formPatch, rebaseForm } from "@/lib/utils/form-patch";
 import { pickSelfCard } from "@/lib/utils/self-card";
-import { useAirportDatabase } from "@/hooks/data";
+import { useAirportByIcao, prefetchAirports } from "@/hooks/data";
 import {
   createEmptyFlightLog,
   calculateBlockTime,
@@ -196,6 +189,8 @@ const flightDataCache = new Map<string, FlightLog>();
  */
 export function primeFlightCache(flight: FlightLog): void {
   flightDataCache.set(flight.id, flight);
+  // Its two airports too, so the timezones are there on the first render.
+  prefetchAirports(flight.departureIcao, flight.arrivalIcao);
 }
 
 /**
@@ -440,7 +435,6 @@ export function FlightForm({
   isDesktop = false,
 }: FlightFormProps) {
   const router = useRouter();
-  const { airports } = useAirportDatabase();
   const { personnel } = usePersonnel();
   const { preferences } = usePreferences();
   const clockSeparator = preferences.display.clockSeparator;
@@ -484,6 +478,9 @@ export function FlightForm({
     }
     return createEmptyFlightLog();
   });
+  // The signature section starts open on a signed flight, as the accordion did.
+  const [signatureSectionOpen, setSignatureSectionOpen] = useState(() => !!formData.signature);
+  const signatureSectionId = useId();
   // The latest form state, for effects that must not re-run on every keystroke.
   const formDataRef = useRef(formData);
   useLayoutEffect(() => {
@@ -505,20 +502,10 @@ export function FlightForm({
   // Inside FlightForm component...
 
   // Get airport data
-  const depAirport = useMemo(
-    () =>
-      formData.departureIcao
-        ? getAirportByICAO(airports, formData.departureIcao)
-        : null,
-    [airports, formData.departureIcao]
-  );
-  const arrAirport = useMemo(
-    () =>
-      formData.arrivalIcao
-        ? getAirportByICAO(airports, formData.arrivalIcao)
-        : null,
-    [airports, formData.arrivalIcao]
-  );
+  // The two airports this flight names — looked up by ICAO, not by loading the
+  // whole ~29k-row table to find them (see `useAirportByIcao`).
+  const depAirport = useAirportByIcao(formData.departureIcao) ?? null;
+  const arrAirport = useAirportByIcao(formData.arrivalIcao) ?? null;
 
   // Helper to get numeric offset from IANA string
   const getNumericOffset = (tzString?: string) => {
@@ -598,14 +585,15 @@ export function FlightForm({
   }, [liveFlight, flightIdProp]);
 
   useEffect(() => {
-    if (airports.length === 0) return;
+    if (!depAirport && !arrAirport) return;
 
     setFormData((prev) => {
       const updated = { ...prev };
       let changed = false;
 
       if (prev.departureIcao) {
-        const airport = getAirportByICAO(airports, prev.departureIcao);
+        const airport =
+          depAirport?.icao.toUpperCase() === prev.departureIcao.toUpperCase() ? depAirport : null;
         if (
           airport &&
           (!prev.departureIata || prev.departureTimezone === undefined)
@@ -617,7 +605,8 @@ export function FlightForm({
       }
 
       if (prev.arrivalIcao) {
-        const airport = getAirportByICAO(airports, prev.arrivalIcao);
+        const airport =
+          arrAirport?.icao.toUpperCase() === prev.arrivalIcao.toUpperCase() ? arrAirport : null;
         if (
           airport &&
           (!prev.arrivalIata || prev.arrivalTimezone === undefined)
@@ -630,7 +619,7 @@ export function FlightForm({
 
       return changed ? updated : prev;
     });
-  }, [airports, formData.departureIcao, formData.arrivalIcao]);
+  }, [depAirport, arrAirport]);
 
 
   useEffect(() => {
@@ -2210,14 +2199,22 @@ export function FlightForm({
 
         {/* SIGNATURE Section */}
         <div className="rounded-xl bg-card border border-border overflow-hidden">
-          <Accordion
-            type="single"
-            collapsible
-            defaultValue={formData.signature ? "signature" : undefined}
-          >
-            <AccordionItem value="signature" className="border-0">
+          {/* A plain disclosure, not Radix's Accordion: that one measures its
+              content with getBoundingClientRect in a layout effect whenever it
+              mounts OPEN — which it does for every signed flight — forcing a
+              layout of the whole app in the middle of the commit that opens
+              the form (~100ms at a 4× CPU throttle). A grid-rows transition
+              opens and closes it with nothing to measure. */}
+          <div>
               <div className="px-4 py-2 bg-muted/30">
-                <AccordionTrigger className="py-0 hover:no-underline">
+                <button
+                  type="button"
+                  id={`${signatureSectionId}-trigger`}
+                  aria-expanded={signatureSectionOpen}
+                  aria-controls={signatureSectionId}
+                  onClick={() => setSignatureSectionOpen((open) => !open)}
+                  className="flex w-full flex-1 items-center justify-between font-medium"
+                >
                   <div className="flex items-center gap-2">
                     <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                       SIGNATURE
@@ -2228,9 +2225,26 @@ export function FlightForm({
                       </span>
                     )}
                   </div>
-                </AccordionTrigger>
+                  <ChevronDown
+                    className={cn(
+                      "h-4 w-4 shrink-0 transition-transform duration-200",
+                      signatureSectionOpen && "rotate-180",
+                    )}
+                  />
+                </button>
               </div>
-              <AccordionContent className="px-4 pb-4">
+              <div
+                id={signatureSectionId}
+                role="region"
+                aria-labelledby={`${signatureSectionId}-trigger`}
+                inert={!signatureSectionOpen}
+                className={cn(
+                  "grid text-sm transition-[grid-template-rows] duration-200 ease-out",
+                  signatureSectionOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+                )}
+              >
+              <div className="min-h-0 overflow-hidden">
+              <div className="px-4 pb-4 pt-0">
                 {/* Signing happens FULL SCREEN. A signature is a drawing, and
                     it was being collected in a 120px strip at the bottom of a
                     long form; the summary stays here, the act moves out. */}
@@ -2267,9 +2281,10 @@ export function FlightForm({
                   )}
                   <PenLine className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
                 </button>
-              </AccordionContent>
-            </AccordionItem>
-          </Accordion>
+              </div>
+              </div>
+              </div>
+          </div>
         </div>
       </div>
 

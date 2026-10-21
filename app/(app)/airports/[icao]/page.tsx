@@ -4,9 +4,9 @@ import { useMemo, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { PageContainer } from "@/components/page-container";
 import { SyncStatus } from "@/components/sync-status";
-import { useAirportDatabase } from "@/hooks/data";
+import { useAirportByIcao } from "@/hooks/data";
 // Added getAirportLocalTime from your new lib
-import { getAirportByICAO, getAirportLocalTime } from "@/lib/db";
+import { getAirportLocalTime } from "@/lib/db";
 import {
   ArrowLeft,
   MapPin,
@@ -25,7 +25,9 @@ export default function AirportDetailPage() {
   const icao = params.icao as string;
   const router = useRouter();
   const isDesktop = useIsDesktop();
-  const { airports, isLoading } = useAirportDatabase();
+  // One airport by its key — not the whole ~29k-row table to find it.
+  const found = useAirportByIcao(icao);
+  const isLoading = found === undefined;
 
   // When switching to desktop view, redirect to airports page with selection
   useEffect(() => {
@@ -34,10 +36,7 @@ export default function AirportDetailPage() {
     }
   }, [isDesktop, icao, router]);
 
-  const airport = useMemo(() => {
-    if (!airports.length) return null;
-    return getAirportByICAO(airports, icao);
-  }, [airports, icao]);
+  const airport = found ?? null;
 
   // Dynamic local time calculation
   const timeInfo = useMemo(() => {

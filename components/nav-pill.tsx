@@ -1317,6 +1317,8 @@ function SidebarNavItem({
     <Link
       href={href}
       scroll={false}
+      // Warmed at idle instead — see prefetchNavRoutesWhenIdle.
+      prefetch={false}
       data-grav-item
       data-nav-link
       draggable={false}
@@ -1371,7 +1373,41 @@ const EXPANDED_HEIGHT =
 
 // ─── Main export ─────────────────────────────────────────────
 
+/**
+ * Warm every nav route ONCE, at idle, one route per idle period.
+ *
+ * Next prefetches a `<Link>` when it scrolls into view, and that includes
+ * downloading and EVALUATING the route's client chunks. The sidebar's links
+ * only come into view when it opens — so the first open of every session
+ * fetched ~40 requests (RSC + page chunks for every section) and evaluated
+ * them during the 300ms morph, at the one moment the main thread was needed
+ * (~650ms of long tasks per toggle at a 4× CPU throttle). The sidebar's links
+ * therefore pass `prefetch={false}` and the same routes are warmed here, when
+ * nothing is animating. Online only: offline there is nothing to fetch, and the
+ * service worker already holds what it holds.
+ */
+let navPrefetchScheduled = false
+function prefetchNavRoutesWhenIdle(prefetch: (href: string) => void) {
+  if (navPrefetchScheduled || typeof window === "undefined") return
+  navPrefetchScheduled = true
+  const hrefs = [dashboardNavItem.href, ...navSections.flatMap((s) => s.items.map((i) => i.href))]
+  const idle = (fn: () => void) =>
+    typeof window.requestIdleCallback === "function" ? window.requestIdleCallback(fn, { timeout: 8000 }) : setTimeout(fn, 1500)
+  const next = () => {
+    const href = hrefs.shift()
+    if (!href) return
+    if (navigator.onLine) prefetch(href)
+    idle(next)
+  }
+  // After the first screen has settled, not during it.
+  window.setTimeout(() => idle(next), 4000)
+}
+
 export function NavPill() {
+  const router = useRouter()
+  useEffect(() => {
+    prefetchNavRoutesWhenIdle((href) => router.prefetch(href))
+  }, [router])
   const canPush = useDesktopPill()
   const hydrated = useHydrated()
   const { isOpen: sidebarOpen, toggle: toggleSidebar } = useSidebar()
