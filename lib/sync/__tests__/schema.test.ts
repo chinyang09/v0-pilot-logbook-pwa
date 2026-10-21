@@ -199,3 +199,43 @@ describe("toWireRecord", () => {
     expect(wire.deletedAt).toBe(1234)
   })
 })
+
+describe("the type rule — one type per field, one way of saying nothing", () => {
+  it("never stores a switch, a list or a time as null", () => {
+    const doc = write("flights", { id: "f1", isLocked: null, ipcIcc: null, approaches: null, blockTime: null })
+    expect(doc.isLocked).toBe(false)
+    expect(doc.ipcIcc).toBe(false)
+    expect(doc.approaches).toEqual([])
+    expect(doc.blockTime).toBe("00:00")
+    const card = write("personnel", { id: "p1", name: "Lim", isMe: null, favorite: undefined })
+    expect(card.isMe).toBe(false)
+    expect(card.favorite).toBe(false)
+  })
+
+  it("stores an unrecorded optional fact as null, and a recorded one in its type", () => {
+    const doc = write("flights", { id: "f1", reportGeneratedAt: "1760000000000", simSessionCode: 12 })
+    expect(doc.toLdgDecidedAt).toBeNull()
+    expect(doc.reportGeneratedAt).toBe(1760000000000)
+    expect(doc.simSessionCode).toBe("12")
+  })
+
+  it("converts an unambiguous wrong type and keeps the rest aside rather than losing it", () => {
+    const doc = write("flights", { id: "f1", isLocked: "true", dayLandings: "2", holds: "two", approaches: "ILS" })
+    expect(doc.isLocked).toBe(true)
+    expect(doc.dayLandings).toBe(2)
+    expect(doc.holds).toBe(0)
+    expect(doc.approaches).toEqual([])
+    expect(doc.schemaRejects).toEqual({ holds: "two", approaches: "ILS" })
+  })
+
+  it("keeps every field of every collection typed or deliberately untyped", () => {
+    // `null` (untyped) is reserved for values whose type really varies — the
+    // two sides of a comparison, and the sparse settings record.
+    const untyped = SYNC_COLLECTIONS.flatMap((c) =>
+      Object.entries(SYNC_FIELDS[c])
+        .filter(([, d]) => d === null)
+        .map(([k]) => `${c}.${k}`)
+    ).filter((k) => !k.startsWith("settings."))
+    expect(untyped.sort()).toEqual(["discrepancies.logbookValue", "discrepancies.scheduleValue"])
+  })
+})

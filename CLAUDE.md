@@ -356,6 +356,18 @@ data loss.
   switches are booleans. Production held "an ordinary unlocked flight" three
   ways (`entryType` on 14 flights and `null` on 307; `isLocked` `false` on 250
   and `null` on 71), which every query on those fields had to know about.
+- **One type per field, one way of saying nothing** (`conformField` in
+  `canonicalizeDocument`, on every write). A field declared with a value is
+  REQUIRED in that value's type and never `null` — a switch is `true`/`false`,
+  a list `[]`, a time `"00:00"`; a field declared `opt(kind)` is OPTIONAL,
+  `null` when unrecorded and of `kind` when recorded. Bare `null` (any type)
+  is kept only where the type really varies (a comparison's two values, the
+  sparse settings record). A wrong type is converted when unambiguous (`"true"`,
+  `"90"`, `8`→`"8"`); otherwise the value goes to `schemaRejects` on the
+  document and the field takes its default — set aside, never silently lost.
+  Unknown keys are still kept: that is the room left for a future build.
+  Audited 21 Oct 2026: production already held one type per field everywhere
+  except the null switches v3 settles.
 - **A key is only dropped by name** (`RETIRED_KEYS`). Unknown keys are kept,
   because one may be a newer build's field; `isDraft` (213 flights, all `false`,
   referenced nowhere) was checked dead first, then listed.
@@ -4093,6 +4105,7 @@ When making changes, be aware of these high-impact files:
 - Do not gate a sync trigger on the local queue being non-empty — a sync is a PULL as much as a push, and gating it is what made other devices' edits arrive only at login
 - Do not store `knownSeq` from anything but a COMPLETE pull's `headSeq`, and do not read the head AFTER the pull's queries — either lets the cheap poll answer `upToDate` past a change the device never received
 - Do not reserve seqs outside the transaction that writes them — the counter would show a seq whose row is not readable yet, and the poll can record a head past it
+- Do not declare a REQUIRED field (a switch, a count, a list, a time) as `null` or `opt(...)` in `lib/sync/schema.ts`, and do not declare an optional fact as bare `null` — the declaration IS the type rule. A switch that can be `null` is three states where the pilot means two
 - Do not write a synced document except through `canonicalizeDocument` — a raw `$set`/`insertOne` is how the collections ended up with records of different shapes. Add a field to the field table in `lib/sync/schema.ts` (the compiler insists), and bump `SYNC_SCHEMA_VERSION` when existing documents need rewriting
 - Do not treat an un-versioned push as complete — it may come from an older build that doesn't know a newer field; it is MERGED, only a client declaring the current schema REPLACES
 - Do not build a client normalizer from an explicit field list — spread the server record first. The crew normalizer was a list without `deletedAt`, so binned crew came back on every other device
