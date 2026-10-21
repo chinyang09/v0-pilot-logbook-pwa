@@ -659,20 +659,17 @@ textarea:focus-within {
 
 /* ─── Liquid Glass UI ─── */
 
-/* The specular angle is a registered custom property so it can ANIMATE:
-   Apple's Liquid Glass highlights are alive (they shift with device motion);
-   the web approximation is a slow ambient drift around the top-left anchor.
-   inherits: true so the rim pseudo-elements see the animated value. */
-@property --glass-specular-angle {
-  syntax: "<angle>";
-  inherits: true;
-  initial-value: 315deg;
-}
-
-@keyframes glass-specular-drift {
-  from { --glass-specular-angle: 297deg; }
-  to   { --glass-specular-angle: 333deg; }
-}
+/* The specular rim is anchored at 315deg (top-left). There used to be an
+   "ambient drift": `--glass-specular-angle` was a registered property animated
+   on every .GlassContainer over 60s. It never reached the screen — `--glass-rim`
+   is declared on :root / .dark, and an unregistered custom property resolves
+   its var() where it is DECLARED, so every rim painted "from 315deg" whatever
+   the surface's angle was (measured: angle 297deg → 315deg, painted rim
+   unchanged). What it DID do was force a style recalc of every glass surface's
+   whole subtree on every frame: ~1.8s of every 2s on a 4×-throttled phone,
+   idle, with the logbook open — frames of ~106ms instead of 17. Do not bring
+   an animated custom property back onto a container; if the glint ever has to
+   move, animate a transform on the rim layer itself. */
 
 /* Glass theme tokens. Glass legibility flips with the theme: on the DARK
    themes the material shows itself through brightness + white edge specular;
@@ -687,7 +684,7 @@ textarea:focus-within {
   --glass-blur-brightness: 1.03;
   --glass-rim:
     conic-gradient(
-      from var(--glass-specular-angle, 315deg),
+      from 315deg,
       rgba(255, 255, 255, 0.60) 0deg,
       rgba(255, 255, 255, 0.33) 30deg,
       rgba(255, 255, 255, 0.20) 76deg,
@@ -748,10 +745,9 @@ textarea:focus-within {
      hairline at all, which is what left it "a way off" from iOS's controls:
      theirs is visible the whole way round. The lobes stay concentrated (that
      is what makes it read as light on a curve) and the FLANKS came up to 0.22,
-     so the ring is continuous and the glint sits above it. It still travels —
-     `--glass-specular-angle` animates, so which part is lit drifts. */
+     so the ring is continuous and the glint sits above it. */
   --glass-rim: conic-gradient(
-    from var(--glass-specular-angle, 315deg),
+    from 315deg,
     rgba(255, 255, 255, 0.52) 0deg,
     rgba(255, 255, 255, 0.29) 30deg,
     rgba(255, 255, 255, 0.18) 76deg,
@@ -871,20 +867,7 @@ textarea:focus-within {
   --on-glass-active: color-mix(in oklab, var(--primary) 32%, var(--on-glass));
 }
 
-/* Held still while the device reads a photo (`data-busy` on <html>, set by
-   lib/ocr/ocr-service.ts). The drift repaints every glass surface every frame,
-   and each repaint re-runs the backdrop-filters around it — on a phone that
-   is the same cores the OCR engine is computing on. Measured: a read took
-   ~2.6s with it running and ~1.5s with it held. Paused, not removed, so it
-   resumes from the same angle: over two seconds of a 60-second drift there is
-   nothing to see, and the material is unchanged. */
-html[data-busy] .GlassContainer {
-  animation-play-state: paused;
-}
-
 .GlassContainer {
-  /* Ambient specular drift — see @property above. Long period, alternate. */
-  animation: glass-specular-drift 60s ease-in-out infinite alternate;
   --corner-radius: 24px;
   --base-strength: 24px;
   --extra-blur: 2px;

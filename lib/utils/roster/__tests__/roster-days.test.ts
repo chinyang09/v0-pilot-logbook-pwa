@@ -88,3 +88,13 @@ describe("roster days", () => {
     expect(dayKeyAt(Date.UTC(2026, 9, 20, 17, 0), Z)).toBe("2026-10-20")
   })
 })
+
+describe("dayKeyAt — the Date fast path agrees with the zone formatter", () => {
+  it("for the device zone and for UTC, across DST changes and midnights", () => {
+    const device = Intl.DateTimeFormat().resolvedOptions().timeZone
+    for (let ms = Date.UTC(2025, 0, 1); ms < Date.UTC(2027, 0, 1); ms += 37 * 60_000 * 13) {
+      expect(dayKeyAt(ms, { zulu: false })).toBe(dayKeyAt(ms, { zulu: false, zone: device }))
+      expect(dayKeyAt(ms, { zulu: true })).toBe(dayKeyAt(ms, { zulu: false, zone: "UTC" }))
+    }
+  })
+})

@@ -180,6 +180,14 @@ const MORPH_LEAD = 100
  */
 const suppressLinkMenu = (e: React.MouseEvent) => e.preventDefault()
 
+/*
+ * Every nav navigation passes `scroll: false`. Next otherwise scrolls the new
+ * segment into view after each route change — a `getBoundingClientRect` that
+ * forces a full layout of all six kept-alive pages (~120ms of a tab switch at a
+ * 4× CPU throttle) to scroll a document that cannot scroll: the shell is
+ * clipped and every page owns its own scroller.
+ */
+
 // ─── Sync status icon ────────────────────────────────────────
 
 /**
@@ -672,9 +680,7 @@ function PillBarContent({
     // own face at all), yet they re-sample every frame the lens moves or
     // scales AND they stop the lens being promoted to a plain composited
     // layer — so the landing was re-rasterising a text-laden subtree while the
-    // main thread mounted a route. The ambient specular animation goes with
-    // them; a 60s keyframe on a copy that lives for one gesture is pure cost.
-    clone.style.animation = "none"
+    // main thread mounted a route.
     clone.querySelectorAll<HTMLElement>(".GlassMaterial > div").forEach((n) => {
       n.style.backdropFilter = "none"
       n.style.setProperty("-webkit-backdrop-filter", "none")
@@ -940,7 +946,7 @@ function PillBarContent({
     lens.classList.add("PillDragLens--settle")
     lens.style.translate = `${dx}px ${dy}px`
     const tab = TAB_CONFIG[tabs[drag.nearest]]
-    if (tab) router.push(tab.href)
+    if (tab) router.push(tab.href, { scroll: false })
     // Outlast the splat's rebound before handing off to the real blob, or the
     // last of the squash gets cut.
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
@@ -1028,6 +1034,7 @@ function PillBarContent({
             <Link
               key={tabKey}
               href={tab.href}
+              scroll={false}
               data-nav-link
               draggable={false}
               onContextMenu={suppressLinkMenu}
@@ -1309,6 +1316,9 @@ function SidebarNavItem({
   return (
     <Link
       href={href}
+      scroll={false}
+      // Warmed at idle instead — see prefetchNavRoutesWhenIdle.
+      prefetch={false}
       data-grav-item
       data-nav-link
       draggable={false}
@@ -1363,7 +1373,41 @@ const EXPANDED_HEIGHT =
 
 // ─── Main export ─────────────────────────────────────────────
 
+/**
+ * Warm every nav route ONCE, at idle, one route per idle period.
+ *
+ * Next prefetches a `<Link>` when it scrolls into view, and that includes
+ * downloading and EVALUATING the route's client chunks. The sidebar's links
+ * only come into view when it opens — so the first open of every session
+ * fetched ~40 requests (RSC + page chunks for every section) and evaluated
+ * them during the 300ms morph, at the one moment the main thread was needed
+ * (~650ms of long tasks per toggle at a 4× CPU throttle). The sidebar's links
+ * therefore pass `prefetch={false}` and the same routes are warmed here, when
+ * nothing is animating. Online only: offline there is nothing to fetch, and the
+ * service worker already holds what it holds.
+ */
+let navPrefetchScheduled = false
+function prefetchNavRoutesWhenIdle(prefetch: (href: string) => void) {
+  if (navPrefetchScheduled || typeof window === "undefined") return
+  navPrefetchScheduled = true
+  const hrefs = [dashboardNavItem.href, ...navSections.flatMap((s) => s.items.map((i) => i.href))]
+  const idle = (fn: () => void) =>
+    typeof window.requestIdleCallback === "function" ? window.requestIdleCallback(fn, { timeout: 8000 }) : setTimeout(fn, 1500)
+  const next = () => {
+    const href = hrefs.shift()
+    if (!href) return
+    if (navigator.onLine) prefetch(href)
+    idle(next)
+  }
+  // After the first screen has settled, not during it.
+  window.setTimeout(() => idle(next), 4000)
+}
+
 export function NavPill() {
+  const router = useRouter()
+  useEffect(() => {
+    prefetchNavRoutesWhenIdle((href) => router.prefetch(href))
+  }, [router])
   const canPush = useDesktopPill()
   const hydrated = useHydrated()
   const { isOpen: sidebarOpen, toggle: toggleSidebar } = useSidebar()
@@ -1724,7 +1768,7 @@ function MobilePillMorph({
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
       e.preventDefault()
       e.stopPropagation()
-      dismissSidebar(() => router.push(href))
+      dismissSidebar(() => router.push(href, { scroll: false }))
     },
     [dismissSidebar, router],
   )

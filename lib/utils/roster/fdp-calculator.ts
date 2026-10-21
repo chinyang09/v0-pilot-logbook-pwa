@@ -24,7 +24,7 @@ import type {
 import type { FlightLog } from "@/types/entities/flight.types"
 import { hhmmToMinutes, minutesToHHMM } from "@/lib/utils/time"
 import {
-  acclimatisedOffsetMinutes,
+  acclimatisedOffsetsAtEachDuty,
   CIRCADIAN_REST_MIN,
   circadianRestRule,
   classifyCircadian,
@@ -1713,12 +1713,15 @@ export interface TimelineDataPoint {
   route?: string                    // e.g. "WSSS-VVNB/VVNB-WSSS"
 }
 
-/** Format a UTC date as "dd MMM" (e.g. "04 Apr") */
+const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+/**
+ * Format a UTC date as "dd MMM" (e.g. "04 Apr"). Read straight off the string:
+ * this runs once per DAY of the timeline, and `toLocaleDateString` there was a
+ * quarter of the dashboard's first render on a long logbook.
+ */
 function formatDateLabel(dateStr: string): string {
-  const dateObj = new Date(dateStr + "T00:00:00Z")
-  const day = dateObj.getUTCDate().toString().padStart(2, "0")
-  const mon = dateObj.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })
-  return `${day} ${mon}`
+  return `${dateStr.slice(8, 10)} ${MONTH_SHORT[Number(dateStr.slice(5, 7)) - 1]}`
 }
 
 /** Get the next date string (YYYY-MM-DD) after the given date */
@@ -1756,18 +1759,54 @@ export function generateTimelineData(
   const lastDpDate = sorted[sorted.length - 1].date
   const endDate = lastDpDate > today ? lastDpDate : today
 
+  // The rolling sums below are `calculateRollingStats` over `sorted`, with the
+  // same bounds, read off a sorted index instead of filtering every duty
+  // period three times for every day. That was O(days × duties) Date parses —
+  // ~40s at a 4× CPU throttle on a long logbook, in the dashboard's first
+  // render. `dayMs` is the same local-midnight parse the filter used, and it
+  // rises with `date`, so each window is a contiguous run of `indexed`.
+  // A date that does not parse never matched the filter's comparisons, so it
+  // is left out of the index rather than breaking its ordering.
+  const indexed = sorted.filter((dp) => !Number.isNaN(new Date(dp.date + "T00:00:00").getTime()))
+  const dayMs = indexed.map((dp) => new Date(dp.date + "T00:00:00").getTime())
+  // First index whose value is > bound (both arrays are non-decreasing).
+  const upperBound = (bound: number) => {
+    let lo = 0
+    let hi = dayMs.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (dayMs[mid] <= bound) lo = mid + 1
+      else hi = mid
+    }
+    return lo
+  }
+  // Summed in array order, exactly as the filter + reduce did.
+  const windowHours = (end: number, asOf: Date, days: number) => {
+    const from = new Date(asOf)
+    from.setDate(from.getDate() - days)
+    let duty = 0
+    let flight = 0
+    for (let i = upperBound(from.getTime()); i < end; i++) {
+      duty += indexed[i].countedDutyMinutes ?? indexed[i].dutyMinutes
+      flight += indexed[i].flightMinutes
+    }
+    return { dutyHours: duty / 60, flightHours: flight / 60 }
+  }
+
   const result: TimelineDataPoint[] = []
   let currentDate = startDate
+  let upToDate = 0
 
   while (currentDate <= endDate) {
     const asOfDate = new Date(currentDate + "T23:59:59Z")
     const dpsOnDate = dpsByDate.get(currentDate)
 
-    // Calculate rolling stats for this date (uses all DPs up to this date)
-    const dpsUpToDate = sorted.filter((d) => d.date <= currentDate)
-    const stats14 = calculateRollingStats(dpsUpToDate, asOfDate, 14, limits)
-    const stats28 = calculateRollingStats(dpsUpToDate, asOfDate, 28, limits)
-    const stats365 = calculateRollingStats(dpsUpToDate, asOfDate, 365, limits)
+    // Rolling stats for this date, over the DPs up to and including it
+    while (upToDate < indexed.length && indexed[upToDate].date <= currentDate) upToDate++
+    const end = Math.min(upToDate, upperBound(asOfDate.getTime()))
+    const stats14 = windowHours(end, asOfDate, 14)
+    const stats28 = windowHours(end, asOfDate, 28)
+    const stats365 = windowHours(end, asOfDate, 365)
 
     if (dpsOnDate) {
       // Duty day(s) — create a point per DP on this date
@@ -2403,6 +2442,8 @@ export function applyAcclimatisation(
     }
   })
 
+  const acclimatedAt = acclimatisedOffsetsAtEachDuty(intervals, homeOffsetHours * 60)
+
   return sortedDPs.map((dp, i) => {
     // A standby is not a flight duty period, so paragraph 14's tables never
     // applied to it — deriving a maximum here would hand it a one-sector FDP
@@ -2412,11 +2453,7 @@ export function applyAcclimatisation(
 
     // What the crew member was acclimated to when THIS duty commenced — so the
     // duty's own arrival zone cannot retroactively justify its own table.
-    const acclimatedMin = acclimatisedOffsetMinutes(
-      intervals.slice(0, i),
-      homeOffsetHours * 60,
-      intervals[i].startMs
-    )
+    const acclimatedMin = acclimatedAt[i]
     const acclimatedHours = acclimatedMin / 60
 
     // The acclimatised zone is the ONLY thing this pass knows that the

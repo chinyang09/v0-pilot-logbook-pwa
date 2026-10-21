@@ -9,6 +9,12 @@
  */
 
 import { referenceDb } from "../../reference-db"
+import {
+  AIRPORT_DATA_VERSION,
+  AIRPORT_SOURCE_URL,
+  writeAirportRows,
+  type AirportSeedMessage,
+} from "./airport-seed"
 import type { Airport } from "@/types/entities/airport.types"
 import { tzFormatter, tzOffsetName } from "@/lib/utils/tz-format"
 
@@ -35,40 +41,12 @@ export interface AirportData {
 // Configuration
 // ============================================
 
-const AIRPORT_SOURCE_URL = "/airports.min.json"
-const DATA_VERSION = "2025.10.27-min"
+const DATA_VERSION = AIRPORT_DATA_VERSION
 
 // ============================================
 // Public API - Data Loading
 // ============================================
 
-/** Map the raw airports JSON into our Airport rows, re-flagging known favorites. */
-function mapRawAirports(rawData: Record<string, any>, favoriteIcaos: Set<string>): Airport[] {
-  return Object.values(rawData)
-    .map((airport: any, index: number) => ({
-      id: index + 1,
-      icao: airport.icao || "",
-      iata: airport.iata || "",
-      name: airport.name || "",
-      city: airport.city || "",
-      state: airport.state || "",
-      country: airport.country || "",
-      latitude: airport.lat || 0,
-      longitude: airport.lon || 0,
-      elevation: airport.elevation || 0,
-      tz: airport.tz || "UTC",
-      isFavorite: favoriteIcaos.has(airport.icao) ? true : undefined,
-    }))
-    .filter((a) => a.icao)
-}
-
-/**
- * Rebuild the airports table from a fresh dataset, preserving the user's
- * favorites and custom airports. Both are derived from a single full scan —
- * the previous code scanned twice (once via a broken `where("isFavorite")
- * .equals(1)` index query that never matched the boolean values actually
- * stored, silently dropping favorites on every dataset version bump).
- */
 /**
  * Bumped by every write to the airports table, so a cached in-memory copy can
  * tell whether it is still current.
@@ -80,9 +58,10 @@ function mapRawAirports(rawData: Record<string, any>, favoriteIcaos: Set<string>
  * directly, not through the hook). A counter says the same thing precisely:
  * the hook reloads when something actually changed and skips otherwise.
  *
- * Every write to `referenceDb.airports` lives in THIS FILE — the three
- * functions below are the complete set — so this stays trustworthy as long as
- * new writers bump it too.
+ * Every write to `referenceDb.airports` starts in THIS FILE — the seed (which
+ * may run in `airport-seed.worker.ts`, and is counted when it reports done),
+ * add-custom and toggle-favorite — so this stays trustworthy as long as new
+ * writers bump it too.
  */
 let airportsRevision = 0
 
@@ -91,30 +70,6 @@ export function getAirportsRevision(): number {
   return airportsRevision
 }
 
-/**
- * Rows per write transaction while seeding, and the pause between them. The
- * bundled dataset is ~29k airports, and Chromium serves every IndexedDB
- * database on an origin from ONE backing store: written as a single
- * transaction it held EVERY request on the origin — the user database and the
- * sync engine included — for the whole write. Measured on a fresh profile:
- * ~26 seconds in which the first flight a new device created could not even
- * be queued, let alone pushed.
- *
- * Chunking alone was not enough, because nothing in the app is ONE
- * transaction. Adding a flight is a chain of about eight (the crew card, the
- * preferences, the flight, the queue …), each started when the last one
- * finishes — and with only a `setTimeout(0)` between chunks the next chunk was
- * always queued first, so the chain waited a whole chunk at EVERY step. At
- * 1000 rows (~550ms a chunk in headless Chromium) adding a flight took 2–6s
- * for the 15-odd seconds after the first flight form opened on a new install,
- * which is what read as "adding gets slower while sync is failing".
- *
- * Smaller chunks bound each wait, and the gap is long enough for a whole
- * chain to run between two of them. The seed takes a few seconds longer; it
- * is a once-per-install background job and the pilot is not waiting on it.
- */
-const SEED_CHUNK = 250
-const SEED_GAP_MS = 48
 
 /**
  * How far a seed has got, 0..1, for anyone waiting on it.
@@ -143,34 +98,74 @@ function rebuildAirportsTable(rawData: Record<string, any>): Promise<Airport[]> 
 }
 
 async function seedAirportsTable(rawData: Record<string, any>): Promise<Airport[]> {
-  const existing = await referenceDb.airports.toArray()
-  const favoriteIcaos = new Set(existing.filter((a) => a.isFavorite).map((a) => a.icao))
-  const customAirports = existing.filter((a) => a.isCustom === true)
-
-  const airports = mapRawAirports(rawData, favoriteIcaos)
-  const newIcaos = new Set(airports.map((a) => a.icao))
-  const customToPreserve = customAirports.filter((a) => !newIcaos.has(a.icao))
-  const rows = [...airports, ...customToPreserve]
-
-  // Overwrite in place rather than clear-then-fill, so a reader during the
-  // seed sees old-or-new rows and never an empty table; drop the airports the
-  // dataset no longer has once every chunk is in.
-  for (let i = 0; i < rows.length; i += SEED_CHUNK) {
-    await referenceDb.airports.bulkPut(rows.slice(i, i + SEED_CHUNK))
-    const done = Math.min(1, (i + SEED_CHUNK) / rows.length)
-    seedListeners.forEach((listener) => listener(done))
-    await new Promise((resolve) => setTimeout(resolve, SEED_GAP_MS))
-  }
-  const keep = new Set(rows.map((a) => a.icao))
-  const stale = ((await referenceDb.airports.toCollection().primaryKeys()) as string[]).filter((k) => !keep.has(k))
-  if (stale.length > 0) await referenceDb.airports.bulkDelete(stale)
-
-  // The version is stamped LAST: a seed interrupted part-way is redone next
-  // time instead of being taken for a complete table.
-  await referenceDb.setMetadata("airport_version", DATA_VERSION)
+  const airports = await writeAirportRows(rawData, (done) => seedListeners.forEach((listener) => listener(done)))
   airportsRevision++
-
   return airports
+}
+
+/**
+ * Seed from the bundled file — in a WORKER where one can be started.
+ *
+ * The file is 5.7MB of JSON, and `response.json()` parses it on the calling
+ * thread: on the main thread that was a ~500ms task (4× CPU throttle) on the
+ * tap that opened a new install's first flight, followed by ~120 chunked
+ * writes each serialising its rows on the main thread too. The worker does the
+ * fetch, the parse, the mapping and every write, so the page only hears the
+ * progress and the end. The table, the chunking and the version stamp are the
+ * same code either way (`writeAirportRows`). With no worker (or one that will
+ * not start) it runs here, as it always did.
+ */
+let sourceSeedInFlight: Promise<void> | null = null
+
+function seedFromSource(): Promise<void> {
+  sourceSeedInFlight ??= (async () => {
+    try {
+      if (await seedInWorker()) return
+      const response = await fetch(AIRPORT_SOURCE_URL)
+      if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`)
+      await rebuildAirportsTable(await response.json())
+    } finally {
+      sourceSeedInFlight = null
+    }
+  })()
+  return sourceSeedInFlight
+}
+
+/** True when the worker seeded the table; false when no worker could run it. */
+function seedInWorker(): Promise<boolean> {
+  if (typeof Worker === "undefined") return Promise.resolve(false)
+  let worker: Worker
+  try {
+    worker = new Worker(new URL("./airport-seed.worker.ts", import.meta.url), { type: "module" })
+  } catch {
+    return Promise.resolve(false)
+  }
+  return new Promise<boolean>((resolve, reject) => {
+    let started = false
+    worker.onmessage = ({ data }: MessageEvent<AirportSeedMessage>) => {
+      started = true
+      if (data.type === "progress") {
+        seedListeners.forEach((listener) => listener(data.done))
+        return
+      }
+      worker.terminate()
+      if (data.type === "done") {
+        airportsRevision++
+        resolve(true)
+      } else {
+        reject(new Error(data.error))
+      }
+    }
+    // A worker that never got going (its script would not load) is not an
+    // answer about the data: run the seed here instead.
+    worker.onerror = (event) => {
+      event.preventDefault()
+      worker.terminate()
+      if (started) reject(new Error(event.message || "Airport seed worker failed"))
+      else resolve(false)
+    }
+    worker.postMessage({ type: "seed" })
+  })
 }
 
 /**
@@ -197,9 +192,7 @@ export function ensureAirportDatabase(): Promise<void> {
           referenceDb.airports.count(),
         ])
         if (storedVersion === DATA_VERSION && count > 0) return
-        const response = await fetch(AIRPORT_SOURCE_URL)
-        if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`)
-        await rebuildAirportsTable(await response.json())
+        await seedFromSource()
       } catch (error) {
         console.error("[Airport DB] Could not seed the airports table:", error)
       }
@@ -225,11 +218,8 @@ export async function getAirportDatabase(): Promise<Airport[]> {
 
     // Fetch from public/airports.min.json
     console.log("[Airport DB] Cache miss or update. Loading local file...")
-    const response = await fetch(AIRPORT_SOURCE_URL)
-    if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`)
-
-    const rawData: Record<string, any> = await response.json()
-    return await rebuildAirportsTable(rawData)
+    await seedFromSource()
+    return await referenceDb.airports.toArray()
   } catch (error) {
     console.error("[Airport DB] Critical failure:", error)
     return []

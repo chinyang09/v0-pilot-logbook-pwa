@@ -70,7 +70,6 @@ const EMPTY_RESULT = {
   capacity: EMPTY_CAPACITY,
   forecast: { exceedances: [] as Array<{ date: string; limitName: string; projected: number; limit: number }>, hasExceedance: false },
   restViolations: [] as DutyPeriod[],
-  timelineData: [] as TimelineDataPoint[],
   restUntilLegal: null as RestUntilLegalResult | null,
   /** The pipeline threw: the empty figures above are NOT a clear pilot. */
   failed: false as boolean,
@@ -80,7 +79,7 @@ type FDPResult = typeof EMPTY_RESULT
 
 /**
  * Module-level cache of the last computed FDP result. The full pipeline (duty
- * periods → rest → forecast → timeline) is expensive, and the dashboard is NOT
+ * periods → rest → forecast) is expensive, and the dashboard is NOT
  * a keep-alive page — its useMemo dies on every navigation, so without this the
  * whole pipeline re-ran on every dashboard visit (the residual mount hitch).
  * The key is content-derived (counts + max updatedAt + tz map) plus a 5-minute
@@ -160,8 +159,9 @@ function computeFDPResult(
       (dp) => dp.restBefore && !dp.restBefore.compliant
     )
 
-    // Timeline chart data
-    const timelineData = generateTimelineData(withRest, limits)
+    // The chart's day-by-day timeline is NOT built here: only the FDP page
+    // draws it, and this pipeline runs for the dashboard's first render too.
+    // See `useFDPTimeline`.
 
     // Rest until legal for the next duty. Given the WHOLE timeline, not just
     // the past: it picks the last COMPLETED duty itself, and para 4's 24-hour
@@ -180,7 +180,6 @@ function computeFDPResult(
       capacity,
       forecast,
       restViolations,
-      timelineData,
       restUntilLegal,
       failed: false,
     }
@@ -304,4 +303,13 @@ export function useFDPData() {
     ...result,
     isLoading: !dbReady || flightsLoading || scheduleLoading,
   }
+}
+
+/**
+ * The FDP chart's timeline — a point per DAY from the first duty to today, so
+ * it is the one part of the pipeline whose cost grows with the length of the
+ * logbook rather than the number of duties. Built only where it is drawn.
+ */
+export function useFDPTimeline(allDutyPeriods: DutyPeriod[]): TimelineDataPoint[] {
+  return useMemo(() => generateTimelineData(allDutyPeriods, DEFAULT_FTL_LIMITS), [allDutyPeriods])
 }

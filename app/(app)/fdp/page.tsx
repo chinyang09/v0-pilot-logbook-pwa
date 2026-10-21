@@ -12,7 +12,7 @@ import {
   AlertTriangle,
   Calculator,
 } from "lucide-react"
-import { useFDPData } from "@/hooks/data/use-fdp-data"
+import { useFDPData, useFDPTimeline } from "@/hooks/data/use-fdp-data"
 import { useScheduleEntries } from "@/hooks/data/use-schedule"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import {
@@ -88,9 +88,9 @@ export default function FDPPage() {
     restViolations,
     futureDuties,
     restUntilLegal,
-    timelineData,
     isLoading,
   } = useFDPData()
+  const timelineData = useFDPTimeline(allDutyPeriods)
 
   const { preferences } = usePreferences()
   const activeRule: RegulationType = preferences.dutyTimeDefaults?.regulationType ?? "CAAS"

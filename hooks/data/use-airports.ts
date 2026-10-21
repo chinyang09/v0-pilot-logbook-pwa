@@ -4,9 +4,11 @@ import { useCallback, useEffect, useState, type SetStateAction } from "react"
 import useSWR from "swr"
 import {
   getAllAirports,
-  bulkLoadAirports,
   getAirportDatabase,
   getAirportsRevision,
+  getAirportByIcao,
+  getAirportByICAO,
+  ensureAirportDatabase,
   type Airport,
 } from "@/lib/db"
 import { useDBReady, CACHE_KEYS, checkDBReady } from "./use-db"
@@ -21,16 +23,13 @@ async function fetchAirports(): Promise<Airport[]> {
   // Try to get data from IndexedDB
   let airports = await getAllAirports()
 
-  // If DB is empty, fetch the JSON and seed it
+  // If DB is empty, seed it from the bundled file. `getAirportDatabase` seeds
+  // AND reads back; its rows are already mapped, so handing them to
+  // `bulkLoadAirports` (which maps raw JSON) re-mapped them with no `lat`/`lon`
+  // and wrote every airport back at 0°N 0°E.
   if (airports.length === 0) {
     console.log("[Airports] DB empty, fetching airports.min.json...")
-    const data = await getAirportDatabase()
-
-    // Save to IndexedDB so next time it's instant
-    await bulkLoadAirports(data)
-
-    // Retrieve the newly saved records
-    airports = await getAllAirports()
+    airports = await getAirportDatabase()
   }
 
   console.log("[Airports] Total loaded:", airports.length)
@@ -150,4 +149,83 @@ export function useAirportDatabase() {
   }, [])
 
   return { airports, isLoading, error, mutate }
+}
+
+/**
+ * ONE airport by ICAO, for a screen that needs a couple of them rather than
+ * the list.
+ *
+ * The flight form used `useAirportDatabase` to find its departure and arrival,
+ * so the first flight opened after every cold start read and deserialised the
+ * whole ~29k-row table on the main thread to answer two primary-key lookups.
+ * This answers from the in-memory list when something else (the airports page)
+ * has already loaded it at the current revision, then from a small per-code
+ * cache, and otherwise with one `get` on the primary key.
+ *
+ * It still makes sure the table is SEEDED (`ensureAirportDatabase`, which never
+ * reads it back) — the flight form is where a new install's seed starts — and
+ * looks again once a seed or any other write moves the revision.
+ *
+ * `undefined` = not known yet; `null` = looked up, no such airport.
+ */
+const icaoLookups = new Map<string, Airport | null>()
+let icaoLookupsRevision = -1
+
+function peekAirport(code: string): Airport | null | undefined {
+  if (!code) return null
+  const revision = getAirportsRevision()
+  if (airportDbCache && airportDbCacheRevision === revision) return getAirportByICAO(airportDbCache, code) ?? null
+  if (icaoLookupsRevision !== revision) {
+    icaoLookups.clear()
+    icaoLookupsRevision = revision
+  }
+  return icaoLookups.get(code)
+}
+
+async function lookUpAirport(code: string): Promise<Airport | null> {
+  const revision = getAirportsRevision()
+  const airport = (await getAirportByIcao(code)) ?? null
+  if (icaoLookupsRevision !== revision) {
+    icaoLookups.clear()
+    icaoLookupsRevision = revision
+  }
+  icaoLookups.set(code, airport)
+  return airport
+}
+
+/** Start the lookups for a screen about to open, so its first render has them. */
+export function prefetchAirports(...icaos: (string | undefined | null)[]): void {
+  for (const icao of icaos) {
+    const code = icao?.trim().toUpperCase()
+    if (code && peekAirport(code) === undefined) void lookUpAirport(code).catch(() => {})
+  }
+}
+
+export function useAirportByIcao(icao: string | undefined | null): Airport | null | undefined {
+  const code = icao?.trim().toUpperCase() ?? ""
+  const [found, setFound] = useState<{ code: string; airport: Airport | null }>({ code: "", airport: null })
+
+  useEffect(() => {
+    if (!code) return
+    let alive = true
+    const read = () =>
+      lookUpAirport(code)
+        .then((airport) => {
+          if (alive) setFound({ code, airport })
+        })
+        .catch(() => {})
+    const revisionBefore = getAirportsRevision()
+    if (peekAirport(code) === undefined) void read()
+    // A first seed (or any write) moves the revision: look again afterwards.
+    void ensureAirportDatabase().then(() => {
+      if (alive && getAirportsRevision() !== revisionBefore) void read()
+    })
+    return () => {
+      alive = false
+    }
+  }, [code])
+
+  const cached = peekAirport(code)
+  if (cached !== undefined) return cached
+  return found.code === code ? found.airport : undefined
 }

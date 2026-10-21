@@ -77,9 +77,19 @@ function endAfter(startMs: number | null, date: string, time: string | undefined
 
 /** YYYY-MM-DD of an instant in the display zone. */
 export function dayKeyAt(ms: number, display: RosterDisplayZone): string {
-  const zone = display.zulu
-    ? "UTC"
-    : display.zone || Intl.DateTimeFormat().resolvedOptions().timeZone
+  // UTC and the DEVICE's zone are what `Date` already computes, with no Intl
+  // formatter in the way — and this runs once per flight in the logbook when
+  // the roster first opens, where `formatToParts` per item was the largest
+  // single cost. Only a named zone needs the formatter.
+  if (display.zulu || !display.zone) {
+    const d = new Date(ms)
+    if (Number.isNaN(d.getTime())) return ""
+    const [y, m, day] = display.zulu
+      ? [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()]
+      : [d.getFullYear(), d.getMonth() + 1, d.getDate()]
+    return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+  }
+  const zone = display.zone
   const parts = tzFormatter(
     zone,
     { year: "numeric", month: "2-digit", day: "2-digit" },

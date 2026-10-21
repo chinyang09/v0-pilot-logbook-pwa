@@ -78,17 +78,18 @@ export function ScrollIndicator() {
       thumb.style.left = `${box.right - 6}px`
       thumb.style.top = `${box.top}px`
     }
-    measureBox()
+    // NOT measured here. This effect runs as the page mounts, and a rect read
+    // at that point forced a layout of the whole new page (~290ms of the first
+    // visit to Roster at a 4× CPU throttle) that the frame then did again. The
+    // observer below reports the first box after the browser's own layout.
 
     let hideTimer = 0
     let raf = 0
     // Where the zero-height marker sits when nothing is rubber-banding. Used
     // ONLY to read the bounce distance on engines that clamp `scrollTop` to
-    // the range — it never places anything.
+    // the range — it never places anything. Taken with the first box.
     let restDrift = 0
-    requestAnimationFrame(() => {
-      restDrift = anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top
-    })
+    let restDriftTaken = false
 
 
     // While the thumb is VISIBLE the layout can move under it without any
@@ -199,7 +200,13 @@ export function ScrollIndicator() {
       if (!raf) raf = requestAnimationFrame(update)
     }
 
-    const ro = new ResizeObserver(measureBox)
+    const ro = new ResizeObserver(() => {
+      measureBox()
+      if (!restDriftTaken) {
+        restDriftTaken = true
+        restDrift = anchor.getBoundingClientRect().top - box.top
+      }
+    })
     ro.observe(scroller)
     scroller.addEventListener("scroll", onScroll, { passive: true })
     window.addEventListener("resize", measureBox)

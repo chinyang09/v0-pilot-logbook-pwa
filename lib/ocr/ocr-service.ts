@@ -170,29 +170,6 @@ async function processWithBrowserOCR(file: File): Promise<OcrResult[]> {
  * uploaded costs nothing more to let land).
  */
 export async function extractTextFromImage(file: File): Promise<OcrResult[]> {
-  const release = holdAmbientMotion()
-  try {
-    return await readPhoto(file)
-  } finally {
-    release()
-  }
-}
-
-/**
- * Pause the UI's ambient animation while a photo is read — see
- * `html[data-busy]` in globals.css for what and why. Counted, so two reads
- * overlapping release it only when both are done.
- */
-let busyCount = 0
-function holdAmbientMotion(): () => void {
-  if (typeof document === "undefined") return () => {}
-  if (busyCount++ === 0) document.documentElement.dataset.busy = "ocr"
-  return () => {
-    if (--busyCount === 0) delete document.documentElement.dataset.busy
-  }
-}
-
-async function readPhoto(file: File): Promise<OcrResult[]> {
   if (deviceFailed) {
     if (serverUsable()) {
       try {

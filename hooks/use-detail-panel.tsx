@@ -1,6 +1,6 @@
 "use client"
 
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, type ReactNode } from "react"
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, startTransition, type ReactNode } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { KEEPALIVE_DETAIL_ROUTES } from "@/components/keep-alive-routes"
 
@@ -72,6 +72,25 @@ function saveSelection(path: string, id: string | null) {
 
 interface DetailPanelProviderProps {
   children: ReactNode
+}
+
+/**
+ * Write `?selected=` one task AFTER the tap that asked for it.
+ *
+ * Next applies a native history write as a router transition, but one made
+ * INSIDE a click rendered synchronously, in that click — and it took the
+ * selection's own transition with it, so opening a flight rendered the whole
+ * form before the tap could paint (~550ms at a 4× CPU throttle, measured by
+ * commit: four commits inside the click; with the write deferred, none). Out
+ * of the event, both render in yielding slices. The selection itself still
+ * changes in the tap, so the detail opens from state and `pendingUrlWriteRef`
+ * covers the task in between, exactly as it covered the router catching up.
+ */
+function writeUrlAfterTap(kind: "push" | "replace", url: string) {
+  window.setTimeout(() => {
+    if (kind === "push") window.history.pushState(null, "", url)
+    else window.history.replaceState(null, "", url)
+  }, 0)
 }
 
 export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
@@ -192,11 +211,20 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     const explicit = opts?.explicit !== false
     backClearedRef.current = false
 
-    setSelections(prev => ({ ...prev, [currentBase]: id }))
+    // A TRANSITION: what this commits is a whole detail form (the flight form
+    // is ~50 rows), and as an ordinary update it rendered synchronously inside
+    // the tap — ~550ms at a 4× CPU throttle in which the card could not even
+    // show it had been pressed. As a transition React renders it in slices and
+    // the tap paints first. It also lands in the same lane as the `?selected=`
+    // write below (Next applies a history push as a transition), so the URL
+    // and the selection commit together.
     const nextExplicit = explicit && !!id
-    setExplicitBases(prev =>
-      prev[currentBase] === nextExplicit ? prev : { ...prev, [currentBase]: nextExplicit }
-    )
+    startTransition(() => {
+      setSelections(prev => ({ ...prev, [currentBase]: id }))
+      setExplicitBases(prev =>
+        prev[currentBase] === nextExplicit ? prev : { ...prev, [currentBase]: nextExplicit }
+      )
+    })
 
     // Update URL — explicit selections only. A programmatic default writing
     // ?selected= would re-open the mobile overlay on a desktop→mobile resize.
@@ -216,12 +244,15 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
       // entry, and the back gesture sailed straight past the section. The
       // `?selected=` param is written for every explicit open, so its presence
       // is exactly "we already own a pushed entry here".
-      const detailIsOpen = searchParams.has("selected")
+      //
+      // `pushedBaseRef` counts too: the write below lands a task later, so a
+      // second tap inside that task must still see the detail as open.
+      const detailIsOpen = searchParams.has("selected") || pushedBaseRef.current === currentBase
       pendingUrlWriteRef.current = true
       if (id && !detailIsOpen) {
         // Opening a detail is a move, so it gets a history entry to undo.
         pushedBaseRef.current = currentBase
-        window.history.pushState(null, "", newUrl || "/")
+        writeUrlAfterTap("push", newUrl || "/")
       } else if (!id && pushedBaseRef.current === currentBase) {
         // Closing it in-app: go back rather than replace, so the entry we
         // pushed is consumed instead of lingering as a dead back press.
@@ -230,7 +261,7 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
       } else {
         // Switching between items isn't a new move — it would pile up an entry
         // per tap and turn back into a tour of everything you looked at.
-        window.history.replaceState(null, "", newUrl || "/")
+        writeUrlAfterTap("replace", newUrl || "/")
       }
     }
 

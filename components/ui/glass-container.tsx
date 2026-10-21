@@ -175,6 +175,10 @@ export function GlassContainer({
    */
   const pointRef = useRef<{ x: number; y: number } | null>(null)
   const trackRafRef = useRef(0)
+  // The box as the last applied frame saw it, for the release ripple — read
+  // fresh at the lift it forced a layout in the middle of the tap that
+  // navigates, ~36ms of a tab switch at a 4× CPU throttle.
+  const lastRectRef = useRef<DOMRect | null>(null)
 
   const applyPoint = () => {
     trackRafRef.current = 0
@@ -182,6 +186,7 @@ export function GlassContainer({
     const el = rootRef.current
     if (!point || !el) return
     const rect = el.getBoundingClientRect()
+    lastRectRef.current = rect
     el.style.setProperty("--press-x", `${point.x - rect.left}px`)
     el.style.setProperty("--press-y", `${point.y - rect.top}px`)
     if (!interactive) return
@@ -259,7 +264,7 @@ export function GlassContainer({
     }
     const el = rootRef.current
     if (el && clientX !== undefined && clientY !== undefined) {
-      const rect = el.getBoundingClientRect()
+      const rect = lastRectRef.current ?? el.getBoundingClientRect()
       setRipple({
         x: clientX - rect.left,
         y: clientY - rect.top,
