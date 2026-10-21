@@ -57,6 +57,9 @@ const VIEW_COLORS: Record<string, string> = {
   flight365: "#6fa3b0",// muted slate-cyan (distinct from orange)
 }
 
+/** The most points the overview strip draws — see `overviewData`. */
+const OVERVIEW_POINTS = 240
+
 // Semantic colors for data bars and compliance indicators (hex for SVG compatibility)
 const COLORS = {
   dutyBar: "#6b8eae",     // muted blue for duty hours bars
@@ -765,6 +768,36 @@ export function FDPTimelineChart({
     setViewWindow(null)
   }, [])
 
+  // The overview strip is a few hundred px wide and 50 tall, and it was handed
+  // EVERY day of the logbook — ~8,400 points per series on a 1,200-flight
+  // career, each one an SVG path segment Recharts builds on the main thread
+  // (most of the FDP page's first render at a 4× CPU throttle). Bucketed to an
+  // envelope of at most OVERVIEW_POINTS, each bucket keeping the MAX of every
+  // rolling series so a peak near a limit is never smoothed away. Buckets are
+  // uniform, so a bucket's position is its days' position: the touch mapping
+  // and the window box keep working in `activeData`'s index space.
+  const overviewData = useMemo(() => {
+    const n = activeData.length
+    if (n <= OVERVIEW_POINTS * 2) return activeData
+    const keys = views.map((v) => v.rollingKey)
+    const out: TimelineDataPoint[] = []
+    for (let j = 0; j < OVERVIEW_POINTS; j++) {
+      const from = Math.floor((j * n) / OVERVIEW_POINTS)
+      const to = Math.floor(((j + 1) * n) / OVERVIEW_POINTS)
+      const point: Record<string, unknown> = { ...activeData[to - 1] }
+      for (const key of keys) {
+        let max = -Infinity
+        for (let i = from; i < to; i++) {
+          const v = activeData[i][key]
+          if (typeof v === "number" && v > max) max = v
+        }
+        if (max > -Infinity) point[key] = max
+      }
+      out.push(point as unknown as TimelineDataPoint)
+    }
+    return out
+  }, [activeData, views])
+
   // Overview window highlight — CSS calc values for the active window box
   const overviewHighlight = useMemo(() => {
     const total = Math.max(activeData.length - 1, 1)
@@ -1163,7 +1196,7 @@ export function FDPTimelineChart({
                   these rounded corners so the darkened regions clip seamlessly into them. */}
               <div className="relative overflow-hidden rounded-md" style={{ marginLeft: CHART_LEFT_PX, marginRight: CHART_RIGHT_PX }}>
                 <ResponsiveContainer width="100%" height={50}>
-                  <ComposedChart data={activeData} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
+                  <ComposedChart data={overviewData} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
                     <defs>
                       {selectedNonRestViews.map((view) => (
                         <linearGradient key={`ov-grad-${view.key}`} id={`ov-gradient-${view.key}`} x1="0" y1="0" x2="0" y2="1">

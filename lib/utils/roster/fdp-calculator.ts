@@ -1724,13 +1724,6 @@ function formatDateLabel(dateStr: string): string {
   return `${dateStr.slice(8, 10)} ${MONTH_SHORT[Number(dateStr.slice(5, 7)) - 1]}`
 }
 
-/** Get the next date string (YYYY-MM-DD) after the given date */
-function nextDate(dateStr: string): string {
-  const d = new Date(dateStr + "T00:00:00Z")
-  d.setUTCDate(d.getUTCDate() + 1)
-  return d.toISOString().split("T")[0]
-}
-
 /**
  * Generate timeline data points for charting.
  * Creates a continuous timeline from earliest to latest duty date,
@@ -1796,9 +1789,13 @@ export function generateTimelineData(
   const result: TimelineDataPoint[] = []
   let currentDate = startDate
   let upToDate = 0
+  // The day walked as a UTC-midnight instant: one point per DAY of a career,
+  // so a Date parse and an ISO string per step (`nextDate`) were most of this
+  // loop's own time. `isoDay` of it is exactly what `nextDate` returned.
+  let dayStartMs = Date.parse(startDate + "T00:00:00Z")
 
   while (currentDate <= endDate) {
-    const asOfDate = new Date(currentDate + "T23:59:59Z")
+    const asOfDate = new Date(dayStartMs + 86_399_000)
     const dpsOnDate = dpsByDate.get(currentDate)
 
     // Rolling stats for this date, over the DPs up to and including it
@@ -1851,10 +1848,19 @@ export function generateTimelineData(
       })
     }
 
-    currentDate = nextDate(currentDate)
+    dayStartMs += 86_400_000
+    currentDate = isoDay(dayStartMs)
   }
 
   return result
+}
+
+const pad2 = (n: number) => (n < 10 ? "0" : "") + n
+
+/** `YYYY-MM-DD` of a UTC instant — `toISOString().split("T")[0]` without the string work. */
+function isoDay(ms: number): string {
+  const d = new Date(ms)
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`
 }
 
 // ============================================
