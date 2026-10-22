@@ -123,8 +123,14 @@ export const CurrencyCard = memo(function CurrencyCard({ currency, onEdit, onDel
   }
 
   return (
-    <SwipeableCard id={`currency-${currency.id}`} actions={actions}>
-      <Card className={cn("overflow-hidden transition-all hover:shadow-md", config.border)}>
+    // A tap opens the editor, the way a tap opens a crew card or a flight —
+    // it did nothing, so editing was only reachable through the swipe panel.
+    <SwipeableCard
+      id={`currency-${currency.id}`}
+      actions={actions}
+      onClick={onEdit ? () => onEdit(currency) : undefined}
+    >
+      <Card className={cn("overflow-hidden transition-shadow hover:shadow-md", onEdit && "cursor-pointer", config.border)}>
       <CardContent className="p-4">
         {/* Header */}
         <div className="flex items-start gap-3 mb-3">

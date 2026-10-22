@@ -1,30 +1,20 @@
 /**
- * Currency Form Dialog Component
- * Form for adding/editing currency entries
+ * Add or edit a currency (a document or check that expires).
+ *
+ * The same form shell as every other entity form — a full-screen sheet over
+ * the content region with grouped rows and Cancel/Save (`RegionSheet`). It was
+ * a centred modal of boxed inputs with a full-width button, which read as a
+ * different app from the crew, aircraft and duty forms beside it.
  */
 
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Save, Loader2 } from "lucide-react"
+import { FormSection } from "@/components/ui/form-section"
+import { RegionSheet } from "@/components/ui/region-sheet"
+import { SelectRow, SettingsRow, ToggleRow } from "@/components/ui/settings-row"
+import { useBackDismiss } from "@/hooks/use-back-dismiss"
 import { addCurrency, updateCurrency } from "@/lib/db"
 import type { CurrencyWithStatus, CurrencyCode } from "@/types/entities/roster.types"
 
@@ -45,6 +35,12 @@ const PREDEFINED_CURRENCIES: Array<{ code: CurrencyCode; description: string }> 
   { code: "CUSTOM", description: "Custom Currency" },
 ]
 
+/** The trigger is right-aligned in a row beside its label: the name, not "CODE - name". */
+const TYPE_OPTIONS = PREDEFINED_CURRENCIES.map((c) => ({
+  value: c.code as string,
+  label: c.code === "CUSTOM" ? "Custom" : c.description,
+}))
+
 interface CurrencyFormDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -52,274 +48,174 @@ interface CurrencyFormDialogProps {
   onSaved?: () => void
 }
 
-export function CurrencyFormDialog({
-  open,
-  onOpenChange,
+export function CurrencyFormDialog({ open, onOpenChange, currency, onSaved }: CurrencyFormDialogProps) {
+  if (!open) return null
+  // Mounted only while open and keyed on the record, so every open seeds the
+  // form from scratch through `useState` initialisers. The reset effect this
+  // replaces was a cascading render on every open, and keyed on the currency
+  // OBJECT it clobbered an edit in progress whenever a sync handed back a
+  // fresh row.
+  return (
+    <CurrencyForm
+      key={currency?.id ?? "new"}
+      currency={currency ?? null}
+      onClose={() => onOpenChange(false)}
+      onSaved={onSaved}
+    />
+  )
+}
+
+function CurrencyForm({
   currency,
+  onClose,
   onSaved,
-}: CurrencyFormDialogProps) {
-  const isEdit = !!currency
+}: {
+  currency: CurrencyWithStatus | null
+  onClose: () => void
+  onSaved?: () => void
+}) {
+  const dismiss = useBackDismiss(true, onClose)
 
-  // Form state
-  const [currencyCode, setCurrencyCode] = useState<string>("MEDIC")
-  const [description, setDescription] = useState("")
-  const [expiryDate, setExpiryDate] = useState("")
-  const [warningDays, setWarningDays] = useState("30")
-  const [criticalDays, setCriticalDays] = useState("7")
-  const [autoUpdate, setAutoUpdate] = useState(true)
-  const [documentNumber, setDocumentNumber] = useState("")
-  const [notes, setNotes] = useState("")
-  const [isCustom, setIsCustom] = useState(false)
-  const [customDescription, setCustomDescription] = useState("")
-
-  const [isSaving, setIsSaving] = useState(false)
-  const [showSuccess, setShowSuccess] = useState(false)
+  const [currencyCode, setCurrencyCode] = useState<string>(() => currency?.code ?? PREDEFINED_CURRENCIES[0].code)
+  const [customDescription, setCustomDescription] = useState(() =>
+    currency?.code === "CUSTOM" ? currency.description : "",
+  )
+  const [expiryDate, setExpiryDate] = useState(() => currency?.expiryDate ?? "")
+  const [warningDays, setWarningDays] = useState(() => String(currency?.warningDays ?? 30))
+  const [criticalDays, setCriticalDays] = useState(() => String(currency?.criticalDays ?? 7))
+  const [autoUpdate, setAutoUpdate] = useState(() => currency?.autoUpdate ?? true)
+  const [documentNumber, setDocumentNumber] = useState(() => currency?.documentNumber ?? "")
+  const [notes, setNotes] = useState(() => currency?.notes ?? "")
+  const [saving, setSaving] = useState(false)
   // Inline, not `alert()`: a native alert blocks the page, reads as a system
   // fault rather than a missing field, and is not shown at all in some
   // installed-PWA contexts.
   const [error, setError] = useState<string | null>(null)
 
-  const handleOpenChange = (next: boolean) => {
-    if (!next) setError(null)
-    onOpenChange(next)
-  }
+  const isCustom = currencyCode === "CUSTOM"
+  // A predefined code's description is the table's; an existing record keeps
+  // its own wording when its code is unchanged (an import may have named it).
+  const description = isCustom
+    ? customDescription
+    : currency && currency.code === currencyCode
+      ? currency.description
+      : (PREDEFINED_CURRENCIES.find((c) => c.code === currencyCode)?.description ?? "")
 
-  // Load currency data when editing
-  useEffect(() => {
-    if (currency) {
-      setCurrencyCode(currency.code)
-      setDescription(currency.description)
-      setExpiryDate(currency.expiryDate)
-      setWarningDays(currency.warningDays.toString())
-      setCriticalDays(currency.criticalDays.toString())
-      setAutoUpdate(currency.autoUpdate)
-      setDocumentNumber(currency.documentNumber || "")
-      setNotes(currency.notes || "")
-      setIsCustom(currency.code === "CUSTOM")
-      setCustomDescription(currency.code === "CUSTOM" ? currency.description : "")
-    } else {
-      // Reset for new currency
-      const defaultCurrency = PREDEFINED_CURRENCIES[0]
-      setCurrencyCode(defaultCurrency.code)
-      setDescription(defaultCurrency.description)
-      setExpiryDate("")
-      setWarningDays("30")
-      setCriticalDays("7")
-      setAutoUpdate(true)
-      setDocumentNumber("")
-      setNotes("")
-      setIsCustom(false)
-      setCustomDescription("")
-    }
-  }, [currency, open])
+  const missing: string[] = []
+  if (!description.trim()) missing.push("a description")
+  if (!expiryDate) missing.push("an expiry date")
+  const blockedReason = missing.length ? `Needs ${missing.join(" and ")}` : null
+  const canSave = !blockedReason && !saving
 
-  const handleCurrencyCodeChange = (code: string) => {
-    setCurrencyCode(code)
-    setIsCustom(code === "CUSTOM")
-
-    if (code !== "CUSTOM") {
-      const selected = PREDEFINED_CURRENCIES.find((c) => c.code === code)
-      if (selected) {
-        setDescription(selected.description)
-      }
-    }
-  }
-
-  const handleSave = async () => {
+  const save = async () => {
+    if (!canSave) return
+    setSaving(true)
+    setError(null)
     try {
-      setIsSaving(true)
-      setError(null)
-
-      const finalDescription = isCustom ? customDescription : description
-
-      if (!finalDescription.trim()) {
-        setError("Enter a description.")
-        return
-      }
-
-      if (!expiryDate) {
-        setError("Enter an expiry date.")
-        return
-      }
-
-      const currencyData = {
+      const data = {
         code: currencyCode,
-        description: finalDescription,
+        description: description.trim(),
         expiryDate,
         warningDays: parseInt(warningDays) || 30,
         criticalDays: parseInt(criticalDays) || 7,
         autoUpdate,
-        documentNumber: documentNumber || undefined,
-        notes: notes || undefined,
+        documentNumber: documentNumber.trim() || undefined,
+        notes: notes.trim() || undefined,
         lastUpdatedFrom: "manual" as const,
       }
-
-      if (isEdit && currency) {
-        await updateCurrency(currency.id, currencyData)
-      } else {
-        await addCurrency(currencyData)
-      }
-
-      setShowSuccess(true)
-      setTimeout(() => {
-        setShowSuccess(false)
-        onOpenChange(false)
-        onSaved?.()
-      }, 1000)
-    } catch (error) {
-      console.error("Failed to save currency:", error)
+      if (currency) await updateCurrency(currency.id, data)
+      else await addCurrency(data)
+      onSaved?.()
+      dismiss()
+    } catch (err) {
+      console.error("Failed to save currency:", err)
       setError("Couldn't save this currency. Try again.")
-    } finally {
-      setIsSaving(false)
+      setSaving(false)
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit Currency" : "Add Currency"}</DialogTitle>
-          <DialogDescription>
-            {isEdit
-              ? "Update currency and expiry information"
-              : "Add a new currency or expiry date to track"}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4 py-4">
-          {/* Currency Type */}
-          <div className="space-y-2">
-            <Label htmlFor="currency-code">Currency Type</Label>
-            <Select value={currencyCode} onValueChange={handleCurrencyCodeChange}>
-              <SelectTrigger id="currency-code">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PREDEFINED_CURRENCIES.map((curr) => (
-                  <SelectItem key={curr.code} value={curr.code}>
-                    {curr.code === "CUSTOM" ? "Custom" : `${curr.code} - ${curr.description}`}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Custom Description */}
-          {isCustom && (
-            <div className="space-y-2">
-              <Label htmlFor="custom-description">Description *</Label>
-              <Input
-                id="custom-description"
-                value={customDescription}
-                onChange={(e) => setCustomDescription(e.target.value)}
-                placeholder="e.g., Company ID Card, Security Clearance"
-              />
-            </div>
-          )}
-
-          {/* Expiry Date */}
-          <div className="space-y-2">
-            <Label htmlFor="expiry-date">Expiry Date *</Label>
-            <Input
-              id="expiry-date"
-              type="date"
-              value={expiryDate}
-              onChange={(e) => setExpiryDate(e.target.value)}
-            />
-          </div>
-
-          {/* Warning Days */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="warning-days">Warning (days)</Label>
-              <Input
-                id="warning-days"
-                type="number"
-                value={warningDays}
-                onChange={(e) => setWarningDays(e.target.value)}
-                placeholder="30"
-              />
-            </div>
-
-            {/* Critical Days */}
-            <div className="space-y-2">
-              <Label htmlFor="critical-days">Critical (days)</Label>
-              <Input
-                id="critical-days"
-                type="number"
-                value={criticalDays}
-                onChange={(e) => setCriticalDays(e.target.value)}
-                placeholder="7"
-              />
-            </div>
-          </div>
-
-          {/* Document Number */}
-          <div className="space-y-2">
-            <Label htmlFor="document-number">Document/Certificate Number</Label>
-            <Input
-              id="document-number"
-              value={documentNumber}
-              onChange={(e) => setDocumentNumber(e.target.value)}
-              placeholder="Optional"
-            />
-          </div>
-
-          {/* Notes */}
-          <div className="space-y-2">
-            <Label htmlFor="notes">Notes</Label>
-            <Input
-              id="notes"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Optional"
-            />
-          </div>
-
-          {/* Auto-update Toggle */}
-          <div className="flex items-center justify-between pt-2">
-            <div className="space-y-0.5">
-              <Label htmlFor="auto-update">Auto-update from schedule</Label>
-              <p className="text-xs text-muted-foreground">
-                Automatically update expiry date when importing schedule CSV
-              </p>
-            </div>
-            <Switch
-              id="auto-update"
-              checked={autoUpdate}
-              onCheckedChange={setAutoUpdate}
-            />
-          </div>
-
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
+    <RegionSheet
+      titleId="currency-dialog-title"
+      title={currency ? "Edit currency" : "Add currency"}
+      onDismiss={dismiss}
+      footer={
+        <>
+          {error ? (
+            <p className="mr-auto min-w-0 text-xs text-destructive" role="alert">
               {error}
             </p>
+          ) : (
+            blockedReason && (
+              <p className="mr-auto min-w-0 text-xs text-muted-foreground" role="status">
+                {blockedReason}
+              </p>
+            )
           )}
+          <Button variant="ghost" onClick={() => dismiss()}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={!canSave}>
+            {saving ? "Saving…" : "Save"}
+          </Button>
+        </>
+      }
+    >
+      <FormSection title="Currency">
+        <SelectRow label="Type" value={currencyCode} onValueChange={setCurrencyCode} options={TYPE_OPTIONS} />
+        {isCustom && (
+          <SettingsRow
+            label="Description"
+            value={customDescription}
+            onChange={setCustomDescription}
+            placeholder="Company ID"
+            required
+          />
+        )}
+        <SettingsRow
+          label="Expires"
+          value={expiryDate}
+          onChange={setExpiryDate}
+          type="date"
+          required
+          swipeToClear={false}
+        />
+      </FormSection>
 
-          {/* Save Button */}
-          <div className="flex items-center gap-2 pt-4">
-            <Button onClick={handleSave} disabled={isSaving || showSuccess} className="flex-1">
-              {isSaving ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Saving...
-                </>
-              ) : showSuccess ? (
-                <>
-                  <Save className="h-4 w-4 mr-2" />
-                  Saved!
-                </>
-              ) : (
-                <>
-                  <Save className="h-4 w-4 mr-2" />
-                  {isEdit ? "Update" : "Add"} Currency
-                </>
-              )}
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+      <FormSection title="Alerts">
+        <SettingsRow
+          label="Warning"
+          description="Days before expiry"
+          value={warningDays}
+          onChange={setWarningDays}
+          inputMode="numeric"
+          placeholder="30"
+        />
+        <SettingsRow
+          label="Critical"
+          description="Days before expiry"
+          value={criticalDays}
+          onChange={setCriticalDays}
+          inputMode="numeric"
+          placeholder="7"
+        />
+      </FormSection>
+
+      <FormSection title="Details">
+        <SettingsRow
+          label="Document no."
+          value={documentNumber}
+          onChange={setDocumentNumber}
+          placeholder="Optional"
+        />
+        <SettingsRow label="Notes" value={notes} onChange={setNotes} placeholder="Optional" />
+        <ToggleRow
+          label="Update from schedule"
+          description="Take the expiry from an imported schedule report"
+          checked={autoUpdate}
+          onCheckedChange={setAutoUpdate}
+        />
+      </FormSection>
+    </RegionSheet>
   )
 }
