@@ -17,14 +17,18 @@ export default function AuthLayout({
 }) {
   return (
     <div className="dark h-full w-full overflow-auto overscroll-contain pt-safe relative">
-      {/* Cockpit background image */}
-      <div className="absolute inset-0 z-0">
+      {/* Cockpit background — FIXED to the viewport, so a short screen that
+          scrolls the form (a phone in landscape) scrolls it over the picture
+          rather than off the end of it. And still: it used to zoom on a 25s
+          Ken Burns loop, which on a screen whose only job is to be steady
+          read as the page itself moving. */}
+      <div className="fixed inset-0 z-0">
         <Image
           src="/images/cockpit-bg.jpg"
           alt=""
           fill
           priority
-          className="object-cover object-center animate-ken-burns"
+          className="object-cover object-center"
           sizes="100vw"
         />
         {/* Dark gradient overlay */}
