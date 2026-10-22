@@ -19,7 +19,7 @@ export const KEEPALIVE_ROUTES = {
   "/aircraft": { hasDetailPanel: true },
   "/airports": { hasDetailPanel: true },
   "/crew": { hasDetailPanel: true },
-  "/roster": { hasDetailPanel: false },
+  "/roster": { hasDetailPanel: true },
 } as const
 
 export type KeepAliveRouteKey = keyof typeof KEEPALIVE_ROUTES

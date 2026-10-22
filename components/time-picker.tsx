@@ -5,6 +5,7 @@ import { WheelPicker, WheelPickerWrapper } from "@ncdai/react-wheel-picker"
 import "@ncdai/react-wheel-picker/style.css"
 import { createPortal } from "react-dom"
 import { MODAL_SCRIM } from "@/components/ui/chrome-overlays"
+import { WHEEL_FILL, wheelClassNames } from "@/components/ui/wheel-styles"
 import { useBackDismiss } from "@/hooks/use-back-dismiss"
 import { cn } from "@/lib/utils"
 import { formatTimezoneOffset, getCurrentTimeUTC, isValidHHMM, localToUTC, utcToLocal } from "@/lib/utils/time"
@@ -180,7 +181,7 @@ export function TimePicker({
         <div className="relative px-8 py-4">
           {/* Highlight bar */}
           <div
-            className="pointer-events-none absolute left-8 right-8 top-1/2 z-0 -translate-y-1/2 rounded-lg bg-muted/40"
+            className={`pointer-events-none absolute left-8 right-8 top-1/2 z-0 -translate-y-1/2 rounded-lg ${WHEEL_FILL}`}
             style={{ height: ITEM_HEIGHT }}
           />
 
@@ -201,10 +202,7 @@ export function TimePicker({
                 infinite
                 optionItemHeight={ITEM_HEIGHT}
                 visibleCount={VISIBLE_COUNT}
-                classNames={{
-                  optionItem: "text-lg tabular-nums text-muted-foreground/50 font-medium",
-                  highlightItem: "text-xl tabular-nums text-foreground font-semibold",
-                }}
+                classNames={wheelClassNames("start")}
               />
             </div>
 
@@ -219,10 +217,7 @@ export function TimePicker({
                 infinite
                 optionItemHeight={ITEM_HEIGHT}
                 visibleCount={VISIBLE_COUNT}
-                classNames={{
-                  optionItem: "text-lg tabular-nums text-muted-foreground/50 font-medium",
-                  highlightItem: "text-xl tabular-nums text-foreground font-semibold",
-                }}
+                classNames={wheelClassNames("end")}
               />
             </div>
           </WheelPickerWrapper>

@@ -15,7 +15,7 @@
  * duties only.
  */
 
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import Link from "next/link"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
@@ -28,7 +28,10 @@ import { usePreferences } from "@/components/providers/preferences-provider"
 import { cn } from "@/lib/utils"
 import { parseYMDLocal, formatLocalYMD } from "@/lib/utils/date"
 import { UnifiedImportButton } from "@/components/import/unified-import-button"
-import { DutyEntryDialog } from "@/components/roster/duty-entry-dialog"
+import { DutyDetailPanel } from "@/components/roster/duty-detail-panel"
+import { PanelLoading } from "@/components/ui/page-loading"
+import { useDetailPanel } from "@/hooks/use-detail-panel"
+import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { RosterMonth } from "@/components/roster/roster-month"
 import { RosterAgenda } from "@/components/roster/roster-agenda"
 import { deleteScheduleEntry, restoreScheduleEntry } from "@/lib/db"
@@ -36,6 +39,9 @@ import { showUndoToast } from "@/lib/utils/undo-toast"
 import { standbyActivation } from "@/lib/utils/roster/standby-activation"
 import { agendaFrom, buildRosterDays, dayKeyAt } from "@/lib/utils/roster/roster-days"
 import type { ScheduleEntry } from "@/types/entities/roster.types"
+
+/** The phone's "a new one is open" selection — never stored (see use-detail-panel). */
+const NEW_SENTINEL = "__new__"
 
 const QUICK_LINK =
   "flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-xs font-medium transition-colors hover:bg-secondary active:bg-secondary"
@@ -60,23 +66,21 @@ export default function RosterPage() {
   const days = useMemo(() => buildRosterDays(scheduleEntries, flights, { zulu }), [scheduleEntries, flights, zulu])
   const agenda = useMemo(() => agendaFrom(days, selectedKey), [days, selectedKey])
 
-  // Add / edit. `editing` null with the dialog open means "add".
-  const [dutyDialogOpen, setDutyDialogOpen] = useState(false)
-  const [editingEntry, setEditingEntry] = useState<ScheduleEntry | null>(null)
+  // A duty opens in the DETAIL panel — beside the month on a tablet, the
+  // full-screen overlay on a phone — the way a flight opens in the logbook.
+  const { selectedId, setSelectedId, setDetailContent } = useDetailPanel()
+  const isDesktop = useIsDesktop()
+  const selectedEntry = useMemo(
+    () => scheduleEntries.find((e) => e.id === selectedId) ?? null,
+    [scheduleEntries, selectedId]
+  )
 
-  const openAddDuty = useCallback(() => {
-    setEditingEntry(null)
-    setDutyDialogOpen(true)
-  }, [])
-
-  const openEditDuty = useCallback((entry: ScheduleEntry) => {
-    setEditingEntry(entry)
-    setDutyDialogOpen(true)
-  }, [])
+  const openEditDuty = useCallback((entry: ScheduleEntry) => setSelectedId(entry.id), [setSelectedId])
 
   const handleDeleteDuty = useCallback(
     async (entry: ScheduleEntry) => {
       await deleteScheduleEntry(entry.id)
+      if (entry.id === selectedId) setSelectedId(null)
       await refreshEntries()
       refreshAllData()
       showUndoToast(`${entry.dutyCode || "Duty"} deleted`, async () => {
@@ -85,15 +89,19 @@ export default function RosterPage() {
         refreshAllData()
       })
     },
-    [refreshEntries]
+    [refreshEntries, selectedId, setSelectedId]
   )
 
-  const handleDutySaved = useCallback(async () => {
-    await refreshEntries()
-    // The FDP pipeline reads schedule entries, so a duty added or edited here
-    // has to reach the dashboard's caches too.
-    refreshAllData()
-  }, [refreshEntries])
+  const handleDutySaved = useCallback(
+    async (saved: ScheduleEntry) => {
+      await refreshEntries()
+      // The FDP pipeline reads schedule entries, so a duty added or edited here
+      // has to reach the dashboard's caches too.
+      refreshAllData()
+      setSelectedId(saved.id)
+    },
+    [refreshEntries, setSelectedId]
+  )
 
   /**
    * Which standby duties were called out, and when (para 6(6)). Built once
@@ -123,6 +131,69 @@ export default function RosterPage() {
     [selectedKey, todayKey, setSelectedKey]
   )
 
+  // Keep-alive: only the active tab owns the header actions; re-activation
+  // refreshes the schedule and moves "today" on.
+  const onActivated = useCallback(() => {
+    setNow(Date.now())
+    refreshEntries()
+  }, [refreshEntries])
+  const isActive = usePageActive("/roster", onActivated)
+
+  // While a NEW duty's form is open, data-driven re-syncs must not replace it
+  // — but the user choosing another duty ends it (the crew page's rule).
+  const creatingRef = useRef<false | { sel: string | null }>(false)
+
+  // Keep-alive: only the ACTIVE roster may write the shared detail panel, or a
+  // hidden roster would overwrite the page in front of it.
+  const syncDetailPanel = useCallback(() => {
+    if (!isActive) return
+    if (creatingRef.current) {
+      if (selectedId === NEW_SENTINEL || selectedId === creatingRef.current.sel) return
+      creatingRef.current = false
+    }
+    if (entriesLoading && scheduleEntries.length === 0) {
+      setDetailContent(<PanelLoading />)
+      return
+    }
+    setDetailContent(
+      selectedEntry ? (
+        <DutyDetailPanel key={selectedEntry.id} entry={selectedEntry} onSaved={handleDutySaved} />
+      ) : null
+    )
+  }, [isActive, selectedId, selectedEntry, entriesLoading, scheduleEntries.length, handleDutySaved, setDetailContent])
+
+  useEffect(() => {
+    syncDetailPanel()
+  }, [syncDetailPanel])
+
+  const addDutyOn = useCallback(
+    (dayKey: string) => {
+      creatingRef.current = { sel: selectedId }
+      setDetailContent(
+        <DutyDetailPanel
+          key={`new-${dayKey}`}
+          entry={null}
+          defaultDate={dayKey}
+          onSaved={async (saved) => {
+            creatingRef.current = false
+            await handleDutySaved(saved)
+          }}
+          onCancelNew={() => {
+            creatingRef.current = false
+            if (isDesktop) syncDetailPanel()
+            else setSelectedId(null)
+          }}
+        />
+      )
+      // A phone has no panel beside the roster: the sentinel opens the overlay.
+      if (!isDesktop) setSelectedId(NEW_SENTINEL)
+    },
+    [selectedId, isDesktop, handleDutySaved, setDetailContent, setSelectedId, syncDetailPanel]
+  )
+
+  // The header's [+] adds on the selected day.
+  const openAddDuty = useCallback(() => addDutyOn(selectedKey), [addDutyOn, selectedKey])
+
   const rosterActions = useMemo(
     () => (
       <>
@@ -147,14 +218,6 @@ export default function RosterPage() {
     ),
     [refreshEntries, entriesLoading, openAddDuty]
   )
-
-  // Keep-alive: only the active tab owns the header actions; re-activation
-  // refreshes the schedule and moves "today" on.
-  const onActivated = useCallback(() => {
-    setNow(Date.now())
-    refreshEntries()
-  }, [refreshEntries])
-  const isActive = usePageActive("/roster", onActivated)
 
   useRegisterMainActions(rosterActions, isActive)
 
@@ -184,9 +247,11 @@ export default function RosterPage() {
             todayKey={todayKey}
             display={display}
             activations={activations}
+            // Lit only where the panel beside the roster shows it.
+            selectedId={isDesktop ? selectedId : null}
             onEditDuty={openEditDuty}
             onDeleteDuty={handleDeleteDuty}
-            onAddDuty={openAddDuty}
+            onAddDuty={addDutyOn}
           />
 
           <nav aria-label="Related" className="flex flex-wrap gap-2 pt-2">
@@ -211,16 +276,6 @@ export default function RosterPage() {
         </div>
       </PageContainer>
 
-      <DutyEntryDialog
-        // Remount on the entry (or, for a new duty, the selected day) so the
-        // form re-seeds from its `useState` initialisers — no seeding effect.
-        key={editingEntry?.id ?? `new-${selectedKey}`}
-        open={dutyDialogOpen}
-        entry={editingEntry}
-        defaultDate={selectedKey}
-        onClose={() => setDutyDialogOpen(false)}
-        onSaved={handleDutySaved}
-      />
     </>
   )
 }

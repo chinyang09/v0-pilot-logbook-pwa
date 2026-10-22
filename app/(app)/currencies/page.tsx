@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef } from "react"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassIconButton } from "@/components/ui/glass-icon-button"
@@ -10,16 +10,24 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { FormSection } from "@/components/ui/form-section"
 import { Shield, RefreshCw, Plus } from "lucide-react"
 import { useCurrencies } from "@/hooks/data"
-import { CurrencyCard, CurrencyFormDialog } from "@/components/roster"
-import type { CurrencyWithStatus } from "@/types/entities/roster.types"
+import { CurrencyCard, CurrencyDetailPanel } from "@/components/roster"
+import { PanelLoading } from "@/components/ui/page-loading"
+import { useDetailPanel } from "@/hooks/use-detail-panel"
+import { useIsDesktop } from "@/hooks/use-is-desktop"
+import type { Currency, CurrencyWithStatus } from "@/types/entities/roster.types"
 import { cn } from "@/lib/utils"
 import { deleteCurrency, restoreCurrency } from "@/lib/db"
 import { showUndoToast } from "@/lib/utils/undo-toast"
 
+/** The phone's "a new one is open" selection — never stored (see use-detail-panel). */
+const NEW_SENTINEL = "__new__"
+
 export default function CurrenciesPage() {
   const { currencies, isLoading, refresh } = useCurrencies()
-  const [currencyToEdit, setCurrencyToEdit] = useState<CurrencyWithStatus | null>(null)
-  const [showAddDialog, setShowAddDialog] = useState(false)
+  // A currency opens in the DETAIL panel — beside the list on a tablet, the
+  // full-screen overlay on a phone — the way a flight or a crew member does.
+  const { selectedId, setSelectedId, setDetailContent } = useDetailPanel()
+  const isDesktop = useIsDesktop()
 
   // ONE page, two groups: what needs attention, then what is current — each
   // soonest first. It used to be a card per currency behind All / Valid /
@@ -34,11 +42,71 @@ export default function CurrenciesPage() {
     }
   }, [currencies])
 
-  const handleEdit = useCallback((currency: CurrencyWithStatus) => setCurrencyToEdit(currency), [])
+  const selected = useMemo(
+    () => currencies.find((c) => c.id === selectedId) ?? null,
+    [currencies, selectedId]
+  )
+
+  const handleEdit = useCallback((currency: CurrencyWithStatus) => setSelectedId(currency.id), [setSelectedId])
+
+  const showSaved = useCallback(
+    async (saved: Currency) => {
+      await refresh()
+      setSelectedId(saved.id)
+    },
+    [refresh, setSelectedId]
+  )
+
+  // While a NEW currency's form is open, data-driven re-syncs must not replace
+  // it — but the user choosing another row ends it (the crew page's rule).
+  const creatingRef = useRef<false | { sel: string | null }>(false)
+
+  const syncDetailPanel = useCallback(() => {
+    if (creatingRef.current) {
+      if (selectedId === NEW_SENTINEL || selectedId === creatingRef.current.sel) return
+      creatingRef.current = false
+    }
+    if (isLoading && currencies.length === 0) {
+      setDetailContent(<PanelLoading />)
+      return
+    }
+    setDetailContent(
+      selected ? (
+        <CurrencyDetailPanel key={selected.id} currency={selected} onSaved={showSaved} />
+      ) : null
+    )
+  }, [selectedId, selected, isLoading, currencies.length, showSaved, setDetailContent])
+
+  useEffect(() => {
+    syncDetailPanel()
+  }, [syncDetailPanel])
+
+  const openNew = useCallback(() => {
+    creatingRef.current = { sel: selectedId }
+    setDetailContent(
+      <CurrencyDetailPanel
+        key="new"
+        currency={null}
+        onSaved={async (saved) => {
+          creatingRef.current = false
+          await showSaved(saved)
+        }}
+        onCancelNew={() => {
+          creatingRef.current = false
+          if (isDesktop) syncDetailPanel()
+          else setSelectedId(null)
+        }}
+      />
+    )
+    // A phone has no panel beside the list: the sentinel opens the overlay.
+    if (!isDesktop) setSelectedId(NEW_SENTINEL)
+  }, [selectedId, isDesktop, setDetailContent, setSelectedId, showSaved, syncDetailPanel])
+
   const handleDelete = useCallback(
     async (currency: CurrencyWithStatus) => {
       try {
         await deleteCurrency(currency.id)
+        if (currency.id === selectedId) setSelectedId(null)
         await refresh()
         showUndoToast(`${currency.code || "Currency"} deleted`, async () => {
           await restoreCurrency(currency.id)
@@ -48,7 +116,7 @@ export default function CurrenciesPage() {
         console.error("Failed to delete currency:", error)
       }
     },
-    [refresh]
+    [refresh, selectedId, setSelectedId]
   )
 
   // Glass action buttons for the floating header bar
@@ -57,11 +125,11 @@ export default function CurrenciesPage() {
       <GlassIconButton ariaLabel="Refresh currencies" onClick={() => refresh()} disabled={isLoading}>
         <RefreshCw className={cn("h-5 w-5", isLoading && "animate-spin")} />
       </GlassIconButton>
-      <GlassIconButton ariaLabel="Add currency" onClick={() => setShowAddDialog(true)}>
+      <GlassIconButton ariaLabel="Add currency" onClick={openNew}>
         <Plus className="h-5 w-5" />
       </GlassIconButton>
     </>
-  ), [refresh, isLoading])
+  ), [refresh, isLoading, openNew])
 
   useRegisterMainActions(currencyActions, true)
 
@@ -69,7 +137,15 @@ export default function CurrenciesPage() {
     rows.length > 0 && (
       <FormSection title={`${title} · ${rows.length}`}>
         {rows.map((currency) => (
-          <CurrencyCard key={currency.id} currency={currency} onEdit={handleEdit} onDelete={handleDelete} />
+          <CurrencyCard
+            key={currency.id}
+            currency={currency}
+            // Lit only where the panel beside the list shows it: a phone has no
+            // such panel, so a lit row there would point at nothing.
+            selected={isDesktop && currency.id === selectedId}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+          />
         ))}
       </FormSection>
     )
@@ -90,7 +166,7 @@ export default function CurrenciesPage() {
             description="Add currencies and expiry dates to track your training, medical, and license renewals."
             action={
               // Outline, like every other empty state's add button.
-              <Button variant="outline" size="sm" onClick={() => setShowAddDialog(true)}>
+              <Button variant="outline" size="sm" onClick={openNew}>
                 <Plus className="h-4 w-4" />
                 Add currency
               </Button>
@@ -102,18 +178,6 @@ export default function CurrenciesPage() {
         {section("Current", current)}
       </div>
 
-      {/* Add/Edit Dialog */}
-      <CurrencyFormDialog
-        open={showAddDialog || !!currencyToEdit}
-        onOpenChange={(open) => {
-          if (!open) {
-            setShowAddDialog(false)
-            setCurrencyToEdit(null)
-          }
-        }}
-        currency={currencyToEdit}
-        onSaved={refresh}
-      />
     </PageContainer>
   )
 }

@@ -5,6 +5,7 @@ import { WheelPicker, WheelPickerWrapper } from "@ncdai/react-wheel-picker"
 import "@ncdai/react-wheel-picker/style.css"
 import { createPortal } from "react-dom"
 import { MODAL_SCRIM } from "@/components/ui/chrome-overlays"
+import { WHEEL_FILL, wheelClassNames } from "@/components/ui/wheel-styles"
 import { useBackDismiss } from "@/hooks/use-back-dismiss"
 import { cn } from "@/lib/utils"
 
@@ -202,7 +203,7 @@ export function DatePicker({
         <div className="relative px-4 py-4">
           {/* Highlight bar */}
           <div
-            className="pointer-events-none absolute left-4 right-4 top-1/2 z-0 -translate-y-1/2 rounded-lg bg-muted/40"
+            className={`pointer-events-none absolute left-4 right-4 top-1/2 z-0 -translate-y-1/2 rounded-lg ${WHEEL_FILL}`}
             style={{ height: ITEM_HEIGHT }}
           />
 
@@ -216,10 +217,7 @@ export function DatePicker({
                 infinite
                 optionItemHeight={ITEM_HEIGHT}
                 visibleCount={VISIBLE_COUNT}
-                classNames={{
-                  optionItem: "text-lg tabular-nums text-muted-foreground/50 font-medium",
-                  highlightItem: "text-xl tabular-nums text-foreground font-semibold",
-                }}
+                classNames={wheelClassNames("start")}
               />
             </div>
 
@@ -232,10 +230,7 @@ export function DatePicker({
                 infinite
                 optionItemHeight={ITEM_HEIGHT}
                 visibleCount={VISIBLE_COUNT}
-                classNames={{
-                  optionItem: "text-lg text-muted-foreground/50 font-medium",
-                  highlightItem: "text-xl text-foreground font-semibold",
-                }}
+                classNames={wheelClassNames("middle", false)}
               />
             </div>
 
@@ -247,10 +242,7 @@ export function DatePicker({
                 onValueChange={(val) => setYear(val as number)}
                 optionItemHeight={ITEM_HEIGHT}
                 visibleCount={VISIBLE_COUNT}
-                classNames={{
-                  optionItem: "text-lg tabular-nums text-muted-foreground/50 font-medium",
-                  highlightItem: "text-xl tabular-nums text-foreground font-semibold",
-                }}
+                classNames={wheelClassNames("end")}
               />
             </div>
           </WheelPickerWrapper>

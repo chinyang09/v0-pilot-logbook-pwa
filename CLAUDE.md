@@ -2706,7 +2706,7 @@ Next.js wraps pages in internal `LayoutRouter` components that unmount contents 
   its panel from the remembered selection; the phone opens on the list
 - `DetailPanelProvider` does NOT clear `detailContent` when navigating between two
   keep-alive routes that own detail content; routes without a detail panel
-  (dashboard, roster) always clear it
+  (the dashboard) always clear it
 - Each persistent page re-syncs its detail panel via its `usePageActive` callback (`syncDetailPanel`)
 - Selections stored in `sessionStorage` for restoration across full page reloads
 - `setSelectedId(id, { explicit: false })` is for **programmatic** selections
@@ -3260,7 +3260,9 @@ opened for, sat at the far end of the history.
   UTC date; local → the device zone). Both tables key on the UTC date, so a
   06:00 SGT standby is stored on the previous day; with no start time (leave,
   off) the stored date is the only fact there is.
-- Add duty pre-fills the selected day (`DutyEntryDialog`'s `defaultDate`).
+- The header's Add duty pre-fills the selected day, and an empty day's own
+  "Add duty" pre-fills THAT day (`onAddDuty(dayKey)` — it used to add to the
+  selected day whichever empty day was tapped).
 
 #### The roster holds NON-FLIGHT duties only
 
@@ -3270,13 +3272,14 @@ imports go to the logbook) and, before that, a parser stage: `schedule-parser`
 offered every non-flight row to `tryExtractSimDuty` and dropped whatever was
 not a simulator, so **standby had never been extracted at all**.
 
-**Duties are hand-editable.** `components/roster/duty-entry-dialog.tsx` adds and
-edits one; the card is swipe-to-delete. It is a full-screen DIALOG over the
-content region (`signature-dialog.tsx`'s bounds), not a detail panel — the
-roster is `hasDetailPanel: false` and populating detail panels on non-detail
-routes is owner-design work that must not be done piecemeal. The form re-seeds
-by a `key` on the component rather than a seeding effect, so there is no
-setState-in-effect and a sync write cannot clobber an edit in progress.
+**Duties are hand-editable.** `components/roster/duty-detail-panel.tsx` adds and
+edits one, in the DETAIL panel — beside the month on a tablet, the full-screen
+overlay on a phone — the way a flight opens in the logbook (owner's request,
+Oct 2026: the roster is `hasDetailPanel: true` now). The card is
+swipe-to-delete. The form holds a DRAFT over the live entry (`useDraft`), so a
+sync write cannot clobber an edit in progress and every field the pilot has not
+touched follows the record. Selecting, adding and the phone's `__new__`
+sentinel follow the crew page's pattern.
 Deleting is a **soft** delete into Recently Deleted, like everything else the
 pilot can delete — the old hard-delete rule held while these were import
 bookkeeping the next report regenerates, and stopped holding the moment the
@@ -3461,12 +3464,11 @@ assessment on record:
 ### Deferred design work (owner-approved to-do)
 
 - **Populate the split-view detail panel on non-detail routes** (layout audit
-  L·8): dashboard, roster, FDP, currencies, discrepancies, and account leave
-  the ≥720px right panel on a permanent "Select an item to view details"
-  placeholder. Highest-value first step: the roster's agenda (the selected
-  day onward) could render into the detail panel beside its month. To be
-  designed together with the owner in a future session — do not implement
-  piecemeal.
+  L·8): dashboard, FDP, discrepancies and account leave the ≥720px right panel
+  on a permanent "Select an item to view details" placeholder. The roster and
+  currencies were done at the owner's request (Oct 2026): a selected duty or
+  currency opens there, like a flight. The rest is to be designed together
+  with the owner — do not implement piecemeal.
 
 ### Performance work surveyed but NOT actioned (audit trail)
 
@@ -4394,7 +4396,7 @@ When making changes, be aware of these high-impact files:
 - Do not answer "was this standby called out" in two places — `findActivationMinute` is the rule, with `truncateActivatedStandby` (duty periods) and `standbyActivation` (schedule entries + flights, for the roster page) as its two callers. And read the ROSTERED report when finding it, or a pushback delay moves the activation later and credits duty hours as standby
 - Do not let a standby into the dashboard's active-duty search — it would become the ACTIVE duty carrying `maxFdpMinutes: 0`, so the panel reads as a flight duty whose limit failed to compute. `DutyStatus.standby` is its own band
 - Do not hard-delete a roster duty, and do not let a binned one be matched by `bulkUpsertScheduleEntries` — updating a deleted row silently resurrects a duty the user deleted, the same rule the flight reconciler follows. Every read filters `isLiveEntity`
-- Do not put the duty form in a detail panel — the roster is `hasDetailPanel: false` and populating detail panels on non-detail routes is owner-design work that must not be done piecemeal. It is a full-screen dialog over the CONTENT region, and it re-seeds by a `key` rather than a seeding effect (an effect there is a cascading render, and keying on the entry OBJECT clobbers an edit in progress on every sync write)
+- Do not put the duty or currency form back in a sheet over the page — a selected duty or currency opens in the DETAIL panel (`DutyDetailPanel` / `CurrencyDetailPanel` on `DetailFormPanel`), beside its list on a tablet and as the overlay on a phone, like a flight or a crew member; a sheet covered the very list it was chosen from. And keep their forms a DRAFT over the live record (`useDraft`), never a copy seeded once — a copy goes stale at the next pull and saving it reverts another device's edit
 - Do not count a standby's full length toward the 90h/180h limits — para 6(7) counts **20%** of home standby, and para 6(3) folds AIRPORT standby into the rest period or the following FDP so it contributes nothing separately. `countedDutyMinutes` carries the discount and `calculateRollingStats` reads `countedDutyMinutes ?? dutyMinutes`, so every ordinary duty is untouched
 - Do not leave an activated standby at its rostered length (para 6(6)) — `truncateActivatedStandby` cuts it back to the following duty's report before the 20% is taken, or the called-out hours are counted twice: once as standby and again in full as the duty they became
 - Do not put flights back into `scheduleEntries`. The roster holds NON-FLIGHT duties only — standby, ground, leave, off — precisely because they have no logbook counterpart and so nothing to reconcile. A parallel record of flights needing reconciliation against the logbook is what made the old roster heavy. And do not add standby as a `FlightLog.entryType` instead: it puts non-flight rows in the legal flight record and breaks the fixed-height card the virtualised list depends on
@@ -4557,7 +4559,11 @@ When making changes, be aware of these high-impact files:
 - Do not turn the currencies page back into a card per currency or put filter chips over it — it is ONE grouped list (`CurrencyCard` is a row), "Needs attention" then "Current", soonest first, and a pilot's ten documents fit one phone screen (measured: 0px overflow at 390×844 and 360×780). A card each was ~210px and five screens of scrolling to learn what runs out next. Thresholds, notes and the auto-update switch are settings OF a currency and live in its editor; past a year the figure is years ("7.9y"), not "2888d"
 - Do not let a `useBackDismiss` overlay close on a popstate that was not its own — every listener hears every pop, so a date picker opened OVER a form sheet closed the sheet too when it saved. Each marker entry carries `__overlayId`, and a listener whose entry is still the current one ignores the pop
 - Do not vertically CENTRE the login form — centred, every step's different card height moved the brand and the card, and on a short phone iOS panned the page to lift a centred field above the keyboard. It is anchored at `clamp(1rem, 12vh, 7rem)` (`vh`: the large viewport, which a toolbar does not change), compact under 500px of height, over a FIXED, still background (the Ken Burns zoom read as the page moving)
-- Do not hand-roll a form dialog — `RegionSheet` (`components/ui/region-sheet.tsx`) is the shell: content-region bounds, header with a close, grouped `FormSection` rows, Cancel/Save in the footer with the reason Save is disabled said beside it. The duty, currency and discrepancy-resolution forms use it (a choice among a few answers is a checked LIST, not a dropdown), and the signature pad takes its bounds from `useContentRegionStyle`. The currency form was a centred modal of boxed inputs with a full-width button and read as a different app. Mount the form only while open and key it on the record, so `useState` initialisers seed it — never a reset effect
+- Do not hand-roll a form dialog — `RegionSheet` (`components/ui/region-sheet.tsx`) is the shell: content-region bounds, header with a close, grouped `FormSection` rows, Cancel/Save in the footer with the reason Save is disabled said beside it. The discrepancy-resolution form uses it (a choice among a few answers is a checked LIST, not a dropdown), and the signature pad takes its bounds from `useContentRegionStyle`. A form for a record chosen from a LIST is not a sheet at all — it opens in the detail panel (`DetailFormPanel`). The currency form was a centred modal of boxed inputs with a full-width button and read as a different app. Mount the form only while open and key it on the record, so `useState` initialisers seed it — never a reset effect
+- Do not clear the header's action buttons unconditionally on cleanup — `useRegisterActions` clears only what THIS page put there (`current === own ? null : current`). A keep-alive page learns it is inactive from the route store AFTER the commit that mounted the next page, whose layout effect has already registered its own buttons, so an unconditional `set(null)` wiped them: currencies, discrepancies and FDP came up with an empty header when arrived at from the logbook (once their code was prefetched), and with a full one from any ordinary page
+- Do not show "Something went wrong" for a chunk that will not load — that is the previous deploy's HTML asking for code the new deploy no longer serves (navigations are cache-first). `ErrorScreen` (every error boundary) recognises it (`isChunkLoadError`), drops the route's stale page from the worker's cache and reloads ONCE, guarded by `sessionStorage` so a genuinely missing chunk cannot loop
+- Do not let the wheel picker emit a value before its settle lands, and do not let a zero-length settle stop between rows — the library (`@ncdai/react-wheel-picker`, `patches/`) truncated the index on both paths, so releasing between 09 and 10 always took 09 and a controlled picker's own value change cancelled the settle on every release. A release held still (>100ms since the last move) has no fling and settles to the NEAREST row. The patch is part of webpack's cache key (`PATCHES_FINGERPRINT` in `next.config.mjs`): webpack re-reads `node_modules` only on a version change and a patch keeps the version, so a restored `.next/cache` shipped the unpatched module. A new patch goes through `pnpm patch`, with `patchedDependencies` in `package.json` (not `pnpm-workspace.yaml`) and only the patch lines changed in the lockfile
+- Do not make the wheel's highlight row translucent — the wheel draws the selected value twice (small and rotated, then bold in the highlight), and a translucent strip showed both. `.wheel-fill` (globals.css) is opaque, on the bar AND each wheel's row (`wheelClassNames`). It is a CSS class rather than an arbitrary `bg-[color-mix(…)]`: Tailwind generated nothing for that one
 - Do not give a full-surface overlay `inset-0` on desktop — the sidebar and the nav pill draw above it, so it ends up BEHIND them with its top unreachable (that was the signature pad on iPad). Take the content region: `--chrome-top`/`--chrome-bottom`, plus `SIDEBAR_WIDTH_PX` on the left only while the sidebar is PUSHING (below 1120 it overlays full-width panels and the region has not moved). Mobile keeps `inset-0` — there the dialog is above the bottom nav and the viewport IS the region
 - Do not redeclare the sidebar's width — it is `SIDEBAR_WIDTH_PX` in `lib/layout/panel-widths.ts`, part of the same budget as the panel widths (1180 − 199 − 1 = 980 on iPad Air 5 landscape). It had drifted into three separate copies
 - Do not hardcode the panel widths — they live in `lib/layout/panel-widths.ts` and are a single budget. `DUAL_MONTH_PX` is 600 rather than 620 because 620 + 360 detail is EXACTLY the space iPad Air 5 landscape has with the sidebar open, so it fit with zero slack and any rounding took the dual-month toggle away on the owner's device
