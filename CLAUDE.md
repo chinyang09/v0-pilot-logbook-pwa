@@ -2591,8 +2591,20 @@ identical:
   opacity 0, so the whole row is the target and the platform's own picker
   opens.
 - **No `alert()` for a form error** — an inline `role="alert"` line in the
-  dialog, cleared when it closes. Only "Log out of all devices" still uses a
-  native alert, because it is refusing an irreversible action.
+  dialog, cleared when it closes. And no browser `confirm`/`alert` anywhere:
+  a question that must be answered goes through `appConfirm` / `appAlert`
+  (`lib/utils/app-alert.ts`, rendered by `AppAlertHost` in the ROOT layout so
+  the login page has it too). The browser's dialogs carry the site's ADDRESS
+  as their title in an installed PWA, block the page while open, and were
+  asking the most consequential questions in the app (unsynced edits lost on
+  sign-out, another account's data on sign-in). A destructive question starts
+  focused on the safe answer.
+- **A date in a form is the app's wheel picker** (`DateRow`, the flight form's
+  `DatePicker`), never `<input type="date">` — that is the browser's control,
+  boxed "mm/dd/yyyy" in the browser's locale beside lists reading "Mar 14,
+  2027". The picker's years span the window around today AND the year being
+  edited (`pastYears`/`futureYears`); a fixed ±5 had no row for a migrated
+  2011 flight or a 2034 passport.
 - **Every input has a label bound to it** (`htmlFor`/`id`, `useId` where a
   component can appear twice), and the login callsign carries
   `autoComplete="username"` with auto-capitalise and autocorrect off (the
@@ -4530,7 +4542,10 @@ When making changes, be aware of these high-impact files:
 - Do not put a translucent fill or a `/NN` text colour on a glass surface — contents ON glass are SOLID (`--on-glass-*`). Only the slab is translucent; a translucent highlight over it shows the page twice and changes tone as the content scrolls underneath
 - Do not save or restore the flight form's scroll offset without the flight it belongs to — the restore is for coming BACK to a flight (from a picker, from another section), and saved bare it opened the next, different flight at the depth the last one was read to. A flight changing under a mounted form (desktop) starts at its top. And offer no "USE" while the block is 0:00: a column of "USE 0:00" down an unflown sector offers to copy a zero
 - Do not put a padded `CardContent` in a bare `Card` — the shadcn `Card` carries `py-6 gap-6` of its own, so the two stacked: the currency, discrepancy and duty cards each had ~24px of empty band above their header and below their last line, and every `EmptyState` sat in 72px of top padding. A card whose content brings its own padding takes `py-0 gap-0`
-- Do not hand-roll a form dialog — `RegionSheet` (`components/ui/region-sheet.tsx`) is the shell: content-region bounds, header with a close, grouped `FormSection` rows, Cancel/Save in the footer with the reason Save is disabled said beside it. The duty and currency forms use it, and the signature pad takes its bounds from `useContentRegionStyle`. The currency form was a centred modal of boxed inputs with a full-width button and read as a different app. Mount the form only while open and key it on the record, so `useState` initialisers seed it — never a reset effect
+- Do not turn the currencies page back into a card per currency or put filter chips over it — it is ONE grouped list (`CurrencyCard` is a row), "Needs attention" then "Current", soonest first, and a pilot's ten documents fit one phone screen (measured: 0px overflow at 390×844 and 360×780). A card each was ~210px and five screens of scrolling to learn what runs out next. Thresholds, notes and the auto-update switch are settings OF a currency and live in its editor; past a year the figure is years ("7.9y"), not "2888d"
+- Do not let a `useBackDismiss` overlay close on a popstate that was not its own — every listener hears every pop, so a date picker opened OVER a form sheet closed the sheet too when it saved. Each marker entry carries `__overlayId`, and a listener whose entry is still the current one ignores the pop
+- Do not vertically CENTRE the login form — centred, every step's different card height moved the brand and the card, and on a short phone iOS panned the page to lift a centred field above the keyboard. It is anchored at `clamp(1rem, 12vh, 7rem)` (`vh`: the large viewport, which a toolbar does not change), compact under 500px of height, over a FIXED, still background (the Ken Burns zoom read as the page moving)
+- Do not hand-roll a form dialog — `RegionSheet` (`components/ui/region-sheet.tsx`) is the shell: content-region bounds, header with a close, grouped `FormSection` rows, Cancel/Save in the footer with the reason Save is disabled said beside it. The duty, currency and discrepancy-resolution forms use it (a choice among a few answers is a checked LIST, not a dropdown), and the signature pad takes its bounds from `useContentRegionStyle`. The currency form was a centred modal of boxed inputs with a full-width button and read as a different app. Mount the form only while open and key it on the record, so `useState` initialisers seed it — never a reset effect
 - Do not give a full-surface overlay `inset-0` on desktop — the sidebar and the nav pill draw above it, so it ends up BEHIND them with its top unreachable (that was the signature pad on iPad). Take the content region: `--chrome-top`/`--chrome-bottom`, plus `SIDEBAR_WIDTH_PX` on the left only while the sidebar is PUSHING (below 1120 it overlays full-width panels and the region has not moved). Mobile keeps `inset-0` — there the dialog is above the bottom nav and the viewport IS the region
 - Do not redeclare the sidebar's width — it is `SIDEBAR_WIDTH_PX` in `lib/layout/panel-widths.ts`, part of the same budget as the panel widths (1180 − 199 − 1 = 980 on iPad Air 5 landscape). It had drifted into three separate copies
 - Do not hardcode the panel widths — they live in `lib/layout/panel-widths.ts` and are a single budget. `DUAL_MONTH_PX` is 600 rather than 620 because 620 + 360 detail is EXACTLY the space iPad Air 5 landscape has with the sidebar open, so it fit with zero slack and any rounding took the dual-month toggle away on the owner's device

@@ -10,14 +10,7 @@ import {
   warmOCR,
   type ExtractedFlightData,
 } from "@/lib/ocr"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Progress } from "@/components/ui/progress"
+import { ImportStatusDialog } from "@/components/import/import-status-dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,11 +34,15 @@ export function ImageImportButton({
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState<{ percent: number; stage: string; detail?: string } | null>(null)
   const [showDialog, setShowDialog] = useState(false)
+  // A failed read stays on screen until it is dismissed. It used to show as
+  // "Error" for two seconds and close itself — gone before it could be read.
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cameraInputRef = useRef<HTMLInputElement>(null)
 
   const processImage = async (file: File) => {
     setLoading(true)
+    setErrorMsg(null)
     setShowDialog(true)
     setProgress({ percent: 30, stage: "Reading", detail: "Reading times..." })
 
@@ -76,17 +73,12 @@ export function ImageImportButton({
       // Straight into the form — the filled rows ARE the confirmation. There
       // used to be a 600ms pause here to show "Complete!".
       onDataExtracted(flightData)
+      setShowDialog(false)
     } catch (error) {
       console.error("OCR failed:", error)
-      setProgress({
-        percent: 0,
-        stage: "Error",
-        detail: error instanceof Error ? error.message : "Processing failed",
-      })
-      await new Promise((r) => setTimeout(r, 2000))
+      setErrorMsg(error instanceof Error ? error.message : "The photo couldn't be read.")
     } finally {
       setLoading(false)
-      setShowDialog(false)
       setProgress(null)
       if (fileInputRef.current) fileInputRef.current.value = ""
       if (cameraInputRef.current) cameraInputRef.current.value = ""
@@ -153,21 +145,22 @@ export function ImageImportButton({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Dialog open={showDialog} onOpenChange={() => {}}>
-        <DialogContent className="sm:max-w-md" showCloseButton={false}>
-          <DialogHeader>
-            <DialogTitle>Processing Image</DialogTitle>
-            <DialogDescription>{progress?.stage || "Extracting..."}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <Progress value={progress?.percent || 0} className="h-2" />
-            <div className="flex justify-between text-sm text-muted-foreground">
-              <span>{progress?.detail || ""}</span>
-              <span>{progress?.percent || 0}%</span>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* The app's one progress surface — the same dialog a report import
+          shows — rather than a stock dialog with a bare progress bar. */}
+      <ImportStatusDialog
+        open={showDialog}
+        onOpenChange={(open) => {
+          if (!open && !loading) setShowDialog(false)
+        }}
+        progress={progress}
+        errorMsg={errorMsg}
+        summary={null}
+        context="Photo"
+        onDone={() => {
+          setShowDialog(false)
+          setErrorMsg(null)
+        }}
+      />
     </>
   )
 }

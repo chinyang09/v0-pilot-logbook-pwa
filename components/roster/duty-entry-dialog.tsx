@@ -17,6 +17,7 @@
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { DateRow } from "@/components/ui/date-row";
 import { FormSection } from "@/components/ui/form-section";
 import { RegionSheet } from "@/components/ui/region-sheet";
 import { SettingsRow, SelectRow } from "@/components/ui/settings-row";
@@ -163,14 +164,7 @@ export function DutyEntryDialog({
       }
     >
         <FormSection title="Duty">
-          <SettingsRow
-            label="Date"
-            value={date}
-            onChange={setDate}
-            type="date"
-            required
-            swipeToClear={false}
-          />
+          <DateRow label="Date" value={date} onChange={setDate} required />
           <SelectRow
             label="Type"
             value={dutyType}

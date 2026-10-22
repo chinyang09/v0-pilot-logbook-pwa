@@ -11,6 +11,7 @@ import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { FormSection } from "@/components/ui/form-section"
 import { SettingsRow, ToggleRow, SelectRow } from "@/components/ui/settings-row"
+import { DateRow } from "@/components/ui/date-row"
 import { PageLoading } from "@/components/ui/page-loading"
 import { SortableNavList } from "@/components/sortable-nav-list"
 import { AppearanceSettings } from "@/components/appearance-settings"
@@ -155,14 +156,15 @@ function LoggingSection({ preferences, updateLogging }: {
           />
         )}
         {seat === "first_officer" && pfRole === "PICUS" && (
-          <SettingsRow
+          <DateRow
             label="PICUS from"
             description="Your check-out date. A leg flown before it is logged SIC."
             value={pfRoleFrom}
             // "" states "no date" outright, so a date left on the crew card
             // does not show through.
             onChange={(v) => updateLogging({ pfRoleFrom: v })}
-            type="date"
+            placeholder="Not set"
+            clearable
           />
         )}
         <SelectRow<"pf" | "pm">

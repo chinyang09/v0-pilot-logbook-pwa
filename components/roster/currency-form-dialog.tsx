@@ -12,6 +12,7 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { FormSection } from "@/components/ui/form-section"
+import { DateRow } from "@/components/ui/date-row"
 import { RegionSheet } from "@/components/ui/region-sheet"
 import { SelectRow, SettingsRow, ToggleRow } from "@/components/ui/settings-row"
 import { useBackDismiss } from "@/hooks/use-back-dismiss"
@@ -172,14 +173,7 @@ function CurrencyForm({
             required
           />
         )}
-        <SettingsRow
-          label="Expires"
-          value={expiryDate}
-          onChange={setExpiryDate}
-          type="date"
-          required
-          swipeToClear={false}
-        />
+        <DateRow label="Expires" value={expiryDate} onChange={setExpiryDate} required futureYears={15} />
       </FormSection>
 
       <FormSection title="Alerts">
