@@ -22,7 +22,7 @@ import { sortFlights } from "@/lib/utils/flight-sort"
 import { isSimulatorEntry, simulatorRepairPatch } from "@/lib/utils/entry-type"
 import { timezoneRepairPatch } from "@/lib/utils/flight-timezone"
 import { flightTimeRepairPatch } from "@/lib/utils/flight-calculations"
-import { inferPilotFlying, inferPilotRole } from "@/lib/utils/flight-evidence"
+import { inferMultiPilotTime, inferPilotFlying, inferPilotRole } from "@/lib/utils/flight-evidence"
 import { getAirportByIcao, getAirportTimeInfo, isAirportTableSeeded } from "../reference/airports.store"
 
 /**
@@ -280,6 +280,7 @@ export function normalizeFlightFromServer(serverFlight: FlightLog): FlightLog {
     actualInstrumentTime: serverFlight.actualInstrumentTime || "00:00",
     simulatedInstrumentTime: serverFlight.simulatedInstrumentTime || "00:00",
     crossCountryTime: serverFlight.crossCountryTime || "00:00",
+    multiPilotTime: serverFlight.multiPilotTime || inferMultiPilotTime(serverFlight),
     approaches: serverFlight.approaches || [],
     holds: serverFlight.holds || 0,
     ipcIcc: serverFlight.ipcIcc || false,

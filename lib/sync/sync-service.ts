@@ -46,8 +46,11 @@ const MAX_SYNC_RETRIES = 5
  * 2 = the single round-trip protocol: tombstones on the seq counter, and a
  * clean baseline after the old engine left devices that only ever pulled at
  * login (and a crew normalizer that dropped `deletedAt`).
+ * 3 = schema 4's `multiPilotTime`: the migration fills it on the server without
+ * moving `serverSeq` (as every canonical rewrite does), so a device only
+ * receives it by re-pulling.
  */
-const SYNC_PROTOCOL = 2
+const SYNC_PROTOCOL = 3
 
 /** Records per round trip, and the request budget a push batch must fit. */
 const PULL_LIMIT = 500

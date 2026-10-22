@@ -822,6 +822,40 @@ convention, never the default.
   report (PM + PICUS, a flown SIC leg for a pilot who logs PICUS, PICUS before
   the check-out). A one-off PICUS by a pilot whose convention is SIC is theirs.
 
+### Logbook Rules — what the hours are called (`lib/utils/logbook-rules.ts`)
+
+The same hour is named differently by each authority — FAA "Dual given" is
+EASA/CAAS "Instructor", FAA "SIC" is EASA "Co-pilot", CAAS "PIC U/S" is EASA
+"PICUS" — so the pilot picks the rules they log under (**Settings › Logging ›
+Logbook rules**: CAAS, EASA, FAA; synced, default CAAS) and every screen that
+names a category reads ONE table, `TIME_CATEGORIES`:
+
+| Column | What it holds |
+|---|---|
+| `field` | the STORED time field — changing the rules never changes a logged figure, only its name |
+| `names` | the label per authority; `categoryLabel` gives the chosen one plus a HELPER naming what the others call it (or the category spelled out when all agree) |
+| `autoFill` | the Settings › Auto-fill switch that fills it — the switch list and the dashboard's totals map are both derived from the table |
+| `recognisedBy` | the authorities whose logbook keeps it; the flight form offers any other only once it holds time (`showsCategory`), so nothing logged is ever hidden |
+
+Readers: the flight form's TIME rows and role picker, Settings › Auto-fill,
+the dashboard breakdown, the import review card. A category is added in the
+table and nowhere else.
+
+**Multi-pilot time** (`multiPilotTime`, schema 4) is the EASA multi-pilot /
+CAAS multi-crew column. It is filled from the flight's own crew
+(`isMultiPilotFlight`: a co-pilot role, or both pilot seats named), never from a
+setting, and a flight stored before the field existed takes it by the same rule
+on both ends (`inferMultiPilotTime`, in the schema default and the client
+normalizer; `SYNC_PROTOCOL` 3 re-pulls once so every device gets it).
+
+The breakdown shows every category that HOLDS time. It used to show only those
+whose Auto-fill switch was on, so a hand-logged IFR hour vanished from the
+totals. The role picker no longer offers "Examiner": it was never a role a
+flight can hold, so choosing it filed the flight's hours under nothing.
+
+The wording was researched from search excerpts (the regulators' sites were
+not reachable); check the CAAS labels against SASP / the ANO before citing them.
+
 ### Entry Type (flight vs simulator)
 
 `FlightLog.entryType: "flight" | "simulator"` — a union rather than another
@@ -4306,6 +4340,7 @@ When making changes, be aware of these high-impact files:
 - Do not skip `detectEditReasons` before classification — it is what protects a signed/remarked/manually-overridden flight regardless of which fields changed
 - Do not dedupe simulator sessions on `date|simSessionCode` alone — recognition must stay structural (no route, no registration), or sims written by an older build duplicate on every import
 - Do not read `FlightLog.entryType` directly — go through `getEntryType()`, and write through `entryTypePatch()` so the legacy `isSimulator` flag stays in step for the dashboard and FDP pipeline
+- Do not hardcode an hour category's name — the flight form, Auto-fill, the dashboard and the import card all read `TIME_CATEGORIES` (`lib/utils/logbook-rules.ts`) through the pilot's chosen rules. And do not hide a category's figure because the rules or an Auto-fill switch say so: a category the rules do not keep is still shown once it holds time
 - Do not resolve the pilot's PF convention without the flight's DATE — `pfRoleFrom` is the PICUS check-out, and a flown leg before it is SIC. And do not let an import apply a `pilotRole` change whose `pilotFlying` half was withheld or declined: the role follows the PF the flight ends up with (`settledRole`), or a PM leg is logged PICUS
 - Do not take an eCrew report's day/night takeoff and landing split as fact — audited against a real year it disagrees with the sun on 86 of 283 events (a "day" landing with the sun 78° down). The sun's answer is applied to creates (`suggested*` in `hydrateFlightFromSector`) as it already was to updates, and a PF sector carries BOTH a takeoff and a landing even where the report recorded only one (`suggestToLdg`)
 - Do not read an OFF or ON on the flight's own date when it is earlier in the day than OUT — the flight is keyed on OUT's UTC date, so it is the NEXT day (`instantOnFlight`; pass `outTime` to `calculateTakeoffsLandings`). And civil twilight is GEOMETRIC: the sun's centre 6° below the horizon with no refraction term, which moved every dusk ~13 seconds and called a −6.02° takeoff "day"

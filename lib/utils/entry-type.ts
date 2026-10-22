@@ -47,6 +47,7 @@ const SIMULATOR_ZERO_FIELDS = [
   "flightTime",
   "dayTime",
   "crossCountryTime",
+  "multiPilotTime",
   "picTime",
   "sicTime",
   "picusTime",
@@ -55,7 +56,7 @@ const SIMULATOR_ZERO_FIELDS = [
 ] as const satisfies ReadonlyArray<keyof FlightLog>;
 
 /** The role times — the pilot may pin one deliberately, so an override holds. */
-const PINNABLE = new Set<string>(["picTime", "sicTime", "picusTime", "dualTime", "instructorTime", "crossCountryTime"]);
+const PINNABLE = new Set<string>(["picTime", "sicTime", "picusTime", "dualTime", "instructorTime", "crossCountryTime", "multiPilotTime"]);
 
 const hasDuration = (v: unknown) => typeof v === "string" && v !== "" && v !== "00:00" && v !== "0:00";
 

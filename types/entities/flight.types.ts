@@ -99,6 +99,7 @@ export interface ManualOverrides {
   dualTime?: boolean
   instructorTime?: boolean
   simulatedInstrumentTime?: boolean
+  multiPilotTime?: boolean
 }
 
 export interface FlightLog {
@@ -173,6 +174,8 @@ export interface FlightLog {
   actualInstrumentTime: string
   simulatedInstrumentTime: string
   crossCountryTime: string
+  /** Flown as one of a multi-pilot crew — EASA's multi-pilot column, CAAS's multi-crew. */
+  multiPilotTime: string
   // Approaches
   approaches: Approach[]
   holds: number

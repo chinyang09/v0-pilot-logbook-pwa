@@ -42,6 +42,29 @@ function count(value: unknown): number {
   return Number.isFinite(n) && n > 0 ? n : 0
 }
 
+/**
+ * Flown as one of a multi-pilot crew, on the record's own evidence: a co-pilot
+ * role (a co-pilot exists only where more than one pilot is required), or both
+ * pilot seats filled. A simulator is never flight time of any kind.
+ */
+export function isMultiPilotFlight(record: Record_): boolean {
+  const flight = record as Record<string, unknown>
+  if (flight.isSimulator === true || flight.entryType === "simulator") return false
+  if (flight.pilotRole === "SIC" || flight.pilotRole === "PICUS") return true
+  const named = (v: unknown) => typeof v === "string" && v.trim() !== ""
+  return named(flight.picName) && named(flight.sicName)
+}
+
+/**
+ * The multi-pilot time a record stored without one should carry: its block
+ * time when the record shows a multi-pilot crew. The rule auto-fill applies
+ * to a new flight, used here for one written before the field existed.
+ */
+export function inferMultiPilotTime(record: Record_): string {
+  const block = (record as Record<string, unknown>).blockTime
+  return isMultiPilotFlight(record) && typeof block === "string" && minutes(block) > 0 ? block : "00:00"
+}
+
 /** Flown by this pilot when it logs one of their takeoffs or landings. */
 export function inferPilotFlying(record: Record_): boolean {
   const flight = record as Record<string, unknown>

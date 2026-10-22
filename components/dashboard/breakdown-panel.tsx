@@ -6,13 +6,13 @@ import { ArrowUpRight } from "lucide-react"
 
 import { usePreferences } from "@/components/providers/preferences-provider"
 import {
-  AUTO_FILL_DISPLAY,
   formatDecimalHours,
   type AutoFillKey,
   type AutoFillMinutes,
   type DashboardAggregates,
 } from "@/lib/utils/dashboard-aggregate"
 import { cn } from "@/lib/utils"
+import { TIME_CATEGORIES, categoryLabel } from "@/lib/utils/logbook-rules"
 
 /**
  * How the period's hours break down — by role flown and by what was flown.
@@ -48,15 +48,20 @@ export function BreakdownPanel({
 }) {
   const { preferences } = usePreferences()
 
+  // Every category that holds time, named the way the pilot's logbook rules
+  // name it. Whether a switch in Auto-fill is on says how a figure got there,
+  // not whether it exists — a hand-logged IFR hour is still an hour.
+  const authority = preferences.logging.authority
   const roles = React.useMemo(
     () =>
-      AUTO_FILL_DISPLAY.filter(
-        ({ key }) =>
-          preferences.autoFill[key] &&
-          !SHOWN_ELSEWHERE.has(key) &&
-          (byAutoFillField[key] ?? 0) > 0,
-      ).map(({ key, label }) => ({ key, label, minutes: byAutoFillField[key] ?? 0 })),
-    [preferences.autoFill, byAutoFillField],
+      TIME_CATEGORIES.filter(
+        (c) => !SHOWN_ELSEWHERE.has(c.autoFill) && (byAutoFillField[c.autoFill] ?? 0) > 0,
+      ).map((c) => ({
+        key: c.autoFill,
+        label: categoryLabel(c, authority).label,
+        minutes: byAutoFillField[c.autoFill] ?? 0,
+      })),
+    [authority, byAutoFillField],
   )
 
   const engineTotal = byEngine.se + byEngine.me + byEngine.jet

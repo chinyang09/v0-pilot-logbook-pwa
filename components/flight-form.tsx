@@ -53,7 +53,8 @@ import {
   getApproachCategory,
   hasCoordinates,
 } from "@/lib/utils/flight-calculations";
-import { inferPilotFlying, inferPilotRole } from "@/lib/utils/flight-evidence";
+import { inferPilotFlying, inferPilotRole, isMultiPilotFlight } from "@/lib/utils/flight-evidence";
+import { PILOT_ROLES, TIME_CATEGORIES, categoryLabel, roleLabel, showsCategory } from "@/lib/utils/logbook-rules";
 import { calculateNightTimeComplete } from "@/lib/utils/night-time";
 import {
   formatClockDisplay,
@@ -313,6 +314,7 @@ function TimeRow({
 // Time display row for calculated values
 function TimeDisplayRow({
   label,
+  helper,
   value,
   secondaryLabel,
   secondaryValue,
@@ -321,6 +323,8 @@ function TimeDisplayRow({
   showUseButton = false,
 }: {
   label: string;
+  /** Smaller line under the label — what the other logbook rules call it. */
+  helper?: string;
   value: string;
   secondaryLabel?: string;
   secondaryValue?: string;
@@ -329,9 +333,16 @@ function TimeDisplayRow({
   showUseButton?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between py-3.5 px-4 row-divider">
-      <span className="text-foreground">{label}</span>
-      <div className="flex items-center gap-4">
+    <div className="flex items-center justify-between gap-3 py-3.5 px-4 row-divider">
+      {helper ? (
+        <span className="flex min-w-0 flex-col">
+          <span className="text-foreground">{label}</span>
+          <span className="text-xs text-muted-foreground">{helper}</span>
+        </span>
+      ) : (
+        <span className="text-foreground">{label}</span>
+      )}
+      <div className="flex shrink-0 items-center gap-4">
         {secondaryLabel && secondaryValue ? (
           <>
             <span className="text-foreground">{formatTimeShort(value)}</span>
@@ -443,6 +454,7 @@ export function FlightForm({
   const { personnel } = usePersonnel();
   const { preferences } = usePreferences();
   const clockSeparator = preferences.display.clockSeparator;
+  const authority = preferences.logging.authority;
   const [, setIsSubmitting] = useState(false);
   const [activeTimePicker, setActiveTimePicker] = useState<string | null>(null);
   const [signatureOpen, setSignatureOpen] = useState(false);
@@ -677,6 +689,7 @@ export function FlightForm({
         dualTime: "00:00",
         instructorTime: "00:00",
         crossCountryTime: "00:00",
+        multiPilotTime: "00:00",
       };
     }
 
@@ -789,10 +802,18 @@ export function FlightForm({
       instructorTime: af.dualGiven !== false ? roleTimes.instructorTime : "00:00",
     };
 
-    // Auto-fill cross-country time
-    const crossCountryTime = af.xc !== false && formData.departureIcao && formData.arrivalIcao && formData.departureIcao !== formData.arrivalIcao
-      ? blockTime
-      : "00:00";
+    // Auto-fill cross-country and multi-pilot time. `null` when the switch is
+    // off: the form then leaves what the flight has alone.
+    const crossCountryTime = af.xc === false
+      ? null
+      : formData.departureIcao && formData.arrivalIcao && formData.departureIcao !== formData.arrivalIcao
+        ? blockTime
+        : "00:00";
+    const multiPilotTime = af.multiPilot === false
+      ? null
+      : isMultiPilotFlight({ pilotRole: formPilotRole, picName: formData.picName, sicName: formData.sicName })
+        ? blockTime
+        : "00:00";
 
     return {
       blockTime,
@@ -802,6 +823,7 @@ export function FlightForm({
       ...toLdg,
       ...gatedRoleTimes,
       crossCountryTime,
+      multiPilotTime,
     };
   }, [
     formData.date,
@@ -813,6 +835,8 @@ export function FlightForm({
     formPilotRole,
     formData.departureIcao,
     formData.arrivalIcao,
+    formData.picName,
+    formData.sicName,
     formData.nightTime,
     formData.dayTakeoffs,
     formData.dayLandings,
@@ -871,6 +895,12 @@ export function FlightForm({
       if (!manualOverrides.instructorTime) {
         if (prev.instructorTime !== calculatedFields.instructorTime) updates.instructorTime = calculatedFields.instructorTime;
       }
+      // Computed above and never applied until now — the XC row only ever
+      // showed what the store's recalculation had written.
+      const xc = calculatedFields.crossCountryTime;
+      if (!manualOverrides.crossCountryTime && xc !== null && prev.crossCountryTime !== xc) updates.crossCountryTime = xc;
+      const mp = calculatedFields.multiPilotTime;
+      if (!manualOverrides.multiPilotTime && mp !== null && prev.multiPilotTime !== mp) updates.multiPilotTime = mp;
 
       // Nothing changed — return same reference so React skips the re-render
       if (Object.keys(updates).length === 0) return prev;
@@ -1901,124 +1931,40 @@ export function FlightForm({
             }
           />
 
-          <SwipeableRow
-            onClear={() => {
-              updateField("picusTime", "00:00");
-              markManualOverride("picusTime", false);
-            }}
-          >
-            <TimeDisplayRow
-              label="P1u/s"
-              value={formData.picusTime || "00:00"}
-              showUseButton={
-                formData.picusTime === "00:00" || !formData.picusTime
-              }
-              useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
-              onUse={() => {
-                updateField("picusTime", formData.blockTime || "00:00");
-              }}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow
-            onClear={() => {
-              updateField("sicTime", "00:00");
-              markManualOverride("sicTime", false);
-            }}
-          >
-            <TimeDisplayRow
-              label="SIC"
-              value={formData.sicTime || "00:00"}
-              showUseButton={formData.sicTime === "00:00" || !formData.sicTime}
-              useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
-              onUse={() => {
-                updateField("sicTime", formData.blockTime || "00:00");
-              }}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow
-            onClear={() => {
-              updateField("crossCountryTime", "00:00");
-              markManualOverride("crossCountryTime", false);
-            }}
-          >
-            <TimeDisplayRow
-              label="XC"
-              value={formData.crossCountryTime || "00:00"}
-              showUseButton={
-                formData.crossCountryTime === "00:00" ||
-                !formData.crossCountryTime
-              }
-              useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
-              onUse={() => {
-                updateField("crossCountryTime", formData.blockTime || "00:00");
-              }}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow
-            onClear={() => {
-              updateField("actualInstrumentTime", "00:00");
-              markManualOverride("actualInstrumentTime", false);
-            }}
-          >
-            <TimeDisplayRow
-              label="Actual Inst"
-              value={formData.actualInstrumentTime || "00:00"}
-              showUseButton={
-                formData.actualInstrumentTime === "00:00" ||
-                !formData.actualInstrumentTime
-              }
-              useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
-              onUse={() => {
-                updateField(
-                  "actualInstrumentTime",
-                  formData.blockTime || "00:00"
-                );
-              }}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow
-            onClear={() => {
-              updateField("ifrTime", "00:00");
-              markManualOverride("ifrTime", false);
-            }}
-          >
-            <TimeDisplayRow
-              label="IFR"
-              value={formData.ifrTime || "00:00"}
-              showUseButton={formData.ifrTime === "00:00" || !formData.ifrTime}
-              useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
-              onUse={() => {
-                updateField("ifrTime", formData.blockTime || "00:00");
-              }}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow
-            onClear={() => {
-              updateField("simulatedInstrumentTime", "00:00");
-              markManualOverride("simulatedInstrumentTime", false);
-            }}
-          >
-            <TimeDisplayRow
-              label="Simulator"
-              value={formData.simulatedInstrumentTime || "00:00"}
-              showUseButton={
-                formData.simulatedInstrumentTime === "00:00" ||
-                !formData.simulatedInstrumentTime
-              }
-              useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
-              onUse={() => {
-                updateField(
-                  "simulatedInstrumentTime",
-                  formData.blockTime || "00:00"
-                );
-              }}
-            />
-          </SwipeableRow>
+          {/* One row per hour category, named by the pilot's logbook rules
+              (Settings › Logging) with the other authorities' names beneath.
+              Night is the row above; a category the rules do not keep is
+              offered only once it holds time, so nothing logged is hidden. */}
+          {TIME_CATEGORIES.filter(
+            (c) => c.field !== "nightTime" && showsCategory(c, authority, formData[c.field])
+          ).map((category) => {
+            const { field } = category;
+            const { label, helper } = categoryLabel(category, authority);
+            const value = formData[field] || "00:00";
+            return (
+              <SwipeableRow
+                key={field}
+                onClear={() => {
+                  updateField(field, "00:00");
+                  markManualOverride(field, false);
+                }}
+              >
+                <TimeDisplayRow
+                  label={label}
+                  helper={helper}
+                  value={value}
+                  showUseButton={value === "00:00"}
+                  useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
+                  onUse={() => {
+                    // Chosen by hand, so pinned: a recalculation must not
+                    // take it back (`manualOverrides`).
+                    updateField(field, formData.blockTime || "00:00");
+                    markManualOverride(field, true);
+                  }}
+                />
+              </SwipeableRow>
+            );
+          })}
         </div>
 
         {/* DUTY Section */}
@@ -2058,7 +2004,7 @@ export function FlightForm({
           <div className="relative flex items-center justify-between py-3.5 px-4 row-divider focus-within:outline-2 focus-within:outline-ring focus-within:-outline-offset-2">
             <span className="text-foreground">Pilot Role</span>
             <span className="flex items-center gap-1 text-foreground">
-              {formPilotRole}
+              {roleLabel(formPilotRole, authority)}
               <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden />
             </span>
             <select
@@ -2072,12 +2018,14 @@ export function FlightForm({
               }
               className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
             >
-              <option value="PIC">PIC</option>
-              <option value="SIC">SIC</option>
-              <option value="PICUS">PICUS</option>
-              <option value="Dual">Dual</option>
-              <option value="Instructor">Instructor</option>
-              <option value="Examiner">Examiner</option>
+              {/* Named by the logbook rules. "Examiner" used to be offered
+                  too; it is not a role the record can hold, so choosing it
+                  filed the flight's hours under nothing. */}
+              {PILOT_ROLES.map((role) => (
+                <option key={role} value={role}>
+                  {roleLabel(role, authority)}
+                </option>
+              ))}
             </select>
           </div>
         </div>

@@ -8,7 +8,7 @@ import { isNight, calculateNightTimeComplete } from "./night-time"
 import type { Airport } from "@/types/entities/airport.types"
 import type { FlightLog, Approach, PilotRole, ManualOverrides } from "@/types/entities/flight.types"
 import { DEFAULT_LOGGING_PREFERENCES, type AutoFillPreferences } from "@/types/db/stores.types"
-import { inferPilotFlying, inferPilotRole, UNSTATED_ROLE } from "./flight-evidence"
+import { inferPilotFlying, inferPilotRole, isMultiPilotFlight, UNSTATED_ROLE } from "./flight-evidence"
 import { isSimulatorEntry, simulatorRepairPatch } from "./entry-type"
 
 /**
@@ -296,6 +296,7 @@ export function createEmptyFlightLog(
     actualInstrumentTime: "00:00",
     simulatedInstrumentTime: "00:00",
     crossCountryTime: "00:00",
+    multiPilotTime: "00:00",
     approaches: [],
     holds: 0,
     ipcIcc: false,
@@ -426,6 +427,12 @@ export function recalculateFlightFields(
     if (depIcao && arrIcao && depIcao !== arrIcao) {
       updates.crossCountryTime = blockTime
     }
+  }
+
+  // Multi-pilot time — the block, when the flight's own record shows a
+  // multi-pilot crew (`isMultiPilotFlight`)
+  if (autoFill?.multiPilot !== false && !overrides.multiPilotTime) {
+    updates.multiPilotTime = isMultiPilotFlight(flight) ? blockTime : "00:00"
   }
 
   // IFR time — auto-fill from flight time

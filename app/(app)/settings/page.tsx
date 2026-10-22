@@ -22,32 +22,25 @@ import {
   Settings, UserCircle, Navigation, ChevronRight, NotebookPen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { LOGBOOK_AUTHORITIES, TIME_CATEGORIES, categoryLabel, roleLabel, type LogbookAuthority } from "@/lib/utils/logbook-rules"
 import type { DisplayPreferences, AutoFillPreferences, BottomNavTab } from "@/types/db/stores.types"
 
 // ─── Data ────────────────────────────────────────────────────
 
-const AUTO_FILL_FIELDS: Array<{
-  key: keyof AutoFillPreferences
-  label: string
-  description: string
-}> = [
-  { key: "night", label: "Night", description: "Calculate night time from solar position" },
-  { key: "pic", label: "PIC", description: "Set PIC time equal to block time when role is PIC" },
-  { key: "sic", label: "SIC", description: "Set SIC time equal to block time when role is SIC" },
-  { key: "p1us", label: "P1u/s (PICUS)", description: "Set PICUS time when role is PICUS" },
-  { key: "dualRcvd", label: "Dual Received", description: "Set dual time when role is Dual" },
-  { key: "dualGiven", label: "Dual Given", description: "Set instructor time when role is Instructor" },
-  { key: "xc", label: "Cross Country", description: "Set XC time to block time when departure differs from arrival" },
-  { key: "ifr", label: "IFR", description: "Set IFR time equal to flight time" },
-  { key: "actualInst", label: "Actual Instrument", description: "Auto-fill actual instrument time" },
-  { key: "simInst", label: "Simulated Instrument", description: "Auto-fill simulated instrument time" },
-  { key: "multiPilot", label: "Multi-Pilot", description: "Set multi-pilot time equal to block time" },
-  { key: "solo", label: "Solo", description: "Set solo time equal to block time" },
-  { key: "ground", label: "Ground", description: "Auto-fill ground training time" },
-  { key: "nvg", label: "NVG", description: "Auto-fill night vision goggle time" },
-  { key: "sfe", label: "SFI/SFE", description: "Auto-fill simulator flight instructor/examiner time" },
-  { key: "flightEngineer", label: "Flight Engineer (SO)", description: "Auto-fill flight engineer / second officer time" },
-]
+/** How each Auto-fill switch fills its category. The NAME is the logbook rules' (`logbook-rules.ts`). */
+const AUTO_FILL_HOW: Record<keyof AutoFillPreferences, string> = {
+  night: "Worked out from the sun at both airports",
+  pic: "The block time, when the role is PIC",
+  sic: "The block time, when the role is co-pilot",
+  p1us: "The block time, when the role is PIC under supervision",
+  dualRcvd: "The block time, when the role is dual",
+  dualGiven: "The block time, when the role is instructor",
+  multiPilot: "The block time, when the flight shows a co-pilot or two pilot seats filled",
+  xc: "The block time, when departure differs from arrival",
+  ifr: "The flight time, on every flight",
+  actualInst: "The flight time, on every flight",
+  simInst: "The flight time, on every flight",
+}
 
 const ALL_NAV_TABS: Array<{ value: BottomNavTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { value: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -113,6 +106,7 @@ function LoggingSection({ preferences, updateLogging }: {
   const seat = seatOf(effective)
   const pfRole = effective?.pfRole ?? "SIC"
   const pfRoleFrom = effective?.pfRoleFrom ?? ""
+  const authority = preferences.logging.authority
 
   return (
     <div className="px-panel py-4 space-y-4">
@@ -123,6 +117,13 @@ function LoggingSection({ preferences, updateLogging }: {
         </p>
       </div>
       <FormSection>
+        <SelectRow<LogbookAuthority>
+          label="Logbook rules"
+          description={`${LOGBOOK_AUTHORITIES.find((a) => a.value === authority)?.description}. What your hours are called — it never changes a logged figure.`}
+          value={authority}
+          onValueChange={(v) => updateLogging({ authority: v })}
+          options={LOGBOOK_AUTHORITIES.map((a) => ({ value: a.value, label: a.label }))}
+        />
         <SelectRow<Seat | "unset">
           label="My seat"
           description={
@@ -147,8 +148,8 @@ function LoggingSection({ preferences, updateLogging }: {
             value={pfRole}
             onValueChange={(v) => updateLogging({ pfRole: v })}
             options={[
-              { value: "SIC", label: "SIC" },
-              { value: "PICUS", label: "PICUS" },
+              { value: "SIC", label: roleLabel("SIC", authority) },
+              { value: "PICUS", label: roleLabel("PICUS", authority) },
             ]}
           />
         )}
@@ -280,13 +281,13 @@ function AutoFillSection({ preferences, updateAutoFill }: {
         </p>
       </div>
       <FormSection>
-        {AUTO_FILL_FIELDS.map((field) => (
+        {TIME_CATEGORIES.map((category) => (
           <ToggleRow
-            key={field.key}
-            label={field.label}
-            description={field.description}
-            checked={preferences.autoFill[field.key]}
-            onCheckedChange={(checked) => updateAutoFill({ [field.key]: checked })}
+            key={category.autoFill}
+            label={categoryLabel(category, preferences.logging.authority).label}
+            description={AUTO_FILL_HOW[category.autoFill]}
+            checked={preferences.autoFill[category.autoFill]}
+            onCheckedChange={(checked) => updateAutoFill({ [category.autoFill]: checked })}
           />
         ))}
       </FormSection>

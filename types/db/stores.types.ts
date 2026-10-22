@@ -4,6 +4,7 @@
 
 import { DEFAULT_PALETTE_ID, type PaletteSeed } from "@/lib/theme/palette"
 import type { DraftGenerationConfig } from "@/types/entities/roster.types"
+import type { LogbookAuthority } from "@/lib/utils/logbook-rules"
 
 export interface FieldOrder {
   flight: string[]
@@ -49,11 +50,6 @@ export interface AutoFillPreferences {
   actualInst: boolean
   simInst: boolean
   multiPilot: boolean
-  solo: boolean
-  ground: boolean
-  nvg: boolean
-  sfe: boolean
-  flightEngineer: boolean
 }
 
 export interface DutyTimeDefaults {
@@ -100,6 +96,12 @@ export interface LoggingPreferences {
    * keeps what was recorded, and an import takes the report's PF/PM.
    */
   newFlightPilotFlying: boolean
+  /**
+   * Whose logbook wording the hour categories carry (`lib/utils/logbook-rules.ts`)
+   * — the licensing authority, which is a separate question from the duty
+   * limits the operator flies under (`DutyTimeDefaults.regulationType`).
+   */
+  authority: LogbookAuthority
 }
 
 export const DEFAULT_LOGGING_PREFERENCES: LoggingPreferences = {
@@ -107,6 +109,7 @@ export const DEFAULT_LOGGING_PREFERENCES: LoggingPreferences = {
   pfRole: null,
   pfRoleFrom: null,
   newFlightPilotFlying: true,
+  authority: "CAAS",
 }
 
 export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
@@ -130,12 +133,9 @@ export const DEFAULT_AUTO_FILL_PREFERENCES: AutoFillPreferences = {
   ifr: false,
   actualInst: false,
   simInst: false,
-  multiPilot: false,
-  solo: false,
-  ground: false,
-  nvg: false,
-  sfe: false,
-  flightEngineer: false,
+  // Fills only where the flight itself shows a multi-pilot crew
+  // (`isMultiPilotFlight`), so on is safe for everyone.
+  multiPilot: true,
 }
 
 export const DEFAULT_DUTY_TIME_DEFAULTS: DutyTimeDefaults = {

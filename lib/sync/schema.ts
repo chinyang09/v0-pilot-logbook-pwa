@@ -34,7 +34,7 @@ import type { ScheduleEntry, Currency, Discrepancy } from "@/types/entities/rost
 import type { SyncCollection } from "@/types/sync/sync.types"
 import { toTimestamp } from "./authorship"
 import { getEntryType } from "@/lib/utils/entry-type"
-import { inferPilotFlying, inferPilotRole } from "@/lib/utils/flight-evidence"
+import { inferPilotFlying, inferPilotRole, inferMultiPilotTime } from "@/lib/utils/flight-evidence"
 import { SETTINGS_FIELD_KEYS } from "@/lib/settings/user-settings"
 
 /**
@@ -52,8 +52,10 @@ import { SETTINGS_FIELD_KEYS } from "@/lib/settings/user-settings"
  *   representation each (`NORMALIZE`), retires the dead `isDraft` key (`RETIRED_KEYS`),
  *   and declares a type for every field (`opt`, `conformValue`). It also
  *   brings the `settings` collection, which needs no rewrite (it is new).
+ * 4 adds a flight's `multiPilotTime` (EASA's multi-pilot column, CAAS's
+ *   multi-crew time), filled from each flight's own crew evidence.
  */
-export const SYNC_SCHEMA_VERSION = 3
+export const SYNC_SCHEMA_VERSION = 4
 
 /**
  * Push/pull order: dependency-light collections first, so a flight never
@@ -226,6 +228,9 @@ const FLIGHT_FIELDS = {
   actualInstrumentTime: ZERO_TIME,
   simulatedInstrumentTime: ZERO_TIME,
   crossCountryTime: ZERO_TIME,
+  // A flight stored before the field existed: its block time when its own
+  // record shows a multi-pilot crew, the rule auto-fill applies to a new one.
+  multiPilotTime: (src) => inferMultiPilotTime(src),
   approaches: emptyArray,
   holds: 0,
   ipcIcc: false,
