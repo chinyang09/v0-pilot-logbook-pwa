@@ -22,7 +22,7 @@ import type {
   FdpTableUsed,
 } from "@/types/entities/roster.types"
 import type { FlightLog } from "@/types/entities/flight.types"
-import { isPositioningEntry } from "@/lib/utils/entry-type"
+import { isPositioningEntry, isSimulatorEntry } from "@/lib/utils/entry-type"
 import { hhmmToMinutes, minutesToHHMM } from "@/lib/utils/time"
 import {
   acclimatisedOffsetsAtEachDuty,
@@ -44,6 +44,15 @@ import {
   applyAugmentedCrewExtension,
   isAcclimated,
 } from "@/lib/utils/roster/fdp-tables"
+
+/**
+ * A duty's airports joined as "WSSS-VVNB-WSSS", leaving out any it does not
+ * know. A missing code used to print as "?", so a simulator session — which
+ * has none — reached the dashboard as "Last ?-?".
+ */
+function chainRoute(codes: (string | undefined | null)[]): string {
+  return codes.filter((c): c is string => !!c).join("-").toUpperCase()
+}
 
 // ============================================
 // Constants
@@ -146,10 +155,10 @@ export function calculateDutyPeriodFromSchedule(
 
   // Build chained route string like "WSSS-VVNB-WSSS" (dep of first + arr of each sector)
   const route = entry.sectors && entry.sectors.length > 0
-    ? [
-        entry.sectors[0].departureIata || "?",
-        ...entry.sectors.map((s) => s.arrivalIata || "?"),
-      ].join("-").toUpperCase()
+    ? chainRoute([
+        entry.sectors[0].departureIata,
+        ...entry.sectors.map((s) => s.arrivalIata),
+      ]) || undefined
     : undefined
 
   const fdpResult = deriveMaxFDP({
@@ -615,13 +624,13 @@ function createDutyPeriodFromFlightGroup(
   // Use unique id when multiple duty periods exist on same date
   const id = totalGroups > 1 ? `logbook-${date}-${groupIdx}` : `logbook-${date}`
 
-  // Build chained route string like "WSSS-VVNB-WSSS" (prefers ICAO, falls back to IATA)
-  const route = groupFlights.length > 0
-    ? [
-        groupFlights[0].departureIcao || groupFlights[0].departureIata || "?",
-        ...groupFlights.map((f) => f.arrivalIcao || f.arrivalIata || "?"),
-      ].join("-").toUpperCase()
-    : ""
+  // Build chained route string like "WSSS-VVNB-WSSS" (prefers ICAO, falls back to IATA).
+  // A simulator session has no airports at all: it is "SIM", not "?-?".
+  const route =
+    chainRoute([
+      groupFlights[0]?.departureIcao || groupFlights[0]?.departureIata,
+      ...groupFlights.map((f) => f.arrivalIcao || f.arrivalIata),
+    ]) || (groupFlights.some((f) => isSimulatorEntry(f)) ? "SIM" : "")
 
   return {
     id,
