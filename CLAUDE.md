@@ -2605,7 +2605,7 @@ identical:
   asking the most consequential questions in the app (unsynced edits lost on
   sign-out, another account's data on sign-in). A destructive question starts
   focused on the safe answer.
-- **A date in a form is the app's wheel picker** (`DateRow`, the flight form's
+- **A date or time in a form is the app's wheel picker** (`DateRow` / `TimeRow`, the flight form's
   `DatePicker`), never `<input type="date">` — that is the browser's control,
   boxed "mm/dd/yyyy" in the browser's locale beside lists reading "Mar 14,
   2027". The picker's years span the window around today AND the year being

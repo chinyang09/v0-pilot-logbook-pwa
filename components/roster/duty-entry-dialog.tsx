@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { DateRow } from "@/components/ui/date-row";
 import { FormSection } from "@/components/ui/form-section";
 import { RegionSheet } from "@/components/ui/region-sheet";
+import { TimeRow } from "@/components/ui/time-row";
 import { SettingsRow, SelectRow } from "@/components/ui/settings-row";
 import { useBackDismiss } from "@/hooks/use-back-dismiss";
 import { addScheduleEntry, updateScheduleEntry } from "@/lib/db";
@@ -189,18 +190,11 @@ export function DutyEntryDialog({
 
         {wantsWindow && (
           <FormSection title="Window (UTC)">
-            <SettingsRow
-              label="Start"
-              value={start}
-              onChange={setStart}
-              placeholder="06:00"
-              required
-            />
-            <SettingsRow
+            <TimeRow label="Start" value={start} onChange={setStart} required />
+            <TimeRow
               label="End"
               value={end}
               onChange={setEnd}
-              placeholder="18:00"
               description="An end earlier than the start means the next day."
               required
             />
