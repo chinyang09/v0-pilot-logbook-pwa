@@ -2,8 +2,9 @@
  * Import status dialog — the progress / success / failure surface shown while
  * an import runs, before the review modal takes over.
  *
- * Dressed as the same material as the review modal and the nav pill: a
- * translucent panel over a radially-blurred backdrop. The flat `bg-black/50`
+ * Dressed like the review modal: an OPAQUE panel over a radial backdrop. It
+ * was translucent (/70, then /95), and the page behind — the logbook's empty
+ * state, mostly — ghosted through behind the dialog's own text. The flat `bg-black/50`
  * scrim a default dialog ships with reads fine over a dark app but turns a
  * light theme into grey mush (the glass sidebar in particular), so the veil is
  * much lighter in light mode and the blur does the separating instead.
@@ -69,7 +70,7 @@ export function ImportStatusDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="z-[110] block max-w-[calc(100%-2rem)] gap-0 overflow-hidden rounded-3xl border-white/10 bg-card/95 p-5 shadow-2xl backdrop-saturate-150 sm:max-w-sm sm:p-6"
+        className="z-[110] block max-w-[calc(100%-2rem)] gap-0 overflow-hidden rounded-3xl border-white/10 bg-card p-5 shadow-2xl sm:max-w-sm sm:p-6"
         overlayClassName={cn("z-[105]", MODAL_SCRIM)}
         backdropSlot={<RadialBlurBackdrop className="fixed inset-0 z-[106]" />}
         showCloseButton={false}
