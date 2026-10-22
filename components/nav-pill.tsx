@@ -1779,6 +1779,17 @@ function MobilePillMorph({
     setSidebarOpen(false)
   }, [pathname])
 
+  // Escape is the keyboard half of the back gesture (an iPad or a Chromebook
+  // with a keyboard). Without it the overlay could only be closed by pointer.
+  useEffect(() => {
+    if (!sidebarOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) dismissSidebar()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [sidebarOpen, dismissSidebar])
+
   // Settle the phase the instant the morph visually finishes (see desktop), so
   // the sidebar content becomes interactive immediately instead of ~80ms later.
   const handleTransitionEnd = useCallback(

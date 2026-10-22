@@ -9,6 +9,9 @@ import {
 } from "@/lib/db/stores/reference/aircraft.store"
 import { useDBReady, CACHE_KEYS, checkDBReady } from "./use-db"
 
+/** One empty list, so "no data yet" is the same reference every render. */
+const NONE: never[] = []
+
 /**
  * Fetch all reference aircraft from IndexedDB and normalize them
  */
@@ -65,7 +68,7 @@ export function useReferenceAircraft() {
   }, [mutateAircraft])
 
   return {
-    aircraft: data ?? [],
+    aircraft: data ?? NONE,
     isLoading,
     error,
     refresh,

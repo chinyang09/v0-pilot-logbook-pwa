@@ -101,7 +101,7 @@ export function useScheduleEntriesByDateRange(startDate: string, endDate: string
   }, [mutateEntries])
 
   return {
-    scheduleEntries: data ?? [],
+    scheduleEntries: data ?? NONE,
     isLoading,
     error,
     refresh,

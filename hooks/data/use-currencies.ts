@@ -102,7 +102,7 @@ export function useExpiringCurrencies() {
   }, [mutateCurrencies])
 
   return {
-    expiringCurrencies: data ?? [],
+    expiringCurrencies: data ?? NONE,
     isLoading,
     error,
     refresh,

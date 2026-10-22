@@ -14,6 +14,9 @@ import {
 } from "@/lib/db"
 import { useDBReady, CACHE_KEYS, checkDBReady } from "./use-db"
 
+/** One empty list, so "no data yet" is the same reference every render. */
+const NONE: never[] = []
+
 /**
  * Fetch airports from IndexedDB (with auto-seed from JSON if empty)
  */
@@ -65,7 +68,7 @@ export function useAirports() {
   }, [mutateAirports])
 
   return {
-    airports: data ?? [],
+    airports: data ?? NONE,
     isLoading,
     error,
     refresh,
