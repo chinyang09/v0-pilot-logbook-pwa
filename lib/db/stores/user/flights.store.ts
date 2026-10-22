@@ -21,7 +21,7 @@ import { DELETED_RETENTION_MS, isWithinRetention } from "@/lib/utils/retention"
 import { sortFlights } from "@/lib/utils/flight-sort"
 import { isSimulatorEntry, simulatorRepairPatch } from "@/lib/utils/entry-type"
 import { timezoneRepairPatch } from "@/lib/utils/flight-timezone"
-import { flightTimeRepairPatch } from "@/lib/utils/flight-calculations"
+import { blockFollowersPatch, flightTimeRepairPatch } from "@/lib/utils/flight-calculations"
 import { inferMultiPilotTime, inferPilotFlying, inferPilotRole } from "@/lib/utils/flight-evidence"
 import { withAdditionalCrew } from "@/lib/utils/crew-complement"
 import { getAirportByIcao, getAirportTimeInfo, isAirportTableSeeded } from "../reference/airports.store"
@@ -48,7 +48,10 @@ export async function addFlight(flight: FlightLogCreate): Promise<FlightLog> {
  * Update an existing flight
  */
 export async function updateFlight(id: string, updates: Partial<FlightLog>): Promise<FlightLog | null> {
-  return updateEntity<FlightLog>(userDb.flights, "flights", id, updates)
+  // An hour category the pilot set to the block ("USE") moves with it, from
+  // every writer — an import replaces OOOI and the block as company-owned
+  // fields, and a category left at the OLD block would then read as a pin.
+  return updateEntity<FlightLog>(userDb.flights, "flights", id, updates, blockFollowersPatch)
 }
 
 /**

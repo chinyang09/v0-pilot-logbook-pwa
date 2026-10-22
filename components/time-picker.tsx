@@ -15,6 +15,8 @@ interface TimePickerProps {
   onClose: () => void
   label?: string
   timezoneOffset?: number // In hours for local time display
+  /** A length of time rather than a point in time: no NOW, no local clock. */
+  duration?: boolean
 }
 
 // Generate options for hours (0-23) and minutes (0-59)
@@ -39,6 +41,7 @@ export function TimePicker({
   onClose,
   label,
   timezoneOffset = 0,
+  duration = false,
 }: TimePickerProps) {
   const [hours, setHours] = useState(0)
   const [minutes, setMinutes] = useState(0)
@@ -135,14 +138,16 @@ export function TimePicker({
             {label && (
               <span className="text-xs text-muted-foreground mb-1">{label}</span>
             )}
-            <button
-              type="button"
-              onClick={handleSetNow}
-              className="text-sm font-medium text-primary active:opacity-70 relative after:absolute after:-inset-3 after:content-['']"
-            >
-              NOW
-            </button>
-            {timezoneOffset !== 0 && (
+            {!duration && (
+              <button
+                type="button"
+                onClick={handleSetNow}
+                className="text-sm font-medium text-primary active:opacity-70 relative after:absolute after:-inset-3 after:content-['']"
+              >
+                NOW
+              </button>
+            )}
+            {!duration && timezoneOffset !== 0 && (
               <span className="text-xs text-muted-foreground mt-0.5">
                 Local: {getLocalTime()}
               </span>

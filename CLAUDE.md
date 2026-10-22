@@ -874,6 +874,23 @@ form shows a simulator's TIME as one "Session" row.
 an export needs one, is the role time × night ÷ block for that flight. It is a
 derivation, not a field a pilot has to log.
 
+**"USE x:xx" is not a lock** (`categoryState`, `lib/utils/flight-calculations.ts`).
+An hour category is in one of three states, read off the record itself:
+
+| | Stored as | Recalculation |
+|---|---|---|
+| `auto` | no override | its Auto-fill rule |
+| `block` | override + a figure EQUAL to the block — what USE writes | follows the block when OUT/IN move |
+| `pinned` | override + any other figure (typed into the row's duration picker) | left alone; a pinned ROLE time freezes the whole split |
+
+No extra field: equality is what makes a reopened flight still read as "USE".
+Every writer carries `block` categories along — the form's apply effect,
+`recalculateFlightFields`, and `updateFlight` itself (`blockFollowersPatch`),
+because an eCrew import rewrites the block as a company-owned field and a
+category left at the old figure would then read as a pin. Only a `pinned`
+category makes an import treat the flight as hand-edited (`detectEditReasons`).
+A lock icon on the row marks `pinned`; nothing marks `block`.
+
 The breakdown shows every category that HOLDS time (a hand-logged IFR hour
 used to vanish when its Auto-fill switch was off). The role picker no longer
 offers "Examiner": it was never a role a flight can hold.
@@ -4507,6 +4524,7 @@ When making changes, be aware of these high-impact files:
 - Do not hardcode PICUS for a first officer's flown leg — it is the pilot's own setting (Settings › Logging), dated by the check-out, with SIC when unset. Read the role convention through `getLoggingProfile()` / `withLoggingPreferences`, never the bare crew card
 - Do not leave a flight with no OFF/ON at a flight time of 00:00 or without takeoffs and landings — `airborneTimes` falls back to OUT/IN for both (the owner's rule: OUT/IN are the next best evidence of when it flew), in `recalculateFlightFields` and the form alike
 - Do not recompute any role time once one of the five (PIC, SIC, PICUS, Dual, Instructor) is pinned
+- Do not treat an hour category set with USE as a pin — an override whose figure equals the block FOLLOWS the block (`categoryState` "block"); only a different figure is the pilot's. And do not write a new block time except through `updateFlight`, or the categories following it are left behind and read as pins
 - Do not mark a session expired on a 401 alone, and do not start a passkey ceremony from a background trigger — probe first, and require user activation
 - Do not let a sign-in as a different account inherit this device's data — `dataOwner` decides, and the switch clears it
 - Do not compare a pulled record against the local one by clock — rebase it (`planLocalApply`): the server's copy plus whatever this device has pending. Only a pending create or a dead-lettered row falls back to last-write-wins

@@ -20,6 +20,7 @@ import {
   Minus,
   Trash2,
   PenLine,
+  Lock,
   X,
 } from "lucide-react";
 import { mutate } from "swr";
@@ -53,6 +54,11 @@ import {
   calculateRoleTimes,
   getApproachCategory,
   hasCoordinates,
+  categoryState,
+  BLOCK_FOLLOWING_FIELDS,
+  isBlockFollowingField,
+  ROLE_TIME_FIELDS,
+  type BlockFollowingField,
 } from "@/lib/utils/flight-calculations";
 import { inferPilotFlying, inferPilotRole, isMultiPilotFlight, isSoloFlight, soloConflict } from "@/lib/utils/flight-evidence";
 import { PILOT_ROLES, TIME_CATEGORIES, categoryLabel, roleLabel, showsCategory } from "@/lib/utils/logbook-rules";
@@ -326,8 +332,14 @@ function TimeDisplayRow({
   onUse,
   useLabel,
   showUseButton = false,
+  onEdit,
+  locked = false,
 }: {
   label: string;
+  /** Tapping the row enters a figure of the pilot's own. */
+  onEdit?: () => void;
+  /** The figure is the pilot's own (`categoryState` "pinned"): no recalculation touches it. */
+  locked?: boolean;
   /** Smaller line under the label — what the other logbook rules call it. */
   helper?: string;
   /** The helper is a problem with the figure, not a note about its name. */
@@ -340,7 +352,10 @@ function TimeDisplayRow({
   showUseButton?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 py-3.5 px-4 row-divider">
+    <div
+      className={cn("flex items-center justify-between gap-3 py-3.5 px-4 row-divider", onEdit && "cursor-pointer")}
+      {...(onEdit ? pressableRow(onEdit, `${label}: ${formatTimeShort(value)}`) : {})}
+    >
       {helper ? (
         <span className="flex min-w-0 flex-col">
           <span className="text-foreground">{label}</span>
@@ -370,12 +385,20 @@ function TimeDisplayRow({
             variant="outline"
             size="sm"
             className="h-9 min-w-11 px-2 text-xs border-primary text-primary bg-transparent"
-            onClick={onUse}
+            onClick={(e) => {
+              // The row behind it opens the picker; this tap means "the block".
+              e.stopPropagation();
+              onUse();
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
           >
             {useLabel || "USE"}
           </Button>
         ) : (
-          <span className="text-foreground">{formatTimeShort(value)}</span>
+          <span className="flex items-center gap-1.5 text-foreground">
+            {locked && <Lock className="h-3.5 w-3.5 text-muted-foreground" aria-label="Entered by hand" />}
+            {formatTimeShort(value)}
+          </span>
         )}
       </div>
     </div>
@@ -915,29 +938,23 @@ export function FlightForm({
         if (prev.nightLandings !== calculatedFields.nightLandings) updates.nightLandings = calculatedFields.nightLandings;
       }
 
-      if (!manualOverrides.picTime) {
-        if (prev.picTime !== calculatedFields.picTime) updates.picTime = calculatedFields.picTime;
+      // The hour categories, on the rule the store's recalculation uses
+      // (`categoryState`): unset → its auto-fill rule; set to the block
+      // ("USE") → follows the block as OUT/IN move; any other figure → the
+      // pilot's, left alone. A real pin on one role time owns the whole split.
+      const stateOf = (f: BlockFollowingField) => categoryState(prev, f, manualOverrides);
+      const rolePinned = ROLE_TIME_FIELDS.some((f) => stateOf(f) === "pinned");
+      const computed: Partial<Record<BlockFollowingField, string | null>> = {
+        crossCountryTime: calculatedFields.crossCountryTime,
+        multiPilotTime: calculatedFields.multiPilotTime,
+        soloTime: calculatedFields.soloTime,
+      };
+      for (const f of ROLE_TIME_FIELDS) computed[f] = rolePinned ? null : calculatedFields[f];
+      for (const f of BLOCK_FOLLOWING_FIELDS) {
+        const state = stateOf(f);
+        const next = state === "block" ? calculatedFields.blockTime : state === "pinned" ? null : (computed[f] ?? null);
+        if (next !== null && prev[f] !== next) updates[f] = next;
       }
-      if (!manualOverrides.sicTime) {
-        if (prev.sicTime !== calculatedFields.sicTime) updates.sicTime = calculatedFields.sicTime;
-      }
-      if (!manualOverrides.picusTime) {
-        if (prev.picusTime !== calculatedFields.picusTime) updates.picusTime = calculatedFields.picusTime;
-      }
-      if (!manualOverrides.dualTime) {
-        if (prev.dualTime !== calculatedFields.dualTime) updates.dualTime = calculatedFields.dualTime;
-      }
-      if (!manualOverrides.instructorTime) {
-        if (prev.instructorTime !== calculatedFields.instructorTime) updates.instructorTime = calculatedFields.instructorTime;
-      }
-      // Computed above and never applied until now — the XC row only ever
-      // showed what the store's recalculation had written.
-      const xc = calculatedFields.crossCountryTime;
-      if (!manualOverrides.crossCountryTime && xc !== null && prev.crossCountryTime !== xc) updates.crossCountryTime = xc;
-      const mp = calculatedFields.multiPilotTime;
-      if (!manualOverrides.multiPilotTime && mp !== null && prev.multiPilotTime !== mp) updates.multiPilotTime = mp;
-      const solo = calculatedFields.soloTime;
-      if (!manualOverrides.soloTime && solo !== null && prev.soloTime !== solo) updates.soloTime = solo;
 
       // Nothing changed — return same reference so React skips the re-render
       if (Object.keys(updates).length === 0) return prev;
@@ -1447,10 +1464,14 @@ export function FlightForm({
     (time: string) => {
       if (activeTimePicker) {
         updateField(activeTimePicker as keyof FlightLog, time);
+        // An hour category entered by hand is the pilot's. Equal to the block
+        // it simply follows the block (as USE does); any other figure is a
+        // pin no recalculation touches (`categoryState`).
+        if (isBlockFollowingField(activeTimePicker)) markManualOverride(activeTimePicker, true);
         setActiveTimePicker(null);
       }
     },
-    [activeTimePicker, updateField]
+    [activeTimePicker, updateField, markManualOverride]
   );
 
   const setNowTime = useCallback(
@@ -2031,6 +2052,7 @@ export function FlightForm({
                   updateField("simulatedInstrumentTime", sessionSpan);
                   markManualOverride("simulatedInstrumentTime", true);
                 }}
+                onEdit={() => setActiveTimePicker("simulatedInstrumentTime")}
               />
             </SwipeableRow>
           ) : (
@@ -2080,11 +2102,15 @@ export function FlightForm({
                       showUseButton={offerUse}
                       useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
                       onUse={() => {
-                        // Chosen by hand, so pinned: a recalculation must not
-                        // take it back (`manualOverrides`).
+                        // "Use the block" — not a pin. The override with a
+                        // figure EQUAL to the block is how that is stored, so
+                        // the category follows the block when OUT/IN move
+                        // and reads the same way when the flight is reopened.
                         updateField(field, formData.blockTime || "00:00");
                         markManualOverride(field, true);
                       }}
+                      onEdit={() => setActiveTimePicker(field)}
+                      locked={isBlockFollowingField(field) && categoryState(formData, field, manualOverrides) === "pinned"}
                     />
                   </SwipeableRow>
                 );
@@ -2439,6 +2465,7 @@ export function FlightForm({
           onSelect={handleTimeSelect}
           onClose={() => setActiveTimePicker(null)}
           timezoneOffset={getTimePickerTimezone()}
+          duration={isBlockFollowingField(activeTimePicker)}
         />
       )}
 

@@ -41,6 +41,7 @@ import type { ImportDefaults } from "@/types/db/stores.types";
 import { isSamePersonName } from "@/lib/utils/parsers/shared/name-normalize";
 import { inferPilotFlying } from "@/lib/utils/flight-evidence";
 import { isPositioningEntry } from "@/lib/utils/entry-type";
+import { categoryState, isBlockFollowingField } from "@/lib/utils/flight-calculations";
 
 // ============================================================
 // Public types
@@ -623,11 +624,13 @@ function detectEditReasons(flight: FlightLog): EditReason[] {
     reasons.push("has_remarks");
   }
 
-  if (
-    flight.manualOverrides &&
-    Object.keys(flight.manualOverrides).length > 0 &&
-    Object.values(flight.manualOverrides).some(Boolean)
-  ) {
+  // A category set to the block ("USE") is not a pin — it follows the block
+  // the report is about to correct — so only a figure of the pilot's own counts.
+  const overrides = flight.manualOverrides ?? {};
+  const pinned = Object.entries(overrides).some(
+    ([field, on]) => on && !(isBlockFollowingField(field) && categoryState(flight, field, overrides) === "block")
+  );
+  if (pinned) {
     reasons.push("has_manual_overrides");
   }
 

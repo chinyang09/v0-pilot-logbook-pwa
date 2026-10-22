@@ -69,6 +69,48 @@ export function flightTimeRepairPatch(f: Partial<FlightLog>): Partial<FlightLog>
   return hhmmToMinutes(flightTime) > 0 ? { flightTime } : {}
 }
 
+export const ROLE_TIME_FIELDS = ["picTime", "sicTime", "picusTime", "dualTime", "instructorTime"] as const
+
+/** The hour categories a pilot can set to "the block" — every one but night, which the sun decides. */
+export const BLOCK_FOLLOWING_FIELDS = [
+  ...ROLE_TIME_FIELDS,
+  "soloTime",
+  "multiPilotTime",
+  "crossCountryTime",
+  "ifrTime",
+  "actualInstrumentTime",
+  "simulatedInstrumentTime",
+] as const satisfies ReadonlyArray<keyof FlightLog & keyof ManualOverrides>
+
+export type BlockFollowingField = (typeof BLOCK_FOLLOWING_FIELDS)[number]
+
+export function isBlockFollowingField(field: string | null | undefined): field is BlockFollowingField {
+  return !!field && (BLOCK_FOLLOWING_FIELDS as readonly string[]).includes(field)
+}
+
+/**
+ * Where an hour category stands, from the pilot's point of view:
+ *
+ * - `auto` — nobody set it; its auto-fill rule decides.
+ * - `block` — set, and equal to the block time. That is what tapping
+ *   "USE x:xx" means — "this was all of it" — so it FOLLOWS the block when
+ *   OUT or IN moves, and is not a lock. A figure that happens to equal the
+ *   block reads the same way, which is how a reopened flight still knows.
+ * - `pinned` — set to anything else. That figure is the pilot's own, and no
+ *   recalculation touches it.
+ *
+ * The form and every recalculation pass decide with this one function.
+ */
+export function categoryState(
+  flight: Partial<FlightLog>,
+  field: BlockFollowingField,
+  overrides: ManualOverrides = flight.manualOverrides ?? {}
+): "auto" | "block" | "pinned" {
+  if (!overrides[field]) return "auto"
+  const value = hhmmToMinutes((flight[field] as string | undefined) || "00:00")
+  return value === hhmmToMinutes(flight.blockTime || "00:00") ? "block" : "pinned"
+}
+
 /**
  * Calculate day time (Total block time minus night time)
  */
@@ -305,6 +347,24 @@ export function createEmptyFlightLog(
 }
 
 /**
+ * The categories that follow a change of block time: every one in the `block`
+ * state on the row as it was, set to the new block. A category the same edit
+ * writes itself is the writer's; this never overrides it. Empty when the block
+ * does not change.
+ */
+export function blockFollowersPatch(existing: Partial<FlightLog>, updates: Partial<FlightLog>): Partial<FlightLog> {
+  const next = updates.blockTime
+  if (next == null || hhmmToMinutes(next) === hhmmToMinutes(existing.blockTime || "00:00")) return {}
+  const overrides = updates.manualOverrides ?? existing.manualOverrides ?? {}
+  const patch: Partial<FlightLog> = {}
+  for (const field of BLOCK_FOLLOWING_FIELDS) {
+    if (field in updates) continue
+    if (categoryState(existing, field, overrides) === "block") patch[field] = next
+  }
+  return patch
+}
+
+/**
  * Recalculate all derived fields for a flight
  * Respects manual overrides and auto-fill preferences
  */
@@ -400,13 +460,9 @@ export function recalculateFlightFields(
   // none is recomputed. Dual and instructor were left out of this gate, so a
   // pinned Dual (a LogTen training flight, say) was zeroed or replaced by the
   // block time on the next recalculation pass.
-  if (
-    !overrides.picTime &&
-    !overrides.sicTime &&
-    !overrides.picusTime &&
-    !overrides.dualTime &&
-    !overrides.instructorTime
-  ) {
+  // A role time set to the block ("USE") is not a pin: it follows the block
+  // (the pass at the end), and leaves the other four free to recompute.
+  if (!ROLE_TIME_FIELDS.some((f) => categoryState(flight, f) === "pinned")) {
     const shouldAutoFillRoles =
       autoFill?.pic !== false ||
       autoFill?.sic !== false ||
@@ -426,7 +482,7 @@ export function recalculateFlightFields(
   }
 
   // Cross-country time — auto-fill when departure differs from arrival
-  if (autoFill?.xc !== false && !overrides.crossCountryTime) {
+  if (autoFill?.xc !== false && categoryState(flight, "crossCountryTime") === "auto") {
     const depIcao = flight.departureIcao || depAirport?.icao
     const arrIcao = flight.arrivalIcao || arrAirport?.icao
     if (depIcao && arrIcao && depIcao !== arrIcao) {
@@ -436,29 +492,35 @@ export function recalculateFlightFields(
 
   // Multi-pilot time — the block, when the flight's own record shows a
   // multi-pilot crew (`isMultiPilotFlight`)
-  if (autoFill?.multiPilot !== false && !overrides.multiPilotTime) {
+  if (autoFill?.multiPilot !== false && categoryState(flight, "multiPilotTime") === "auto") {
     updates.multiPilotTime = isMultiPilotFlight(flight) ? blockTime : "00:00"
   }
 
   // Solo time — opt-in (`isSoloFlight` cannot see passengers), and never on a
   // type certified for two pilots
-  if (autoFill?.solo === true && !overrides.soloTime) {
+  if (autoFill?.solo === true && categoryState(flight, "soloTime") === "auto") {
     updates.soloTime = isSoloFlight(flight) ? blockTime : "00:00"
   }
 
   // IFR time — auto-fill from flight time
-  if (autoFill?.ifr === true && !overrides.ifrTime) {
+  if (autoFill?.ifr === true && categoryState(flight, "ifrTime") === "auto") {
     updates.ifrTime = flightTime
   }
 
   // Actual instrument time
-  if (autoFill?.actualInst === true && !overrides.actualInstrumentTime) {
+  if (autoFill?.actualInst === true && categoryState(flight, "actualInstrumentTime") === "auto") {
     updates.actualInstrumentTime = flightTime
   }
 
   // Simulated instrument time
-  if (autoFill?.simInst === true && !overrides.simulatedInstrumentTime) {
+  if (autoFill?.simInst === true && categoryState(flight, "simulatedInstrumentTime") === "auto") {
     updates.simulatedInstrumentTime = flightTime
+  }
+
+  // Every category the pilot set to the block follows it, whatever the
+  // auto-fill rule for that category would have said.
+  for (const field of BLOCK_FOLLOWING_FIELDS) {
+    if (categoryState(flight, field) === "block") updates[field] = blockTime
   }
 
   return updates

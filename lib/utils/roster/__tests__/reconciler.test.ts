@@ -297,6 +297,26 @@ describe("reconcileRoster — edited_conflict", () => {
     expect(ops[0].kind).toBe("edited_conflict");
   });
 
+  it("flags edited when an hour category holds a figure of the pilot's own", () => {
+    const dbFlight = makeFlight({ scheduledOut: "04:00", ifrTime: "01:00", manualOverrides: { ifrTime: true } });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [dbFlight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    expect(ops[0].kind).toBe("edited_conflict");
+  });
+
+  it("does not treat a category set to the block (USE) as an edit — it follows the block", () => {
+    const dbFlight = makeFlight({ scheduledOut: "04:00", ifrTime: "02:33", manualOverrides: { ifrTime: true } });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [dbFlight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    expect(ops[0].kind).toBe("update_conflict");
+  });
+
   it("treats freshly-imported flights as NOT edited", () => {
     const dbFlight = makeFlight({ scheduledOut: "04:00" });
     const ops = reconcileRoster({
