@@ -20,6 +20,7 @@ import { ReadOnlyRow, SettingsRow } from "@/components/ui/settings-row"
 import { useBackDismiss } from "@/hooks/use-back-dismiss"
 import { resolveDiscrepancy } from "@/lib/db"
 import { cn } from "@/lib/utils"
+import { flightFieldLabel } from "@/lib/utils/field-labels"
 import type { Discrepancy } from "@/types/entities/roster.types"
 
 const RESOLUTION_OPTIONS = [
@@ -125,7 +126,7 @@ function ResolutionForm({
         <p className="row-divider px-4 py-3.5 text-sm text-foreground">
           {discrepancy.message || "Discrepancy detected"}
         </p>
-        {discrepancy.field && <ReadOnlyRow label="Field" value={discrepancy.field} />}
+        {discrepancy.field && <ReadOnlyRow label="Field" value={flightFieldLabel(discrepancy.field)} />}
         {discrepancy.scheduleValue && <ReadOnlyRow label="Schedule" value={String(discrepancy.scheduleValue)} />}
         {discrepancy.logbookValue && <ReadOnlyRow label="Logbook" value={String(discrepancy.logbookValue)} />}
       </FormSection>

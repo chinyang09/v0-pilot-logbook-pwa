@@ -2611,6 +2611,12 @@ identical:
   2027". The picker's years span the window around today AND the year being
   edited (`pastYears`/`futureYears`); a fixed ±5 had no row for a migrated
   2011 flight or a 2034 passport.
+- **A flight field is named through `flightFieldLabel`** (`lib/utils/field-labels.ts`)
+  wherever a pilot reads it — the resolve sheet, the comparison cards, the
+  import card (hour categories ask `TIME_CATEGORIES` first). Each surface kept
+  its own short list, so anything off it reached the screen as "outTime".
+  The FDP Quick Check's date/report/debrief are wheel-picker fields too; its
+  times are UTC and the field says so.
 - **Every input has a label bound to it** (`htmlFor`/`id`, `useId` where a
   component can appear twice), and the login callsign carries
   `autoComplete="username"` with auto-capitalise and autocorrect off (the

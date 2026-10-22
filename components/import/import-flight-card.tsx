@@ -31,6 +31,7 @@ import { OptionPair } from "./option-pair";
 import { getAirportDisplayCode } from "@/lib/utils/airport-display";
 import { usePreferences } from "@/components/providers/preferences-provider";
 import { TIME_CATEGORIES, categoryLabel, roleLabel, type LogbookAuthority } from "@/lib/utils/logbook-rules";
+import { flightFieldLabel } from "@/lib/utils/field-labels";
 
 /** Field slots the card body already draws. */
 const CHROME_FIELDS = new Set([
@@ -75,16 +76,10 @@ const HIDDEN_FIELDS = new Set([
   "nightLandings",
 ]);
 
-const FIELD_LABELS: Record<string, string> = {
-  pilotRole: "Role",
-  flightTime: "Flight time",
-  dayTime: "Day",
-};
-
 /** An hour category takes the pilot's logbook rules' name; anything else its own. */
 function fieldLabel(field: string, authority: LogbookAuthority): string {
   const category = TIME_CATEGORIES.find((c) => c.field === field);
-  return category ? categoryLabel(category, authority).label : (FIELD_LABELS[field] ?? field);
+  return category ? categoryLabel(category, authority).label : flightFieldLabel(field);
 }
 
 const TOLDG_FIELDS = [
