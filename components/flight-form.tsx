@@ -1309,23 +1309,30 @@ export function FlightForm({
   // restored when the form re-mounts — switching out of the logbook section and
   // back, or returning from a picker on mobile. Kept current on every scroll so the
   // latest position is already saved by the time the form unmounts.
+  // Saved WITH the flight it belongs to. Saved bare, the offset was restored
+  // into whichever flight mounted next — open a different flight after
+  // scrolling one and it opened at the Landings section, not at its date.
+  const scrollFlightId = resolvedFlight?.id || flightIdProp || "";
+  const writeScroll = useCallback(() => {
+    if (scrollContainerRef.current && scrollFlightId) {
+      sessionStorage.setItem(
+        SCROLL_STORAGE_KEY,
+        `${scrollFlightId}|${scrollContainerRef.current.scrollTop}`
+      );
+    }
+  }, [scrollFlightId]);
+
   const handleScrollSave = useCallback(() => {
     if (scrollSaveRafRef.current) return;
     scrollSaveRafRef.current = true;
     requestAnimationFrame(() => {
       scrollSaveRafRef.current = false;
-      if (scrollContainerRef.current) {
-        sessionStorage.setItem(SCROLL_STORAGE_KEY, String(scrollContainerRef.current.scrollTop));
-      }
+      writeScroll();
     });
-  }, []);
+  }, [writeScroll]);
 
   // Save scroll position immediately (used right before navigating to a picker).
-  const saveScrollPosition = useCallback(() => {
-    if (scrollContainerRef.current) {
-      sessionStorage.setItem(SCROLL_STORAGE_KEY, String(scrollContainerRef.current.scrollTop));
-    }
-  }, []);
+  const saveScrollPosition = writeScroll;
 
   // Restore the saved scroll position synchronously, BEFORE the browser paints,
   // so there is no flash at the top before jumping to the saved offset.
@@ -1343,7 +1350,9 @@ export function FlightForm({
     didRestoreScrollRef.current = true;
     const saved = sessionStorage.getItem(SCROLL_STORAGE_KEY);
     if (!saved) return;
-    const scrollVal = Number(saved);
+    const [savedId, savedTop] = saved.split("|");
+    if (savedId !== scrollFlightId) return;
+    const scrollVal = Number(savedTop);
     if (Number.isFinite(scrollVal) && scrollVal > 0) {
       el.scrollTop = scrollVal;
     }
@@ -1351,6 +1360,17 @@ export function FlightForm({
     // is only read to confirm content is backed by data before restoring.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveFlight]);
+
+  // A different flight under a mounted form (desktop keeps the form up while
+  // the list selection moves) starts at its top, not at the depth the last
+  // one was read to. The FIRST id is left to the restore above.
+  const shownFlightIdRef = useRef(scrollFlightId);
+  useLayoutEffect(() => {
+    if (shownFlightIdRef.current === scrollFlightId) return;
+    const switched = shownFlightIdRef.current !== "";
+    shownFlightIdRef.current = scrollFlightId;
+    if (switched && scrollContainerRef.current) scrollContainerRef.current.scrollTop = 0;
+  }, [scrollFlightId]);
 
   // Force-save current form data before navigating away (bypasses debounce)
   // Skips save if nothing changed from last saved state to avoid sync queue bloat
@@ -2140,7 +2160,12 @@ export function FlightForm({
                 // Solo on a two-pilot type, or with another pilot aboard, is
                 // a mistake in the record. Said, not silently corrected.
                 const warning = field === "soloTime" ? soloWarning : null;
-                const offerUse = value === "00:00" && !(field === "soloTime" && soloImpossible);
+                // Nothing to offer while there is no block: a column of
+                // "USE 0:00" down an unflown sector offered to copy a zero.
+                const offerUse =
+                  value === "00:00" &&
+                  (formData.blockTime || "00:00") !== "00:00" &&
+                  !(field === "soloTime" && soloImpossible);
                 return (
                   <SwipeableRow
                     key={field}
