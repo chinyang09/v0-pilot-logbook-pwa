@@ -232,7 +232,27 @@ function pressableRow(onActivate: () => void, name: string) {
   };
 }
 
-// Time row with UTC and Local display
+/**
+ * One column of a time row as its own control. The row is the UTC target; a
+ * column inside it claims its own taps, and its hit area grows into the row's
+ * padding so the target is the full row height without moving anything.
+ */
+function clockColumn(onActivate: () => void, name: string) {
+  return {
+    ...pressableRow(onActivate, name),
+    onClick: (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onActivate();
+    },
+    className:
+      "relative flex flex-col items-end rounded-md after:absolute after:-inset-x-1.5 after:-inset-y-3.5 after:content-[''] focus-visible:outline-2 focus-visible:outline-ring",
+  };
+}
+
+// Time row with UTC and Local display. Either clock can be edited: the UTC
+// column (and the rest of the row) opens the picker in UTC, the local column
+// opens it in the airport's time — and the picker shows the other clock
+// live, so each checks the other.
 function TimeRow({
   label,
   utcValue,
@@ -246,7 +266,7 @@ function TimeRow({
   label: string;
   utcValue: string;
   timezoneOffset: number;
-  onTap: () => void;
+  onTap: (frame: "utc" | "local") => void;
   onNow?: () => void;
   showNow?: boolean;
   clockSeparator?: DisplayPreferences["clockSeparator"];
@@ -268,11 +288,11 @@ function TimeRow({
     // on "Out" itself did nothing.
     <div
       className="flex items-center justify-between py-3.5 px-4 row-divider cursor-pointer focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
-      {...pressableRow(onTap, `${label}, ${shown} UTC`)}
+      {...pressableRow(() => onTap("utc"), `${label}, ${shown} UTC`)}
     >
       <span className="text-foreground">{label}</span>
       <div className="flex items-center gap-3">
-        <div className="flex flex-col items-end">
+        <div {...clockColumn(() => onTap("utc"), `${label}, ${shown} UTC`)}>
           <span
             className={`text-lg ${
               hasValue ? "text-foreground" : "text-muted-foreground"
@@ -302,7 +322,12 @@ function TimeRow({
               NOW
             </Button>
           ) : (
-            <>
+            <div
+              {...clockColumn(
+                () => onTap("local"),
+                `${label}, ${hasValue ? localValue : "not set"} ${tzLabel}`
+              )}
+            >
               <span
                 className={`text-lg ${
                   hasValue ? "text-foreground" : "text-muted-foreground"
@@ -313,7 +338,7 @@ function TimeRow({
                   : "--:--"}
               </span>
               <span className="text-xs text-muted-foreground">{tzLabel}</span>
-            </>
+            </div>
           )}
         </div>
       </div>
@@ -489,6 +514,12 @@ export function FlightForm({
   const authority = preferences.logging.authority;
   const [, setIsSubmitting] = useState(false);
   const [activeTimePicker, setActiveTimePicker] = useState<string | null>(null);
+  // Which clock the picker edits — the row's UTC column or its local one.
+  const [timePickerFrame, setTimePickerFrame] = useState<"utc" | "local">("utc");
+  const openTimePicker = useCallback((field: keyof FlightLog, frame: "utc" | "local") => {
+    setTimePickerFrame(frame);
+    setActiveTimePicker(field);
+  }, []);
   const [signatureOpen, setSignatureOpen] = useState(false);
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
@@ -542,6 +573,10 @@ export function FlightForm({
   const [manualOverrides, setManualOverrides] = useState<
     FlightLog["manualOverrides"]
   >(resolvedFlight?.manualOverrides || cachedFlight?.manualOverrides || {});
+  const manualOverridesRef = useRef(manualOverrides);
+  useLayoutEffect(() => {
+    manualOverridesRef.current = manualOverrides;
+  }, [manualOverrides]);
 
   // Keep the module cache current so the next re-mount can seed synchronously.
   useEffect(() => {
@@ -626,6 +661,25 @@ export function FlightForm({
     if (next.adopted.length === 0) return;
     if (baseline) baselineRef.current = next.baseline;
     setFormData(next.form);
+
+    // The overrides live in their own state, which is what every
+    // recalculation reads — so they have to follow the row too, key by key.
+    // Adopted into the form copy alone, another device's pin stayed "auto"
+    // here, and the next OUT/IN edit recomputed the figure and sent it back
+    // over the pin.
+    if (next.adopted.includes("manualOverrides")) {
+      const mine = manualOverridesRef.current ?? {};
+      const followed = rebaseForm<NonNullable<FlightLog["manualOverrides"]>>({
+        form: mine,
+        baseline: baselineOverridesRef.current ?? mine,
+        previous: previous.manualOverrides ?? {},
+        live: liveFlight.manualOverrides ?? {},
+      });
+      if (followed.adopted.length > 0) {
+        if (baselineOverridesRef.current) baselineOverridesRef.current = followed.baseline;
+        setManualOverrides(followed.form);
+      }
+    }
   }, [liveFlight, flightIdProp]);
 
   useEffect(() => {
@@ -1168,36 +1222,37 @@ export function FlightForm({
    * mis-typed entry stops inflating flight hours the moment it is corrected.
    */
   const setEntryType = useCallback((type: EntryType) => {
-    setFormData((prev) => {
-      if (getEntryType(prev) === type) return prev;
-      const patch = entryTypePatch(type);
-      if (type === "simulator") {
-        const duration =
-          prev.simulatedInstrumentTime && prev.simulatedInstrumentTime !== "00:00"
-            ? prev.simulatedInstrumentTime
-            : prev.blockTime || "00:00";
-        return {
-          ...prev,
-          ...patch,
-          simulatedInstrumentTime: duration,
-          blockTime: "00:00",
-          flightTime: "00:00",
-          manualOverrides: {
-            ...(prev.manualOverrides ?? {}),
-            simulatedInstrumentTime: true,
-          },
-        };
-      }
-      if (type === "positioning") {
-        // Every hour goes: the pilot was carried, not flying. The OUT/IN stay —
-        // they are the duty. A simulator's pins are dropped as for a flight.
-        const next = { ...prev, ...patch };
-        return {
-          ...next,
-          ...positioningPatch(next),
-          manualOverrides: withoutSimulatorPins(prev.manualOverrides ?? {}, prev.nightTime),
-        };
-      }
+    const prev = formDataRef.current;
+    if (getEntryType(prev) === type) return;
+    const patch = entryTypePatch(type);
+    // The overrides the save and every recalculation read are the
+    // `manualOverrides` STATE, not the copy on the form data. Writing only
+    // the copy discarded the switch's pins: a simulator turned into a flight
+    // kept its 00:00 night pin, the very thing `withoutSimulatorPins` exists
+    // to drop.
+    const pins = (mine: FlightLog["manualOverrides"] | undefined): FlightLog["manualOverrides"] =>
+      type === "simulator"
+        ? { ...(mine ?? {}), simulatedInstrumentTime: true }
+        : withoutSimulatorPins(mine ?? {}, prev.nightTime);
+    let next: Partial<FlightLog>;
+    if (type === "simulator") {
+      const duration =
+        prev.simulatedInstrumentTime && prev.simulatedInstrumentTime !== "00:00"
+          ? prev.simulatedInstrumentTime
+          : prev.blockTime || "00:00";
+      next = {
+        ...prev,
+        ...patch,
+        simulatedInstrumentTime: duration,
+        blockTime: "00:00",
+        flightTime: "00:00",
+      };
+    } else if (type === "positioning") {
+      // Every hour goes: the pilot was carried, not flying. The OUT/IN stay —
+      // they are the duty. A simulator's pins are dropped as for a flight.
+      const carried = { ...prev, ...patch };
+      next = { ...carried, ...positioningPatch(carried) };
+    } else {
       // To a flight: from a simulator the duration moves across; from
       // positioning there is none, and the block is worked out from OUT/IN.
       const duration =
@@ -1206,17 +1261,13 @@ export function FlightForm({
           : getEntryType(prev) === "simulator"
             ? prev.simulatedInstrumentTime || "00:00"
             : "00:00";
-      return {
-        ...prev,
-        ...patch,
-        blockTime: duration,
-        simulatedInstrumentTime: "00:00",
-        // A simulator pins its session time and its night time (00:00 — a
-        // sim has no sky). Carried into a FLIGHT those pins hold night at
-        // zero for good, because every recalculation respects a pin.
-        manualOverrides: withoutSimulatorPins(prev.manualOverrides ?? {}, prev.nightTime),
-      };
-    });
+      // A simulator pins its session time and its night time (00:00 — a sim
+      // has no sky). Carried into a FLIGHT those pins hold night at zero for
+      // good, because every recalculation respects a pin.
+      next = { ...prev, ...patch, blockTime: duration, simulatedInstrumentTime: "00:00" };
+    }
+    setFormData(next);
+    setManualOverrides(pins);
   }, []);
 
   // Clear a field
@@ -1832,7 +1883,7 @@ export function FlightForm({
               utcValue={formData.reportTime || ""}
               derivedValue={rosteredReport}
               timezoneOffset={depTimezone}
-              onTap={() => setActiveTimePicker("reportTime")}
+              onTap={(frame) => openTimePicker("reportTime", frame)}
               onNow={() => setNowTime("reportTime")}
               clockSeparator={clockSeparator}
             />
@@ -1843,7 +1894,7 @@ export function FlightForm({
               label="Scheduled Out"
               utcValue={formData.scheduledOut || ""}
               timezoneOffset={depTimezone}
-              onTap={() => setActiveTimePicker("scheduledOut")}
+              onTap={(frame) => openTimePicker("scheduledOut", frame)}
               onNow={() => setNowTime("scheduledOut")}
             clockSeparator={clockSeparator}
             />
@@ -1854,7 +1905,7 @@ export function FlightForm({
               label="Scheduled In"
               utcValue={formData.scheduledIn || ""}
               timezoneOffset={arrTimezone}
-              onTap={() => setActiveTimePicker("scheduledIn")}
+              onTap={(frame) => openTimePicker("scheduledIn", frame)}
               onNow={() => setNowTime("scheduledIn")}
             clockSeparator={clockSeparator}
             />
@@ -1865,7 +1916,7 @@ export function FlightForm({
               label="Out"
               utcValue={formData.outTime || ""}
               timezoneOffset={depTimezone}
-              onTap={() => setActiveTimePicker("outTime")}
+              onTap={(frame) => openTimePicker("outTime", frame)}
               onNow={() => setNowTime("outTime")}
             clockSeparator={clockSeparator}
             />
@@ -1876,7 +1927,7 @@ export function FlightForm({
               label="Off"
               utcValue={formData.offTime || ""}
               timezoneOffset={depTimezone}
-              onTap={() => setActiveTimePicker("offTime")}
+              onTap={(frame) => openTimePicker("offTime", frame)}
               onNow={() => setNowTime("offTime")}
             clockSeparator={clockSeparator}
             />
@@ -1887,7 +1938,7 @@ export function FlightForm({
               label="On"
               utcValue={formData.onTime || ""}
               timezoneOffset={arrTimezone}
-              onTap={() => setActiveTimePicker("onTime")}
+              onTap={(frame) => openTimePicker("onTime", frame)}
               onNow={() => setNowTime("onTime")}
             clockSeparator={clockSeparator}
             />
@@ -1898,7 +1949,7 @@ export function FlightForm({
               label="In"
               utcValue={formData.inTime || ""}
               timezoneOffset={arrTimezone}
-              onTap={() => setActiveTimePicker("inTime")}
+              onTap={(frame) => openTimePicker("inTime", frame)}
               onNow={() => setNowTime("inTime")}
             clockSeparator={clockSeparator}
             />
@@ -2052,7 +2103,7 @@ export function FlightForm({
                   updateField("simulatedInstrumentTime", sessionSpan);
                   markManualOverride("simulatedInstrumentTime", true);
                 }}
-                onEdit={() => setActiveTimePicker("simulatedInstrumentTime")}
+                onEdit={() => openTimePicker("simulatedInstrumentTime", "utc")}
               />
             </SwipeableRow>
           ) : (
@@ -2109,7 +2160,7 @@ export function FlightForm({
                         updateField(field, formData.blockTime || "00:00");
                         markManualOverride(field, true);
                       }}
-                      onEdit={() => setActiveTimePicker(field)}
+                      onEdit={() => openTimePicker(field, "utc")}
                       locked={isBlockFollowingField(field) && categoryState(formData, field, manualOverrides) === "pinned"}
                     />
                   </SwipeableRow>
@@ -2460,12 +2511,14 @@ export function FlightForm({
       {/* Time Picker Modal */}
       {activeTimePicker && (
         <TimePicker
+          key={`${activeTimePicker}:${timePickerFrame}`}
           isOpen={!!activeTimePicker}
           initialTime={formData[activeTimePicker as keyof FlightLog] as string}
           onSelect={handleTimeSelect}
           onClose={() => setActiveTimePicker(null)}
           timezoneOffset={getTimePickerTimezone()}
           duration={isBlockFollowingField(activeTimePicker)}
+          frame={timePickerFrame}
         />
       )}
 

@@ -2558,6 +2558,19 @@ identical:
   `role="button"`, `tabIndex`, Enter/Space, an accessible name), so the form
   can be driven from a keyboard. A row with its own inner button (NOW, USE)
   stops that button's keydown from bubbling to the row.
+- **A time row edits EITHER clock.** The UTC column (and the rest of the
+  row) opens the picker in UTC; the local column opens it in the airport's
+  time (`TimePicker`'s `frame`). The picker always takes and returns UTC
+  (`utcToLocal` / `localToUTC`, exact inverses at every offset, half hours
+  included) and shows the other clock live under NOW, so each checks the
+  other. Clock only — the flight's date is not moved by a local edit, the same
+  as a UTC edit. `formatTimezoneOffset` names a half-hour zone `UTC+5:30`.
+- **The form's overrides are STATE, and they follow the row.** Saves and every
+  recalculation read the `manualOverrides` state, never the copy on the form
+  data — so anything that changes a pin (the entry-type switch, a pin made on
+  another device and pulled) must change the state. Written only to the copy,
+  a simulator switched to a flight kept its 00:00 night pin, and a pulled pin
+  was recomputed and sent back over on the next OUT/IN edit.
 - **Remarks is an inline auto-growing textarea**, not a `prompt()` — a native
   prompt is a one-line box with no preview of what is already there.
 - **The Pilot Role row is the native select, laid over the whole row** at
