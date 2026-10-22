@@ -434,12 +434,9 @@ export default function AircraftPage() {
     }
 
     if (allSortedAircraft.length === 0) {
-      setDetailContent(
-        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-          <Plane className="h-12 w-12 mb-4" />
-          <p>No aircraft found</p>
-        </div>
-      )
+      // Blank: the list's own empty state already says there is nothing and
+      // offers the way to add one. The panel said it again, in other words.
+      setDetailContent(<div className="h-full" />)
       return
     }
 

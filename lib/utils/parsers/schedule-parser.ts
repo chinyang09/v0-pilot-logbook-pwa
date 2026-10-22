@@ -202,6 +202,35 @@ interface ParsedHeader {
   dataStartIndex: number;
 }
 
+/** The header's crew line — e.g. "9766 Lim Chin Yang SIN-FO-32N". */
+function readCrewLine(rows: NormalizedRow[]): PlannedImport["crewMember"] {
+  for (const { raw: line } of rows.slice(0, 10)) {
+    const match = line.match(/^(\d+)\s+(.+?)\s+([A-Z]{3})-(\w+)-(\w+)/);
+    if (match) {
+      return {
+        crewId: match[1],
+        name: match[2].trim(),
+        base: match[3],
+        role: match[4],
+        aircraftType: match[5],
+      };
+    }
+  }
+  return { crewId: "", name: "", base: "", role: "", aircraftType: "" };
+}
+
+/**
+ * Whose report this is, as its header states it — or null when it does not.
+ * Read before parsing, so an import on an account with no "This is me" card
+ * can ask "is this you?" instead of refusing a pilot's very first import.
+ */
+export function readReportSubject(
+  doc: NormalizedDocument
+): PlannedImport["crewMember"] | null {
+  const subject = readCrewLine(doc.rows);
+  return subject.crewId && subject.name ? subject : null;
+}
+
 function parseHeader(rows: NormalizedRow[]): ParsedHeader {
   let timeReference: TimeReference = "UTC";
   let timeReferenceStated = false;
@@ -227,29 +256,7 @@ function parseHeader(rows: NormalizedRow[]): ParsedHeader {
     }
   }
 
-  // Crew info line — e.g. "9766 Lim Chin Yang SIN-FO-32N"
-  let crewInfo: PlannedImport["crewMember"] = {
-    crewId: "",
-    name: "",
-    base: "",
-    role: "",
-    aircraftType: "",
-  };
-  for (const { raw: line } of rows.slice(0, 10)) {
-    const match = line.match(
-      /^(\d+)\s+(.+?)\s+([A-Z]{3})-(\w+)-(\w+)/
-    );
-    if (match) {
-      crewInfo = {
-        crewId: match[1],
-        name: match[2].trim(),
-        base: match[3],
-        role: match[4],
-        aircraftType: match[5],
-      };
-      break;
-    }
-  }
+  const crewInfo = readCrewLine(rows);
 
   // Column header row
   let headerRowIndex = -1;

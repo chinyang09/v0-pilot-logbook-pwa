@@ -11,7 +11,8 @@
 
 "use client";
 
-import { CheckCircle2, Loader2, Upload, XCircle } from "lucide-react";
+import type React from "react";
+import { CheckCircle2, Loader2, Upload, UserRound, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -33,12 +34,23 @@ export interface ImportStage {
   detail?: string;
 }
 
+/** A question the import needs answered before it can go on. */
+export interface ImportQuestion {
+  title: string;
+  description: string;
+  body: React.ReactNode;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
 export function ImportStatusDialog({
   open,
   onOpenChange,
   progress,
   errorMsg,
   summary,
+  question,
   context,
   onDone,
 }: {
@@ -47,10 +59,12 @@ export function ImportStatusDialog({
   progress: ImportStage | null;
   errorMsg: string | null;
   summary: string | null;
+  question?: ImportQuestion | null;
   context?: string;
   onDone: () => void;
 }) {
-  const done = !progress && (errorMsg || summary);
+  const asking = !!question && !progress && !errorMsg;
+  const done = !progress && !asking && (errorMsg || summary);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -74,6 +88,8 @@ export function ImportStatusDialog({
           >
             {progress ? (
               <Loader2 className="size-5 animate-spin" />
+            ) : asking ? (
+              <UserRound className="size-5" />
             ) : errorMsg ? (
               <XCircle className="size-5" />
             ) : summary ? (
@@ -86,7 +102,9 @@ export function ImportStatusDialog({
             <DialogTitle className="text-base">
               {progress
                 ? "Importing"
-                : errorMsg
+                : asking
+                  ? question.title
+                  : errorMsg
                   ? "Import failed"
                   : summary
                     ? "Import complete"
@@ -95,7 +113,9 @@ export function ImportStatusDialog({
             <DialogDescription className="truncate text-xs">
               {progress
                 ? progress.stage
-                : errorMsg
+                : asking
+                  ? question.description
+                  : errorMsg
                   ? "Nothing was changed"
                   : summary
                     ? "Your logbook is up to date"
@@ -138,7 +158,27 @@ export function ImportStatusDialog({
           </p>
         )}
 
-        {summary && !errorMsg && !progress && (
+        {asking && (
+          <>
+            <div className="mt-4">{question.body}</div>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="ghost" className="h-10 rounded-full px-4" onClick={question.onCancel}>
+                Cancel
+              </Button>
+              <GlassContainer cornerRadius={20}>
+                <Button
+                  variant="ghost"
+                  className="h-10 rounded-full px-5 font-semibold text-primary"
+                  onClick={question.onConfirm}
+                >
+                  {question.confirmLabel}
+                </Button>
+              </GlassContainer>
+            </div>
+          </>
+        )}
+
+        {summary && !errorMsg && !progress && !asking && (
           <p className="mt-4 text-sm text-foreground">{summary}</p>
         )}
 

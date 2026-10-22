@@ -355,11 +355,9 @@ export default function CrewPage() {
     }
 
     if (sortedPersonnel.length === 0) {
-      setDetailContent(
-        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-          <p>No crew members</p>
-        </div>
-      );
+      // Blank: the list's own empty state already says there is nothing and
+      // offers the way to add one. The panel said it again, in other words.
+      setDetailContent(<div className="h-full" />);
       return;
     }
 
