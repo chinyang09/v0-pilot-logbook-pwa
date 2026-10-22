@@ -114,12 +114,13 @@ export default function CurrenciesPage() {
         {currencies.length === 0 && !isLoading && (
           <EmptyState
             icon={Shield}
-            title="No Currencies"
+            title="No currencies yet"
             description="Add currencies and expiry dates to track your training, medical, and license renewals."
             action={
-              <Button size="sm" onClick={() => setShowAddDialog(true)}>
+              // Outline, like every other empty state's add button.
+              <Button variant="outline" size="sm" onClick={() => setShowAddDialog(true)}>
                 <Plus className="h-4 w-4" />
-                Add Currency
+                Add currency
               </Button>
             }
           />

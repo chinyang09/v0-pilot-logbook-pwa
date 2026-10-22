@@ -580,7 +580,7 @@ function PillBarContent({
   onToggleSidebar: () => void
 }) {
   const tabsRef = useRef<HTMLDivElement>(null)
-  const activeIndex = tabs.findIndex((k) => TAB_CONFIG[k]?.isActive(pathname))
+  const activeIndex = activeTabIndex(tabs, pathname)
   const router = useRouter()
   const reduce = useReducedMotion()
 
@@ -1024,7 +1024,7 @@ function PillBarContent({
         {tabs.map((tabKey, i) => {
           const tab = TAB_CONFIG[tabKey]
           if (!tab) return null
-          const active = tab.isActive(pathname)
+          const active = i === activeIndex
           // While the lens is up, ONLY the tab under it reads as selected —
           // its label pre-highlights and the previously active tab dims.
           const highlighted = lensActive ? lensIndex === i : active
@@ -1372,6 +1372,20 @@ const EXPANDED_HEIGHT =
   ` - ${NAV_BOTTOM_OFFSET} - var(--install-banner-height, 0px))`
 
 // ─── Main export ─────────────────────────────────────────────
+
+/**
+ * Which tab a route lights. A tab's OWN page wins over a family match: the
+ * Roster tab also stands for Currencies, FDP and Discrepancies, so with a
+ * Currencies tab in the bar as well `/currencies` matched both — the blob went
+ * to whichever came first and BOTH labels read as selected.
+ */
+function activeTabIndex(tabs: readonly BottomNavTab[], pathname: string): number {
+  const own = tabs.findIndex((k) => {
+    const href = TAB_CONFIG[k]?.href
+    return !!href && (pathname === href || (href !== "/" && pathname.startsWith(href + "/")))
+  })
+  return own >= 0 ? own : tabs.findIndex((k) => TAB_CONFIG[k]?.isActive(pathname))
+}
 
 /**
  * Warm every nav route ONCE, at idle, one route per idle period.

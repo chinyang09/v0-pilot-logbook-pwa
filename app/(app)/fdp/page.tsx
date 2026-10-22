@@ -333,7 +333,7 @@ export default function FDPPage() {
         ) : !isLoading ? (
           <EmptyState
             icon={TrendingUp}
-            title="No Duty Periods"
+            title="No duty periods yet"
             description="Import schedule or log flights to see FDP compliance."
           />
         ) : null}

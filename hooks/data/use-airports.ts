@@ -10,6 +10,7 @@ import {
   getAirportByICAO,
   ensureAirportDatabase,
   isAirportTableSeeded,
+  onAirportSeedProgress,
   type Airport,
 } from "@/lib/db"
 import { useDBReady, CACHE_KEYS, checkDBReady } from "./use-db"
@@ -153,6 +154,19 @@ export function useAirportDatabase() {
   }, [])
 
   return { airports, isLoading, error, mutate }
+}
+
+/**
+ * How far a running seed has got, 0..1 — null until the first report. Only
+ * listens while `active`, which is while a screen is actually waiting on it.
+ */
+export function useAirportSeedProgress(active: boolean): number | null {
+  const [fraction, setFraction] = useState<number | null>(null)
+  useEffect(() => {
+    if (!active) return
+    return onAirportSeedProgress((done) => setFraction(done))
+  }, [active])
+  return active ? fraction : null
 }
 
 /**
