@@ -603,14 +603,18 @@ export function FlightForm({
   const getNumericOffset = (tzString?: string) =>
     tzString ? getAirportTimeInfo(tzString).offset : 0;
 
-  // Replace your old timezone constants with these dynamic ones
+  // The airport's zone when it is known; until then the offset the flight
+  // already carries. Defaulting to 0 while the lookup was pending — every
+  // open on a new install, while the airport table seeds — showed the local
+  // column as a second copy of UTC, and a local edit made then was stored as
+  // if it were UTC.
   const depTimezone = useMemo(
-    () => getNumericOffset(depAirport?.tz),
-    [depAirport]
+    () => (depAirport?.tz ? getNumericOffset(depAirport.tz) : formData.departureTimezone ?? 0),
+    [depAirport, formData.departureTimezone]
   );
   const arrTimezone = useMemo(
-    () => getNumericOffset(arrAirport?.tz),
-    [arrAirport]
+    () => (arrAirport?.tz ? getNumericOffset(arrAirport.tz) : formData.arrivalTimezone ?? 0),
+    [arrAirport, formData.arrivalTimezone]
   );
   // Tracks the flight currently loaded into the form. The instant-swap handling
   // when this changes lives in a useLayoutEffect defined after forceSave (below),

@@ -1,6 +1,6 @@
 "use client"
 
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo, startTransition, type ReactNode } from "react"
+import React, { createContext, useContext, useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo, startTransition, type ReactNode } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { KEEPALIVE_DETAIL_ROUTES } from "@/components/keep-alive-routes"
 
@@ -122,7 +122,13 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  const [detailContent, setDetailContent] = useState<ReactNode | null>(null)
+  const [detailContent, setDetailContentState] = useState<ReactNode | null>(null)
+  // Which base route set the content now held. The route-change reset below is
+  // a PARENT effect, so it runs after the arriving page's own mount effect has
+  // already set that page's content — and cleared it. Re-entering Settings
+  // showed "Select an item to view details" over a remembered section.
+  const contentOwnerRef = useRef<string | null>(null)
+  const baseRef = useRef<string | null>(null)
 
   // Derive current base route (e.g. "/aircraft", "/airports") from pathname
   const currentBase = useMemo(
@@ -140,6 +146,16 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     const urlSelected = searchParams.get("selected")
     return urlSelected ? { ...stored, [currentBase]: urlSelected } : stored
   })
+
+  // Layout effects run before any passive effect, so a page's mount effect
+  // calling `setDetailContent` already sees the base it belongs to.
+  useLayoutEffect(() => {
+    baseRef.current = currentBase
+  }, [currentBase])
+  const setDetailContent = useCallback((content: ReactNode | null) => {
+    contentOwnerRef.current = content == null ? null : baseRef.current
+    setDetailContentState(content)
+  }, [])
 
   // Effective selectedId: derived during render from the current route's slot.
   const selectedId = selections[currentBase] ?? null
@@ -335,12 +351,25 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     const currBase = "/" + (pathname?.split("/").filter(Boolean)[0] || "")
     prevPathnameRef.current = pathname
 
+    // Leaving a page that is NOT kept alive demotes its selection to a
+    // remembered one. It unmounts, so nothing can re-sync `?selected=` for it
+    // on return (only keep-alive routes get that), and an overlay reopened
+    // from the explicit flag alone had no history entry: on a phone the next
+    // back gesture left the page instead of closing the section. A remembered
+    // selection still fills the desktop panel; the phone opens on the list.
+    if (prevBase !== currBase && !KEEPALIVE_DETAIL_ROUTES.includes(prevBase)) {
+      setExplicitBases(p => (p[prevBase] ? { ...p, [prevBase]: false } : p))
+    }
+
     if (KEEPALIVE_DETAIL_ROUTES.includes(prevBase) && KEEPALIVE_DETAIL_ROUTES.includes(currBase)) {
       return
     }
+    // The arriving page has already set its own content (its mount effect ran
+    // first); only someone else's is stale.
+    if (prevBase !== currBase && contentOwnerRef.current === currBase) return
 
     setDetailContent(null)
-  }, [pathname])
+  }, [pathname, setDetailContent])
 
   // Memoized: this provider wraps the whole shell, so a fresh value object per
   // render re-rendered every keep-alive page on any state change here.
@@ -352,7 +381,7 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
       setSelectedId,
       selectionExplicit,
     }),
-    [detailContent, selectedId, setSelectedId, selectionExplicit],
+    [detailContent, setDetailContent, selectedId, setSelectedId, selectionExplicit],
   )
 
   return (

@@ -422,11 +422,14 @@ export default function SettingsPage() {
 
   return (
     <PageContainer>
-      <div className="px-4 pt-4">
+      <div className="px-panel pt-4">
         <FormSection>
           {SECTIONS.map((section) => {
             const Icon = section.icon
-            const isActive = selectedId === section.key
+            // The highlight says which section the panel BESIDE the list is
+            // showing. A phone has no such panel — the list is all there is
+            // once a section closes — so a lit row there pointed at nothing.
+            const isActive = isDesktop && selectedId === section.key
             return (
               <button
                 key={section.key}

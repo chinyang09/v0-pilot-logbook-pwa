@@ -398,6 +398,15 @@ online and the periodic check never pulled another device's edits, and the
 only unconditional pull was the one at login. That is why logging in again was
 the reliable way to catch up. `sync-triggers.test.ts` pins it.
 
+**A failed cycle says so** (`SyncStatus` `"error"`). The status was
+`online` / `offline` / `syncing`, and a cycle that ended `ok: false` while
+online — the server answering 5xx, a session that could not be renewed, an
+item rejected — fell straight back to `online`: a green cloud over edits that
+were not reaching the server. It now ends in `error` (an amber cloud with its
+own mark, still tappable to retry) until the next clean cycle. A cycle that
+stopped at the round cap is `partial`, unfinished rather than failed, and
+stays `online`.
+
 The "syncing" status is only raised for real work (a push, a first pull, or a
 poll that came back with changes), and `onDataChanged` only fires when
 something changed — a poll every 15s must not flash the indicator or refresh
@@ -2565,6 +2574,11 @@ identical:
   included) and shows the other clock live under NOW, so each checks the
   other. Clock only — the flight's date is not moved by a local edit, the same
   as a UTC edit. `formatTimezoneOffset` names a half-hour zone `UTC+5:30`.
+- **A time row's local column falls back to the offset the flight STORES**
+  until the airport lookup lands. Defaulting to 0 while it was pending — every
+  open on a new install, while the airport table seeds — drew the local column
+  as a second copy of UTC, and a local edit made then was stored as if it
+  were UTC.
 - **The form's overrides are STATE, and they follow the row.** Saves and every
   recalculation read the `manualOverrides` state, never the copy on the form
   data — so anything that changes a pin (the entry-type switch, a pin made on
@@ -2641,6 +2655,19 @@ Next.js wraps pages in internal `LayoutRouter` components that unmount contents 
   types its `PERSISTENT_PAGES` map against it (compile-checked) and
   `use-detail-panel.tsx` derives `KEEPALIVE_DETAIL_ROUTES` from it — do not
   reintroduce parallel hand-maintained route lists (they drifted once already)
+- **The provider's route-change reset never clears the ARRIVING page's
+  content.** It is a PARENT effect, so it runs after the arriving page's own
+  mount effect has set that page's panel — and used to wipe it: re-entering
+  Settings showed "Select an item to view details" over a remembered section.
+  `setDetailContent` records which base set the content (`contentOwnerRef`,
+  read from a ref the provider updates in a layout effect, so it is current
+  before any passive effect), and the reset skips content the new route owns
+- **Leaving a page that is NOT kept alive demotes its selection** to a
+  remembered one (`explicitBases[prev] = false`). It unmounts, so nothing
+  re-syncs `?selected=` for it on return; an overlay reopened from the
+  explicit flag alone had no history entry, and on a phone the next back
+  gesture left the page instead of closing the section. Desktop still fills
+  its panel from the remembered selection; the phone opens on the list
 - `DetailPanelProvider` does NOT clear `detailContent` when navigating between two
   keep-alive routes that own detail content; routes without a detail panel
   (dashboard, roster) always clear it

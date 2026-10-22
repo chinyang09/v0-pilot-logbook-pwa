@@ -122,7 +122,13 @@ const COLLECTION_HANDLERS: Record<
   settings: { silentDelete: silentDeleteSettings, normalize: normalizeSettingsFromServer },
 }
 
-type SyncStatus = "online" | "offline" | "syncing"
+/**
+ * `error` — online, but the last cycle did not get through (the server
+ * answered 5xx, the session could not be renewed, an item was rejected). It
+ * used to fall straight back to `online`, so the indicator showed green while
+ * edits were not reaching the server. The next clean cycle clears it.
+ */
+export type SyncStatus = "online" | "offline" | "syncing" | "error"
 
 export interface SyncRunResult {
   pushed: number
@@ -132,6 +138,8 @@ export interface SyncRunResult {
   ok?: boolean
   /** Queue rows still waiting after the cycle (drives retry back-off). */
   remaining?: number
+  /** Stopped at the round cap with more to fetch — unfinished, not failed. */
+  partial?: boolean
 }
 
 interface PushItemResult {
@@ -393,7 +401,7 @@ class SyncService {
       console.error(`[Sync ${correlationId}] error:`, error)
       result = { ...result, ok: false }
     } finally {
-      this.setStatus(navigator.onLine ? "online" : "offline")
+      this.setStatus(!navigator.onLine ? "offline" : result.ok || result.partial ? "online" : "error")
     }
 
     result.remaining = await userDb.syncQueue.count().catch(() => 0)
@@ -547,7 +555,7 @@ class SyncService {
     }
 
     console.warn(`[Sync ${correlationId}] round cap reached - resuming next cycle`)
-    return { pushed, pulled, failed, ok: false }
+    return { pushed, pulled, failed, ok: false, partial: true }
   }
 
   /** Persist the cursors the server returned — only ever forward. */
