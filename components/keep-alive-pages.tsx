@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, memo, Suspense, lazy, Component, type ReactNode, type ErrorInfo } from "react"
 import { usePathname } from "next/navigation"
-import { ActiveRouteProvider } from "@/hooks/use-page-active"
+import { ActiveRouteProvider, KeepAlivePageScope } from "@/hooks/use-page-active"
 import { PageLoading } from "@/components/ui/page-loading"
 import { type KeepAliveRouteKey } from "@/components/keep-alive-routes"
 
@@ -143,11 +143,15 @@ const KeepAlivePage = memo(function KeepAlivePage({
   const PageComponent = PERSISTENT_PAGES[routeKey]
   return (
     <PageErrorBoundary>
-      {/* Shared spinner instead of a blank pane while the lazy chunk loads on
-          the first visit to this tab. */}
-      <Suspense fallback={<PageLoading />}>
-        <PageComponent />
-      </Suspense>
+      {/* Lets the data hooks hold their last value while this page is hidden
+          behind another tab (`useHeldWhileHidden`). */}
+      <KeepAlivePageScope routeKey={routeKey}>
+        {/* Shared spinner instead of a blank pane while the lazy chunk loads on
+            the first visit to this tab. */}
+        <Suspense fallback={<PageLoading />}>
+          <PageComponent />
+        </Suspense>
+      </KeepAlivePageScope>
     </PageErrorBoundary>
   )
 })

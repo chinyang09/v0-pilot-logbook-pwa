@@ -2648,6 +2648,18 @@ Next.js wraps pages in internal `LayoutRouter` components that unmount contents 
   however unchanged the props are — so the context fix alone would not have
   helped. The wrapper `div` still re-renders (its visibility and z-index really
   do change); the page inside it does not
+- **A hidden page HOLDS its data** (`useHeldWhileHidden`, inside
+  `KeepAlivePageScope`). `useFlights`, `useScheduleEntries`, `useCurrencies`,
+  `useAircraft` and `usePersonnel` return the value they had when their page
+  was LEFT while it sits behind another tab, and the live value again the
+  moment it is shown. Every retained page reads the same hooks, so adding a
+  flight on the logbook used to re-run the hidden dashboard's whole legality
+  model — FDP pipeline, duty status, recency — inside the tap (measured at 4×
+  on 1,200 flights: ~2.07s of main-thread work → ~0.86s). Outside a keep-alive
+  page (the detail panel, the shell, ordinary routes) it is the identity. Hold
+  SWR's RAW `data`, never `data ?? []`: a fresh default per render never equals
+  the held value and the render-phase update loops — the hooks return a shared
+  `NONE` for "no data yet" for the same reason
 
 **Detail panel integration** (`hooks/use-detail-panel.tsx`):
 - The keep-alive route set lives in ONE registry — `components/keep-alive-routes.ts`
@@ -4311,6 +4323,7 @@ When making changes, be aware of these high-impact files:
 - Do not expose FR24 as the data source in UI — the user explicitly requires online lookups to be transparent (no "Online Results" labels, no Globe icons, no "FlightRadar24" branding)
 - Do not add hexdb.io fallback for aircraft lookup — if FR24 fails, manual entry is the only option
 - Do not bypass `recalculateFlightFields()` `manualOverrides` — users' manually entered field values must never be overwritten by enrichment
+- Do not let a hidden keep-alive page recompute on a data change — read data through the hooks that hold it (`useHeldWhileHidden`), and add a new list hook the same way. And never default SWR's `data` to a fresh `[]` per render: it breaks every downstream memo, and under the hold it loops
 - Do not put the active route back into context as a plain value, and do not render a keep-alive page's element inline in the stack — either one re-renders all six retained pages on every tab switch. The route is a store whose SNAPSHOT is the per-page boolean (`useSyncExternalStore`), and each page is `memo`ized on its route key
 - Do not add pages to `PERSISTENT_PAGES` in `keep-alive-pages.tsx` without considering memory impact — only heavy virtualized pages should be persistent
 - Do not use `display:none` for hiding keep-alive pages — `visibility:hidden` is required to preserve scroll positions and virtualizer measurements

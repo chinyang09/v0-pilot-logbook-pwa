@@ -31,9 +31,11 @@ function tomorrow(): string {
   return d.toISOString().split("T")[0]
 }
 
+const MONTH_UTC = new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" })
+
 function formatDateShort(dateStr: string): string {
   const d = new Date(dateStr + "T00:00:00Z")
-  return `${d.getUTCDate().toString().padStart(2, "0")} ${d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })}`
+  return `${d.getUTCDate().toString().padStart(2, "0")} ${MONTH_UTC.format(d)}`
 }
 
 const VIOLATION_TYPE_LABELS: Record<string, string> = {

@@ -150,3 +150,49 @@ export function usePageActive(routeKey: string, onActivated?: () => void) {
 function noopSubscribe() {
   return () => {}
 }
+
+/**
+ * The keep-alive page a component is rendered inside, or null outside one
+ * (the shell, the detail panel, an ordinary route). Constant for a given
+ * mount, so providing it never re-renders anything.
+ */
+const KeepAlivePageContext = createContext<string | null>(null)
+
+export function KeepAlivePageScope({ routeKey, children }: { routeKey: string; children: ReactNode }) {
+  return <KeepAlivePageContext.Provider value={routeKey}>{children}</KeepAlivePageContext.Provider>
+}
+
+/**
+ * `value` while the page this component lives in is on screen; the value it
+ * had when the page was LEFT, while the page is hidden behind another tab.
+ *
+ * Six pages stay mounted, and every one of them reads the same data hooks.
+ * Adding a flight on the logbook therefore re-ran the hidden dashboard's whole
+ * legality model — the FDP pipeline, the duty status, the 90-day recency —
+ * inside the tap (~550ms of a ~2s add at a 4× throttle), for a page nobody
+ * could see. Held here, the hidden page's memos see an unchanged input and
+ * skip; the moment it is shown again it reads the live value and catches up
+ * once (and `usePageActive`'s re-activation refresh revalidates it besides).
+ *
+ * Outside a keep-alive page — the detail panel, the shell, an ordinary route —
+ * it is the identity: nothing there is ever hidden.
+ *
+ * Hold the RAW value (SWR's `data`, possibly undefined), never a `data ?? []`
+ * default: a fresh array per render would never equal the held one, and the
+ * render-phase update below would loop.
+ */
+export function useHeldWhileHidden<T>(value: T): T {
+  const routeKey = useContext(KeepAlivePageContext)
+  const store = useContext(ActiveRouteContext)
+  const hidden = useSyncExternalStore(
+    routeKey && store ? store.subscribe : noopSubscribe,
+    () => (routeKey && store ? store.get() !== routeKey : false),
+    () => (routeKey && store ? store.initial !== routeKey : false),
+  )
+  // State, updated DURING render (React's "storing information from previous
+  // renders" pattern) rather than a ref written in render or an effect that
+  // would hand the hidden page one render of the live value first.
+  const [held, setHeld] = useState(value)
+  if (!hidden && held !== value) setHeld(value)
+  return hidden ? held : value
+}

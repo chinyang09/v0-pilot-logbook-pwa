@@ -421,16 +421,20 @@ function describesMoreThanCode(description: string | undefined, code: string): b
   return !d.includes(c) && !c.includes(d)
 }
 
+/** One formatter for every date on the panel — constructing one per call was
+ *  the single biggest line in the legality model's first build. */
+const EXPIRY_DATE = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "short",
+  year: "2-digit",
+  timeZone: "UTC",
+})
+
 /** "12 Jan 27" — a date a pilot reads, not an ISO string. */
 function formatExpiry(iso: string): string {
   const at = Date.parse(`${iso}T00:00:00Z`)
   if (!Number.isFinite(at)) return iso
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "2-digit",
-    timeZone: "UTC",
-  }).format(new Date(at))
+  return EXPIRY_DATE.format(new Date(at))
 }
 
 function shortfallAction(toShort: number, ldgShort: number): string {

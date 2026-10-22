@@ -4,6 +4,10 @@ import { useCallback } from "react"
 import useSWR from "swr"
 import { getAllPersonnel, type Personnel } from "@/lib/db"
 import { useDBReady, CACHE_KEYS, checkDBReady } from "./use-db"
+import { useHeldWhileHidden } from "@/hooks/use-page-active"
+
+/** One empty list, so "no data yet" is the same reference every render. */
+const NONE: never[] = []
 
 /**
  * Fetch personnel/crew from IndexedDB
@@ -43,8 +47,11 @@ export function usePersonnel() {
     return mutatePersonnel()
   }, [mutatePersonnel])
 
+  // Held while this page is behind another tab — see `useHeldWhileHidden`.
+  const live = useHeldWhileHidden(data)
+
   return {
-    personnel: data ?? [],
+    personnel: live ?? NONE,
     isLoading,
     error,
     refresh,
