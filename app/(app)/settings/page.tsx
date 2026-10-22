@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { ScrollIndicator } from "@/components/ui/scroll-indicator"
-import { useCallback, useEffect } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { usePersonnel } from "@/hooks/data/use-crew"
 import { pickSelfCard } from "@/lib/utils/self-card"
 import { seatOf, withLoggingPreferences, type Seat } from "@/lib/utils/roster/pilot-role"
@@ -320,36 +320,56 @@ function DutyTimeSection({ preferences, updateDutyTimeDefaults }: {
             { value: "EASA", label: "EASA" },
           ]}
         />
-        <SettingsRow
-          label="Minutes Before Scheduled OUT"
-          description="Report time before departure"
-          type="number"
-          inputMode="numeric"
-          swipeToClear={false}
-          value={String(preferences.dutyTimeDefaults.minutesBeforeOut)}
-          onChange={(v) => {
-            const val = Number.parseInt(v, 10)
-            if (!Number.isNaN(val) && val >= 0 && val <= 240) {
-              updateDutyTimeDefaults({ minutesBeforeOut: val })
-            }
-          }}
+        <MinutesRow
+          label="Report"
+          description="Minutes before scheduled OUT"
+          minutes={preferences.dutyTimeDefaults.minutesBeforeOut}
+          onCommit={(minutesBeforeOut) => updateDutyTimeDefaults({ minutesBeforeOut })}
         />
-        <SettingsRow
-          label="Minutes After IN"
-          description="Debrief time after arrival"
-          type="number"
-          inputMode="numeric"
-          swipeToClear={false}
-          value={String(preferences.dutyTimeDefaults.minutesAfterIn)}
-          onChange={(v) => {
-            const val = Number.parseInt(v, 10)
-            if (!Number.isNaN(val) && val >= 0 && val <= 240) {
-              updateDutyTimeDefaults({ minutesAfterIn: val })
-            }
-          }}
+        <MinutesRow
+          label="Debrief"
+          description="Minutes after IN"
+          minutes={preferences.dutyTimeDefaults.minutesAfterIn}
+          onCommit={(minutesAfterIn) => updateDutyTimeDefaults({ minutesAfterIn })}
         />
       </FormSection>
     </div>
+  )
+}
+
+/**
+ * A minutes field that can be EDITED. Bound straight to the stored value, it
+ * refused the empty string a backspace produces, so "60" could not be cleared
+ * to type "45" — and every keystroke on the way was a saved, synced figure
+ * (deleting "30" stored 3). It edits a draft and commits once, when the field
+ * is left; a blank or out-of-range draft puts the stored figure back.
+ */
+function MinutesRow({
+  label,
+  description,
+  minutes,
+  onCommit,
+}: {
+  label: string
+  description: string
+  minutes: number
+  onCommit: (minutes: number) => void
+}) {
+  const [draft, setDraft] = useState<string | null>(null)
+  return (
+    <SettingsRow
+      label={label}
+      description={description}
+      inputMode="numeric"
+      swipeToClear={false}
+      value={draft ?? String(minutes)}
+      onChange={(v) => setDraft(v.replace(/\D/g, "").slice(0, 3))}
+      onBlur={() => {
+        const val = draft === null ? Number.NaN : Number.parseInt(draft, 10)
+        if (!Number.isNaN(val) && val <= 240 && val !== minutes) onCommit(val)
+        setDraft(null)
+      }}
+    />
   )
 }
 

@@ -27,8 +27,13 @@ function RowLabel({
   required?: boolean
   disabled?: boolean
 }) {
+  // A bare label is a word or two and keeps its line; the INPUT beside it
+  // gives way (`min-w-0` on the inputs). As a flex-1 block it was the label
+  // that shrank, so "Licence Number" broke over two lines beside an input
+  // claiming its full intrinsic width. A label with a description still
+  // wraps — that sentence is what is meant to give.
   return (
-    <div className="min-w-0 flex-1 mr-4">
+    <div className={cn("mr-4", description ? "min-w-0 flex-1" : "shrink-0 whitespace-nowrap")}>
       <span className={disabled ? "text-muted-foreground" : "text-foreground"}>
         {label}
         {required && <span className="text-destructive ml-0.5">*</span>}
@@ -52,6 +57,7 @@ export function SettingsRow({
   description,
   value,
   onChange,
+  onBlur,
   placeholder,
   type = "text",
   inputMode,
@@ -65,6 +71,8 @@ export function SettingsRow({
   description?: string
   value: string
   onChange?: (value: string) => void
+  /** When the field is left — for a value committed once rather than per keystroke. */
+  onBlur?: () => void
   placeholder?: string
   type?: string
   inputMode?: "text" | "decimal" | "numeric"
@@ -94,6 +102,7 @@ export function SettingsRow({
           inputMode={inputMode}
           value={value}
           onChange={(e) => onChange?.(e.target.value)}
+          onBlur={onBlur}
           placeholder={placeholder}
           // The row's label is a sibling span, so the input needs its own name
           // (the Switch and Select rows below say the same thing).
@@ -103,8 +112,11 @@ export function SettingsRow({
           className={cn(
             // Blend the input into the row: no box/shadow/border, and keep the
             // same font size as the read-only value (override the base md:text-sm).
-            "text-right border-0 bg-transparent dark:bg-transparent shadow-none rounded-none h-auto p-0 w-auto max-w-[200px] md:text-base text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0",
-            uppercase && "uppercase"
+            "text-right border-0 bg-transparent dark:bg-transparent shadow-none rounded-none h-auto p-0 w-auto min-w-0 max-w-[200px] md:text-base text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0",
+            uppercase && "uppercase",
+            // A count is a few digits; reserving a text field's width for it
+            // is what broke its label over three lines.
+            (inputMode === "numeric" || inputMode === "decimal") && "max-w-[6rem]"
           )}
         />
       )}
@@ -189,7 +201,7 @@ export function SelectRow<T extends string>({
           className={cn(
             // Blend into the row like the inline text inputs — no box, right
             // aligned, same type size as the read-only value.
-            "border-0 bg-transparent dark:bg-transparent shadow-none rounded-none h-auto p-0 w-auto",
+            "border-0 bg-transparent dark:bg-transparent shadow-none rounded-none h-auto p-0 w-auto min-w-0",
             "justify-end gap-1 text-muted-foreground md:text-base focus-visible:ring-0"
           )}
         >
