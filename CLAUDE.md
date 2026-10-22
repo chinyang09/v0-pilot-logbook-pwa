@@ -3567,6 +3567,25 @@ alone on purpose. The reason is recorded so the next pass doesn't re-derive it
   chunk and ONNX Runtime's JavaScript), and a failed load is retried rather
   than cached as the answer. The models and the WASM runtime are precached by
   the service worker at install.
+- **The install banner sits ABOVE the edge-to-edge chrome, and the chrome
+  knows it** (`pwa-install-prompt.tsx`, a browser tab only). It is in layout
+  flow at the top of the shell, so the panels move down with it — but every
+  VIEWPORT-fixed surface did not: the mobile flight overlay, the signature
+  pad, the duty dialog and the import review were all anchored to the top of
+  the screen, under the banner. While it is up it publishes
+  `--install-banner-height` (fixed surfaces add it) and zeroes `--top-inset`:
+  the banner is topmost, so IT clears the status bar, and `--chrome-top`,
+  `.pt-chrome-bar`, `.pt-safe` and the nav pill read `--top-inset` instead of
+  the raw `env(safe-area-inset-top)` so they do not clear it a second time.
+  A new fixed surface under the banner reads those two variables, never the
+  env() directly.
+- **Chromium's install offer is captured at MODULE scope and spent on the
+  first tap.** `beforeinstallprompt` can fire before hydration (a mount-effect
+  listener missed it, so the banner never showed), and `prompt()` works ONCE
+  per event — keeping the event after a declined dialog left an Install
+  button that threw. A declined dialog counts as a dismissal (7 days). The
+  "Open" button that appeared after `appinstalled` is gone: a tab cannot launch
+  the installed app, so it only reloaded the page.
 - **A database that fails to open is retried and SAID** (`retryDBOpen`,
   `StorageNotice`). It used to be final, and every page showed its EMPTY state
   — "NO FLIGHTS YET" over a full logbook.

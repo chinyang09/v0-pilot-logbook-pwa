@@ -258,7 +258,9 @@ function AppShellContent({ children }: AppShellProps) {
 
   return (
     <div className="relative h-full w-full flex flex-col bg-background overflow-hidden">
-      {/* PWA install banner — in layout flow, pushes content down when visible */}
+      {/* PWA install banner — in layout flow, pushes content down when visible.
+          It owns the status-bar inset while it is up; fixed surfaces read
+          `--install-banner-height` / `--top-inset` (see the component). */}
       <PWAInstallPrompt />
 
       {/* Progressive blur toward the home indicator (iOS standalone only);
@@ -394,7 +396,9 @@ function AppShellContent({ children }: AppShellProps) {
       {showMobileOverlay && (
         <div
           ref={overlayPanelRef}
-          className="fixed inset-0 z-[55] bg-background md:hidden"
+          // Below the install banner (a browser tab only), like the rest of
+          // the shell: `inset-0` slid the overlay's header under it.
+          className="fixed inset-x-0 bottom-0 top-[var(--install-banner-height)] z-[55] bg-background md:hidden"
         >
           {/* Mobile detail header bar — gradient overlay with back button + detail actions */}
           <div className="absolute top-0 left-0 right-0 z-[99] flex pointer-events-none pt-chrome-bar">

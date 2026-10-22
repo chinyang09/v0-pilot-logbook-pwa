@@ -124,13 +124,13 @@ export function DutyEntryDialog({
     const pushedBy = canPushSidebar && sidebarOpen ? SIDEBAR_WIDTH_PX : 0;
     return isDesktop
       ? {
-          top: "var(--chrome-top)",
+          top: "calc(var(--install-banner-height) + var(--chrome-top))",
           bottom: "var(--chrome-bottom)",
           left: `calc(${pushedBy}px + var(--panel-gutter))`,
           right: "var(--panel-gutter)",
           transition: "left 200ms cubic-bezier(0.25, 0.1, 0.25, 1)",
         }
-      : { inset: 0 };
+      : { top: "var(--install-banner-height)", left: 0, right: 0, bottom: 0 };
   }, [isDesktop, canPushSidebar, sidebarOpen]);
 
   if (!open || typeof document === "undefined") return null;

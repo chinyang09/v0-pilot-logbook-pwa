@@ -1368,7 +1368,7 @@ function SidebarNavItem({
  */
 const NAV_BOTTOM_OFFSET = `var(--nav-bottom-offset, ${SIDEBAR_MARGIN}px)`
 const EXPANDED_HEIGHT =
-  `calc(100% - ${SIDEBAR_MARGIN}px - env(safe-area-inset-top, 0px)` +
+  `calc(100% - ${SIDEBAR_MARGIN}px - var(--top-inset, env(safe-area-inset-top, 0px))` +
   ` - ${NAV_BOTTOM_OFFSET} - var(--install-banner-height, 0px))`
 
 // ─── Main export ─────────────────────────────────────────────
@@ -1622,8 +1622,8 @@ function DesktopPillMorph({
 
   const style: React.CSSProperties = {
     top: isSidebarShape
-      ? `calc(${SIDEBAR_MARGIN}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`
-      : `calc(${PILL_TOP}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`,
+      ? `calc(${SIDEBAR_MARGIN}px + var(--top-inset, env(safe-area-inset-top, 0px)) + var(--install-banner-height, 0px))`
+      : `calc(${PILL_TOP}px + var(--top-inset, env(safe-area-inset-top, 0px)) + var(--install-banner-height, 0px))`,
     left: isSidebarShape ? SIDEBAR_MARGIN : "50%",
     transform: isSidebarShape ? "translateX(0)" : "translateX(-50%)",
     width: isSidebarShape ? SIDEBAR_INNER_WIDTH : (pillWidth ?? "auto"),
