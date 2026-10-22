@@ -374,7 +374,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     // right answer for all of them. Calibrate from it and the correction never
     // fires. 104 is only the opening guess, used for the first paint.
     const [rowHeight, setRowHeight] = useState(0); // 0 = not calibrated yet
-    const rowHeightRef = useRef(104); // opening guess, for the first paint only
+    const rowHeightRef = useRef(110); // opening guess (a phone's measured row), for the first paint only
     const calibratedRef = useRef(false);
 
     // Create virtualizer instance
@@ -405,13 +405,33 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     // disagree by a fraction of a pixel (subpixel layout, a device's font
     // scaling) ping-pong it and React tears the page down with "maximum update
     // depth exceeded".
+    //
+    // Read from a ResizeObserver, not in the ref callback. A ref callback runs
+    // in the middle of React's commit, so `getBoundingClientRect` there forced
+    // a layout of the whole app on every cold start — ~230ms at a 4× throttle,
+    // the single biggest native cost before the first card painted — which
+    // the rest of the commit then dirtied again. The observer reports after
+    // the browser's own layout, at no extra cost.
+    const calibrationRef = useRef<ResizeObserver | null>(null);
     const measureRow = useCallback((el: HTMLElement | null) => {
-      if (!el || calibratedRef.current) return;
-      const h = Math.round(el.getBoundingClientRect().height);
-      if (h <= 0) return;
-      calibratedRef.current = true;
-      rowHeightRef.current = h;
-      setRowHeight(h);
+      if (!el || calibratedRef.current || calibrationRef.current) return;
+      const observer = new ResizeObserver(([entry]) => {
+        const h = Math.round(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height);
+        if (h <= 0) return;
+        observer.disconnect();
+        calibrationRef.current = null;
+        calibratedRef.current = true;
+        rowHeightRef.current = h;
+        setRowHeight(h);
+      });
+      calibrationRef.current = observer;
+      observer.observe(el);
+      // The row unmounted before it laid out: let the next row calibrate.
+      return () => {
+        if (calibrationRef.current !== observer) return;
+        observer.disconnect();
+        calibrationRef.current = null;
+      };
     }, []);
 
     // Rebuild every row's position from the calibrated height. `estimateSize`
