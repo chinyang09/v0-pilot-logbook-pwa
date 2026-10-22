@@ -26,6 +26,17 @@ describe("isSimulatorDuty", () => {
 });
 
 describe("parseCrewColumn", () => {
+  it("marks the commander, which tells an augmented crew's captains apart", () => {
+    const crew = parseCrewColumn(
+      ["CPT - PIC - 2644 - Prorok Andriy", "CPT - 1000 - Relief Captain", "FO - 9766 - Lim Chin Yang"].join("\n")
+    );
+    expect(crew.map((c) => [c.name, c.commander ?? false])).toEqual([
+      ["Prorok Andriy", true],
+      ["Relief Captain", false],
+      ["Lim Chin Yang", false],
+    ]);
+  });
+
   it("parses single-line CPT + FO", () => {
     const cell = [
       "CPT - PIC - 2644 - Prorok Andriy",

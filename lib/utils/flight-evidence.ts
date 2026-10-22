@@ -20,6 +20,7 @@
  */
 
 import type { PilotRole } from "@/types/entities/flight.types"
+import { requiresTwoPilots } from "./crew-complement"
 
 /**
  * The role of a flight nothing says anything about — no role time, not a
@@ -42,17 +43,63 @@ function count(value: unknown): number {
   return Number.isFinite(n) && n > 0 ? n : 0
 }
 
+/** A flight the pilot operated — not a simulator session, not a positioning sector. */
+function isOperatedFlight(flight: Record<string, unknown>): boolean {
+  if (flight.isSimulator === true) return false
+  return flight.entryType !== "simulator" && flight.entryType !== "positioning"
+}
+
+const named = (v: unknown) => typeof v === "string" && v.trim() !== ""
+
+/** A pilot on board beyond the two seats — an augmented crew's relief pilot. */
+function hasReliefPilot(flight: Record<string, unknown>): boolean {
+  const extra = flight.additionalCrew
+  return Array.isArray(extra) && extra.some((c) => c && (c as { role?: unknown }).role === "Relief Pilot")
+}
+
 /**
- * Flown as one of a multi-pilot crew, on the record's own evidence: a co-pilot
- * role (a co-pilot exists only where more than one pilot is required), or both
- * pilot seats filled. A simulator is never flight time of any kind.
+ * Flown as one of a multi-pilot crew, on the record's own evidence, strongest
+ * first: a type certificated for two pilots (`crew-complement.ts` — every
+ * airline sector, whether or not its co-pilot was recorded), a co-pilot role
+ * (a co-pilot exists only where more than one pilot is required), both pilot
+ * seats filled, or a relief pilot aboard. Only an operated flight has any:
+ * a simulator session and a positioning sector are not flight time.
  */
 export function isMultiPilotFlight(record: Record_): boolean {
   const flight = record as Record<string, unknown>
-  if (flight.isSimulator === true || flight.entryType === "simulator") return false
+  if (!isOperatedFlight(flight)) return false
+  if (requiresTwoPilots(flight.aircraftType as string | undefined)) return true
   if (flight.pilotRole === "SIC" || flight.pilotRole === "PICUS") return true
-  const named = (v: unknown) => typeof v === "string" && v.trim() !== ""
-  return named(flight.picName) && named(flight.sicName)
+  return (named(flight.picName) && named(flight.sicName)) || hasReliefPilot(flight)
+}
+
+/**
+ * A flight auto-fill may call SOLO: operated, flown as PIC, on a type a single
+ * pilot may fly, with nobody else in a seat or in the additional crew. That is
+ * as far as a record can see — it does not know about passengers, which is why
+ * the solo switch is off until a pilot turns it on.
+ */
+export function isSoloFlight(record: Record_): boolean {
+  const flight = record as Record<string, unknown>
+  if (!isOperatedFlight(flight) || flight.pilotRole !== "PIC") return false
+  if (isMultiPilotFlight(record)) return false
+  const others = [flight.picName, flight.sicName].filter((n) => named(n) && String(n).trim().toLowerCase() !== "self")
+  const extra = Array.isArray(flight.additionalCrew) ? flight.additionalCrew.length : 0
+  return others.length === 0 && extra === 0
+}
+
+/**
+ * Why the solo time on a record cannot be right, or `null`. A flag, not a
+ * correction: the figure is the pilot's, and the form says what is wrong with
+ * it rather than quietly zeroing it.
+ */
+export function soloConflict(record: Record_): string | null {
+  const flight = record as Record<string, unknown>
+  if (minutes(flight.soloTime) === 0) return null
+  const type = typeof flight.aircraftType === "string" ? flight.aircraftType.trim().toUpperCase() : ""
+  if (requiresTwoPilots(type)) return `The ${type} is certified for two pilots — it cannot be flown solo`
+  if (isMultiPilotFlight(record)) return "Another pilot is recorded on this flight"
+  return null
 }
 
 /**

@@ -22,7 +22,7 @@ import {
   Settings, UserCircle, Navigation, ChevronRight, NotebookPen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { LOGBOOK_AUTHORITIES, TIME_CATEGORIES, categoryLabel, roleLabel, type LogbookAuthority } from "@/lib/utils/logbook-rules"
+import { LOGBOOK_AUTHORITIES, OFFERED_AUTHORITIES, TIME_CATEGORIES, categoryLabel, roleLabel, type LogbookAuthority } from "@/lib/utils/logbook-rules"
 import type { DisplayPreferences, AutoFillPreferences, BottomNavTab } from "@/types/db/stores.types"
 
 // ─── Data ────────────────────────────────────────────────────
@@ -35,7 +35,8 @@ const AUTO_FILL_HOW: Record<keyof AutoFillPreferences, string> = {
   p1us: "The block time, when the role is PIC under supervision",
   dualRcvd: "The block time, when the role is dual",
   dualGiven: "The block time, when the role is instructor",
-  multiPilot: "The block time, when the flight shows a co-pilot or two pilot seats filled",
+  multiPilot: "The block time, on a type certified for two pilots or with a second pilot aboard",
+  solo: "The block time, as PIC with nobody else recorded — never on a two-pilot type",
   xc: "The block time, when departure differs from arrival",
   ifr: "The flight time, on every flight",
   actualInst: "The flight time, on every flight",
@@ -122,7 +123,7 @@ function LoggingSection({ preferences, updateLogging }: {
           description={`${LOGBOOK_AUTHORITIES.find((a) => a.value === authority)?.description}. What your hours are called — it never changes a logged figure.`}
           value={authority}
           onValueChange={(v) => updateLogging({ authority: v })}
-          options={LOGBOOK_AUTHORITIES.map((a) => ({ value: a.value, label: a.label }))}
+          options={OFFERED_AUTHORITIES.map((a) => ({ value: a.value, label: a.label }))}
         />
         <SelectRow<Seat | "unset">
           label="My seat"

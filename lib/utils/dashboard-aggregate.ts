@@ -14,6 +14,7 @@ import type { Aircraft } from "@/types/entities/aircraft.types"
 import type { AutoFillPreferences } from "@/types/db/stores.types"
 import { hhmmToMinutes } from "./time"
 import { isFlownFlight } from "./flight-calculations"
+import { isPositioningEntry } from "./entry-type"
 import { sortFlights } from "./flight-sort"
 import { normalizeRegistration } from "./string"
 import { normalizeAircraftType } from "./parsers/shared/aircraft-type-map"
@@ -36,7 +37,7 @@ function emptyAutoFillMinutes(): AutoFillMinutes {
   return {
     night: 0, pic: 0, sic: 0, p1us: 0,
     dualRcvd: 0, dualGiven: 0, xc: 0, ifr: 0,
-    actualInst: 0, simInst: 0, multiPilot: 0,
+    actualInst: 0, simInst: 0, multiPilot: 0, solo: 0,
   }
 }
 
@@ -350,6 +351,10 @@ export function aggregateDashboard({
       }
       continue
     }
+
+    // A positioning sector is duty, not flying: no hours, no landings, and not
+    // one of the period's flights.
+    if (isPositioningEntry(flight)) continue
 
     // Exclude scheduled / not-yet-flown placeholders.
     if (!isFlownFlight(flight)) continue

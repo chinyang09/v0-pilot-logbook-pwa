@@ -20,6 +20,7 @@ import {
   Minus,
   Trash2,
   PenLine,
+  X,
 } from "lucide-react";
 import { mutate } from "swr";
 import { CACHE_KEYS } from "@/hooks/data";
@@ -53,7 +54,7 @@ import {
   getApproachCategory,
   hasCoordinates,
 } from "@/lib/utils/flight-calculations";
-import { inferPilotFlying, inferPilotRole, isMultiPilotFlight } from "@/lib/utils/flight-evidence";
+import { inferPilotFlying, inferPilotRole, isMultiPilotFlight, isSoloFlight, soloConflict } from "@/lib/utils/flight-evidence";
 import { PILOT_ROLES, TIME_CATEGORIES, categoryLabel, roleLabel, showsCategory } from "@/lib/utils/logbook-rules";
 import { calculateNightTimeComplete } from "@/lib/utils/night-time";
 import {
@@ -77,9 +78,12 @@ import { cn } from "@/lib/utils";
 import {
   ENTRY_TYPES,
   entryTypePatch,
+  gateSpan,
   getEntryType,
+  positioningPatch,
   withoutSimulatorPins,
 } from "@/lib/utils/entry-type";
+import { ADDITIONAL_CREW_ROLES, additionalCrewRoleLabel, requiresTwoPilots } from "@/lib/utils/crew-complement";
 import type { EntryType } from "@/types/entities/flight.types";
 import type { DisplayPreferences } from "@/types/db/stores.types";
 import type { ExtractedFlightData } from "@/lib/ocr";
@@ -315,6 +319,7 @@ function TimeRow({
 function TimeDisplayRow({
   label,
   helper,
+  warning = false,
   value,
   secondaryLabel,
   secondaryValue,
@@ -325,6 +330,8 @@ function TimeDisplayRow({
   label: string;
   /** Smaller line under the label — what the other logbook rules call it. */
   helper?: string;
+  /** The helper is a problem with the figure, not a note about its name. */
+  warning?: boolean;
   value: string;
   secondaryLabel?: string;
   secondaryValue?: string;
@@ -337,7 +344,9 @@ function TimeDisplayRow({
       {helper ? (
         <span className="flex min-w-0 flex-col">
           <span className="text-foreground">{label}</span>
-          <span className="text-xs text-muted-foreground">{helper}</span>
+          <span className={cn("text-xs", warning ? "text-destructive" : "text-muted-foreground")} role={warning ? "alert" : undefined}>
+            {helper}
+          </span>
         </span>
       ) : (
         <span className="text-foreground">{label}</span>
@@ -667,22 +676,31 @@ export function FlightForm({
   // covers a row written without them (`lib/utils/flight-evidence.ts`).
   const formPilotFlying = formData.pilotFlying ?? inferPilotFlying(formData);
   const formPilotRole = formData.pilotRole || inferPilotRole(formData);
+  const entryKind = getEntryType(formData);
+  // A session's length when OUT/IN are recorded — offered, never assumed.
+  const sessionSpan = entryKind === "simulator" ? gateSpan(formData.outTime, formData.inTime) : "";
+  const soloWarning = soloConflict({ ...formData, pilotRole: formPilotRole });
+  const soloImpossible = requiresTwoPilots(formData.aircraftType);
 
   const calculatedFields = useMemo(() => {
     // A simulator derives nothing from its OUT/IN: its duration is
     // `simulatedInstrumentTime`, and a block time computed here was written
     // back on every open — four hours of block, and four of SIC from it,
     // for every session the pilot looked at.
-    if (getEntryType({ entryType: formData.entryType, isSimulator: formData.isSimulator }) === "simulator") {
+    // Nor does a positioning sector, which was not flown by this pilot at all:
+    // no night, no takeoff or landing either.
+    const entryType = getEntryType({ entryType: formData.entryType, isSimulator: formData.isSimulator });
+    if (entryType !== "flight") {
+      const positioning = entryType === "positioning";
       return {
         blockTime: "00:00",
         flightTime: "00:00",
-        nightTime: formData.nightTime || "00:00",
+        nightTime: positioning ? "00:00" : formData.nightTime || "00:00",
         dayTime: "00:00",
-        dayTakeoffs: formData.dayTakeoffs ?? 0,
-        dayLandings: formData.dayLandings ?? 0,
-        nightTakeoffs: formData.nightTakeoffs ?? 0,
-        nightLandings: formData.nightLandings ?? 0,
+        dayTakeoffs: positioning ? 0 : formData.dayTakeoffs ?? 0,
+        dayLandings: positioning ? 0 : formData.dayLandings ?? 0,
+        nightTakeoffs: positioning ? 0 : formData.nightTakeoffs ?? 0,
+        nightLandings: positioning ? 0 : formData.nightLandings ?? 0,
         picTime: "00:00",
         sicTime: "00:00",
         picusTime: "00:00",
@@ -690,6 +708,7 @@ export function FlightForm({
         instructorTime: "00:00",
         crossCountryTime: "00:00",
         multiPilotTime: "00:00",
+        soloTime: "00:00",
       };
     }
 
@@ -809,9 +828,22 @@ export function FlightForm({
       : formData.departureIcao && formData.arrivalIcao && formData.departureIcao !== formData.arrivalIcao
         ? blockTime
         : "00:00";
+    const crew = {
+      pilotRole: formPilotRole,
+      aircraftType: formData.aircraftType,
+      picName: formData.picName,
+      sicName: formData.sicName,
+      additionalCrew: formData.additionalCrew,
+    };
     const multiPilotTime = af.multiPilot === false
       ? null
-      : isMultiPilotFlight({ pilotRole: formPilotRole, picName: formData.picName, sicName: formData.sicName })
+      : isMultiPilotFlight(crew)
+        ? blockTime
+        : "00:00";
+    // Solo is opt-in: a record cannot see passengers (`isSoloFlight`).
+    const soloTime = af.solo !== true
+      ? null
+      : isSoloFlight(crew)
         ? blockTime
         : "00:00";
 
@@ -824,6 +856,7 @@ export function FlightForm({
       ...gatedRoleTimes,
       crossCountryTime,
       multiPilotTime,
+      soloTime,
     };
   }, [
     formData.date,
@@ -835,8 +868,10 @@ export function FlightForm({
     formPilotRole,
     formData.departureIcao,
     formData.arrivalIcao,
+    formData.aircraftType,
     formData.picName,
     formData.sicName,
+    formData.additionalCrew,
     formData.nightTime,
     formData.dayTakeoffs,
     formData.dayLandings,
@@ -901,6 +936,8 @@ export function FlightForm({
       if (!manualOverrides.crossCountryTime && xc !== null && prev.crossCountryTime !== xc) updates.crossCountryTime = xc;
       const mp = calculatedFields.multiPilotTime;
       if (!manualOverrides.multiPilotTime && mp !== null && prev.multiPilotTime !== mp) updates.multiPilotTime = mp;
+      const solo = calculatedFields.soloTime;
+      if (!manualOverrides.soloTime && solo !== null && prev.soloTime !== solo) updates.soloTime = solo;
 
       // Nothing changed — return same reference so React skips the re-render
       if (Object.keys(updates).length === 0) return prev;
@@ -1105,7 +1142,7 @@ export function FlightForm({
   );
 
   /**
-   * Switch this record between flight and simulator.
+   * Switch this record between flight, simulator and positioning.
    *
    * The two carry their duration in different fields on purpose: a flight's is
    * `blockTime` (which feeds every flight-hour total), a simulator's is
@@ -1134,10 +1171,24 @@ export function FlightForm({
           },
         };
       }
+      if (type === "positioning") {
+        // Every hour goes: the pilot was carried, not flying. The OUT/IN stay —
+        // they are the duty. A simulator's pins are dropped as for a flight.
+        const next = { ...prev, ...patch };
+        return {
+          ...next,
+          ...positioningPatch(next),
+          manualOverrides: withoutSimulatorPins(prev.manualOverrides ?? {}, prev.nightTime),
+        };
+      }
+      // To a flight: from a simulator the duration moves across; from
+      // positioning there is none, and the block is worked out from OUT/IN.
       const duration =
         prev.blockTime && prev.blockTime !== "00:00"
           ? prev.blockTime
-          : prev.simulatedInstrumentTime || "00:00";
+          : getEntryType(prev) === "simulator"
+            ? prev.simulatedInstrumentTime || "00:00"
+            : "00:00";
       return {
         ...prev,
         ...patch,
@@ -1371,7 +1422,7 @@ export function FlightForm({
     router.push(`/aircraft?${params.toString()}`);
   };
 
-  const openCrewPicker = async (field: "picId" | "sicId") => {
+  const openCrewPicker = async (field: "picId" | "sicId" | "additionalCrew") => {
     if (!formData.id) return;
     saveScrollPosition();
     await forceSave();
@@ -1411,19 +1462,7 @@ export function FlightForm({
   );
 
 
-  // Additional crew management
-  const addAdditionalCrew = useCallback(() => {
-    const newCrew: AdditionalCrew = {
-      id: crypto.randomUUID(),
-      name: "",
-      role: "Observer",
-    };
-    setFormData((prev) => ({
-      ...prev,
-      additionalCrew: [...(prev.additionalCrew || []), newCrew],
-    }));
-  }, []);
-
+  // Additional crew management (members are added through the crew picker)
   const updateAdditionalCrew = useCallback(
     (id: string, updates: Partial<AdditionalCrew>) => {
       setFormData((prev) => ({
@@ -1897,11 +1936,57 @@ export function FlightForm({
             />
           </SwipeableRow>
 
-          <div className="flex items-center justify-center py-3 row-divider">
+          {/* Crew beyond the two seats — a relief pilot on an augmented crew,
+              a check pilot, an instructor. The role is the native select laid
+              over the role text, as the Pilot Role row does it. */}
+          {(formData.additionalCrew ?? []).map((member, i) => (
+            <div
+              key={member.id ?? `${member.name}-${i}`}
+              className="flex items-center justify-between gap-2 py-1.5 pl-4 pr-2 row-divider"
+            >
+              <span className="flex min-w-0 items-center gap-2 text-foreground">
+                <User className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="truncate">{member.name || "Unnamed"}</span>
+              </span>
+              <span className="flex shrink-0 items-center">
+                <span className="relative flex h-9 items-center gap-1 px-2 text-muted-foreground focus-within:outline-2 focus-within:outline-ring">
+                  {additionalCrewRoleLabel(member.role)}
+                  <ChevronDown className="h-4 w-4" aria-hidden />
+                  <select
+                    aria-label={`Role of ${member.name || "crew member"}`}
+                    value={member.role}
+                    onChange={(e) =>
+                      member.id &&
+                      updateAdditionalCrew(member.id, { role: e.target.value as AdditionalCrew["role"] })
+                    }
+                    className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
+                  >
+                    {ADDITIONAL_CREW_ROLES.map((r) => (
+                      <option key={r.value} value={r.value}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 text-muted-foreground"
+                  aria-label={`Remove ${member.name || "crew member"}`}
+                  onClick={() => member.id && removeAdditionalCrew(member.id)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </span>
+            </div>
+          ))}
+
+          <div className="flex items-center justify-center py-1.5 row-divider">
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 px-3 text-xs text-primary"
+              className="h-9 px-3 text-xs text-primary"
+              onClick={() => openCrewPicker("additionalCrew")}
             >
               <Plus className="h-3.5 w-3.5 mr-1" />
               Add Crew
@@ -1917,56 +2002,101 @@ export function FlightForm({
             </h2>
           </div>
 
-          <TimeDisplayRow
-            label="Total Time"
-            value={formData.blockTime || "00:00"}
-          />
-
-          <TimeDisplayRow
-            label="Night"
-            value={formData.nightTime || calculatedFields.nightTime || "00:00"}
-            secondaryLabel="Day"
-            secondaryValue={
-              formData.dayTime || calculatedFields.dayTime || "00:00"
-            }
-          />
-
-          {/* One row per hour category, named by the pilot's logbook rules
-              (Settings › Logging) with the other authorities' names beneath.
-              Night is the row above; a category the rules do not keep is
-              offered only once it holds time, so nothing logged is hidden. */}
-          {TIME_CATEGORIES.filter(
-            (c) => c.field !== "nightTime" && showsCategory(c, authority, formData[c.field])
-          ).map((category) => {
-            const { field } = category;
-            const { label, helper } = categoryLabel(category, authority);
-            const value = formData[field] || "00:00";
-            return (
-              <SwipeableRow
-                key={field}
-                onClear={() => {
-                  updateField(field, "00:00");
-                  markManualOverride(field, false);
+          {entryKind === "positioning" ? (
+            // Carried, not flown: the time on board is duty (the FDP pipeline
+            // reads its OUT/IN) and is held in no hour field.
+            <TimeDisplayRow
+              label="Positioning"
+              helper="Counts as duty, not as flight time"
+              value={gateSpan(formData.outTime, formData.inTime) || "00:00"}
+            />
+          ) : entryKind === "simulator" ? (
+            // A session is an EVENT: its length lives in the one field a
+            // flight uses for hood time, told apart by the entry type.
+            <SwipeableRow
+              onClear={() => {
+                updateField("simulatedInstrumentTime", "00:00");
+                markManualOverride("simulatedInstrumentTime", false);
+              }}
+            >
+              <TimeDisplayRow
+                label="Session"
+                helper="Training device — not flight time"
+                value={formData.simulatedInstrumentTime || "00:00"}
+                showUseButton={
+                  (formData.simulatedInstrumentTime || "00:00") === "00:00" && !!sessionSpan
+                }
+                useLabel={`USE ${sessionSpan}`}
+                onUse={() => {
+                  updateField("simulatedInstrumentTime", sessionSpan);
+                  markManualOverride("simulatedInstrumentTime", true);
                 }}
-              >
-                <TimeDisplayRow
-                  label={label}
-                  helper={helper}
-                  value={value}
-                  showUseButton={value === "00:00"}
-                  useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
-                  onUse={() => {
-                    // Chosen by hand, so pinned: a recalculation must not
-                    // take it back (`manualOverrides`).
-                    updateField(field, formData.blockTime || "00:00");
-                    markManualOverride(field, true);
-                  }}
-                />
-              </SwipeableRow>
-            );
-          })}
+              />
+            </SwipeableRow>
+          ) : (
+            <>
+              <TimeDisplayRow
+                label="Total Time"
+                value={formData.blockTime || "00:00"}
+              />
+
+              <TimeDisplayRow
+                label="Night"
+                value={formData.nightTime || calculatedFields.nightTime || "00:00"}
+                secondaryLabel="Day"
+                secondaryValue={
+                  formData.dayTime || calculatedFields.dayTime || "00:00"
+                }
+              />
+
+              {/* One row per hour category, named by the pilot's logbook
+                  rules (Settings › Logging) with the other authorities' names
+                  beneath. Night is the row above; a category the rules do not
+                  keep is offered only once it holds time, so nothing logged
+                  is hidden. */}
+              {TIME_CATEGORIES.filter(
+                (c) => c.field !== "nightTime" && showsCategory(c, authority, formData[c.field])
+              ).map((category) => {
+                const { field } = category;
+                const { label, helper } = categoryLabel(category, authority);
+                const value = formData[field] || "00:00";
+                // Solo on a two-pilot type, or with another pilot aboard, is
+                // a mistake in the record. Said, not silently corrected.
+                const warning = field === "soloTime" ? soloWarning : null;
+                const offerUse = value === "00:00" && !(field === "soloTime" && soloImpossible);
+                return (
+                  <SwipeableRow
+                    key={field}
+                    onClear={() => {
+                      updateField(field, "00:00");
+                      markManualOverride(field, false);
+                    }}
+                  >
+                    <TimeDisplayRow
+                      label={label}
+                      helper={warning ?? helper}
+                      warning={!!warning}
+                      value={value}
+                      showUseButton={offerUse}
+                      useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
+                      onUse={() => {
+                        // Chosen by hand, so pinned: a recalculation must not
+                        // take it back (`manualOverrides`).
+                        updateField(field, formData.blockTime || "00:00");
+                        markManualOverride(field, true);
+                      }}
+                    />
+                  </SwipeableRow>
+                );
+              })}
+            </>
+          )}
         </div>
 
+        {/* A positioning sector was not flown by this pilot: no role, no
+            landings, no approaches to record. */}
+        {entryKind !== "positioning" && (
+        <>
         {/* DUTY Section */}
         <div className="rounded-xl bg-card border border-border overflow-hidden">
           <div className="px-4 py-2 bg-muted/30">
@@ -2165,6 +2295,9 @@ export function FlightForm({
             onCheckedChange={(checked) => updateField("ipcIcc", checked)}
           />
         </div>
+
+        </>
+        )}
 
         {/* REMARKS Section */}
         <div className="rounded-xl bg-card border border-border overflow-hidden">

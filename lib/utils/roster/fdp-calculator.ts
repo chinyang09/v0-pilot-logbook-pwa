@@ -22,6 +22,7 @@ import type {
   FdpTableUsed,
 } from "@/types/entities/roster.types"
 import type { FlightLog } from "@/types/entities/flight.types"
+import { isPositioningEntry } from "@/lib/utils/entry-type"
 import { hhmmToMinutes, minutesToHHMM } from "@/lib/utils/time"
 import {
   acclimatisedOffsetsAtEachDuty,
@@ -466,16 +467,23 @@ function createDutyPeriodFromFlightGroup(
   groupIdx: number,
   totalGroups: number
 ): DutyPeriod | null {
+  // Para 8: positioning is DUTY — its OUT/IN widen the duty window below —
+  // but it is not an operating sector and not flight time, so it is left out
+  // of the sector count, the sector lengths and the flight minutes.
+  const operated = groupFlights.filter((f) => !isPositioningEntry(f))
+
   let totalFlightMinutes = 0
   let earliestOut = Infinity
   let earliestScheduledOut = Infinity
   let earliestStatedReport = Infinity
   let latestIn = -Infinity
 
-  for (const flight of groupFlights) {
+  for (const flight of operated) {
     if (flight.blockTime) {
       totalFlightMinutes += hhmmToMinutes(flight.blockTime)
     }
+  }
+  for (const flight of groupFlights) {
     if (flight.outTime) {
       earliestOut = Math.min(earliestOut, hhmmToMinutes(flight.outTime))
     }
@@ -516,7 +524,7 @@ function createDutyPeriodFromFlightGroup(
   }
 
   if (totalFlightMinutes === 0) {
-    for (const flight of groupFlights) {
+    for (const flight of operated) {
       if (flight.scheduledOut && flight.scheduledIn) {
         let blockMin = hhmmToMinutes(flight.scheduledIn) - hhmmToMinutes(flight.scheduledOut)
         if (blockMin < 0) blockMin += 1440
@@ -585,7 +593,7 @@ function createDutyPeriodFromFlightGroup(
 
   // EVERY sector's block time — para 14(2) counts each long sector up, not
   // only the longest.
-  const sectorMinutes = groupFlights.map((f) =>
+  const sectorMinutes = operated.map((f) =>
     f.blockTime ? hhmmToMinutes(f.blockTime) : 0
   )
 
@@ -599,7 +607,7 @@ function createDutyPeriodFromFlightGroup(
   const fdpResult = deriveMaxFDP({
     reportTime,
     fdpStartLocal: localReportTime,
-    sectorCount: groupFlights.length,
+    sectorCount: operated.length,
     sectorMinutes,
     departureTimezoneOffset: depTzOffset,
   })
@@ -622,7 +630,7 @@ function createDutyPeriodFromFlightGroup(
     debriefTime,
     dutyMinutes,
     flightMinutes: totalFlightMinutes,
-    sectorCount: groupFlights.length,
+    sectorCount: operated.length,
     maxFdpMinutes: fdpResult.maxFdpMinutes,
     fdpExtensionUsed: false,
     fdpTableUsed: fdpResult.tableUsed,

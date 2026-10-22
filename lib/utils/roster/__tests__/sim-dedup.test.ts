@@ -66,6 +66,7 @@ function simFlight(over: Partial<FlightLog> = {}): FlightLog {
     simulatedInstrumentTime: "04:00",
     crossCountryTime: "00:00",
     multiPilotTime: "00:00",
+    soloTime: "00:00",
     approaches: [],
     holds: 0,
     ipcIcc: false,

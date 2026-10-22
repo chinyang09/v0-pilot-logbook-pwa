@@ -88,6 +88,12 @@ export interface ScheduledCrewMember {
   crewId: string                    // "2727"
   name: string                      // "Yu Shuqing"
   personnelId?: string              // Linked to Personnel table
+  /**
+   * Marked "PIC" in the report ("CPT - PIC - 6160 - …"): the commander. Only
+   * an augmented crew has more than one captain, and this is how to tell
+   * which one holds the PIC seat.
+   */
+  commander?: boolean
 }
 
 /**

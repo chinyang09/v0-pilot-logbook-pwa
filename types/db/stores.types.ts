@@ -50,6 +50,7 @@ export interface AutoFillPreferences {
   actualInst: boolean
   simInst: boolean
   multiPilot: boolean
+  solo: boolean
 }
 
 export interface DutyTimeDefaults {
@@ -136,6 +137,9 @@ export const DEFAULT_AUTO_FILL_PREFERENCES: AutoFillPreferences = {
   // Fills only where the flight itself shows a multi-pilot crew
   // (`isMultiPilotFlight`), so on is safe for everyone.
   multiPilot: true,
+  // Off by default: a record cannot see passengers, so "PIC with nobody else
+  // named" is only solo when the pilot says that is how they log.
+  solo: false,
 }
 
 export const DEFAULT_DUTY_TIME_DEFAULTS: DutyTimeDefaults = {

@@ -9,15 +9,18 @@
  * The categories are the STORED fields, so changing the rules never changes a
  * logged figure — only what it is called and which rows the form offers.
  *
- * Sources (researched Oct 2026, from search excerpts — the regulators' sites
- * were not reachable to quote; recheck before citing):
- * - CAAS: SASP Part 2 (ATPL), SASP Part D definitions ("PIC U/S", co-pilot /
- *   P2, dual instruction time), ANO para 22 (logbook content).
- * - EASA: Part-FCL FCL.010, AMC1 FCL.050 (logbook columns: PIC, co-pilot,
- *   dual, instructor, multi-pilot, IFR; PICUS is logged as PIC, countersigned).
+ * Sources:
+ * - CAAS: SASP Part 1 Appendix B, "Recording and crediting of flight time"
+ *   (20 Jan 2025, Issue 9 Amendment 8) — read from the document itself. The
+ *   designations (PIC or P1, PIC U/S, P2, P/UT, SNY) and the columns they are
+ *   entered in (P1, Co-pilot (P2), Dual) are its Cases A–N. "Instructor" and
+ *   "Multi-crew" are not in Appendix B and are unconfirmed.
  * - FAA: 14 CFR 61.51 (PIC, SIC, solo, dual received, actual / simulated
  *   instrument, cross-country; no PICUS or multi-pilot column — duties of PIC
- *   under supervision is 61.51(e)(1)(iv)).
+ *   under supervision is 61.51(e)(1)(iv)). From search excerpts, not the text.
+ * - EASA: TODO. Part-FCL FCL.050 / AMC1 FCL.050 has not been read from the
+ *   source, so its names are held back (`available: false`) rather than shown
+ *   as fact.
  */
 
 import type { FlightLog, PilotRole } from "@/types/entities/flight.types"
@@ -25,11 +28,21 @@ import type { AutoFillPreferences } from "@/types/db/stores.types"
 
 export type LogbookAuthority = "CAAS" | "EASA" | "FAA"
 
-export const LOGBOOK_AUTHORITIES: { value: LogbookAuthority; label: string; description: string }[] = [
-  { value: "CAAS", label: "CAAS", description: "Singapore — SASP / Air Navigation Order" },
-  { value: "EASA", label: "EASA", description: "Europe — Part-FCL" },
-  { value: "FAA", label: "FAA", description: "United States — 14 CFR Part 61" },
+export const LOGBOOK_AUTHORITIES: {
+  value: LogbookAuthority
+  label: string
+  description: string
+  /** Offered in Settings and named in helper text. False until its wording is verified. */
+  available: boolean
+}[] = [
+  { value: "CAAS", label: "CAAS", description: "Singapore — SASP Appendix B", available: true },
+  { value: "FAA", label: "FAA", description: "United States — 14 CFR Part 61", available: true },
+  // TODO(EASA): verify AMC1 FCL.050's columns against the source, then offer it.
+  { value: "EASA", label: "EASA", description: "Europe — Part-FCL", available: false },
 ]
+
+/** The authorities a pilot can choose today. */
+export const OFFERED_AUTHORITIES = LOGBOOK_AUTHORITIES.filter((a) => a.available)
 
 /** The time fields a category can be — every one is an HH:MM string on the flight. */
 export type TimeField =
@@ -38,6 +51,7 @@ export type TimeField =
   | "picusTime"
   | "dualTime"
   | "instructorTime"
+  | "soloTime"
   | "multiPilotTime"
   | "nightTime"
   | "ifrTime"
@@ -48,8 +62,12 @@ export type TimeField =
 interface Name {
   /** The column heading. */
   label: string
-  /** The same thing spelled out — the helper when every authority agrees on the label. */
+  /** What the pilot is designated as when this is their role, where that differs from the column (CAAS P/UT → the Dual column). */
+  designation?: string
+  /** The same thing spelled out — the helper when nothing else applies. */
   full: string
+  /** A rule the pilot needs at the point of logging it ("entered in the P1 column"). Always shown. */
+  note?: string
 }
 
 export interface TimeCategory {
@@ -78,7 +96,8 @@ export const TIME_CATEGORIES: TimeCategory[] = [
     kind: "function",
     role: "PIC",
     names: {
-      CAAS: { label: "PIC", full: "Pilot-in-command" },
+      // Case A: designation "PIC or P1", entered in the P1 column.
+      CAAS: { label: "P1", designation: "PIC", full: "Pilot-in-command" },
       EASA: { label: "PIC", full: "Pilot-in-command" },
       FAA: { label: "PIC", full: "Pilot in command" },
     },
@@ -90,7 +109,8 @@ export const TIME_CATEGORIES: TimeCategory[] = [
     kind: "function",
     role: "SIC",
     names: {
-      CAAS: { label: "Co-pilot", full: "Co-pilot (P2)" },
+      // Case C: designation P2, entered in the "Co-pilot (P2)" column.
+      CAAS: { label: "P2", full: "Co-pilot" },
       EASA: { label: "Co-pilot", full: "Co-pilot" },
       FAA: { label: "SIC", full: "Second in command" },
     },
@@ -102,8 +122,14 @@ export const TIME_CATEGORIES: TimeCategory[] = [
     kind: "function",
     role: "PICUS",
     names: {
-      CAAS: { label: "PIC U/S", full: "PIC under supervision" },
-      EASA: { label: "PICUS", full: "PIC under supervision — logged as PIC, countersigned" },
+      // Case B: co-pilot performing the duties of PIC under supervision —
+      // entered in the P1 column, counted subject to the PIC's certification.
+      CAAS: {
+        label: "PIC U/S",
+        full: "Co-pilot performing the duties of PIC under supervision",
+        note: "Counts in P1 once the PIC certifies it",
+      },
+      EASA: { label: "PICUS", full: "PIC under supervision" },
       FAA: { label: "PIC (supervised)", full: "Duties of PIC under supervision, 61.51(e)(1)(iv)" },
     },
     recognisedBy: ["CAAS", "EASA"],
@@ -114,7 +140,8 @@ export const TIME_CATEGORIES: TimeCategory[] = [
     kind: "function",
     role: "Dual",
     names: {
-      CAAS: { label: "Dual", full: "Dual instruction received" },
+      // Case G: designation P/UT, entered in the Dual column.
+      CAAS: { label: "Dual", designation: "P/UT", full: "Pilot under instruction" },
       EASA: { label: "Dual", full: "Dual instruction received" },
       FAA: { label: "Dual received", full: "Training received from an authorized instructor" },
     },
@@ -129,6 +156,18 @@ export const TIME_CATEGORIES: TimeCategory[] = [
       CAAS: { label: "Instructor", full: "Flight instruction given" },
       EASA: { label: "Instructor", full: "Flight instruction given" },
       FAA: { label: "Dual given", full: "Flight instruction given" },
+    },
+    recognisedBy: ["CAAS", "EASA", "FAA"],
+  },
+  {
+    field: "soloTime",
+    autoFill: "solo",
+    kind: "condition",
+    names: {
+      // Case L: a student pilot as sole occupant is logged PIC, in the P1 column.
+      CAAS: { label: "Solo", full: "Sole occupant of the aircraft", note: "Also counts in P1" },
+      EASA: { label: "Solo", full: "Sole occupant of the aircraft" },
+      FAA: { label: "Solo", full: "Sole occupant of the aircraft" },
     },
     recognisedBy: ["CAAS", "EASA", "FAA"],
   },
@@ -154,11 +193,7 @@ export const TIME_CATEGORIES: TimeCategory[] = [
     field: "ifrTime",
     autoFill: "ifr",
     kind: "condition",
-    names: {
-      CAAS: { label: "IFR", full: "Flown under instrument flight rules" },
-      EASA: { label: "IFR", full: "Flown under instrument flight rules" },
-      FAA: { label: "IFR", full: "Flown under instrument flight rules" },
-    },
+    names: same("IFR", "Flown under instrument flight rules"),
     recognisedBy: ["CAAS", "EASA"],
   },
   {
@@ -172,7 +207,9 @@ export const TIME_CATEGORIES: TimeCategory[] = [
     field: "simulatedInstrumentTime",
     autoFill: "simInst",
     kind: "condition",
-    names: same("Simulated instrument", "Under the hood, or in a training device"),
+    // On a FLIGHT this is hood time. A simulator session keeps its length in
+    // the same field and is told apart by its entry type, not a second field.
+    names: same("Simulated instrument", "Under the hood, in an aircraft"),
     recognisedBy: ["CAAS", "FAA"],
   },
   {
@@ -205,24 +242,26 @@ export function roleTimeField(role: PilotRole): TimeField {
 
 /**
  * The heading and the helper for a category under `authority`. The helper
- * names what the OTHER authorities call it where that differs ("EASA PICUS ·
- * FAA PIC (supervised)"); where every authority says the same thing it spells
- * the category out instead, so the helper always adds something.
+ * carries the authority's own logging rule where it has one, then what the
+ * OTHER offered authorities call it where that differs ("FAA SIC"); with
+ * neither, it spells the category out, so the helper always adds something.
  */
 export function categoryLabel(
   category: TimeCategory,
   authority: LogbookAuthority
 ): { label: string; helper: string } {
   const own = category.names[authority]
-  const others = LOGBOOK_AUTHORITIES.map((a) => a.value)
+  const others = OFFERED_AUTHORITIES.map((a) => a.value)
     .filter((a) => a !== authority && category.names[a].label !== own.label)
     .map((a) => `${a} ${category.names[a].label}`)
-  return { label: own.label, helper: others.length > 0 ? others.join(" · ") : own.full }
+  const parts = [own.note, ...others].filter(Boolean)
+  return { label: own.label, helper: parts.length > 0 ? parts.join(" · ") : own.full }
 }
 
 /** What a role is called under `authority` — the role picker's options. */
 export function roleLabel(role: PilotRole, authority: LogbookAuthority): string {
-  return BY_ROLE.get(role)!.names[authority].label
+  const name = BY_ROLE.get(role)!.names[authority]
+  return name.designation ?? name.label
 }
 
 /**

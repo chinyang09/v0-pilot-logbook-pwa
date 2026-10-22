@@ -825,41 +825,90 @@ convention, never the default.
 ### Logbook Rules — what the hours are called (`lib/utils/logbook-rules.ts`)
 
 The same hour is named differently by each authority — FAA "Dual given" is
-EASA/CAAS "Instructor", FAA "SIC" is EASA "Co-pilot", CAAS "PIC U/S" is EASA
-"PICUS" — so the pilot picks the rules they log under (**Settings › Logging ›
-Logbook rules**: CAAS, EASA, FAA; synced, default CAAS) and every screen that
-names a category reads ONE table, `TIME_CATEGORIES`:
+CAAS "Instructor", FAA "SIC" is CAAS "P2" — so the pilot picks the rules they
+log under (**Settings › Logging › Logbook rules**; synced, default CAAS) and
+every screen that names a category reads ONE table, `TIME_CATEGORIES`:
 
 | Column | What it holds |
 |---|---|
 | `field` | the STORED time field — changing the rules never changes a logged figure, only its name |
-| `names` | the label per authority; `categoryLabel` gives the chosen one plus a HELPER naming what the others call it (or the category spelled out when all agree) |
+| `names` | per authority: the column `label`, the role `designation` where it differs (CAAS P/UT → the Dual column), a `note` that always shows (CAAS PIC U/S "Counts in P1 once the PIC certifies it"), and the `full` name |
 | `autoFill` | the Settings › Auto-fill switch that fills it — the switch list and the dashboard's totals map are both derived from the table |
 | `recognisedBy` | the authorities whose logbook keeps it; the flight form offers any other only once it holds time (`showsCategory`), so nothing logged is ever hidden |
+
+**CAAS is transcribed from SASP Part 1 Appendix B** (Issue 9, Amendment 8):
+Case A PIC → the **P1** column; B co-pilot doing PIC duties under supervision
+→ **PIC U/S**, entered in P1 subject to the PIC's certification; C co-pilot →
+**P2**; G pilot under instruction → **P/UT**, in the **Dual** column; L a
+student as sole occupant → P1 (so solo also counts in P1). "Instructor" and
+"Multi-crew" are not in Appendix B and are unconfirmed. Appendix B's **SNY**
+(Case F(iii) — other flying duties, e.g. a relief pilot out of the seat; not
+counted toward licence experience) has no field yet.
+
+**EASA is TODO** (`available: false`): its names are in the table but it is not
+offered in Settings and never named in a helper until AMC1 FCL.050 has been
+read from the source. FAA is from 14 CFR 61.51 search excerpts.
 
 Readers: the flight form's TIME rows and role picker, Settings › Auto-fill,
 the dashboard breakdown, the import review card. A category is added in the
 table and nowhere else.
 
-**Multi-pilot time** (`multiPilotTime`, schema 4) is the EASA multi-pilot /
-CAAS multi-crew column. It is filled from the flight's own crew
-(`isMultiPilotFlight`: a co-pilot role, or both pilot seats named), never from a
-setting, and a flight stored before the field existed takes it by the same rule
-on both ends (`inferMultiPilotTime`, in the schema default and the client
-normalizer; `SYNC_PROTOCOL` 3 re-pulls once so every device gets it).
+**Crew complement** (`lib/utils/crew-complement.ts`) — `minimumPilots(type)`
+reads the ICAO designator the flight already carries: 2 for the transport and
+large business types (a LIST, because wake category and engine type both have
+exceptions — the CJ4 is single-pilot, the Dash 8 needs two), `null` = unknown,
+and then the record's own crew decides. Two things turn on it:
 
-The breakdown shows every category that HOLDS time. It used to show only those
-whose Auto-fill switch was on, so a hand-logged IFR hour vanished from the
-totals. The role picker no longer offers "Examiner": it was never a role a
-flight can hold, so choosing it filed the flight's hours under nothing.
+| | Rule (`flight-evidence.ts`) |
+|---|---|
+| **Multi-pilot time** (`multiPilotTime`, schema 4) | `isMultiPilotFlight`: a two-pilot TYPE (every airline sector, even imported without its co-pilot), a co-pilot role, both seats named, or a relief pilot aboard. A flight stored before the field takes it by the same rule on server and client (`inferMultiPilotTime`; `SYNC_PROTOCOL` 3 re-pulls once) |
+| **Solo** (`soloTime`, schema 5) | auto-fill is OPT-IN (`isSoloFlight`: PIC, not multi-pilot, nobody else recorded — a record cannot see passengers). Solo on a two-pilot type, or with another pilot aboard, is FLAGGED in the form (`soloConflict`), never silently zeroed, and the form offers no USE button for it on such a type |
 
-The wording was researched from search excerpts (the regulators' sites were
-not reachable); check the CAAS labels against SASP / the ANO before citing them.
+**Simulator time is an EVENT, not a field.** A simulator entry keeps its
+session length in `simulatedInstrumentTime`, the field a FLIGHT uses for hood
+time; the entry type tells the two apart, so an export can separate training-
+device hours from simulated-instrument flight time without a second field. The
+form shows a simulator's TIME as one "Session" row.
 
-### Entry Type (flight vs simulator)
+**Night is not split by role.** A night-PIC (or night-anything) figure, where
+an export needs one, is the role time × night ÷ block for that flight. It is a
+derivation, not a field a pilot has to log.
 
-`FlightLog.entryType: "flight" | "simulator"` — a union rather than another
-boolean so ground duties (standby, leave) can follow. Rows written before it
+The breakdown shows every category that HOLDS time (a hand-logged IFR hour
+used to vanish when its Auto-fill switch was off). The role picker no longer
+offers "Examiner": it was never a role a flight can hold.
+
+**More than two crew.** `additionalCrew` (any number) is added from the crew
+picker (`field=additionalCrew`, `withAdditionalCrew` — never the same person
+twice) with a role per member; "Relief Pilot" is the augmented-crew role and
+makes a flight multi-pilot by itself. `assignCrewToFlight` is the one way a
+picker puts a crew card on a flight — choosing an existing card, or creating
+one in the picker (which used to save the card and assign nobody). An eCrew
+schedule import seats the COMMANDER ("CPT - PIC - …", `commander`) as PIC and
+this pilot in their own seat, and lists every other CPT/FO as a relief pilot
+on a CREATED flight (`deriveSectorCrew`). Taking the first CPT and FO blindly
+dropped a second-listed first officer from their own flight. A re-import does
+not add relief pilots to an EXISTING flight yet: the review modal's diff is a
+string, and a list needs its own presentation.
+
+### Entry Type (flight, simulator, positioning)
+
+`FlightLog.entryType: "flight" | "simulator" | "positioning"` — a union rather
+than another boolean per kind. Only a `flight` carries flight time
+(`isOperatedFlight`).
+
+**Positioning** (deadheading) is DUTY but no flight time. Its OUT/IN stay — the
+FDP pipeline reads them, so the duty window covers it — but `positioningPatch`
+zeroes every hour, count and PF, and every recalculation returns that patch
+(pins included: there is no figure to own on a flight you did not operate).
+`createDutyPeriodFromFlightGroup` leaves it out of the sector count, the sector
+lengths and the flight minutes (Fifth Schedule para 8: not an operating
+sector); the dashboard does not count it as a flight; the card shows its
+OUT→IN as "pos" with a ticket icon; the form hides the role, landings and
+approaches; and a report re-import never proposes PF, role, landings or hours
+for it (`NOT_FOR_POSITIONING`), which would otherwise file tracked
+discrepancies against a flight the pilot was carried on. Neither eCrew report
+marks a positioning sector in the files seen so far, so it is set by hand. Rows written before it
 exists carry only the legacy `isSimulator` flag, so **read through
 `getEntryType()`** (`lib/utils/entry-type.ts`) and **write through
 `entryTypePatch()`**, which sets both — the dashboard aggregate and the FDP
@@ -3264,9 +3313,11 @@ crew logbook and `DEFAULT_FTL_LIMITS` carries the flight-crew figures — do not
   make-good); 82 hours at base after 7+ days away. None of this is computed.
   It needs COMPLETE roster coverage to tell a day off from a day with no data,
   and a false "you have worked 8 days straight" is worse than silence.
-- **Para 8: positioning is not an operating sector.** A positioning leg
-  imported as an ordinary flight row inflates the sector count. `ScheduleEntry`
-  has `dutyType: "positioning"` but `FlightLog` carries no equivalent flag.
+- **Para 8: positioning.** A sector logged as `positioning` is duty but not an
+  operating sector (Entry Type, above). Still open: a duty made ONLY of
+  positioning is given the one-sector FDP maximum (it is a duty period, not an
+  FDP), and imports cannot mark positioning — neither report seen so far
+  flags it.
 - **Para 9: simulator then flying in the same duty.** Sim time counts in full
   toward the subsequent FDP but is not a sector. The dashboard's
   `buildPlannedDuties` skips simulators entirely.
@@ -4340,6 +4391,10 @@ When making changes, be aware of these high-impact files:
 - Do not skip `detectEditReasons` before classification — it is what protects a signed/remarked/manually-overridden flight regardless of which fields changed
 - Do not dedupe simulator sessions on `date|simSessionCode` alone — recognition must stay structural (no route, no registration), or sims written by an older build duplicate on every import
 - Do not read `FlightLog.entryType` directly — go through `getEntryType()`, and write through `entryTypePatch()` so the legacy `isSimulator` flag stays in step for the dashboard and FDP pipeline
+- Do not count a positioning sector anywhere hours, landings or sectors are counted — read the entry through `isOperatedFlight` / `isPositioningEntry`, never `!isSimulator`. It is duty (keep its OUT/IN in the duty window) and nothing else
+- Do not let solo time on a two-pilot type pass silently, and do not zero it either — `soloConflict` flags it in the form; the figure is the pilot's to correct. And keep solo auto-fill OFF by default: a record cannot see passengers
+- Do not seat crew from an eCrew report by "first CPT, first FO" — the PIC seat is the commander, the SIC seat is this pilot when they are one of the FOs, and every other pilot is a relief pilot (`deriveSectorCrew`)
+- Do not name EASA in Settings or a helper until its wording is verified (`available: false`), and do not add a CAAS name that Appendix B does not give without marking it unconfirmed
 - Do not hardcode an hour category's name — the flight form, Auto-fill, the dashboard and the import card all read `TIME_CATEGORIES` (`lib/utils/logbook-rules.ts`) through the pilot's chosen rules. And do not hide a category's figure because the rules or an Auto-fill switch say so: a category the rules do not keep is still shown once it holds time
 - Do not resolve the pilot's PF convention without the flight's DATE — `pfRoleFrom` is the PICUS check-out, and a flown leg before it is SIC. And do not let an import apply a `pilotRole` change whose `pilotFlying` half was withheld or declined: the role follows the PF the flight ends up with (`settledRole`), or a PM leg is logged PICUS
 - Do not take an eCrew report's day/night takeoff and landing split as fact — audited against a real year it disagrees with the sun on 86 of 283 events (a "day" landing with the sun 78° down). The sun's answer is applied to creates (`suggested*` in `hydrateFlightFromSector`) as it already was to updates, and a PF sector carries BOTH a takeoff and a landing even where the report recorded only one (`suggestToLdg`)

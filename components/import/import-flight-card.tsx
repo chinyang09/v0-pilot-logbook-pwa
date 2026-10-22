@@ -155,6 +155,7 @@ const EMPTY_FLIGHT: FlightLog = {
   simulatedInstrumentTime: "",
   crossCountryTime: "",
   multiPilotTime: "",
+  soloTime: "",
   approaches: [],
   holds: 0,
   ipcIcc: false,

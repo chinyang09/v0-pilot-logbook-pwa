@@ -8,8 +8,8 @@ import { isNight, calculateNightTimeComplete } from "./night-time"
 import type { Airport } from "@/types/entities/airport.types"
 import type { FlightLog, Approach, PilotRole, ManualOverrides } from "@/types/entities/flight.types"
 import { DEFAULT_LOGGING_PREFERENCES, type AutoFillPreferences } from "@/types/db/stores.types"
-import { inferPilotFlying, inferPilotRole, isMultiPilotFlight, UNSTATED_ROLE } from "./flight-evidence"
-import { isSimulatorEntry, simulatorRepairPatch } from "./entry-type"
+import { inferPilotFlying, inferPilotRole, isMultiPilotFlight, isSoloFlight, UNSTATED_ROLE } from "./flight-evidence"
+import { isOperatedFlight, isPositioningEntry, isSimulatorEntry, positioningPatch, simulatorRepairPatch } from "./entry-type"
 
 /**
  * A flight is "flown" once both OOOI gate times are populated.
@@ -61,7 +61,7 @@ export function airborneTimes(f: {
  * row with OFF/ON (the recalculation owns it), a figure already there.
  */
 export function flightTimeRepairPatch(f: Partial<FlightLog>): Partial<FlightLog> {
-  if (isSimulatorEntry({ entryType: f.entryType, isSimulator: f.isSimulator })) return {}
+  if (!isOperatedFlight({ entryType: f.entryType, isSimulator: f.isSimulator })) return {}
   if (hhmmToMinutes(f.flightTime || "00:00") > 0) return {}
   const airborne = airborneTimes(f)
   if (!airborne?.fromGate) return {}
@@ -297,6 +297,7 @@ export function createEmptyFlightLog(
     simulatedInstrumentTime: "00:00",
     crossCountryTime: "00:00",
     multiPilotTime: "00:00",
+    soloTime: "00:00",
     approaches: [],
     holds: 0,
     ipcIcc: false,
@@ -317,6 +318,10 @@ export function recalculateFlightFields(
   // block time computed from its OUT/IN would reach every flight-hour total.
   if (isSimulatorEntry({ entryType: flight.entryType, isSimulator: flight.isSimulator })) {
     return simulatorRepairPatch(flight)
+  }
+  // Nor has a positioning sector: the pilot was carried, not flying.
+  if (isPositioningEntry({ entryType: flight.entryType, isSimulator: flight.isSimulator })) {
+    return positioningPatch(flight)
   }
 
   const updates: Partial<FlightLog> = {}
@@ -433,6 +438,12 @@ export function recalculateFlightFields(
   // multi-pilot crew (`isMultiPilotFlight`)
   if (autoFill?.multiPilot !== false && !overrides.multiPilotTime) {
     updates.multiPilotTime = isMultiPilotFlight(flight) ? blockTime : "00:00"
+  }
+
+  // Solo time — opt-in (`isSoloFlight` cannot see passengers), and never on a
+  // type certified for two pilots
+  if (autoFill?.solo === true && !overrides.soloTime) {
+    updates.soloTime = isSoloFlight(flight) ? blockTime : "00:00"
   }
 
   // IFR time — auto-fill from flight time

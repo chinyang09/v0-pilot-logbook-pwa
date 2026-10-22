@@ -8,6 +8,7 @@
 import { describe, it, expect } from "vitest"
 import {
   LOGBOOK_AUTHORITIES,
+  OFFERED_AUTHORITIES,
   PILOT_ROLES,
   TIME_CATEGORIES,
   categoryLabel,
@@ -38,19 +39,51 @@ describe("the category table", () => {
   })
 })
 
-describe("categoryLabel", () => {
-  const picus = timeCategory("picusTime")
-  const instructor = timeCategory("instructorTime")
+describe("CAAS — SASP Part 1 Appendix B", () => {
+  // Each expectation is the Appendix's own designation / column.
+  const caas = (field: Parameters<typeof timeCategory>[0]) => categoryLabel(timeCategory(field), "CAAS")
 
-  it("leads with the chosen authority's name and lists the others that differ", () => {
-    expect(categoryLabel(picus, "CAAS")).toEqual({ label: "PIC U/S", helper: "EASA PICUS · FAA PIC (supervised)" })
-    expect(categoryLabel(instructor, "FAA")).toEqual({ label: "Dual given", helper: "CAAS Instructor · EASA Instructor" })
-    expect(categoryLabel(timeCategory("sicTime"), "FAA").label).toBe("SIC")
-    expect(categoryLabel(timeCategory("sicTime"), "EASA").label).toBe("Co-pilot")
+  it("enters PIC time in the P1 column and co-pilot time as P2 (Cases A, C)", () => {
+    expect(caas("picTime").label).toBe("P1")
+    expect(roleLabel("PIC", "CAAS")).toBe("PIC")
+    expect(caas("sicTime").label).toBe("P2")
+    expect(roleLabel("SIC", "CAAS")).toBe("P2")
+  })
+
+  it("designates PIC U/S and says it counts in P1 once certified (Case B)", () => {
+    expect(caas("picusTime")).toEqual({
+      label: "PIC U/S",
+      helper: "Counts in P1 once the PIC certifies it · FAA PIC (supervised)",
+    })
+    expect(roleLabel("PICUS", "CAAS")).toBe("PIC U/S")
+  })
+
+  it("designates a pilot under instruction P/UT, entered in the Dual column (Case G)", () => {
+    expect(roleLabel("Dual", "CAAS")).toBe("P/UT")
+    expect(caas("dualTime").label).toBe("Dual")
+  })
+
+  it("counts solo in P1 (Case L)", () => {
+    expect(caas("soloTime").helper).toBe("Also counts in P1")
+  })
+})
+
+describe("categoryLabel", () => {
+  it("leads with the chosen authority's name and lists the offered others that differ", () => {
+    expect(categoryLabel(timeCategory("instructorTime"), "FAA")).toEqual({ label: "Dual given", helper: "CAAS Instructor" })
+    expect(categoryLabel(timeCategory("picTime"), "CAAS")).toEqual({ label: "P1", helper: "FAA PIC" })
+    expect(categoryLabel(timeCategory("sicTime"), "FAA")).toEqual({ label: "SIC", helper: "CAAS P2" })
+  })
+
+  it("never names EASA while its wording is unverified", () => {
+    expect(OFFERED_AUTHORITIES.map((a) => a.value)).toEqual(["CAAS", "FAA"])
+    for (const c of TIME_CATEGORIES) {
+      for (const { value } of OFFERED_AUTHORITIES) expect(categoryLabel(c, value).helper).not.toMatch(/EASA/)
+    }
   })
 
   it("spells the category out when every authority agrees on the name", () => {
-    expect(categoryLabel(timeCategory("nightTime"), "EASA").helper).toMatch(/twilight/)
+    expect(categoryLabel(timeCategory("nightTime"), "FAA").helper).toMatch(/twilight/)
   })
 
   it("never returns an empty helper", () => {
@@ -62,7 +95,6 @@ describe("categoryLabel", () => {
 
 describe("roleLabel", () => {
   it("names the role the way the rules do", () => {
-    expect(roleLabel("PICUS", "CAAS")).toBe("PIC U/S")
     expect(roleLabel("Dual", "FAA")).toBe("Dual received")
     expect(roleLabel("Instructor", "FAA")).toBe("Dual given")
   })
@@ -70,7 +102,7 @@ describe("roleLabel", () => {
 
 describe("showsCategory", () => {
   it("offers what the authority's logbook keeps", () => {
-    expect(showsCategory(timeCategory("picusTime"), "EASA", "00:00")).toBe(true)
+    expect(showsCategory(timeCategory("picusTime"), "CAAS", "00:00")).toBe(true)
     expect(showsCategory(timeCategory("crossCountryTime"), "FAA", undefined)).toBe(true)
   })
 
@@ -82,7 +114,12 @@ describe("showsCategory", () => {
 })
 
 describe("multi-pilot time", () => {
-  it("comes from the record's own crew: a co-pilot role or both seats named", () => {
+  it("comes from the type, or the record's own crew: a co-pilot role, both seats named, a relief pilot", () => {
+    expect(isMultiPilotFlight({ pilotRole: "PIC", aircraftType: "A21N" })).toBe(true)
+    expect(isMultiPilotFlight({ pilotRole: "PIC", aircraftType: "C172" })).toBe(false)
+    expect(isMultiPilotFlight({ pilotRole: "PIC", additionalCrew: [{ name: "Tan", role: "Relief Pilot" }] })).toBe(true)
+    expect(isMultiPilotFlight({ pilotRole: "PIC", additionalCrew: [{ name: "Tan", role: "Observer" }] })).toBe(false)
+    expect(isMultiPilotFlight({ pilotRole: "SIC", aircraftType: "A320", entryType: "positioning" })).toBe(false)
     expect(isMultiPilotFlight({ pilotRole: "SIC" })).toBe(true)
     expect(isMultiPilotFlight({ pilotRole: "PICUS" })).toBe(true)
     expect(isMultiPilotFlight({ pilotRole: "PIC", picName: "Self", sicName: "Tan" })).toBe(true)
@@ -118,5 +155,7 @@ describe("multi-pilot time", () => {
     expect(inferMultiPilotTime({ pilotRole: "PIC", blockTime: "02:10" })).toBe("00:00")
     expect(inferMultiPilotTime({ pilotRole: "SIC" })).toBe("00:00")
     expect(inferMultiPilotTime({ pilotRole: "SIC", entryType: "simulator", blockTime: "04:00" })).toBe("00:00")
+    // An airline sector imported with only the captain named is still two-crew.
+    expect(inferMultiPilotTime({ pilotRole: "PIC", aircraftType: "A320", blockTime: "01:30" })).toBe("01:30")
   })
 })

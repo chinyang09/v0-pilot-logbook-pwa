@@ -54,8 +54,10 @@ import { SETTINGS_FIELD_KEYS } from "@/lib/settings/user-settings"
  *   brings the `settings` collection, which needs no rewrite (it is new).
  * 4 adds a flight's `multiPilotTime` (EASA's multi-pilot column, CAAS's
  *   multi-crew time), filled from each flight's own crew evidence.
+ * 5 adds a flight's `soloTime`. (The `positioning` entry type needs no
+ *   rewrite: `entryType` was already an optional string.)
  */
-export const SYNC_SCHEMA_VERSION = 4
+export const SYNC_SCHEMA_VERSION = 5
 
 /**
  * Push/pull order: dependency-light collections first, so a flight never
@@ -231,6 +233,7 @@ const FLIGHT_FIELDS = {
   // A flight stored before the field existed: its block time when its own
   // record shows a multi-pilot crew, the rule auto-fill applies to a new one.
   multiPilotTime: (src) => inferMultiPilotTime(src),
+  soloTime: ZERO_TIME,
   approaches: emptyArray,
   holds: 0,
   ipcIcc: false,

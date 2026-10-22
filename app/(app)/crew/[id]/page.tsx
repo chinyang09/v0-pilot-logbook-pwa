@@ -10,6 +10,8 @@ import { CrewFormBody } from "@/components/crew-form-body";
 import { ChevronLeft, Loader2 } from "lucide-react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
+import { assignCrewToFlight } from "@/lib/db";
+import { syncService } from "@/lib/sync";
 
 export default function CrewDetailPage() {
   const params = useParams();
@@ -18,6 +20,7 @@ export default function CrewDetailPage() {
   const isNew = id === "new";
   const fieldType = searchParams.get("field");
   const returnUrl = searchParams.get("return") || "/logbook";
+  const flightId = searchParams.get("flightId");
   const router = useRouter();
   const isDesktop = useIsDesktop();
 
@@ -38,7 +41,14 @@ export default function CrewDetailPage() {
     id,
     isNew,
     onSaved: (saved) => {
-      if (fieldType && saved) {
+      if (fieldType && flightId && saved) {
+        // Created from a flight's crew picker: put them on the flight, then
+        // step back past the picker to the form (form → picker → new).
+        void assignCrewToFlight(flightId, fieldType, saved)
+          .then(() => syncService.notifyDataChange())
+          .catch((error) => console.error("Failed to update flight with crew:", error))
+          .finally(() => window.history.go(-2));
+      } else if (fieldType && saved) {
         const params = new URLSearchParams();
         params.set("field", fieldType);
         params.set("crewId", saved.id);

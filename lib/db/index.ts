@@ -71,6 +71,7 @@ export {
   silentDeleteFlight,
   getAllFlights,
   getFlightById,
+  assignCrewToFlight,
   getPendingFlights,
   upsertFlightFromServer,
   markFlightSynced,

@@ -8,7 +8,7 @@ import {
   userDb,
 } from "@/lib/db"
 import { createEmptyFlightLog } from "@/lib/utils/flight-calculations"
-import { isSimulatorEntry } from "@/lib/utils/entry-type"
+import { isOperatedFlight } from "@/lib/utils/entry-type"
 import { nonPicPfRoleOf, roleForSeat, seatOf } from "@/lib/utils/roster/pilot-role"
 
 /**
@@ -28,7 +28,7 @@ async function lastPilotRole() {
   const latest = await userDb.flights
     .orderBy("date")
     .reverse()
-    .filter((f) => isLiveFlight(f) && !isSimulatorEntry(f) && !!f.pilotRole)
+    .filter((f) => isLiveFlight(f) && isOperatedFlight(f) && !!f.pilotRole)
     .first()
   return latest?.pilotRole
 }

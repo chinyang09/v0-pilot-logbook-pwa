@@ -642,7 +642,7 @@ async function normalizeSector(
  * the role and the crew id.
  */
 const CREW_MEMBER_START_RE =
-  /^([A-Z]{1,4})\s-\s(?:[A-Z]{1,5}\s-\s)?(\d+)\s-\s(.+)$/;
+  /^([A-Z]{1,4})\s-\s(?:([A-Z]{1,5})\s-\s)?(\d+)\s-\s(.+)$/;
 
 /**
  * Parse the multi-line Crew column into pilot crew members (CPT + FO only).
@@ -664,7 +664,7 @@ export function parseCrewColumn(crewCell: string): ScheduledCrewMember[] {
   const crew: ScheduledCrewMember[] = [];
   const lines = crewCell.split(/\r?\n/);
 
-  let pending: { role: string; crewId: string; nameParts: string[] } | null =
+  let pending: { role: string; commander: boolean; crewId: string; nameParts: string[] } | null =
     null;
 
   const flush = () => {
@@ -672,7 +672,12 @@ export function parseCrewColumn(crewCell: string): ScheduledCrewMember[] {
     const roleKey = pending.role.toUpperCase();
     if (CREW_ROLE_MAP[roleKey]) {
       const name = pending.nameParts.join(" ").replace(/\s+/g, " ").trim();
-      crew.push({ role: CREW_ROLE_MAP[roleKey], crewId: pending.crewId, name });
+      crew.push({
+        role: CREW_ROLE_MAP[roleKey],
+        crewId: pending.crewId,
+        name,
+        ...(pending.commander ? { commander: true } : {}),
+      });
     }
     pending = null;
   };
@@ -685,8 +690,9 @@ export function parseCrewColumn(crewCell: string): ScheduledCrewMember[] {
       flush();
       pending = {
         role: match[1].trim(),
-        crewId: match[2],
-        nameParts: [match[3].trim()],
+        commander: match[2] === "PIC",
+        crewId: match[3],
+        nameParts: [match[4].trim()],
       };
     } else if (pending) {
       // Wrapped continuation of the previous member's name.
