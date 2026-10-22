@@ -758,7 +758,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           <div style={{ height: topSpacerHeight }} />
           <div className="px-panel pt-1 space-y-3">
           {Array.from({ length: 3 }).map((_, i) => (
-            <Card key={i} className="bg-card border-border">
+            <Card key={i} className="bg-card border-border py-0 gap-0">
               <CardContent className="p-4">
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">

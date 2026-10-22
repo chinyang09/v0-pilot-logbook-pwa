@@ -130,7 +130,7 @@ export const CurrencyCard = memo(function CurrencyCard({ currency, onEdit, onDel
       actions={actions}
       onClick={onEdit ? () => onEdit(currency) : undefined}
     >
-      <Card className={cn("overflow-hidden transition-shadow hover:shadow-md", onEdit && "cursor-pointer", config.border)}>
+      <Card className={cn("overflow-hidden py-0 gap-0 transition-shadow hover:shadow-md", onEdit && "cursor-pointer", config.border)}>
       <CardContent className="p-4">
         {/* Header */}
         <div className="flex items-start gap-3 mb-3">

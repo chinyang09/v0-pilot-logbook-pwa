@@ -116,7 +116,7 @@ export const DutyEntryCard = memo(function DutyEntryCard({
   return (
     <Card
       className={cn(
-        "overflow-hidden transition-all hover:shadow-md",
+        "overflow-hidden py-0 gap-0 transition-shadow hover:shadow-md",
         colors.border,
         onClick && "cursor-pointer"
       )}

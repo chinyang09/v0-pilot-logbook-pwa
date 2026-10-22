@@ -48,7 +48,7 @@ class ChartErrorBoundary extends Component<
   render() {
     if (this.state.hasError) {
       return (
-        <Card>
+        <Card className="py-0 gap-0">
           <CardContent className="py-6 text-center">
             <AlertTriangle className="h-6 w-6 text-muted-foreground/40 mb-2 mx-auto" />
             <p className="text-xs font-medium text-foreground mb-1">Chart failed to render</p>
