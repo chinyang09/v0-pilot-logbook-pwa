@@ -29,6 +29,9 @@ import type { DisplayPreferences } from "@/types/db/stores.types";
 import { FlightCardBody } from "@/components/flight-card-body";
 import { OptionPair } from "./option-pair";
 import { getAirportDisplayCode } from "@/lib/utils/airport-display";
+import { usePreferences } from "@/components/providers/preferences-provider";
+import { TIME_CATEGORIES, categoryLabel, roleLabel, type LogbookAuthority } from "@/lib/utils/logbook-rules";
+import { flightFieldLabel } from "@/lib/utils/field-labels";
 
 /** Field slots the card body already draws. */
 const CHROME_FIELDS = new Set([
@@ -73,15 +76,11 @@ const HIDDEN_FIELDS = new Set([
   "nightLandings",
 ]);
 
-const FIELD_LABELS: Record<string, string> = {
-  pilotRole: "Role",
-  flightTime: "Flight time",
-  nightTime: "Night",
-  dayTime: "Day",
-  picTime: "PIC",
-  sicTime: "SIC",
-  picusTime: "PICUS",
-};
+/** An hour category takes the pilot's logbook rules' name; anything else its own. */
+function fieldLabel(field: string, authority: LogbookAuthority): string {
+  const category = TIME_CATEGORIES.find((c) => c.field === field);
+  return category ? categoryLabel(category, authority).label : flightFieldLabel(field);
+}
 
 const TOLDG_FIELDS = [
   "dayTakeoffs",
@@ -150,6 +149,8 @@ const EMPTY_FLIGHT: FlightLog = {
   actualInstrumentTime: "",
   simulatedInstrumentTime: "",
   crossCountryTime: "",
+  multiPilotTime: "",
+  soloTime: "",
   approaches: [],
   holds: 0,
   ipcIcc: false,
@@ -304,6 +305,7 @@ function PilotFlyingChoice({
   roleOverride?: PilotRole;
   onRoleChange?: (role: PilotRole) => void;
 }) {
+  const authority = usePreferences().preferences.logging.authority;
   const pfDiff = diffs.get("pilotFlying");
   if (!pfDiff) return null;
 
@@ -362,7 +364,7 @@ function PilotFlyingChoice({
                   !rolesEnabled && "cursor-default"
                 )}
               >
-                {role}
+                {roleLabel(role, authority)}
               </button>
             );
           })}
@@ -439,6 +441,7 @@ export function ImportFlightCard({
   );
 
   const selectable = typeof onCheckedChange === "function";
+  const authority = usePreferences().preferences.logging.authority;
 
   const inner = (
     <>
@@ -490,7 +493,7 @@ export function ImportFlightCard({
           {extraChanges.map((c) => (
             <span key={c.field} className="inline-flex items-baseline gap-1">
               <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                {FIELD_LABELS[c.field] ?? c.field}
+                {fieldLabel(c.field, authority)}
               </span>
               <span className="text-muted-foreground/50 line-through decoration-muted-foreground/40">
                 {c.from || "—"}

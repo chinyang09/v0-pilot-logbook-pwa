@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  deriveSectorCrew,
   reconcileRoster,
   type ParsedSector,
 } from "../reconciler";
@@ -61,6 +62,8 @@ function makeFlight(overrides: Partial<FlightLog> = {}): FlightLog {
     actualInstrumentTime: "00:00",
     simulatedInstrumentTime: "00:00",
     crossCountryTime: "00:00",
+    multiPilotTime: "00:00",
+    soloTime: "00:00",
     approaches: [],
     holds: 0,
     ipcIcc: false,
@@ -292,6 +295,26 @@ describe("reconcileRoster — edited_conflict", () => {
       csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
     });
     expect(ops[0].kind).toBe("edited_conflict");
+  });
+
+  it("flags edited when an hour category holds a figure of the pilot's own", () => {
+    const dbFlight = makeFlight({ scheduledOut: "04:00", ifrTime: "01:00", manualOverrides: { ifrTime: true } });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [dbFlight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    expect(ops[0].kind).toBe("edited_conflict");
+  });
+
+  it("does not treat a category set to the block (USE) as an edit — it follows the block", () => {
+    const dbFlight = makeFlight({ scheduledOut: "04:00", ifrTime: "02:33", manualOverrides: { ifrTime: true } });
+    const ops = reconcileRoster({
+      sectors: [makeSector()],
+      existingFlights: [dbFlight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    expect(ops[0].kind).toBe("update_conflict");
   });
 
   it("treats freshly-imported flights as NOT edited", () => {
@@ -1034,5 +1057,80 @@ describe("reconcileRoster — import decisions", () => {
     const fields = ops[0].changes.map((c) => c.field);
     expect(fields).toContain("scheduledIn");
     expect(fields).not.toContain("scheduledOut");
+  });
+});
+
+// ============================================================
+// Augmented crews — more than one captain or first officer
+// ============================================================
+
+describe("deriveSectorCrew — an augmented crew", () => {
+  const currentUser = { id: "me", crewId: "9766" } as Parameters<typeof deriveSectorCrew>[1];
+  const sector = (crew: unknown) => makeSector({ crew } as unknown as Partial<ParsedSector>);
+
+  it("seats the COMMANDER as PIC and this pilot as SIC, and lists the rest as relief pilots", () => {
+    const result = deriveSectorCrew(
+      sector([
+        { role: "CPT", crewId: "1000", name: "Relief Captain", personnelId: "p-rc" },
+        { role: "CPT", crewId: "2000", name: "Commander", personnelId: "p-cmd", commander: true },
+        { role: "FO", crewId: "3000", name: "Other FO", personnelId: "p-fo" },
+        { role: "FO", crewId: "9766", name: "Lim Chin Yang", personnelId: "me" },
+      ]),
+      currentUser
+    );
+    expect(result).toMatchObject({ picId: "p-cmd", picName: "Commander", sicId: "me", sicName: "Self", isSelfFO: true });
+    expect(result.additionalCrew).toEqual([
+      { id: "p-rc", name: "Relief Captain", role: "Relief Pilot" },
+      { id: "p-fo", name: "Other FO", role: "Relief Pilot" },
+    ]);
+  });
+
+  it("keeps a relief captain who is this pilot as Self, out of the PIC seat", () => {
+    const result = deriveSectorCrew(
+      sector([
+        { role: "CPT", crewId: "2000", name: "Commander", personnelId: "p-cmd", commander: true },
+        { role: "CPT", crewId: "9766", name: "Lim Chin Yang", personnelId: "me" },
+        { role: "FO", crewId: "3000", name: "Other FO", personnelId: "p-fo" },
+      ]),
+      currentUser
+    );
+    expect(result.isSelfCPT).toBe(false);
+    expect(result.additionalCrew).toEqual([{ id: "me", name: "Self", role: "Relief Pilot" }]);
+  });
+
+  it("adds no relief pilots to an ordinary two-pilot crew", () => {
+    const result = deriveSectorCrew(
+      sector([
+        { role: "CPT", crewId: "2000", name: "Commander", personnelId: "p-cmd" },
+        { role: "FO", crewId: "9766", name: "Lim Chin Yang", personnelId: "me" },
+      ]),
+      currentUser
+    );
+    expect(result.additionalCrew).toEqual([]);
+    expect(result.picName).toBe("Commander");
+  });
+});
+
+describe("reconcileRoster — a sector logged as positioning", () => {
+  it("takes the company's times but nothing about who flew it", () => {
+    const flight = makeFlight({
+      entryType: "positioning",
+      pilotFlying: false,
+      dayLandings: 0,
+      dayTakeoffs: 0,
+      outTime: "04:40",
+    });
+    const ops = reconcileRoster({
+      sectors: [makeSector({ isPilotFlying: true, dayLandings: 1, dayTakeoffs: 1 } as Partial<ParsedSector>)],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+    });
+    const op = ops[0];
+    if (!("changes" in op)) throw new Error(`expected an op with changes, got ${op.kind}`);
+    const fields = op.changes.map((c) => c.field);
+    expect(fields).toContain("outTime");
+    expect(fields).not.toContain("pilotFlying");
+    expect(fields).not.toContain("dayLandings");
+    expect(fields).not.toContain("dayTakeoffs");
   });
 });

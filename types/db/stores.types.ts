@@ -4,6 +4,7 @@
 
 import { DEFAULT_PALETTE_ID, type PaletteSeed } from "@/lib/theme/palette"
 import type { DraftGenerationConfig } from "@/types/entities/roster.types"
+import type { LogbookAuthority } from "@/lib/utils/logbook-rules"
 
 export interface FieldOrder {
   flight: string[]
@@ -50,10 +51,6 @@ export interface AutoFillPreferences {
   simInst: boolean
   multiPilot: boolean
   solo: boolean
-  ground: boolean
-  nvg: boolean
-  sfe: boolean
-  flightEngineer: boolean
 }
 
 export interface DutyTimeDefaults {
@@ -76,9 +73,13 @@ export interface ImportDefaults {
 
 /**
  * How the pilot logs their own seat — a USER setting (synced), not a device
- * one. Every value is nullable: null is "not set here", and the pilot's "This
- * is me" crew card answers instead, which is where these lived before
+ * one. The seat values are nullable: null is "not set here", and the pilot's
+ * "This is me" crew card answers instead, which is where these lived before
  * (`withLoggingPreferences` in lib/utils/roster/pilot-role.ts).
+ *
+ * This is also where a NEW flight's starting values live. Nothing about a
+ * pilot's flight is a fixed default in code — the app starts a flight the way
+ * the pilot said to, and follows when they change it.
  */
 export interface LoggingPreferences {
   /** Captain logs PIC whoever flies; a first officer logs SIC (or PICUS when flying). */
@@ -90,12 +91,26 @@ export interface LoggingPreferences {
    * `""` says "no date" explicitly, so the card's date does not show through.
    */
   pfRoleFrom: string | null
+  /**
+   * Whether a flight the pilot CREATES (new, next leg, return trip) starts as
+   * Pilot Flying or Pilot Monitoring. Only a starting value: a recorded flight
+   * keeps what was recorded, and an import takes the report's PF/PM.
+   */
+  newFlightPilotFlying: boolean
+  /**
+   * Whose logbook wording the hour categories carry (`lib/utils/logbook-rules.ts`)
+   * — the licensing authority, which is a separate question from the duty
+   * limits the operator flies under (`DutyTimeDefaults.regulationType`).
+   */
+  authority: LogbookAuthority
 }
 
 export const DEFAULT_LOGGING_PREFERENCES: LoggingPreferences = {
   seat: null,
   pfRole: null,
   pfRoleFrom: null,
+  newFlightPilotFlying: true,
+  authority: "CAAS",
 }
 
 export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
@@ -119,12 +134,12 @@ export const DEFAULT_AUTO_FILL_PREFERENCES: AutoFillPreferences = {
   ifr: false,
   actualInst: false,
   simInst: false,
-  multiPilot: false,
+  // Fills only where the flight itself shows a multi-pilot crew
+  // (`isMultiPilotFlight`), so on is safe for everyone.
+  multiPilot: true,
+  // Off by default: a record cannot see passengers, so "PIC with nobody else
+  // named" is only solo when the pilot says that is how they log.
   solo: false,
-  ground: false,
-  nvg: false,
-  sfe: false,
-  flightEngineer: false,
 }
 
 export const DEFAULT_DUTY_TIME_DEFAULTS: DutyTimeDefaults = {

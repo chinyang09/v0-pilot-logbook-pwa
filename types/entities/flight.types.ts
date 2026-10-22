@@ -70,17 +70,26 @@ export interface Approach {
 export interface AdditionalCrew {
   id?: string
   name: string
-  role: "Observer" | "Check Airman" | "Instructor" | "Examiner" | "Other"
+  /**
+   * "Relief Pilot" is a third (or fourth) pilot on an augmented crew — the one
+   * crew role that makes a flight multi-pilot by itself.
+   */
+  role: "Relief Pilot" | "Observer" | "Check Airman" | "Instructor" | "Examiner" | "Other"
 }
 
 export type PilotRole = "PIC" | "SIC" | "PICUS" | "Dual" | "Instructor"
 
 /**
- * What a logbook record is. Only flight and simulator today; the union exists
- * so ground duties (standby, leave, training) can be added without another
- * boolean flag per kind.
+ * What a logbook record is.
+ * - `flight` — a sector the pilot operated; its hours are the logbook.
+ * - `simulator` — a training-device session; its length is
+ *   `simulatedInstrumentTime`, and it never reaches flight-hour totals.
+ * - `positioning` — carried as a passenger to or from a duty (deadheading).
+ *   Its OUT/IN are real and count as DUTY (CAAS Fifth Schedule para 8), but it
+ *   is no flight time of any kind: no block, role, night, takeoff or landing,
+ *   and not an operating sector.
  */
-export type EntryType = "flight" | "simulator"
+export type EntryType = "flight" | "simulator" | "positioning"
 
 export type SyncStatus = "synced" | "pending" | "error"
 
@@ -99,6 +108,8 @@ export interface ManualOverrides {
   dualTime?: boolean
   instructorTime?: boolean
   simulatedInstrumentTime?: boolean
+  multiPilotTime?: boolean
+  soloTime?: boolean
 }
 
 export interface FlightLog {
@@ -173,6 +184,10 @@ export interface FlightLog {
   actualInstrumentTime: string
   simulatedInstrumentTime: string
   crossCountryTime: string
+  /** Flown as one of a multi-pilot crew — EASA's multi-pilot column, CAAS's multi-crew. */
+  multiPilotTime: string
+  /** Sole occupant of the aircraft. CAAS (SASP App. B Case L) also counts it in P1. */
+  soloTime: string
   // Approaches
   approaches: Approach[]
   holds: number

@@ -580,7 +580,7 @@ function PillBarContent({
   onToggleSidebar: () => void
 }) {
   const tabsRef = useRef<HTMLDivElement>(null)
-  const activeIndex = tabs.findIndex((k) => TAB_CONFIG[k]?.isActive(pathname))
+  const activeIndex = activeTabIndex(tabs, pathname)
   const router = useRouter()
   const reduce = useReducedMotion()
 
@@ -1024,7 +1024,7 @@ function PillBarContent({
         {tabs.map((tabKey, i) => {
           const tab = TAB_CONFIG[tabKey]
           if (!tab) return null
-          const active = tab.isActive(pathname)
+          const active = i === activeIndex
           // While the lens is up, ONLY the tab under it reads as selected —
           // its label pre-highlights and the previously active tab dims.
           const highlighted = lensActive ? lensIndex === i : active
@@ -1368,10 +1368,24 @@ function SidebarNavItem({
  */
 const NAV_BOTTOM_OFFSET = `var(--nav-bottom-offset, ${SIDEBAR_MARGIN}px)`
 const EXPANDED_HEIGHT =
-  `calc(100% - ${SIDEBAR_MARGIN}px - env(safe-area-inset-top, 0px)` +
+  `calc(100% - ${SIDEBAR_MARGIN}px - var(--top-inset, env(safe-area-inset-top, 0px))` +
   ` - ${NAV_BOTTOM_OFFSET} - var(--install-banner-height, 0px))`
 
 // ─── Main export ─────────────────────────────────────────────
+
+/**
+ * Which tab a route lights. A tab's OWN page wins over a family match: the
+ * Roster tab also stands for Currencies, FDP and Discrepancies, so with a
+ * Currencies tab in the bar as well `/currencies` matched both — the blob went
+ * to whichever came first and BOTH labels read as selected.
+ */
+function activeTabIndex(tabs: readonly BottomNavTab[], pathname: string): number {
+  const own = tabs.findIndex((k) => {
+    const href = TAB_CONFIG[k]?.href
+    return !!href && (pathname === href || (href !== "/" && pathname.startsWith(href + "/")))
+  })
+  return own >= 0 ? own : tabs.findIndex((k) => TAB_CONFIG[k]?.isActive(pathname))
+}
 
 /**
  * Warm every nav route ONCE, at idle, one route per idle period.
@@ -1622,8 +1636,8 @@ function DesktopPillMorph({
 
   const style: React.CSSProperties = {
     top: isSidebarShape
-      ? `calc(${SIDEBAR_MARGIN}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`
-      : `calc(${PILL_TOP}px + env(safe-area-inset-top, 0px) + var(--install-banner-height, 0px))`,
+      ? `calc(${SIDEBAR_MARGIN}px + var(--top-inset, env(safe-area-inset-top, 0px)) + var(--install-banner-height, 0px))`
+      : `calc(${PILL_TOP}px + var(--top-inset, env(safe-area-inset-top, 0px)) + var(--install-banner-height, 0px))`,
     left: isSidebarShape ? SIDEBAR_MARGIN : "50%",
     transform: isSidebarShape ? "translateX(0)" : "translateX(-50%)",
     width: isSidebarShape ? SIDEBAR_INNER_WIDTH : (pillWidth ?? "auto"),
@@ -1778,6 +1792,17 @@ function MobilePillMorph({
   useEffect(() => {
     setSidebarOpen(false)
   }, [pathname])
+
+  // Escape is the keyboard half of the back gesture (an iPad or a Chromebook
+  // with a keyboard). Without it the overlay could only be closed by pointer.
+  useEffect(() => {
+    if (!sidebarOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) dismissSidebar()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [sidebarOpen, dismissSidebar])
 
   // Settle the phase the instant the morph visually finishes (see desktop), so
   // the sidebar content becomes interactive immediately instead of ~80ms later.

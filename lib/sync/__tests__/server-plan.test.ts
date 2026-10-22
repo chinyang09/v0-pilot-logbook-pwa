@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from "vitest"
-import { MAX_CLOCK_LEAD_MS, decidePush, dedupeByRecord, editTime, validatePushItems, type PushItem } from "../server/plan"
+import { MAX_CLOCK_LEAD_MS, decidePush, dedupeByRecord, editTime, newestCopies, validatePushItems, type PushItem } from "../server/plan"
 import { keysetQuery, needsFullResync, sanitizeCursor, TOMBSTONE_RETENTION_MS } from "../server/engine"
 
 function item(p: Omit<Partial<PushItem>, "data"> & { data?: Record<string, unknown> } = {}): PushItem {
@@ -110,6 +110,27 @@ describe("dedupeByRecord", () => {
     ])
     expect(kept.map((i) => i.id)).toEqual(["q2", "q3"])
     expect(superseded.map((i) => i.id)).toEqual(["q1"])
+  })
+})
+
+describe("newestCopies", () => {
+  it("keeps the highest serverSeq per id, whatever order the copies arrive in", () => {
+    const older = { _id: "a", id: "f1", serverSeq: 5 }
+    const newer = { _id: "b", id: "f1", serverSeq: 9 }
+    const other = { _id: "c", id: "f2", serverSeq: 1 }
+    for (const docs of [[older, newer, other], [newer, other, older]]) {
+      const { byId, superseded } = newestCopies(docs)
+      expect(byId.get("f1")).toBe(newer)
+      expect(byId.get("f2")).toBe(other)
+      expect(superseded).toEqual([older])
+    }
+  })
+
+  it("breaks a seq tie on _id, so every request picks the same copy", () => {
+    const a = { _id: "6a", id: "f1", serverSeq: 3 }
+    const b = { _id: "6b", id: "f1", serverSeq: 3 }
+    expect(newestCopies([a, b]).byId.get("f1")).toBe(b)
+    expect(newestCopies([b, a]).byId.get("f1")).toBe(b)
   })
 })
 

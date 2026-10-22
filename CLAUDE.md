@@ -214,6 +214,16 @@ All user data is stored locally in **IndexedDB via Dexie** and synced to **Mongo
 - **A comparison's id is derived** (`mismatch:<flight>:<field>`), so a CREATE
   of a tombstoned discrepancy id is a new record: inserted, with the tombstone
   removed in the same commit. Random-id collections keep the rejection
+- **One document per record, and the engine copes when there are two**
+  (`newestCopies`). The `{userId, id}` unique index cannot be built while a
+  collection holds a duplicate, and production carried two (two concurrent
+  first pushes, no index to refuse the second). A write used to `replaceOne`
+  whichever copy matched FIRST — the older one — and a purge's `deleteOne`
+  left the other standing. Now the newest copy (highest `serverSeq`) is the
+  record: a write replaces it by `_id` and deletes the superseded copies in the
+  same commit, and a purge is a `deleteMany`. `ensureIndexes` removes the
+  superseded copies (`collapseDuplicateCopies` — each delete pinned to the seq
+  it read) and then builds the index
 
 ### The Sync Protocol (`/api/sync`, `lib/sync/`)
 
@@ -388,6 +398,15 @@ online and the periodic check never pulled another device's edits, and the
 only unconditional pull was the one at login. That is why logging in again was
 the reliable way to catch up. `sync-triggers.test.ts` pins it.
 
+**A failed cycle says so** (`SyncStatus` `"error"`). The status was
+`online` / `offline` / `syncing`, and a cycle that ended `ok: false` while
+online — the server answering 5xx, a session that could not be renewed, an
+item rejected — fell straight back to `online`: a green cloud over edits that
+were not reaching the server. It now ends in `error` (an amber cloud with its
+own mark, still tappable to retry) until the next clean cycle. A cycle that
+stopped at the round cap is `partial`, unfinished rather than failed, and
+stays `online`.
+
 The "syncing" status is only raised for real work (a push, a first pull, or a
 poll that came back with changes), and `onDataChanged` only fires when
 something changed — a poll every 15s must not flash the indicator or refresh
@@ -467,6 +486,11 @@ pages showed pre-sync numbers until they remounted. Every SWR key in
 - TOTP bookkeeping is **atomic** (`lib/auth/server/totp-attempts.ts`): `claimTotpCounter` is a conditional update only one request can win, and `recordTotpFailure` counts with `$inc`. Read-then-write let parallel guesses skip the 5-attempt lockout and one code log in twice. The callsign change shares the lockout.
 - Login challenges are typed `"login"` and consumed only as that type.
 - No route returns the session TOKEN in a body — it is the HttpOnly cookie's secret.
+- **A session row stores the SHA-256 of the token, never the token**
+  (`hashSessionToken`, in the row's `token` field so the unique index still
+  holds). Look a row up with `sessionTokenFilter` and recognise the current one
+  with `isSessionRowFor` — both also accept a row written before hashing, which
+  `upgradeLegacySessionRow` rewrites to the hash on its first use.
 - **A store error is not a missing session.** `validateSession` throws (`SessionStoreUnavailableError`) so the route answers 5xx; returning `null` turned a MongoDB cold start into a 401 the client read as "signed out". It also re-sets the cookie when it slides the session forward.
 
 **A 401 during sync is a claim, not proof** (`handleSyncReauth`): the session
@@ -518,7 +542,14 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
 **Enrichment Pipeline:**
 - Custom aircraft/airports are submitted fire-and-forget to `/api/submissions/aircraft` or `/api/submissions/airport`
 - Server attempts real-time enrichment (FR24 for aircraft, geo-tz for airports)
-- Failed enrichments are retried by `/api/enrichment/batch` (cron, max 3 retries)
+- Failed enrichments are retried by `/api/enrichment/batch` (cron; a widening
+  1/2/4/8/16/32-day backoff, because an unknown tail is usually an aeroplane not
+  yet delivered — it rehydrates when FR24 lists it) —
+  scheduled daily in `vercel.json`. Vercel Cron sends **GET** with
+  `Authorization: Bearer $CRON_SECRET`; the route took POST only and there was
+  no `vercel.json`, so for months nothing retried (9V-TNL sat `pending` from
+  June). A re-submitted registration that never enriched is also looked up
+  again inline, at most hourly (`dueForRetry`)
 - Enriched data is shared across all users via batch lookup API
 
 **Form UX Pattern:**
@@ -800,10 +831,110 @@ convention, never the default.
   report (PM + PICUS, a flown SIC leg for a pilot who logs PICUS, PICUS before
   the check-out). A one-off PICUS by a pilot whose convention is SIC is theirs.
 
-### Entry Type (flight vs simulator)
+### Logbook Rules — what the hours are called (`lib/utils/logbook-rules.ts`)
 
-`FlightLog.entryType: "flight" | "simulator"` — a union rather than another
-boolean so ground duties (standby, leave) can follow. Rows written before it
+The same hour is named differently by each authority — FAA "Dual given" is
+CAAS "Instructor", FAA "SIC" is CAAS "P2" — so the pilot picks the rules they
+log under (**Settings › Logging › Logbook rules**; synced, default CAAS) and
+every screen that names a category reads ONE table, `TIME_CATEGORIES`:
+
+| Column | What it holds |
+|---|---|
+| `field` | the STORED time field — changing the rules never changes a logged figure, only its name |
+| `names` | per authority: the column `label`, the role `designation` where it differs (CAAS P/UT → the Dual column), a `note` that always shows (CAAS PIC U/S "Counts in P1 once the PIC certifies it"), and the `full` name |
+| `autoFill` | the Settings › Auto-fill switch that fills it — the switch list and the dashboard's totals map are both derived from the table |
+| `recognisedBy` | the authorities whose logbook keeps it; the flight form offers any other only once it holds time (`showsCategory`), so nothing logged is ever hidden |
+
+**CAAS is transcribed from SASP Part 1 Appendix B** (Issue 9, Amendment 8):
+Case A PIC → the **P1** column; B co-pilot doing PIC duties under supervision
+→ **PIC U/S**, entered in P1 subject to the PIC's certification; C co-pilot →
+**P2**; G pilot under instruction → **P/UT**, in the **Dual** column; L a
+student as sole occupant → P1 (so solo also counts in P1). "Instructor" and
+"Multi-crew" are not in Appendix B and are unconfirmed. Appendix B's **SNY**
+(Case F(iii) — other flying duties, e.g. a relief pilot out of the seat; not
+counted toward licence experience) has no field yet.
+
+**EASA is TODO** (`available: false`): its names are in the table but it is not
+offered in Settings and never named in a helper until AMC1 FCL.050 has been
+read from the source. FAA is from 14 CFR 61.51 search excerpts.
+
+Readers: the flight form's TIME rows and role picker, Settings › Auto-fill,
+the dashboard breakdown, the import review card. A category is added in the
+table and nowhere else.
+
+**Crew complement** (`lib/utils/crew-complement.ts`) — `minimumPilots(type)`
+reads the ICAO designator the flight already carries: 2 for the transport and
+large business types (a LIST, because wake category and engine type both have
+exceptions — the CJ4 is single-pilot, the Dash 8 needs two), `null` = unknown,
+and then the record's own crew decides. Two things turn on it:
+
+| | Rule (`flight-evidence.ts`) |
+|---|---|
+| **Multi-pilot time** (`multiPilotTime`, schema 4) | `isMultiPilotFlight`: a two-pilot TYPE (every airline sector, even imported without its co-pilot), a co-pilot role, both seats named, or a relief pilot aboard. A flight stored before the field takes it by the same rule on server and client (`inferMultiPilotTime`; `SYNC_PROTOCOL` 3 re-pulls once) |
+| **Solo** (`soloTime`, schema 5) | auto-fill is OPT-IN (`isSoloFlight`: PIC, not multi-pilot, nobody else recorded — a record cannot see passengers). Solo on a two-pilot type, or with another pilot aboard, is FLAGGED in the form (`soloConflict`), never silently zeroed, and the form offers no USE button for it on such a type |
+
+**Simulator time is an EVENT, not a field.** A simulator entry keeps its
+session length in `simulatedInstrumentTime`, the field a FLIGHT uses for hood
+time; the entry type tells the two apart, so an export can separate training-
+device hours from simulated-instrument flight time without a second field. The
+form shows a simulator's TIME as one "Session" row.
+
+**Night is not split by role.** A night-PIC (or night-anything) figure, where
+an export needs one, is the role time × night ÷ block for that flight. It is a
+derivation, not a field a pilot has to log.
+
+**"USE x:xx" is not a lock** (`categoryState`, `lib/utils/flight-calculations.ts`).
+An hour category is in one of three states, read off the record itself:
+
+| | Stored as | Recalculation |
+|---|---|---|
+| `auto` | no override | its Auto-fill rule |
+| `block` | override + a figure EQUAL to the block — what USE writes | follows the block when OUT/IN move |
+| `pinned` | override + any other figure (typed into the row's duration picker) | left alone; a pinned ROLE time freezes the whole split |
+
+No extra field: equality is what makes a reopened flight still read as "USE".
+Every writer carries `block` categories along — the form's apply effect,
+`recalculateFlightFields`, and `updateFlight` itself (`blockFollowersPatch`),
+because an eCrew import rewrites the block as a company-owned field and a
+category left at the old figure would then read as a pin. Only a `pinned`
+category makes an import treat the flight as hand-edited (`detectEditReasons`).
+A lock icon on the row marks `pinned`; nothing marks `block`.
+
+The breakdown shows every category that HOLDS time (a hand-logged IFR hour
+used to vanish when its Auto-fill switch was off). The role picker no longer
+offers "Examiner": it was never a role a flight can hold.
+
+**More than two crew.** `additionalCrew` (any number) is added from the crew
+picker (`field=additionalCrew`, `withAdditionalCrew` — never the same person
+twice) with a role per member; "Relief Pilot" is the augmented-crew role and
+makes a flight multi-pilot by itself. `assignCrewToFlight` is the one way a
+picker puts a crew card on a flight — choosing an existing card, or creating
+one in the picker (which used to save the card and assign nobody). An eCrew
+schedule import seats the COMMANDER ("CPT - PIC - …", `commander`) as PIC and
+this pilot in their own seat, and lists every other CPT/FO as a relief pilot
+on a CREATED flight (`deriveSectorCrew`). Taking the first CPT and FO blindly
+dropped a second-listed first officer from their own flight. A re-import does
+not add relief pilots to an EXISTING flight yet: the review modal's diff is a
+string, and a list needs its own presentation.
+
+### Entry Type (flight, simulator, positioning)
+
+`FlightLog.entryType: "flight" | "simulator" | "positioning"` — a union rather
+than another boolean per kind. Only a `flight` carries flight time
+(`isOperatedFlight`).
+
+**Positioning** (deadheading) is DUTY but no flight time. Its OUT/IN stay — the
+FDP pipeline reads them, so the duty window covers it — but `positioningPatch`
+zeroes every hour, count and PF, and every recalculation returns that patch
+(pins included: there is no figure to own on a flight you did not operate).
+`createDutyPeriodFromFlightGroup` leaves it out of the sector count, the sector
+lengths and the flight minutes (Fifth Schedule para 8: not an operating
+sector); the dashboard does not count it as a flight; the card shows its
+OUT→IN as "pos" with a ticket icon; the form hides the role, landings and
+approaches; and a report re-import never proposes PF, role, landings or hours
+for it (`NOT_FOR_POSITIONING`), which would otherwise file tracked
+discrepancies against a flight the pilot was carried on. Neither eCrew report
+marks a positioning sector in the files seen so far, so it is set by hand. Rows written before it
 exists carry only the legacy `isSimulator` flag, so **read through
 `getEntryType()`** (`lib/utils/entry-type.ts`) and **write through
 `entryTypePatch()`**, which sets both — the dashboard aggregate and the FDP
@@ -1932,7 +2063,7 @@ the CPU throttled 3×). So:
 
 | | |
 |---|---|
-| camera menu opens | `warmOCR` loads and primes the DEVICE models (not the server) |
+| camera button pressed | `warmOCR` loads and primes the DEVICE models (not the server) |
 | photo arrives | `readOnDevice` |
 | device not done after `HEDGE_MS` (4s) | the server is asked too; the first answer wins |
 | device throws | the server is asked at once, and `deviceFailed` sends every later photo server-first (iOS before 16.4 has no WASM SIMD) |
@@ -1978,7 +2109,7 @@ Measured on the seven real photos (`lib/ocr/__tests__/fixtures/mcdu/`):
   `processWithServerOCR`; the browser engine decodes the original straight to
   `OCR_MAX_SIDE` (`createImageBitmap` + one canvas draw), with no JPEG
   round trip in between.
-- **The engine is woken when the camera menu OPENS** (`warmOCR`): the device
+- **The engine is woken when the camera button is PRESSED** (`warmOCR`, on pointerdown — the OS photo sheet follows): the device
   models load and run once while the pilot is still taking the photo. Only once
   the device has failed is the server's health check called instead, which
   boots the function and primes its models.
@@ -2436,14 +2567,56 @@ identical:
   `role="button"`, `tabIndex`, Enter/Space, an accessible name), so the form
   can be driven from a keyboard. A row with its own inner button (NOW, USE)
   stops that button's keydown from bubbling to the row.
+- **A time row edits EITHER clock.** The UTC column (and the rest of the
+  row) opens the picker in UTC; the local column opens it in the airport's
+  time (`TimePicker`'s `frame`). The picker always takes and returns UTC
+  (`utcToLocal` / `localToUTC`, exact inverses at every offset, half hours
+  included) and shows the other clock live under NOW, so each checks the
+  other. Clock only — the flight's date is not moved by a local edit, the same
+  as a UTC edit. `formatTimezoneOffset` names a half-hour zone `UTC+5:30`.
+- **A time row's local column falls back to the offset the flight STORES**
+  until the airport lookup lands. Defaulting to 0 while it was pending — every
+  open on a new install, while the airport table seeds — drew the local column
+  as a second copy of UTC, and a local edit made then was stored as if it
+  were UTC.
+- **The form's overrides are STATE, and they follow the row.** Saves and every
+  recalculation read the `manualOverrides` state, never the copy on the form
+  data — so anything that changes a pin (the entry-type switch, a pin made on
+  another device and pulled) must change the state. Written only to the copy,
+  a simulator switched to a flight kept its 00:00 night pin, and a pulled pin
+  was recomputed and sent back over on the next OUT/IN edit.
 - **Remarks is an inline auto-growing textarea**, not a `prompt()` — a native
   prompt is a one-line box with no preview of what is already there.
 - **The Pilot Role row is the native select, laid over the whole row** at
   opacity 0, so the whole row is the target and the platform's own picker
-  opens.
+  opens — and so is every `SelectRow` (Settings, the duty and currency
+  forms). Their Radix Select was a floating web dropdown in a corner of the
+  row; the platform's picker is the wheel on iOS and the sheet on Android.
+- **The camera button opens the OS photo sheet directly** — one image input
+  with no `capture`, which iOS and Android already present as Take Photo /
+  Photo Library. An in-app dropdown offering the same two choices was a web
+  menu and an extra tap before the camera.
 - **No `alert()` for a form error** — an inline `role="alert"` line in the
-  dialog, cleared when it closes. Only "Log out of all devices" still uses a
-  native alert, because it is refusing an irreversible action.
+  dialog, cleared when it closes. And no browser `confirm`/`alert` anywhere:
+  a question that must be answered goes through `appConfirm` / `appAlert`
+  (`lib/utils/app-alert.ts`, rendered by `AppAlertHost` in the ROOT layout so
+  the login page has it too). The browser's dialogs carry the site's ADDRESS
+  as their title in an installed PWA, block the page while open, and were
+  asking the most consequential questions in the app (unsynced edits lost on
+  sign-out, another account's data on sign-in). A destructive question starts
+  focused on the safe answer.
+- **A date or time in a form is the app's wheel picker** (`DateRow` / `TimeRow`, the flight form's
+  `DatePicker`), never `<input type="date">` — that is the browser's control,
+  boxed "mm/dd/yyyy" in the browser's locale beside lists reading "Mar 14,
+  2027". The picker's years span the window around today AND the year being
+  edited (`pastYears`/`futureYears`); a fixed ±5 had no row for a migrated
+  2011 flight or a 2034 passport.
+- **A flight field is named through `flightFieldLabel`** (`lib/utils/field-labels.ts`)
+  wherever a pilot reads it — the resolve sheet, the comparison cards, the
+  import card (hour categories ask `TIME_CATEGORIES` first). Each surface kept
+  its own short list, so anything off it reached the screen as "outTime".
+  The FDP Quick Check's date/report/debrief are wheel-picker fields too; its
+  times are UTC and the field says so.
 - **Every input has a label bound to it** (`htmlFor`/`id`, `useId` where a
   component can appear twice), and the login callsign carries
   `autoComplete="username"` with auto-capitalise and autocorrect off (the
@@ -2499,6 +2672,18 @@ Next.js wraps pages in internal `LayoutRouter` components that unmount contents 
   however unchanged the props are — so the context fix alone would not have
   helped. The wrapper `div` still re-renders (its visibility and z-index really
   do change); the page inside it does not
+- **A hidden page HOLDS its data** (`useHeldWhileHidden`, inside
+  `KeepAlivePageScope`). `useFlights`, `useScheduleEntries`, `useCurrencies`,
+  `useAircraft` and `usePersonnel` return the value they had when their page
+  was LEFT while it sits behind another tab, and the live value again the
+  moment it is shown. Every retained page reads the same hooks, so adding a
+  flight on the logbook used to re-run the hidden dashboard's whole legality
+  model — FDP pipeline, duty status, recency — inside the tap (measured at 4×
+  on 1,200 flights: ~2.07s of main-thread work → ~0.86s). Outside a keep-alive
+  page (the detail panel, the shell, ordinary routes) it is the identity. Hold
+  SWR's RAW `data`, never `data ?? []`: a fresh default per render never equals
+  the held value and the render-phase update loops — the hooks return a shared
+  `NONE` for "no data yet" for the same reason
 
 **Detail panel integration** (`hooks/use-detail-panel.tsx`):
 - The keep-alive route set lives in ONE registry — `components/keep-alive-routes.ts`
@@ -2506,6 +2691,19 @@ Next.js wraps pages in internal `LayoutRouter` components that unmount contents 
   types its `PERSISTENT_PAGES` map against it (compile-checked) and
   `use-detail-panel.tsx` derives `KEEPALIVE_DETAIL_ROUTES` from it — do not
   reintroduce parallel hand-maintained route lists (they drifted once already)
+- **The provider's route-change reset never clears the ARRIVING page's
+  content.** It is a PARENT effect, so it runs after the arriving page's own
+  mount effect has set that page's panel — and used to wipe it: re-entering
+  Settings showed "Select an item to view details" over a remembered section.
+  `setDetailContent` records which base set the content (`contentOwnerRef`,
+  read from a ref the provider updates in a layout effect, so it is current
+  before any passive effect), and the reset skips content the new route owns
+- **Leaving a page that is NOT kept alive demotes its selection** to a
+  remembered one (`explicitBases[prev] = false`). It unmounts, so nothing
+  re-syncs `?selected=` for it on return; an overlay reopened from the
+  explicit flag alone had no history entry, and on a phone the next back
+  gesture left the page instead of closing the section. Desktop still fills
+  its panel from the remembered selection; the phone opens on the list
 - `DetailPanelProvider` does NOT clear `detailContent` when navigating between two
   keep-alive routes that own detail content; routes without a detail panel
   (dashboard, roster) always clear it
@@ -3208,9 +3406,11 @@ crew logbook and `DEFAULT_FTL_LIMITS` carries the flight-crew figures — do not
   make-good); 82 hours at base after 7+ days away. None of this is computed.
   It needs COMPLETE roster coverage to tell a day off from a day with no data,
   and a false "you have worked 8 days straight" is worse than silence.
-- **Para 8: positioning is not an operating sector.** A positioning leg
-  imported as an ordinary flight row inflates the sector count. `ScheduleEntry`
-  has `dutyType: "positioning"` but `FlightLog` carries no equivalent flag.
+- **Para 8: positioning.** A sector logged as `positioning` is duty but not an
+  operating sector (Entry Type, above). Still open: a duty made ONLY of
+  positioning is given the one-sector FDP maximum (it is a duty period, not an
+  FDP), and imports cannot mark positioning — neither report seen so far
+  flags it.
 - **Para 9: simulator then flying in the same duty.** Sim time counts in full
   toward the subsequent FDP but is not a sector. The dashboard's
   `buildPlannedDuties` skips simulators entirely.
@@ -3403,6 +3603,25 @@ alone on purpose. The reason is recorded so the next pass doesn't re-derive it
   chunk and ONNX Runtime's JavaScript), and a failed load is retried rather
   than cached as the answer. The models and the WASM runtime are precached by
   the service worker at install.
+- **The install banner sits ABOVE the edge-to-edge chrome, and the chrome
+  knows it** (`pwa-install-prompt.tsx`, a browser tab only). It is in layout
+  flow at the top of the shell, so the panels move down with it — but every
+  VIEWPORT-fixed surface did not: the mobile flight overlay, the signature
+  pad, the duty dialog and the import review were all anchored to the top of
+  the screen, under the banner. While it is up it publishes
+  `--install-banner-height` (fixed surfaces add it) and zeroes `--top-inset`:
+  the banner is topmost, so IT clears the status bar, and `--chrome-top`,
+  `.pt-chrome-bar`, `.pt-safe` and the nav pill read `--top-inset` instead of
+  the raw `env(safe-area-inset-top)` so they do not clear it a second time.
+  A new fixed surface under the banner reads those two variables, never the
+  env() directly.
+- **Chromium's install offer is captured at MODULE scope and spent on the
+  first tap.** `beforeinstallprompt` can fire before hydration (a mount-effect
+  listener missed it, so the banner never showed), and `prompt()` works ONCE
+  per event — keeping the event after a declined dialog left an Install
+  button that threw. A declined dialog counts as a dismissal (7 days). The
+  "Open" button that appeared after `appinstalled` is gone: a tab cannot launch
+  the installed app, so it only reloaded the page.
 - **A database that fails to open is retried and SAID** (`retryDBOpen`,
   `StorageNotice`). It used to be final, and every page showed its EMPTY state
   — "NO FLIGHTS YET" over a full logbook.
@@ -4112,6 +4331,9 @@ When making changes, be aware of these high-impact files:
 - Do not apply pulled records one at a time — `applyServerChanges` does one transaction, one `bulkGet` and one `bulkPut` per collection. The per-record double lookup + put was most of a first sync's cost
 - Do not raise the "syncing" status or fire `onDataChanged` for a poll that found nothing — it runs every 30s while the app is open
 - Do not delete a record on the server before its tombstone is written (`/api/sync/bulk`) — that order prevents deleted records resurrecting on other devices
+- Do not write or delete a synced record by `{ userId, id }` "first match" — pick the stored copy with `newestCopies` and replace it by `_id`, and purge with `deleteMany`. Until the unique index exists a record can have two copies, and first-match updated the stale one and left a purged record standing
+- Do not make `entryType`/`isSimulator` REQUIRED in the flight field table. The table's default is applied BEFORE `NORMALIZE`, so a required `entryType` would stamp "flight" on an old build's `isSimulator: true` row and turn a simulator into a flight; they are `opt` so the normalizer can still see the legacy flag
+- Do not write synced documents by hand with EJSON `$numberLong` values — the engine stores numbers as BSON double, and a long is one more spelling of the same field. An admin correction must also take a fresh seq per record (reserved from `counters`), stamp `fieldVersions`, and bump the counter once more at the end, or no device ever pulls it
 - Do not issue a session from a passkey route without calling `verifyAuthenticationResponse` — a `credential.id` lookup is not proof of possession (credential IDs aren't secret). Same for `register/complete`/`add-passkey`: bind the attestation to the server-issued challenge (`webauthn.create` + matching challenge)
 - Do not trust client-supplied `userId`/`callsign`/`totpSecret` in `register/complete` — read them from the consumed server-issued challenge doc
 - Do not re-tighten the WebAuthn counter check to always-strict — synced/platform passkeys report `signCount 0` forever; only enforce strict increase when a counter is in use (either side non-zero)
@@ -4125,6 +4347,7 @@ When making changes, be aware of these high-impact files:
 - Do not expose FR24 as the data source in UI — the user explicitly requires online lookups to be transparent (no "Online Results" labels, no Globe icons, no "FlightRadar24" branding)
 - Do not add hexdb.io fallback for aircraft lookup — if FR24 fails, manual entry is the only option
 - Do not bypass `recalculateFlightFields()` `manualOverrides` — users' manually entered field values must never be overwritten by enrichment
+- Do not let a hidden keep-alive page recompute on a data change — read data through the hooks that hold it (`useHeldWhileHidden`), and add a new list hook the same way. And never default SWR's `data` to a fresh `[]` per render: it breaks every downstream memo, and under the hold it loops
 - Do not put the active route back into context as a plain value, and do not render a keep-alive page's element inline in the stack — either one re-renders all six retained pages on every tab switch. The route is a store whose SNAPSHOT is the per-page boolean (`useSyncExternalStore`), and each page is `memo`ized on its route key
 - Do not add pages to `PERSISTENT_PAGES` in `keep-alive-pages.tsx` without considering memory impact — only heavy virtualized pages should be persistent
 - Do not use `display:none` for hiding keep-alive pages — `visibility:hidden` is required to preserve scroll positions and virtualizer measurements
@@ -4263,10 +4486,14 @@ When making changes, be aware of these high-impact files:
 - Do not fetch anything to choose, edit or restore a palette, and do not apply the stored palette before the preferences row has loaded — the boot script has already painted it from localStorage, and applying the in-memory default first flashes Graphite on every launch
 
 **Report import:**
+- Do not concatenate the two parsers' new crew cards in a cross-hydrated import — each invents a card for a captain it cannot find (the logbook from a truncated name, the schedule from the full one), so the same person got two. `mergeImportPersonnel` keeps the schedule's card, points the logbook's sectors at it, and drops a logbook card nothing uses
+- Do not create fleet records only for the flights an import TOUCHED — a sector the report repeated unchanged is never touched, so its aircraft never got one (9 registrations in production). The executor also covers the flights the report repeated unchanged (`skip_identical` / `skip_decided` / `skip_stale_report`)
+- Do not give a flight's `pilotFlying`/`pilotRole` or an aircraft's `engineType` a constant default — not in the schema, a normalizer or a form. A missing PF/PM or role is filled from the record's own figures (`lib/utils/flight-evidence.ts`: takeoffs/landings, role times, a simulator, the "Self" seat), the same rule on server and client; a NEW flight starts as Settings › Logging says (`newFlightPilotFlying`, the seat); an engine type the type data cannot classify stays UNKNOWN, because the dashboard then reads it off the DOC 8643 description, where a constant "SEP" would have counted an airliner as a piston single
 - Do not write an imported record with a bare `table.put()` — it is a raw Dexie write with NO sync-queue entry behind it, so the row lives only on the device that ran the import. The importers reached for it because their rows already carry the ids the flight rows point at, which rules out `addPersonnel`/`addCurrency`; `putManyWithSync` (`crud-helpers.ts`) is the shape that keeps the id AND enqueues, in one `bulkPut` + one `enqueueMany` rather than 2N round trips. Crew, currencies and discrepancies were all silently local for exactly this reason
 - Do not close the import status dialog when an execution finishes — it is the ONLY surface that renders the summary and the error message, and closing it in the `finally` meant every eCrew import ended in silence with the work done and nothing said. `onDone` closes it; a cancel closes it without setting a summary nobody will see
 - Do not fan a per-item enrichment leg out with `Promise.allSettled(remaining.map(…))` — that is every unresolved registration or airport at once, each holding an 8s timeout through one proxy route. Go through `pooledForEach` (`shared/pooled-map.ts`); a roster's handful behaves identically and a career's logbook gets a queue instead of a stampede
 - Do not let a schedule report be read without it STATING its time reference — `timeReference` defaults to UTC, and eCrew issues the same report in three frames that differ only by the "All times in …" header line, so a Local Base report read as UTC puts every time in the file eight hours out as an auto-applied `update_safe`. Missing line = refuse the import
+- Do not refuse a new account's first import for want of a "This is me" card — the schedule report names its subject (`readReportSubject`), so the import ASKS "Is this you?" as soon as the files are read (before the airport seed) and creates the card from the header on yes: name, crew id, and the seat its rank states (FO → SIC, CPT → PIC). A crew logbook report names nobody, so on its own it still refuses, saying what to do
 - Do not import a report without checking WHOSE it is. The header names its subject; nothing was comparing it, so a colleague's PDF wrote their flights into this pilot's logbook as ordinary creates. Refuse only when BOTH crew ids are present and differ — a missing id is an unknown, not a mismatch
 - Do not auto-accept an operation whose sector carries `timesUncertain`. It means a LOCAL_STATION row named an airport nothing could resolve, so the offset fell back to zero and the times may be a whole timezone out. `applyDefaultAcceptance` withholds acceptance regardless of kind — a silently wrong time is exactly the change nobody reviews
 - Do not feed the reconciler sectors without deduping them (`dedupeSectors`) — a PDF page break that repeats a row pairs the first copy with the stored flight, leaves the second nothing to claim, and turns it into an auto-accepted `create` duplicating the flight matched a line earlier. The key is date + flight number + route + out time, so a genuine repeated-route day keeps all its legs
@@ -4278,6 +4505,11 @@ When making changes, be aware of these high-impact files:
 - Do not skip `detectEditReasons` before classification — it is what protects a signed/remarked/manually-overridden flight regardless of which fields changed
 - Do not dedupe simulator sessions on `date|simSessionCode` alone — recognition must stay structural (no route, no registration), or sims written by an older build duplicate on every import
 - Do not read `FlightLog.entryType` directly — go through `getEntryType()`, and write through `entryTypePatch()` so the legacy `isSimulator` flag stays in step for the dashboard and FDP pipeline
+- Do not count a positioning sector anywhere hours, landings or sectors are counted — read the entry through `isOperatedFlight` / `isPositioningEntry`, never `!isSimulator`. It is duty (keep its OUT/IN in the duty window) and nothing else
+- Do not let solo time on a two-pilot type pass silently, and do not zero it either — `soloConflict` flags it in the form; the figure is the pilot's to correct. And keep solo auto-fill OFF by default: a record cannot see passengers
+- Do not seat crew from an eCrew report by "first CPT, first FO" — the PIC seat is the commander, the SIC seat is this pilot when they are one of the FOs, and every other pilot is a relief pilot (`deriveSectorCrew`)
+- Do not name EASA in Settings or a helper until its wording is verified (`available: false`), and do not add a CAAS name that Appendix B does not give without marking it unconfirmed
+- Do not hardcode an hour category's name — the flight form, Auto-fill, the dashboard and the import card all read `TIME_CATEGORIES` (`lib/utils/logbook-rules.ts`) through the pilot's chosen rules. And do not hide a category's figure because the rules or an Auto-fill switch say so: a category the rules do not keep is still shown once it holds time
 - Do not resolve the pilot's PF convention without the flight's DATE — `pfRoleFrom` is the PICUS check-out, and a flown leg before it is SIC. And do not let an import apply a `pilotRole` change whose `pilotFlying` half was withheld or declined: the role follows the PF the flight ends up with (`settledRole`), or a PM leg is logged PICUS
 - Do not take an eCrew report's day/night takeoff and landing split as fact — audited against a real year it disagrees with the sun on 86 of 283 events (a "day" landing with the sun 78° down). The sun's answer is applied to creates (`suggested*` in `hydrateFlightFromSector`) as it already was to updates, and a PF sector carries BOTH a takeoff and a landing even where the report recorded only one (`suggestToLdg`)
 - Do not read an OFF or ON on the flight's own date when it is earlier in the day than OUT — the flight is keyed on OUT's UTC date, so it is the NEXT day (`instantOnFlight`; pass `outTime` to `calculateTakeoffsLandings`). And civil twilight is GEOMETRIC: the sun's centre 6° below the horizon with no refraction term, which moved every dusk ~13 seconds and called a −6.02° takeoff "day"
@@ -4320,6 +4552,12 @@ When making changes, be aware of these high-impact files:
 - Do not drive the glass's opacity from `--glass-veil` — that coat is a warm LIGHTENING paint and raising its alpha whitens a dark surface instead of solidifying it. Opacity belongs to `--glass-base`, the card-coloured undercoat; the two are separate on purpose
 - Do not paint an extra background over a glass surface to make one instance more opaque (the calendar did, at `--background` 0.85, and read as a different material from every other glass surface). Change the shared material instead
 - Do not put a translucent fill or a `/NN` text colour on a glass surface — contents ON glass are SOLID (`--on-glass-*`). Only the slab is translucent; a translucent highlight over it shows the page twice and changes tone as the content scrolls underneath
+- Do not save or restore the flight form's scroll offset without the flight it belongs to — the restore is for coming BACK to a flight (from a picker, from another section), and saved bare it opened the next, different flight at the depth the last one was read to. A flight changing under a mounted form (desktop) starts at its top. And offer no "USE" while the block is 0:00: a column of "USE 0:00" down an unflown sector offers to copy a zero
+- Do not put a padded `CardContent` in a bare `Card` — the shadcn `Card` carries `py-6 gap-6` of its own, so the two stacked: the currency, discrepancy and duty cards each had ~24px of empty band above their header and below their last line, and every `EmptyState` sat in 72px of top padding. A card whose content brings its own padding takes `py-0 gap-0`
+- Do not turn the currencies page back into a card per currency or put filter chips over it — it is ONE grouped list (`CurrencyCard` is a row), "Needs attention" then "Current", soonest first, and a pilot's ten documents fit one phone screen (measured: 0px overflow at 390×844 and 360×780). A card each was ~210px and five screens of scrolling to learn what runs out next. Thresholds, notes and the auto-update switch are settings OF a currency and live in its editor; past a year the figure is years ("7.9y"), not "2888d"
+- Do not let a `useBackDismiss` overlay close on a popstate that was not its own — every listener hears every pop, so a date picker opened OVER a form sheet closed the sheet too when it saved. Each marker entry carries `__overlayId`, and a listener whose entry is still the current one ignores the pop
+- Do not vertically CENTRE the login form — centred, every step's different card height moved the brand and the card, and on a short phone iOS panned the page to lift a centred field above the keyboard. It is anchored at `clamp(1rem, 12vh, 7rem)` (`vh`: the large viewport, which a toolbar does not change), compact under 500px of height, over a FIXED, still background (the Ken Burns zoom read as the page moving)
+- Do not hand-roll a form dialog — `RegionSheet` (`components/ui/region-sheet.tsx`) is the shell: content-region bounds, header with a close, grouped `FormSection` rows, Cancel/Save in the footer with the reason Save is disabled said beside it. The duty, currency and discrepancy-resolution forms use it (a choice among a few answers is a checked LIST, not a dropdown), and the signature pad takes its bounds from `useContentRegionStyle`. The currency form was a centred modal of boxed inputs with a full-width button and read as a different app. Mount the form only while open and key it on the record, so `useState` initialisers seed it — never a reset effect
 - Do not give a full-surface overlay `inset-0` on desktop — the sidebar and the nav pill draw above it, so it ends up BEHIND them with its top unreachable (that was the signature pad on iPad). Take the content region: `--chrome-top`/`--chrome-bottom`, plus `SIDEBAR_WIDTH_PX` on the left only while the sidebar is PUSHING (below 1120 it overlays full-width panels and the region has not moved). Mobile keeps `inset-0` — there the dialog is above the bottom nav and the viewport IS the region
 - Do not redeclare the sidebar's width — it is `SIDEBAR_WIDTH_PX` in `lib/layout/panel-widths.ts`, part of the same budget as the panel widths (1180 − 199 − 1 = 980 on iPad Air 5 landscape). It had drifted into three separate copies
 - Do not hardcode the panel widths — they live in `lib/layout/panel-widths.ts` and are a single budget. `DUAL_MONTH_PX` is 600 rather than 620 because 620 + 360 detail is EXACTLY the space iPad Air 5 landscape has with the sidebar open, so it fit with zero slack and any rounding took the dual-month toggle away on the owner's device
@@ -4367,7 +4605,7 @@ When making changes, be aware of these high-impact files:
 - Do not pass `dragControls` (or `drag`) to an unarmed `SwipeableCard` row — framer mounts its whole drag feature for EITHER prop, and fifty rows of it plus their action panels was ~800ms of the tap that opens a flight. The row arms on first pointerdown/focus and hands that pointerdown to the drag controls, so the first swipe still swipes
 - Do not write `?selected=` to history INSIDE the tap — Next applies the write as a router transition, but one made inside a click renders synchronously, in the click, and takes the selection's own transition with it (the whole flight form rendered before the tap could paint: INP 656ms at 4×, 96ms deferred). `writeUrlAfterTap` defers it one task, `pendingUrlWriteRef` covers the gap, and the selection itself commits as a transition. Keep `pushedBaseRef` in the "is it already open" test, or a second tap inside that task pushes a second entry The deferred write is ONE at a time (a second inside the task supersedes the first but keeps its push), is dropped if the pathname changed before it fires (it would put the old page's URL on top of the new route), and a close inside that task cancels the pending push instead of calling `router.back()` — there is no entry to go back over yet, and the back would pop the page before it
 - Do not let a navigation link scroll — every nav navigation passes `scroll: false`. Next's scroll-into-view after a route change is a forced layout of all six kept-alive pages to scroll a document that cannot scroll
-- Do not read layout (`getBoundingClientRect`, `scrollHeight`, `offsetHeight`) in a ref callback, a layout effect or a mount effect — that is the middle of React's commit, so it forces a synchronous layout of the whole app which the rest of the commit then dirties again. Take the first measurement from a ResizeObserver callback (it fires after the browser's own layout, before paint): the keep-alive stack, the scroll indicator and the remarks textarea all did this, at 90–290ms each per open at a 4× throttle. During a gesture, reuse the rect the last frame already read (`GlassContainer`'s release ripple)
+- Do not read layout (`getBoundingClientRect`, `scrollHeight`, `offsetHeight`) in a ref callback, a layout effect or a mount effect — that is the middle of React's commit, so it forces a synchronous layout of the whole app which the rest of the commit then dirties again. Take the first measurement from a ResizeObserver callback (it fires after the browser's own layout, before paint): the keep-alive stack, the scroll indicator and the remarks textarea all did this, at 90–290ms each per open at a 4× throttle, and the logbook list's one-shot row calibration did it on every cold start (~230ms at 4×, the biggest native cost before the first card painted). During a gesture, reuse the rect the last frame already read (`GlassContainer`'s release ripple)
 - Do not let a `<Link>` that only becomes visible during an animation prefetch on visibility — Next's viewport prefetch downloads AND evaluates the route's chunks, and the sidebar's links all came into view on the morph's first frame (~40 requests, ~650ms of long tasks at 4×, on the first open of every session). Sidebar links pass `prefetch={false}` and `prefetchNavRoutesWhenIdle` warms the same routes when nothing is moving. A new nav item goes in `nav-sections.tsx` and is warmed with the rest
 - Do not load the whole airport table to find one or two airports — `useAirportByIcao` is a primary-key `get` (answered from the in-memory list when something already loaded it at the current revision). `useAirportDatabase` is for screens that LIST or SEARCH airports; the flight form read all ~29k rows on its first open of every cold start to answer two lookups
 - Do not let `useAirportByIcao` report a gap as "no airport". Three rules keep it honest, and the flight form depends on all of them because it computes night time and day/night takeoffs and landings from the two airports and SAVES the result: the effect is keyed on the airports REVISION as well as the code (keyed on the code alone, any write — a custom airport, a favourite, a seed — emptied the peek and nothing ever looked again, so an open form saved zeros); between a write and the re-read it answers with the LAST KNOWN airport, not `undefined`; and a miss before the seed has finished (`isAirportTableSeeded`) is `undefined`, not `null` — a new install writes ~29k rows over ~15s, and a flight opened in that window found VHHH "missing" and saved its landings as 0. The form in turn treats `undefined` as PENDING (`airportsPending`) and holds the stored night and takeoff/landing figures until both airports are known
@@ -4389,6 +4627,7 @@ When making changes, be aware of these high-impact files:
 - Do not hardcode PICUS for a first officer's flown leg — it is the pilot's own setting (Settings › Logging), dated by the check-out, with SIC when unset. Read the role convention through `getLoggingProfile()` / `withLoggingPreferences`, never the bare crew card
 - Do not leave a flight with no OFF/ON at a flight time of 00:00 or without takeoffs and landings — `airborneTimes` falls back to OUT/IN for both (the owner's rule: OUT/IN are the next best evidence of when it flew), in `recalculateFlightFields` and the form alike
 - Do not recompute any role time once one of the five (PIC, SIC, PICUS, Dual, Instructor) is pinned
+- Do not treat an hour category set with USE as a pin — an override whose figure equals the block FOLLOWS the block (`categoryState` "block"); only a different figure is the pilot's. And do not write a new block time except through `updateFlight`, or the categories following it are left behind and read as pins
 - Do not mark a session expired on a 401 alone, and do not start a passkey ceremony from a background trigger — probe first, and require user activation
 - Do not let a sign-in as a different account inherit this device's data — `dataOwner` decides, and the switch clears it
 - Do not compare a pulled record against the local one by clock — rebase it (`planLocalApply`): the server's copy plus whatever this device has pending. Only a pending create or a dead-lettered row falls back to last-write-wins

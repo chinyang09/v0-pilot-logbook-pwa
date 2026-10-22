@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useSyncExternalStore } from "react"
 import { syncService } from "@/lib/sync"
-
-type SyncStatus = "online" | "offline" | "syncing"
+import type { SyncStatus } from "@/lib/sync/sync-service"
 
 /**
  * Hook to subscribe to sync status changes
@@ -19,7 +18,9 @@ export function useSyncStatus() {
 
   return {
     status,
-    isOnline: status === "online",
+    // Reachable, even when the last cycle failed — `error` is a server-side
+    // answer, not a lost connection.
+    isOnline: status === "online" || status === "error",
     isOffline: status === "offline",
     isSyncing: status === "syncing",
   }

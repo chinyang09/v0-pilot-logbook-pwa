@@ -93,6 +93,10 @@ const EXTRA_CREW_COLUMNS: Array<{
   aliases: string[];
   role: AdditionalCrew["role"];
 }> = [
+  { aliases: ["flight_selectedCrewRelief"], role: "Relief Pilot" },
+  { aliases: ["flight_selectedCrewRelief2"], role: "Relief Pilot" },
+  { aliases: ["flight_selectedCrewRelief3"], role: "Relief Pilot" },
+  { aliases: ["flight_selectedCrewRelief4"], role: "Relief Pilot" },
   { aliases: ["flight_selectedCrewInstructor"], role: "Instructor" },
   { aliases: ["flight_selectedCrewStudent"], role: "Other" },
   { aliases: ["flight_selectedCrewObserver"], role: "Observer" },
@@ -145,6 +149,8 @@ interface RawFlight {
   flightTime: string;
   nightTime: string;
   crossCountryTime: string;
+  multiPilotTime: string;
+  soloTime: string;
   actualInstrumentTime: string;
   simulatedInstrumentTime: string;
   simulatorTime: string;
@@ -206,6 +212,8 @@ function readRow(row: LogtenRow, dateOrder: DateOrder): RawFlight {
     flightTime: toDuration(row.get("flight_duration")),
     nightTime: toDuration(row.get("flight_night", "Night")),
     crossCountryTime: toDuration(row.get("flight_crossCountry")),
+    multiPilotTime: toDuration(row.get("flight_multiPilot")),
+    soloTime: toDuration(row.get("flight_solo")),
     actualInstrumentTime: toDuration(row.get("flight_actualInstrument")),
     simulatedInstrumentTime: toDuration(row.get("flight_simulatedInstrument")),
     simulatorTime: toDuration(row.get("flight_simulator")),
@@ -759,6 +767,8 @@ function buildFlight(
     actualInstrumentTime: raw.actualInstrumentTime || "00:00",
     simulatedInstrumentTime: raw.simulatedInstrumentTime || "00:00",
     crossCountryTime: raw.crossCountryTime || "00:00",
+    multiPilotTime: raw.multiPilotTime || "00:00",
+    soloTime: raw.soloTime || "00:00",
     approaches: raw.approaches,
     holds: raw.holds,
     ipcIcc: raw.ipcIcc,
@@ -795,6 +805,8 @@ function overridesFor(raw: RawFlight): ManualOverrides {
     overrides.simulatedInstrumentTime = true;
   }
   if (hasTime(raw.crossCountryTime)) overrides.crossCountryTime = true;
+  if (hasTime(raw.multiPilotTime)) overrides.multiPilotTime = true;
+  if (hasTime(raw.soloTime)) overrides.soloTime = true;
   // The role times are written as a set — `recalculateFlightFields` gates all
   // five on picTime/sicTime/picusTime together, so flagging one is flagging
   // the group, and a half-flagged group would let it rewrite the rest.
@@ -895,6 +907,8 @@ function buildSimulator(
     actualInstrumentTime: "00:00",
     simulatedInstrumentTime: duration,
     crossCountryTime: "00:00",
+    multiPilotTime: "00:00",
+    soloTime: "00:00",
     approaches: raw.approaches,
     holds: raw.holds,
     ipcIcc: raw.ipcIcc,
@@ -1059,6 +1073,8 @@ function fillBlanks(
     "actualInstrumentTime",
     "simulatedInstrumentTime",
     "crossCountryTime",
+    "multiPilotTime",
+    "soloTime",
   ];
   for (const field of durationFields) {
     const current = String(existing[field] ?? "");

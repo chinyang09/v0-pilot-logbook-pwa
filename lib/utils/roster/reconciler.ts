@@ -26,7 +26,7 @@
  * applies the user-approved subset.
  */
 
-import type { FlightLog } from "../../../types/entities/flight.types";
+import type { AdditionalCrew, FlightLog } from "../../../types/entities/flight.types";
 import type { ScheduledCrewMember } from "@/types/entities/roster.types";
 import { classifyChanges } from "./classification";
 import { newestStamp, type ReportSource } from "./report-tracking";
@@ -38,6 +38,10 @@ import {
   type ScoredPair,
 } from "./match-assign";
 import type { ImportDefaults } from "@/types/db/stores.types";
+import { isSamePersonName } from "@/lib/utils/parsers/shared/name-normalize";
+import { inferPilotFlying } from "@/lib/utils/flight-evidence";
+import { isPositioningEntry } from "@/lib/utils/entry-type";
+import { categoryState, isBlockFollowingField } from "@/lib/utils/flight-calculations";
 
 // ============================================================
 // Public types
@@ -326,6 +330,12 @@ export interface SectorCrewAssignment {
   isSelfCPT: boolean;
   /** True when the logged-in user is the first officer on this sector. */
   isSelfFO: boolean;
+  /**
+   * Pilots beyond the two seats — an augmented crew's relief captain or
+   * first officer — as "Relief Pilot" crew. Written on a CREATE; an update
+   * does not diff the list yet.
+   */
+  additionalCrew: AdditionalCrew[];
 }
 
 /**
@@ -346,8 +356,23 @@ export function deriveSectorCrew(
   sector: ParsedSector,
   currentUser: CurrentUserCrew
 ): SectorCrewAssignment {
-  const captain = sector.crew?.find((c) => c.role === "CPT" || c.role === "PIC");
-  const fo = sector.crew?.find((c) => c.role === "FO");
+  // An augmented crew lists more than one captain or first officer. The PIC
+  // seat is the COMMANDER ("CPT - PIC - …"), else the first captain; the SIC
+  // seat is this pilot when they are one of the first officers, else the
+  // first. Taking the first of each blindly dropped a second-listed pilot
+  // from their own flight. Every other pilot is a relief pilot.
+  const isSelf = (c: { crewId: string }) => Boolean(currentUser.crewId && c.crewId === currentUser.crewId);
+  const captains = sector.crew?.filter((c) => c.role === "CPT" || c.role === "PIC") ?? [];
+  const fos = sector.crew?.filter((c) => c.role === "FO") ?? [];
+  const captain = captains.find((c) => c.commander) ?? captains[0];
+  const fo = fos.find(isSelf) ?? fos[0];
+  const additionalCrew: AdditionalCrew[] = [...captains, ...fos]
+    .filter((c) => c !== captain && c !== fo)
+    .map((c) => ({
+      id: isSelf(c) ? currentUser.id : c.personnelId || undefined,
+      name: isSelf(c) ? "Self" : c.name,
+      role: "Relief Pilot" as const,
+    }));
   const isSelfCPT = Boolean(
     captain && currentUser.crewId && captain.crewId === currentUser.crewId
   );
@@ -377,27 +402,7 @@ export function deriveSectorCrew(
     sicName = "Self";
   }
 
-  return { picId, picName, sicId, sicName, isSelfCPT, isSelfFO };
-}
-
-/** Alphanumeric-only lowercase form for tolerant crew-name comparison. */
-function normPersonName(s: string): string {
-  return s ? s.toLowerCase().replace(/[^a-z0-9]/g, "") : "";
-}
-
-/**
- * Two crew names refer to the same person when their normalized forms are
- * equal OR one is a prefix of the other (the Crew Logbook Report truncates
- * names to 20 chars; the Schedule Report carries the full form).
- */
-function isSamePersonName(a: string, b: string): boolean {
-  const na = normPersonName(a);
-  const nb = normPersonName(b);
-  if (!na || !nb) return false;
-  if (na === nb) return true;
-  if (na.length > nb.length && na.startsWith(nb)) return true;
-  if (nb.length > na.length && nb.startsWith(na)) return true;
-  return false;
+  return { picId, picName, sicId, sicName, isSelfCPT, isSelfFO, additionalCrew };
 }
 
 /**
@@ -619,11 +624,13 @@ function detectEditReasons(flight: FlightLog): EditReason[] {
     reasons.push("has_remarks");
   }
 
-  if (
-    flight.manualOverrides &&
-    Object.keys(flight.manualOverrides).length > 0 &&
-    Object.values(flight.manualOverrides).some(Boolean)
-  ) {
+  // A category set to the block ("USE") is not a pin — it follows the block
+  // the report is about to correct — so only a figure of the pilot's own counts.
+  const overrides = flight.manualOverrides ?? {};
+  const pinned = Object.entries(overrides).some(
+    ([field, on]) => on && !(isBlockFollowingField(field) && categoryState(flight, field, overrides) === "block")
+  );
+  if (pinned) {
     reasons.push("has_manual_overrides");
   }
 
@@ -688,6 +695,23 @@ interface SectorDiff {
   /** Changes withheld because the user already turned this exact value down. */
   suppressed: FieldDiff[];
 }
+
+/** What a report can say about the pilot's own flying — moot on a positioning sector. */
+const NOT_FOR_POSITIONING = new Set<string>([
+  "pilotFlying",
+  "pilotRole",
+  "dayTakeoffs",
+  "nightTakeoffs",
+  "dayLandings",
+  "nightLandings",
+  "picTime",
+  "sicTime",
+  "picusTime",
+  "dualTime",
+  "instructorTime",
+  "blockTime",
+  "flightTime",
+]);
 
 function diffSectorVsFlight(
   sector: ParsedSector,
@@ -819,7 +843,7 @@ function diffSectorVsFlight(
   ) {
     changes.push({
       field: "pilotFlying",
-      from: String(flight.pilotFlying ?? true),
+      from: String(flight.pilotFlying ?? inferPilotFlying(flight)),
       to: String(sector.isPilotFlying),
     });
 
@@ -960,6 +984,17 @@ function diffSectorVsFlight(
     changes
   );
 
+  // A sector the pilot logged as POSITIONING was not flown by them: nothing
+  // the report says about who flew it, the role or the landings applies (a
+  // schedule-only sector reads as pilot flying by default), and raising it
+  // would file a tracked discrepancy against a flight they were carried on.
+  // The company's times, route and crew still update it — they are the duty.
+  if (isPositioningEntry(flight)) {
+    for (let i = changes.length - 1; i >= 0; i--) {
+      if (NOT_FOR_POSITIONING.has(changes[i].field)) changes.splice(i, 1);
+    }
+  }
+
   // Anything the user has already turned down — with this exact value, inside
   // the retention window — is not raised again. A different value for the same
   // field still surfaces, and the withheld ones are handed back so the caller
@@ -983,7 +1018,7 @@ function diffSectorVsFlight(
     if (role !== -1) suppressed.push(...visible.splice(role, 1));
     const kept = settledRole({
       currentRole: flight.pilotRole,
-      pilotFlying: flight.pilotFlying ?? true,
+      pilotFlying: flight.pilotFlying ?? inferPilotFlying(flight),
       convention,
       onDate: conventionOnDate,
     });

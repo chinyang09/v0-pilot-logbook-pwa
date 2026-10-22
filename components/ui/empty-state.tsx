@@ -25,7 +25,8 @@ export function EmptyState({
   className?: string
 }) {
   return (
-    <Card className={className}>
+    // The Card's own `py-6` would stack on the content's `py-12`.
+    <Card className={cn("py-0 gap-0", className)}>
       <CardContent className="py-12 text-center">
         <Icon className={cn("h-10 w-10 mx-auto mb-3 text-muted-foreground/40", iconClassName)} />
         <p className="text-sm font-medium text-foreground mb-1">{title}</p>

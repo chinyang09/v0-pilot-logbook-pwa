@@ -18,7 +18,7 @@ import {
   endpointDelta,
   type ScoredPair,
 } from "@/lib/utils/roster/match-assign";
-import { normalize } from "./shared/name-normalize";
+import { isSamePersonName, normalize } from "./shared/name-normalize";
 import {
   familyOfNormalizedType,
   normalizeAircraftType,
@@ -32,6 +32,7 @@ import type { PlannedImport } from "./schedule-parser";
 import type {
   ScheduledCrewMember,
 } from "@/types/entities/roster.types";
+import type { Personnel } from "@/types/entities/crew.types";
 
 // Cost charged when neither side offers a comparable departure time, so a
 // timeless pair ranks below every pair whose times actually agree but still
@@ -282,4 +283,64 @@ export function crossHydrate(
   void normalize;
 
   return { sectors: merged, unmatchedLogbook, unmatchedSchedule };
+}
+
+/**
+ * One crew card per person when both reports are imported together.
+ *
+ * Each parser resolves crew against the cards the device already holds and
+ * invents a card for anyone it cannot find — the logbook from its truncated
+ * 20-character PIC name, the schedule from the full name and crew id. Merged
+ * as a plain concatenation, a captain new to both reports got TWO cards. The
+ * logbook's half is resolved here instead:
+ *
+ * - a logbook card naming the same person as a schedule card is dropped, and
+ *   any sector pointing at it is pointed at the schedule card (whose name is
+ *   the full one);
+ * - a logbook card no sector still uses is dropped — a merged sector takes its
+ *   captain from the schedule's crew (`deriveSectorCrew`), so the logbook's
+ *   PIC id on it is never written.
+ *
+ * Schedule cards are kept as they are.
+ */
+export function mergeImportPersonnel(
+  sectors: ParsedSector[],
+  scheduleCards: Personnel[],
+  logbookCards: Personnel[]
+): { sectors: ParsedSector[]; personnelToCreate: Personnel[] } {
+  const remap = new Map<string, Personnel>();
+  for (const card of logbookCards) {
+    const same = scheduleCards.find((s) => isSamePersonName(s.name, card.name));
+    if (same) remap.set(card.id, same);
+  }
+
+  const remapped = sectors.map((sector) => {
+    const target = sector.picPersonnelId ? remap.get(sector.picPersonnelId) : undefined;
+    if (!target) return sector;
+    return {
+      ...sector,
+      picPersonnelId: target.id,
+      picResolvedName:
+        target.name.length >= (sector.picResolvedName ?? "").length
+          ? target.name
+          : sector.picResolvedName,
+    };
+  });
+
+  const used = new Set<string>();
+  for (const sector of remapped) {
+    const captain = sector.crew?.find((c) => c.role === "CPT" || c.role === "PIC");
+    for (const member of sector.crew ?? []) {
+      if (member.personnelId) used.add(member.personnelId);
+    }
+    if (!captain && sector.picPersonnelId) used.add(sector.picPersonnelId);
+  }
+
+  return {
+    sectors: remapped,
+    personnelToCreate: [
+      ...scheduleCards,
+      ...logbookCards.filter((card) => !remap.has(card.id) && used.has(card.id)),
+    ],
+  };
 }

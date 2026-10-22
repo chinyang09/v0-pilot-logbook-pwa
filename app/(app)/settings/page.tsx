@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { ScrollIndicator } from "@/components/ui/scroll-indicator"
-import { useCallback, useEffect } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { usePersonnel } from "@/hooks/data/use-crew"
 import { pickSelfCard } from "@/lib/utils/self-card"
 import { seatOf, withLoggingPreferences, type Seat } from "@/lib/utils/roster/pilot-role"
@@ -11,6 +11,7 @@ import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { FormSection } from "@/components/ui/form-section"
 import { SettingsRow, ToggleRow, SelectRow } from "@/components/ui/settings-row"
+import { DateRow } from "@/components/ui/date-row"
 import { PageLoading } from "@/components/ui/page-loading"
 import { SortableNavList } from "@/components/sortable-nav-list"
 import { AppearanceSettings } from "@/components/appearance-settings"
@@ -22,32 +23,26 @@ import {
   Settings, UserCircle, Navigation, ChevronRight, NotebookPen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { LOGBOOK_AUTHORITIES, OFFERED_AUTHORITIES, TIME_CATEGORIES, categoryLabel, roleLabel, type LogbookAuthority } from "@/lib/utils/logbook-rules"
 import type { DisplayPreferences, AutoFillPreferences, BottomNavTab } from "@/types/db/stores.types"
 
 // ─── Data ────────────────────────────────────────────────────
 
-const AUTO_FILL_FIELDS: Array<{
-  key: keyof AutoFillPreferences
-  label: string
-  description: string
-}> = [
-  { key: "night", label: "Night", description: "Calculate night time from solar position" },
-  { key: "pic", label: "PIC", description: "Set PIC time equal to block time when role is PIC" },
-  { key: "sic", label: "SIC", description: "Set SIC time equal to block time when role is SIC" },
-  { key: "p1us", label: "P1u/s (PICUS)", description: "Set PICUS time when role is PICUS" },
-  { key: "dualRcvd", label: "Dual Received", description: "Set dual time when role is Dual" },
-  { key: "dualGiven", label: "Dual Given", description: "Set instructor time when role is Instructor" },
-  { key: "xc", label: "Cross Country", description: "Set XC time to block time when departure differs from arrival" },
-  { key: "ifr", label: "IFR", description: "Set IFR time equal to flight time" },
-  { key: "actualInst", label: "Actual Instrument", description: "Auto-fill actual instrument time" },
-  { key: "simInst", label: "Simulated Instrument", description: "Auto-fill simulated instrument time" },
-  { key: "multiPilot", label: "Multi-Pilot", description: "Set multi-pilot time equal to block time" },
-  { key: "solo", label: "Solo", description: "Set solo time equal to block time" },
-  { key: "ground", label: "Ground", description: "Auto-fill ground training time" },
-  { key: "nvg", label: "NVG", description: "Auto-fill night vision goggle time" },
-  { key: "sfe", label: "SFI/SFE", description: "Auto-fill simulator flight instructor/examiner time" },
-  { key: "flightEngineer", label: "Flight Engineer (SO)", description: "Auto-fill flight engineer / second officer time" },
-]
+/** How each Auto-fill switch fills its category. The NAME is the logbook rules' (`logbook-rules.ts`). */
+const AUTO_FILL_HOW: Record<keyof AutoFillPreferences, string> = {
+  night: "Worked out from the sun at both airports",
+  pic: "The block time, when the role is PIC",
+  sic: "The block time, when the role is co-pilot",
+  p1us: "The block time, when the role is PIC under supervision",
+  dualRcvd: "The block time, when the role is dual",
+  dualGiven: "The block time, when the role is instructor",
+  multiPilot: "The block time, on a type certified for two pilots or with a second pilot aboard",
+  solo: "The block time, as PIC with nobody else recorded — never on a two-pilot type",
+  xc: "The block time, when departure differs from arrival",
+  ifr: "The flight time, on every flight",
+  actualInst: "The flight time, on every flight",
+  simInst: "The flight time, on every flight",
+}
 
 const ALL_NAV_TABS: Array<{ value: BottomNavTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { value: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -113,6 +108,7 @@ function LoggingSection({ preferences, updateLogging }: {
   const seat = seatOf(effective)
   const pfRole = effective?.pfRole ?? "SIC"
   const pfRoleFrom = effective?.pfRoleFrom ?? ""
+  const authority = preferences.logging.authority
 
   return (
     <div className="px-panel py-4 space-y-4">
@@ -123,6 +119,13 @@ function LoggingSection({ preferences, updateLogging }: {
         </p>
       </div>
       <FormSection>
+        <SelectRow<LogbookAuthority>
+          label="Logbook rules"
+          description={`${LOGBOOK_AUTHORITIES.find((a) => a.value === authority)?.description}. What your hours are called — it never changes a logged figure.`}
+          value={authority}
+          onValueChange={(v) => updateLogging({ authority: v })}
+          options={OFFERED_AUTHORITIES.map((a) => ({ value: a.value, label: a.label }))}
+        />
         <SelectRow<Seat | "unset">
           label="My seat"
           description={
@@ -147,22 +150,33 @@ function LoggingSection({ preferences, updateLogging }: {
             value={pfRole}
             onValueChange={(v) => updateLogging({ pfRole: v })}
             options={[
-              { value: "SIC", label: "SIC" },
-              { value: "PICUS", label: "PICUS" },
+              { value: "SIC", label: roleLabel("SIC", authority) },
+              { value: "PICUS", label: roleLabel("PICUS", authority) },
             ]}
           />
         )}
         {seat === "first_officer" && pfRole === "PICUS" && (
-          <SettingsRow
+          <DateRow
             label="PICUS from"
             description="Your check-out date. A leg flown before it is logged SIC."
             value={pfRoleFrom}
             // "" states "no date" outright, so a date left on the crew card
             // does not show through.
             onChange={(v) => updateLogging({ pfRoleFrom: v })}
-            type="date"
+            placeholder="Not set"
+            clearable
           />
         )}
+        <SelectRow<"pf" | "pm">
+          label="New flights start as"
+          description="A flight you add, or a next leg or return. A recorded flight keeps what was recorded, and an import takes the report's."
+          value={preferences.logging.newFlightPilotFlying ? "pf" : "pm"}
+          onValueChange={(v) => updateLogging({ newFlightPilotFlying: v === "pf" })}
+          options={[
+            { value: "pf", label: "Pilot flying" },
+            { value: "pm", label: "Pilot monitoring" },
+          ]}
+        />
       </FormSection>
     </div>
   )
@@ -270,13 +284,13 @@ function AutoFillSection({ preferences, updateAutoFill }: {
         </p>
       </div>
       <FormSection>
-        {AUTO_FILL_FIELDS.map((field) => (
+        {TIME_CATEGORIES.map((category) => (
           <ToggleRow
-            key={field.key}
-            label={field.label}
-            description={field.description}
-            checked={preferences.autoFill[field.key]}
-            onCheckedChange={(checked) => updateAutoFill({ [field.key]: checked })}
+            key={category.autoFill}
+            label={categoryLabel(category, preferences.logging.authority).label}
+            description={AUTO_FILL_HOW[category.autoFill]}
+            checked={preferences.autoFill[category.autoFill]}
+            onCheckedChange={(checked) => updateAutoFill({ [category.autoFill]: checked })}
           />
         ))}
       </FormSection>
@@ -308,36 +322,56 @@ function DutyTimeSection({ preferences, updateDutyTimeDefaults }: {
             { value: "EASA", label: "EASA" },
           ]}
         />
-        <SettingsRow
-          label="Minutes Before Scheduled OUT"
-          description="Report time before departure"
-          type="number"
-          inputMode="numeric"
-          swipeToClear={false}
-          value={String(preferences.dutyTimeDefaults.minutesBeforeOut)}
-          onChange={(v) => {
-            const val = Number.parseInt(v, 10)
-            if (!Number.isNaN(val) && val >= 0 && val <= 240) {
-              updateDutyTimeDefaults({ minutesBeforeOut: val })
-            }
-          }}
+        <MinutesRow
+          label="Report"
+          description="Minutes before scheduled OUT"
+          minutes={preferences.dutyTimeDefaults.minutesBeforeOut}
+          onCommit={(minutesBeforeOut) => updateDutyTimeDefaults({ minutesBeforeOut })}
         />
-        <SettingsRow
-          label="Minutes After IN"
-          description="Debrief time after arrival"
-          type="number"
-          inputMode="numeric"
-          swipeToClear={false}
-          value={String(preferences.dutyTimeDefaults.minutesAfterIn)}
-          onChange={(v) => {
-            const val = Number.parseInt(v, 10)
-            if (!Number.isNaN(val) && val >= 0 && val <= 240) {
-              updateDutyTimeDefaults({ minutesAfterIn: val })
-            }
-          }}
+        <MinutesRow
+          label="Debrief"
+          description="Minutes after IN"
+          minutes={preferences.dutyTimeDefaults.minutesAfterIn}
+          onCommit={(minutesAfterIn) => updateDutyTimeDefaults({ minutesAfterIn })}
         />
       </FormSection>
     </div>
+  )
+}
+
+/**
+ * A minutes field that can be EDITED. Bound straight to the stored value, it
+ * refused the empty string a backspace produces, so "60" could not be cleared
+ * to type "45" — and every keystroke on the way was a saved, synced figure
+ * (deleting "30" stored 3). It edits a draft and commits once, when the field
+ * is left; a blank or out-of-range draft puts the stored figure back.
+ */
+function MinutesRow({
+  label,
+  description,
+  minutes,
+  onCommit,
+}: {
+  label: string
+  description: string
+  minutes: number
+  onCommit: (minutes: number) => void
+}) {
+  const [draft, setDraft] = useState<string | null>(null)
+  return (
+    <SettingsRow
+      label={label}
+      description={description}
+      inputMode="numeric"
+      swipeToClear={false}
+      value={draft ?? String(minutes)}
+      onChange={(v) => setDraft(v.replace(/\D/g, "").slice(0, 3))}
+      onBlur={() => {
+        const val = draft === null ? Number.NaN : Number.parseInt(draft, 10)
+        if (!Number.isNaN(val) && val <= 240 && val !== minutes) onCommit(val)
+        setDraft(null)
+      }}
+    />
   )
 }
 
@@ -410,11 +444,14 @@ export default function SettingsPage() {
 
   return (
     <PageContainer>
-      <div className="px-4 pt-4">
+      <div className="px-panel pt-4">
         <FormSection>
           {SECTIONS.map((section) => {
             const Icon = section.icon
-            const isActive = selectedId === section.key
+            // The highlight says which section the panel BESIDE the list is
+            // showing. A phone has no such panel — the list is all there is
+            // once a section closes — so a lit row there pointed at nothing.
+            const isActive = isDesktop && selectedId === section.key
             return (
               <button
                 key={section.key}

@@ -80,6 +80,8 @@ function makeFlight(
     actualInstrumentTime: "00:00",
     simulatedInstrumentTime: "00:00",
     crossCountryTime: "00:00",
+    multiPilotTime: "00:00",
+    soloTime: "00:00",
     approaches: [],
     holds: 0,
     ipcIcc: false,

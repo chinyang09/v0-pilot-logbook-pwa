@@ -391,7 +391,7 @@ async function ensureFleet(
           typeDesignator: type || "",
           model,
           category: category || "Airplane",
-          engineType: engineType || "JET",
+          engineType,
           isComplex: false,
           isHighPerformance: false,
         });

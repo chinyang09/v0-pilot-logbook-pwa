@@ -50,6 +50,10 @@ export function formatLocalYMD(date: Date): string {
   return `${year}-${month}-${day}`
 }
 
+/** Formatters by (locale × options). `toLocaleDateString` constructs a new
+ *  one per call, and these run per ROW (the dashboard's period list). */
+const ymdFormatters = new Map<string, Intl.DateTimeFormat>()
+
 /** Format "YYYY-MM-DD" with arbitrary Intl options (local, no TZ shift). */
 export function formatYMD(
   ymd: string,
@@ -57,7 +61,13 @@ export function formatYMD(
   locale?: string
 ): string {
   if (!ymd) return ""
-  return parseYMDLocal(ymd).toLocaleDateString(locale, options)
+  const key = `${locale ?? ""}|${JSON.stringify(options)}`
+  let fmt = ymdFormatters.get(key)
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat(locale, options)
+    ymdFormatters.set(key, fmt)
+  }
+  return fmt.format(parseYMDLocal(ymd))
 }
 
 /** "Apr 16" */

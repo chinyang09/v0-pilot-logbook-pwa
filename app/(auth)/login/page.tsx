@@ -587,7 +587,14 @@ export default function LoginPage() {
     totpStatus === "error" ? "totp-error" : ""
 
   return (
-    <div className="min-h-full flex flex-col items-center justify-center p-4 safe-area-inset">
+    // ANCHORED to the top, not centred. Centred, every change of height moved
+    // everything: each step's card is a different height, so the brand and
+    // the card jumped on every step, and on a short phone iOS panned the whole
+    // page to lift a centred field above the keyboard. Anchored, a step only
+    // moves the card's bottom edge. The offset is in `vh` — the LARGE viewport,
+    // which a browser toolbar showing or hiding does not change — and a short
+    // screen (a phone in landscape) gets a compact header instead.
+    <div className="min-h-full flex flex-col items-center px-4 pt-[clamp(1rem,12vh,7rem)] pb-[max(1rem,env(safe-area-inset-bottom))] [@media(max-height:500px)]:pt-3">
       <motion.div
         className="w-full max-w-md"
         initial={{ opacity: 0, y: 20 }}
@@ -595,8 +602,8 @@ export default function LoginPage() {
         transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
       >
         {/* OOOI Branding */}
-        <div className="flex flex-col items-center mb-8">
-          <h1 className="text-5xl font-bold text-white tracking-[0.3em] mb-1">
+        <div className="flex flex-col items-center mb-8 [@media(max-height:500px)]:mb-3">
+          <h1 className="text-5xl font-bold text-white tracking-[0.3em] mb-1 [@media(max-height:500px)]:text-3xl">
             OOOI
           </h1>
           <p className="text-white/50 text-xs tracking-[0.5em] uppercase font-medium">

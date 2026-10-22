@@ -4,6 +4,8 @@ import { useState, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { DatePicker } from "@/components/date-picker"
+import { TimePicker } from "@/components/time-picker"
 import {
   Plus,
   Trash2,
@@ -31,9 +33,11 @@ function tomorrow(): string {
   return d.toISOString().split("T")[0]
 }
 
+const MONTH_UTC = new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" })
+
 function formatDateShort(dateStr: string): string {
   const d = new Date(dateStr + "T00:00:00Z")
-  return `${d.getUTCDate().toString().padStart(2, "0")} ${d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })}`
+  return `${d.getUTCDate().toString().padStart(2, "0")} ${MONTH_UTC.format(d)}`
 }
 
 const VIOLATION_TYPE_LABELS: Record<string, string> = {
@@ -43,6 +47,48 @@ const VIOLATION_TYPE_LABELS: Record<string, string> = {
   duty28: "28d Duty",
   flight28: "28d Flight",
   flight365: "12mo Flight",
+}
+
+/**
+ * A compact field that opens the app's wheel picker — the same picker every
+ * other date and time in the app uses. It was `<input type="date">` /
+ * `type="time"`: the browser's own controls, boxed "mm/dd/yyyy" in the
+ * browser's locale and with no word on which clock the time was in. The
+ * scenario reads report and debrief as UTC, and the picker says so.
+ */
+function PickerField({
+  kind,
+  label,
+  value,
+  onChange,
+}: {
+  kind: "date" | "time"
+  label: string
+  value: string
+  onChange: (value: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const shown = value ? (kind === "date" ? formatDateShort(value) : value) : "—"
+  return (
+    <div>
+      <span className="text-[10px] text-muted-foreground">{label}</span>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label={`${label}: ${value || "not set"}${kind === "time" ? " UTC" : ""}`}
+        className="mt-0.5 flex h-9 w-full items-center rounded-md border border-input bg-transparent px-2 text-xs tabular-nums text-foreground transition-colors active:bg-muted/50"
+      >
+        {shown}
+        {kind === "time" && value && <span className="ml-1 text-[10px] text-muted-foreground">Z</span>}
+      </button>
+      {open &&
+        (kind === "date" ? (
+          <DatePicker initialDate={value} onSelect={onChange} onClose={() => setOpen(false)} label={label} />
+        ) : (
+          <TimePicker initialTime={value} onSelect={onChange} onClose={() => setOpen(false)} label={label} />
+        ))}
+    </div>
+  )
 }
 
 let nextChangeId = 1
@@ -263,42 +309,30 @@ export function QuickCheckPanel({
                     type="button"
                     aria-label="Remove this flight"
                     onClick={() => removeChange(entry.id)}
-                    className="absolute top-0 right-0 flex h-8 w-8 items-center justify-center rounded text-muted-foreground hover:text-status-error transition-colors"
+                    className="absolute top-0 right-0 flex h-9 w-9 items-center justify-center rounded text-muted-foreground hover:text-status-error transition-colors"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 )}
                 <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <Label htmlFor={`qc-${entry.id}-date`} className="text-[10px] text-muted-foreground">Date</Label>
-                    <Input
-                      id={`qc-${entry.id}-date`}
-                      type="date"
-                      value={entry.date}
-                      onChange={(e) => updateChange(entry.id, { date: e.target.value })}
-                      className="h-8 text-xs px-2 mt-0.5 appearance-none block w-full [&::-webkit-date-and-time-value]:text-left [&::-webkit-calendar-picker-indicator]:opacity-60"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor={`qc-${entry.id}-report`} className="text-[10px] text-muted-foreground">Report</Label>
-                    <Input
-                      id={`qc-${entry.id}-report`}
-                      type="time"
-                      value={entry.reportTime}
-                      onChange={(e) => updateChange(entry.id, { reportTime: e.target.value })}
-                      className="h-8 text-xs px-2 mt-0.5"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor={`qc-${entry.id}-debrief`} className="text-[10px] text-muted-foreground">Debrief</Label>
-                    <Input
-                      id={`qc-${entry.id}-debrief`}
-                      type="time"
-                      value={entry.debriefTime}
-                      onChange={(e) => updateChange(entry.id, { debriefTime: e.target.value })}
-                      className="h-8 text-xs px-2 mt-0.5"
-                    />
-                  </div>
+                  <PickerField
+                    kind="date"
+                    label="Date"
+                    value={entry.date}
+                    onChange={(date) => updateChange(entry.id, { date })}
+                  />
+                  <PickerField
+                    kind="time"
+                    label="Report"
+                    value={entry.reportTime}
+                    onChange={(reportTime) => updateChange(entry.id, { reportTime })}
+                  />
+                  <PickerField
+                    kind="time"
+                    label="Debrief"
+                    value={entry.debriefTime}
+                    onChange={(debriefTime) => updateChange(entry.id, { debriefTime })}
+                  />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -311,7 +345,7 @@ export function QuickCheckPanel({
                       inputMode="decimal"
                       value={entry.flightHours}
                       onChange={(e) => updateChange(entry.id, { flightHours: e.target.value })}
-                      className="h-8 text-xs px-2 mt-0.5"
+                      className="h-9 text-xs px-2 mt-0.5"
                     />
                   </div>
                   <div>
@@ -323,7 +357,7 @@ export function QuickCheckPanel({
                       inputMode="numeric"
                       value={entry.sectors}
                       onChange={(e) => updateChange(entry.id, { sectors: e.target.value })}
-                      className="h-8 text-xs px-2 mt-0.5"
+                      className="h-9 text-xs px-2 mt-0.5"
                     />
                   </div>
                 </div>
@@ -334,10 +368,10 @@ export function QuickCheckPanel({
 
         {/* Action buttons */}
         <div className="flex gap-1.5">
-          <Button onClick={addChange} variant="outline" size="sm" className="flex-1 h-8 text-xs">
+          <Button onClick={addChange} variant="outline" size="sm" className="flex-1 h-9 text-xs">
             <Plus className="h-3 w-3 mr-1" /> Add Flight
           </Button>
-          <Button onClick={handleCheck} size="sm" className="flex-1 h-8 text-xs">
+          <Button onClick={handleCheck} size="sm" className="flex-1 h-9 text-xs">
             Check Legality
           </Button>
         </div>

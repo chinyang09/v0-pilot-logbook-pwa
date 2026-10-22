@@ -46,8 +46,11 @@ const MAX_SYNC_RETRIES = 5
  * 2 = the single round-trip protocol: tombstones on the seq counter, and a
  * clean baseline after the old engine left devices that only ever pulled at
  * login (and a crew normalizer that dropped `deletedAt`).
+ * 3 = schema 4's `multiPilotTime`: the migration fills it on the server without
+ * moving `serverSeq` (as every canonical rewrite does), so a device only
+ * receives it by re-pulling.
  */
-const SYNC_PROTOCOL = 2
+const SYNC_PROTOCOL = 3
 
 /** Records per round trip, and the request budget a push batch must fit. */
 const PULL_LIMIT = 500
@@ -119,7 +122,13 @@ const COLLECTION_HANDLERS: Record<
   settings: { silentDelete: silentDeleteSettings, normalize: normalizeSettingsFromServer },
 }
 
-type SyncStatus = "online" | "offline" | "syncing"
+/**
+ * `error` — online, but the last cycle did not get through (the server
+ * answered 5xx, the session could not be renewed, an item was rejected). It
+ * used to fall straight back to `online`, so the indicator showed green while
+ * edits were not reaching the server. The next clean cycle clears it.
+ */
+export type SyncStatus = "online" | "offline" | "syncing" | "error"
 
 export interface SyncRunResult {
   pushed: number
@@ -129,6 +138,8 @@ export interface SyncRunResult {
   ok?: boolean
   /** Queue rows still waiting after the cycle (drives retry back-off). */
   remaining?: number
+  /** Stopped at the round cap with more to fetch — unfinished, not failed. */
+  partial?: boolean
 }
 
 interface PushItemResult {
@@ -390,7 +401,7 @@ class SyncService {
       console.error(`[Sync ${correlationId}] error:`, error)
       result = { ...result, ok: false }
     } finally {
-      this.setStatus(navigator.onLine ? "online" : "offline")
+      this.setStatus(!navigator.onLine ? "offline" : result.ok || result.partial ? "online" : "error")
     }
 
     result.remaining = await userDb.syncQueue.count().catch(() => 0)
@@ -544,7 +555,7 @@ class SyncService {
     }
 
     console.warn(`[Sync ${correlationId}] round cap reached - resuming next cycle`)
-    return { pushed, pulled, failed, ok: false }
+    return { pushed, pulled, failed, ok: false, partial: true }
   }
 
   /** Persist the cursors the server returned — only ever forward. */

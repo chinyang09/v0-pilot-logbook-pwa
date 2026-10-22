@@ -135,6 +135,8 @@ export class FakeCollection {
       } else if (kind === "deleteOne") {
         const i = this.docs.findIndex((x) => matches(x, arg.filter as Doc))
         if (i >= 0) this.docs.splice(i, 1)
+      } else if (kind === "deleteMany") {
+        this.docs = this.docs.filter((x) => !matches(x, arg.filter as Doc))
       } else if (kind === "insertOne") {
         this.docs.push(clone(arg.document as Doc))
       }

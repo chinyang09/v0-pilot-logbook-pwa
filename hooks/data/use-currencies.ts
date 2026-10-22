@@ -8,6 +8,10 @@ import {
   type CurrencyWithStatus,
 } from "@/lib/db"
 import { useDBReady, CACHE_KEYS, checkDBReady } from "./use-db"
+import { useHeldWhileHidden } from "@/hooks/use-page-active"
+
+/** One empty list, so "no data yet" is the same reference every render. */
+const NONE: never[] = []
 
 /**
  * Fetch currencies from IndexedDB
@@ -56,8 +60,11 @@ export function useCurrencies() {
     return mutateCurrencies()
   }, [mutateCurrencies])
 
+  // Held while this page is behind another tab — see `useHeldWhileHidden`.
+  const live = useHeldWhileHidden(data)
+
   return {
-    currencies: data ?? [],
+    currencies: live ?? NONE,
     isLoading,
     error,
     refresh,
@@ -95,7 +102,7 @@ export function useExpiringCurrencies() {
   }, [mutateCurrencies])
 
   return {
-    expiringCurrencies: data ?? [],
+    expiringCurrencies: data ?? NONE,
     isLoading,
     error,
     refresh,

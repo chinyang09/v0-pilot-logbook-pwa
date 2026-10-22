@@ -153,23 +153,37 @@ export function isValidHHMM(time: string | undefined | null): boolean {
 export function utcToLocal(utcTime: string | undefined | null, timezoneOffset: number): string {
   if (!utcTime || !isValidHHMM(utcTime)) return ""
 
-  const utcMinutes = hhmmToMinutes(utcTime)
-  let localMinutes = utcMinutes + timezoneOffset * 60
-
-  // Handle day wraparound
-  if (localMinutes < 0) localMinutes += 24 * 60
-  if (localMinutes >= 24 * 60) localMinutes -= 24 * 60
-
-  return minutesToHHMM(localMinutes)
+  return shiftClock(utcTime, timezoneOffset)
 }
 
 /**
- * Format timezone offset for display (e.g., "UTC+8", "UTC-5")
+ * The inverse of `utcToLocal`: a local clock time at `timezoneOffset` hours,
+ * as the UTC clock time the flight stores. Clock only — the flight's date is
+ * the pilot's to set, exactly as when they edit the UTC time directly.
+ */
+export function localToUTC(localTime: string | undefined | null, timezoneOffset: number): string {
+  if (!localTime || !isValidHHMM(localTime)) return ""
+  return shiftClock(localTime, -timezoneOffset)
+}
+
+/** A clock time moved by `hours` (fractional offsets included), wrapped into the day. */
+function shiftClock(hhmm: string, hours: number): string {
+  const day = 24 * 60
+  const minutes = (((hhmmToMinutes(hhmm) + Math.round(hours * 60)) % day) + day) % day
+  return minutesToHHMM(minutes)
+}
+
+/**
+ * Format timezone offset for display (e.g., "UTC+8", "UTC-5", "UTC+5:30").
+ * A half-hour zone used to read "UTC+5.5".
  */
 export function formatTimezoneOffset(offset: number): string {
   if (offset === 0) return "UTC"
-  const sign = offset >= 0 ? "+" : ""
-  return `UTC${sign}${offset}`
+  const sign = offset > 0 ? "+" : "-"
+  const total = Math.round(Math.abs(offset) * 60)
+  const hours = Math.floor(total / 60)
+  const minutes = total % 60
+  return `UTC${sign}${hours}${minutes ? `:${String(minutes).padStart(2, "0")}` : ""}`
 }
 
 /**

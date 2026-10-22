@@ -7,7 +7,7 @@ import { PageContainer } from "@/components/page-container";
 import { useDebounce } from "@/hooks/use-debounce";
 import { Button } from "@/components/ui/button";
 import { usePersonnel, useFlights } from "@/hooks/data";
-import { deletePersonnel, restorePersonnel, updateFlight, updatePersonnel, type Personnel } from "@/lib/db";
+import { assignCrewToFlight, deletePersonnel, restorePersonnel, updatePersonnel, type Personnel } from "@/lib/db";
 import { showUndoToast } from "@/lib/utils/undo-toast";
 import { syncService } from "@/lib/sync";
 import {
@@ -355,11 +355,9 @@ export default function CrewPage() {
     }
 
     if (sortedPersonnel.length === 0) {
-      setDetailContent(
-        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-          <p>No crew members</p>
-        </div>
-      );
+      // Blank: the list's own empty state already says there is nothing and
+      // offers the way to add one. The panel said it again, in other words.
+      setDetailContent(<div className="h-full" />);
       return;
     }
 
@@ -449,17 +447,8 @@ export default function CrewPage() {
 
   const handleCrewSelect = useCallback(async (crew: (typeof personnel)[0]) => {
     if (fieldType && flightId) {
-      const crewName = crew.isMe ? "Self" : crew.name;
-      const updates: Partial<{ picId: string; picName: string; sicId: string; sicName: string }> = {};
-      if (fieldType === "picId" || fieldType === "pic") {
-        updates.picId = crew.id;
-        updates.picName = crewName;
-      } else if (fieldType === "sicId" || fieldType === "sic") {
-        updates.sicId = crew.id;
-        updates.sicName = crewName;
-      }
       try {
-        await updateFlight(flightId, updates);
+        await assignCrewToFlight(flightId, fieldType, crew);
         syncService.notifyDataChange();
       } catch (error) {
         console.error("Failed to update flight with crew:", error);
@@ -552,9 +541,9 @@ export default function CrewPage() {
 
   const pageTitle = fieldType
     ? `Select ${
-        fieldType === "pic"
+        fieldType === "pic" || fieldType === "picId"
           ? "PIC"
-          : fieldType === "sic"
+          : fieldType === "sic" || fieldType === "sicId"
           ? "SIC"
           : "Crew"
       }`

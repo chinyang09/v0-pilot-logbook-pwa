@@ -202,6 +202,35 @@ interface ParsedHeader {
   dataStartIndex: number;
 }
 
+/** The header's crew line — e.g. "9766 Lim Chin Yang SIN-FO-32N". */
+function readCrewLine(rows: NormalizedRow[]): PlannedImport["crewMember"] {
+  for (const { raw: line } of rows.slice(0, 10)) {
+    const match = line.match(/^(\d+)\s+(.+?)\s+([A-Z]{3})-(\w+)-(\w+)/);
+    if (match) {
+      return {
+        crewId: match[1],
+        name: match[2].trim(),
+        base: match[3],
+        role: match[4],
+        aircraftType: match[5],
+      };
+    }
+  }
+  return { crewId: "", name: "", base: "", role: "", aircraftType: "" };
+}
+
+/**
+ * Whose report this is, as its header states it — or null when it does not.
+ * Read before parsing, so an import on an account with no "This is me" card
+ * can ask "is this you?" instead of refusing a pilot's very first import.
+ */
+export function readReportSubject(
+  doc: NormalizedDocument
+): PlannedImport["crewMember"] | null {
+  const subject = readCrewLine(doc.rows);
+  return subject.crewId && subject.name ? subject : null;
+}
+
 function parseHeader(rows: NormalizedRow[]): ParsedHeader {
   let timeReference: TimeReference = "UTC";
   let timeReferenceStated = false;
@@ -227,29 +256,7 @@ function parseHeader(rows: NormalizedRow[]): ParsedHeader {
     }
   }
 
-  // Crew info line — e.g. "9766 Lim Chin Yang SIN-FO-32N"
-  let crewInfo: PlannedImport["crewMember"] = {
-    crewId: "",
-    name: "",
-    base: "",
-    role: "",
-    aircraftType: "",
-  };
-  for (const { raw: line } of rows.slice(0, 10)) {
-    const match = line.match(
-      /^(\d+)\s+(.+?)\s+([A-Z]{3})-(\w+)-(\w+)/
-    );
-    if (match) {
-      crewInfo = {
-        crewId: match[1],
-        name: match[2].trim(),
-        base: match[3],
-        role: match[4],
-        aircraftType: match[5],
-      };
-      break;
-    }
-  }
+  const crewInfo = readCrewLine(rows);
 
   // Column header row
   let headerRowIndex = -1;
@@ -642,7 +649,7 @@ async function normalizeSector(
  * the role and the crew id.
  */
 const CREW_MEMBER_START_RE =
-  /^([A-Z]{1,4})\s-\s(?:[A-Z]{1,5}\s-\s)?(\d+)\s-\s(.+)$/;
+  /^([A-Z]{1,4})\s-\s(?:([A-Z]{1,5})\s-\s)?(\d+)\s-\s(.+)$/;
 
 /**
  * Parse the multi-line Crew column into pilot crew members (CPT + FO only).
@@ -664,7 +671,7 @@ export function parseCrewColumn(crewCell: string): ScheduledCrewMember[] {
   const crew: ScheduledCrewMember[] = [];
   const lines = crewCell.split(/\r?\n/);
 
-  let pending: { role: string; crewId: string; nameParts: string[] } | null =
+  let pending: { role: string; commander: boolean; crewId: string; nameParts: string[] } | null =
     null;
 
   const flush = () => {
@@ -672,7 +679,12 @@ export function parseCrewColumn(crewCell: string): ScheduledCrewMember[] {
     const roleKey = pending.role.toUpperCase();
     if (CREW_ROLE_MAP[roleKey]) {
       const name = pending.nameParts.join(" ").replace(/\s+/g, " ").trim();
-      crew.push({ role: CREW_ROLE_MAP[roleKey], crewId: pending.crewId, name });
+      crew.push({
+        role: CREW_ROLE_MAP[roleKey],
+        crewId: pending.crewId,
+        name,
+        ...(pending.commander ? { commander: true } : {}),
+      });
     }
     pending = null;
   };
@@ -685,8 +697,9 @@ export function parseCrewColumn(crewCell: string): ScheduledCrewMember[] {
       flush();
       pending = {
         role: match[1].trim(),
-        crewId: match[2],
-        nameParts: [match[3].trim()],
+        commander: match[2] === "PIC",
+        crewId: match[3],
+        nameParts: [match[4].trim()],
       };
     } else if (pending) {
       // Wrapped continuation of the previous member's name.

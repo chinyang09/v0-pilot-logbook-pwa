@@ -304,6 +304,46 @@ describe("field-level merge — a device that has not caught up", () => {
   })
 })
 
+describe("duplicate copies of one record", () => {
+  // Production held two copies each of two flights — the unique index on
+  // { userId, id } cannot be built while they exist, so nothing stopped two
+  // concurrent first pushes inserting one each. The OLDER copy was inserted
+  // first, which is the copy a "first match" write or purge used to hit.
+  async function seedTwoCopies() {
+    await seedDocs("flights", [
+      { _id: new ObjectId(), id: "f1", userId: USER, schemaVersion: SYNC_SCHEMA_VERSION, serverSeq: 5, remarks: "older copy", updatedAt: 5 },
+      { _id: new ObjectId(), id: "f1", userId: USER, schemaVersion: SYNC_SCHEMA_VERSION, serverSeq: 9, remarks: "newer copy", ifrTime: "03:37", updatedAt: 9 },
+    ])
+    await db.collection("counters").updateOne({ _id: USER as unknown as ObjectId }, { $set: { seq: 9 } })
+  }
+
+  it("a write lands on the NEWEST copy and removes the superseded one", async () => {
+    await seedTwoCopies()
+    const { results } = await push(
+      op("flights", "update", { id: "f1", dayLandings: 1, updatedAt: 20, deviceId: "A" }, { changedFields: ["dayLandings"], baseSeq: 9 })
+    )
+    expect(results[0]).toMatchObject({ success: true })
+
+    const copies = (await allDocs("flights")).filter((d) => d.id === "f1")
+    expect(copies).toHaveLength(1)
+    expect(copies[0]).toMatchObject({ remarks: "newer copy", ifrTime: "03:37", dayLandings: 1, serverSeq: results[0].serverSeq })
+  })
+
+  it("a purge removes EVERY copy, so the record cannot outlive its deletion", async () => {
+    await seedTwoCopies()
+    const { results } = await push(op("flights", "delete", { id: "f1" }))
+    expect(results[0]).toMatchObject({ success: true })
+    expect((await allDocs("flights")).filter((d) => d.id === "f1")).toHaveLength(0)
+  })
+
+  it("a stale push is answered with the newest copy", async () => {
+    await seedTwoCopies()
+    const { results } = await push(op("flights", "update", { id: "f1", remarks: "ancient", updatedAt: 1, deviceId: "A" }))
+    expect(results[0]).toMatchObject({ success: true, stale: true })
+    expect(results[0].record?.remarks).toBe("newer copy")
+  })
+})
+
 describe("settings — one record per user, written as patches only", () => {
   // A device writes ONLY the settings the user changed, as an update from
   // base 0 even when it holds no settings row. A fresh device at its defaults

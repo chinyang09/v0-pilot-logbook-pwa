@@ -22,6 +22,16 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
+/** One formatter for every card's timestamps — `toLocaleDateString` built two
+ *  per card, per render of the list. */
+const STAMP = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+})
+
 const DISCREPANCY_TYPE_CONFIG: Record<
   DiscrepancyType,
   {
@@ -165,7 +175,7 @@ export const DiscrepancyCard = memo(function DiscrepancyCard({
   return (
     <Card
       className={cn(
-        "overflow-hidden transition-all hover:shadow-md",
+        "overflow-hidden py-0 gap-0 transition-shadow hover:shadow-md",
         severityConfig.border,
         discrepancy.resolved && "opacity-60"
       )}
@@ -237,13 +247,7 @@ export const DiscrepancyCard = memo(function DiscrepancyCard({
             )}
             {discrepancy.resolvedAt && (
               <p className="text-xs text-muted-foreground mt-1">
-                {new Date(discrepancy.resolvedAt).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
+                {STAMP.format(new Date(discrepancy.resolvedAt))}
               </p>
             )}
           </div>
@@ -252,13 +256,7 @@ export const DiscrepancyCard = memo(function DiscrepancyCard({
         {/* Timestamp */}
         <div className="flex items-center justify-between pt-3 border-t border-border/50">
           <p className="text-xs text-muted-foreground">
-            {new Date(discrepancy.createdAt).toLocaleDateString("en-US", {
-              month: "short",
-              day: "numeric",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+            {STAMP.format(new Date(discrepancy.createdAt))}
           </p>
           <div className="flex gap-1">
             {discrepancy.resolved ? (

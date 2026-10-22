@@ -298,4 +298,43 @@ export function dedupeByRecord(items: PushItem[]): { kept: PushItem[]; supersede
 }
 
 /** Key for "this request wrote this record at this seq". */
+/**
+ * The stored documents for a set of record ids, ONE per id — and the copies
+ * that should not exist.
+ *
+ * `{ userId, id }` is meant to be unique, but the unique index can only be
+ * built once the collection holds no duplicates, and until then two concurrent
+ * first pushes of one record each insert a copy. Production carried two such
+ * pairs. Left alone they defeat the engine: a write's `replaceOne` lands on
+ * whichever copy the server finds first (the OLDER one, in insertion order),
+ * and a purge's `deleteOne` removes one copy and leaves the other standing.
+ *
+ * The record is the copy with the highest `serverSeq` — the last write the
+ * cursor delivered, which is what every device already holds — with `_id` as
+ * the tie-break. The others are superseded versions of the same record.
+ */
+export function newestCopies<T extends Record<string, unknown>>(
+  docs: T[]
+): { byId: Map<string, T>; superseded: T[] } {
+  const seqOf = (d: T) => (typeof d.serverSeq === "number" ? d.serverSeq : 0)
+  const byId = new Map<string, T>()
+  const superseded: T[] = []
+  for (const doc of docs) {
+    const id = doc.id as string
+    const held = byId.get(id)
+    if (!held) {
+      byId.set(id, doc)
+      continue
+    }
+    const newer = seqOf(doc) > seqOf(held) || (seqOf(doc) === seqOf(held) && String(doc._id) > String(held._id))
+    if (newer) {
+      superseded.push(held)
+      byId.set(id, doc)
+    } else {
+      superseded.push(doc)
+    }
+  }
+  return { byId, superseded }
+}
+
 export const writtenKey = (collection: SyncCollection, id: string) => `${collection}:${id}`

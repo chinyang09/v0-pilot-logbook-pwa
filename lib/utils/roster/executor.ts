@@ -37,7 +37,6 @@ import {
   getCurrentUserPersonnel,
   getLoggingProfile,
   getUserPreferences,
-  getAllAircraft,
   bulkUpsertScheduleEntries,
   addAircraft,
   updateAircraft,
@@ -151,7 +150,7 @@ async function hydrateFlightFromSector(
   // Crew: schedule provides full crew with crewIds; logbook-only path uses
   // the resolved truncation. `deriveSectorCrew` is the shared resolver the
   // reconciler's update-diff also uses, so create and re-import agree.
-  const { picId, picName, sicId, sicName, isSelfCPT } = deriveSectorCrew(
+  const { picId, picName, sicId, sicName, isSelfCPT, additionalCrew } = deriveSectorCrew(
     sector,
     currentUser
   );
@@ -215,7 +214,7 @@ async function hydrateFlightFromSector(
     picName,
     sicId,
     sicName,
-    additionalCrew: [],
+    additionalCrew,
     pilotFlying,
     pilotRole,
     picTime: "00:00",
@@ -240,6 +239,8 @@ async function hydrateFlightFromSector(
     actualInstrumentTime: "00:00",
     simulatedInstrumentTime: "00:00",
     crossCountryTime: "00:00",
+    multiPilotTime: "00:00",
+    soloTime: "00:00",
     approaches: [],
     holds: 0,
     ipcIcc: false,
@@ -418,11 +419,13 @@ async function postWriteRecalculate(
 }
 
 /**
- * Ensure a user `Aircraft` record exists for every registration flown in
- * this import, deriving engine group + category from the ICAO type so the
- * dashboard's by-engine / by-category rings populate. New records are
- * created; existing records are only BACKFILLED where a field is blank —
- * user-entered values are never clobbered.
+ * Ensure a user `Aircraft` record exists for every registration given,
+ * deriving engine group + category from the ICAO type so the dashboard's
+ * by-engine / by-category rings populate. New records are created; existing
+ * records are only BACKFILLED where a field is blank — user-entered values are
+ * never clobbered. A registration whose record is in Recently Deleted is left
+ * alone: it was binned by hand, and a second record beside it would be a
+ * duplicate the moment it was restored.
  */
 async function ensureAircraftForFlights(
   pairs: Array<{ reg: string; type: string }>,
@@ -438,13 +441,23 @@ async function ensureAircraftForFlights(
 
   let existing: Aircraft[] = [];
   try {
-    existing = await getAllAircraft();
+    existing = await userDb.aircraft.toArray();
   } catch {
     return;
   }
-  const byReg = new Map(existing.map((a) => [a.registration.toUpperCase(), a]));
+  const byReg = new Map(
+    existing
+      .filter((a) => a.deletedAt == null)
+      .map((a) => [a.registration.toUpperCase(), a])
+  );
+  const binned = new Set(
+    existing
+      .filter((a) => a.deletedAt != null)
+      .map((a) => a.registration.toUpperCase())
+  );
 
   for (const [reg, type] of wanted) {
+    if (!byReg.has(reg) && binned.has(reg)) continue;
     try {
       const doc = type ? await getAircraftType(type).catch(() => null) : null;
       const engineType = doc
@@ -460,10 +473,10 @@ async function ensureAircraftForFlights(
           type: type || "",
           typeDesignator: type || "",
           model,
-          // Airline schedule imports are jets by domain; DOC 8643 lookup
-          // refines this when the designator resolves.
           category: category || "Airplane",
-          engineType: engineType || "JET",
+          // From DOC 8643 when the designator resolves; otherwise left
+          // unknown rather than assumed.
+          engineType,
           isComplex: false,
           isHighPerformance: false,
         });
@@ -655,6 +668,8 @@ function buildSimFlight(
     actualInstrumentTime: "00:00",
     simulatedInstrumentTime: duration,
     crossCountryTime: "00:00",
+    multiPilotTime: "00:00",
+    soloTime: "00:00",
     approaches: [],
     holds: 0,
     ipcIcc: false,
@@ -1102,6 +1117,23 @@ export async function executeRosterImport(
 
   // ----- 7. Correlate flights with aircraft records (engine/category) so
   //          the dashboard reflects 2-engine / jet totals correctly. --------
+  //          Every flight the report COVERS, not only those it touched: a
+  //          sector the report repeated unchanged is never touched, so its
+  //          aircraft used to be left without a record for good.
+  for (const op of plan.operations) {
+    if (
+      (op.kind === "skip_identical" ||
+        op.kind === "skip_decided" ||
+        op.kind === "skip_stale_report") &&
+      op.flight.aircraftReg &&
+      !isSimulatorEntry(op.flight)
+    ) {
+      aircraftPairs.push({
+        reg: op.flight.aircraftReg,
+        type: op.flight.aircraftType || "",
+      });
+    }
+  }
   try {
     await ensureAircraftForFlights(aircraftPairs, result);
   } catch {

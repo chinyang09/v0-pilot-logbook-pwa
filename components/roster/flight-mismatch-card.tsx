@@ -24,21 +24,13 @@
 
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
+import { flightFieldLabel } from "@/lib/utils/field-labels";
 import { FlightCardBody } from "@/components/flight-card-body";
 import { OptionPair } from "@/components/import/option-pair";
 import { retentionDaysLeft, retentionLabel } from "@/lib/utils/retention";
 import type { Discrepancy } from "@/types/entities/roster.types";
 import type { FlightLog } from "@/types/entities/flight.types";
 import type { DisplayPreferences } from "@/types/db/stores.types";
-
-const FIELD_LABELS: Record<string, string> = {
-  pilotFlying: "Pilot flying",
-  pilotRole: "Role",
-  dayTakeoffs: "Day takeoffs",
-  nightTakeoffs: "Night takeoffs",
-  dayLandings: "Day landings",
-  nightLandings: "Night landings",
-};
 
 /** Stored pilotFlying is a boolean string; pilots read it as PF / PM. */
 function displayValue(field: string, value: string | undefined): string {
@@ -138,7 +130,7 @@ export function FlightMismatchCard({
               className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-muted/30 px-2 py-1.5"
             >
               <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {FIELD_LABELS[row.field ?? ""] ?? row.field}
+                {flightFieldLabel(row.field ?? "")}
               </span>
               <OptionPair
                 left={{

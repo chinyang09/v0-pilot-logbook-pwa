@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
 import type React from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { PageContainer } from "@/components/page-container";
-import { useAirportDatabase, useFlights } from "@/hooks/data";
+import { useAirportDatabase, useAirportSeedProgress, useFlights } from "@/hooks/data";
 import {
   searchAirports,
   hasExactAirportCodeMatch,
@@ -121,6 +121,10 @@ export default function AirportsPage() {
   }, []);
 
   const { airports, isLoading, mutate: mutateAirports } = useAirportDatabase();
+  // A new install writes ~29k airports before the first one can be listed
+  // (~20s on a fresh device); the page stood empty for all of it.
+  const waitingForTable = isLoading && airports.length === 0;
+  const seedProgress = useAirportSeedProgress(waitingForTable);
   const { flights } = useFlights();
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
   const isFastScrollingRef = useRef(false);
@@ -704,6 +708,29 @@ export default function AirportsPage() {
                     <div className="border-t border-border my-4" />
                   </div>
                 )}
+
+                {waitingForTable && (
+                  <div className="flex flex-col items-center gap-3 py-16 text-center" role="status">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">
+                      Setting up the airport database
+                      {seedProgress != null ? ` · ${Math.round(seedProgress * 100)}%` : "…"}
+                    </p>
+                  </div>
+                )}
+
+                {!isLoading && airports.length === 0 && (
+                  <div className="flex flex-col items-center gap-3 py-16 text-center">
+                    <MapPin className="h-8 w-8 text-muted-foreground/50" />
+                    <p className="text-sm text-muted-foreground max-w-xs">
+                      The airport database couldn&apos;t be loaded. It will be set up the next time the app is online.
+                    </p>
+                    <Button variant="outline" size="sm" onClick={handleAddClick}>
+                      <Plus className="h-4 w-4 mr-1" />
+                      Add airport
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -752,7 +779,7 @@ export default function AirportsPage() {
                       onClick={handleAddClick}
                     >
                       <Plus className="h-4 w-4 mr-1" />
-                      Add Airport
+                      Add airport
                     </Button>
                   </div>
                 )}

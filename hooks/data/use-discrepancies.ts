@@ -10,6 +10,9 @@ import {
 } from "@/lib/db"
 import { useDBReady, CACHE_KEYS, checkDBReady } from "./use-db"
 
+/** One empty list, so "no data yet" is the same reference every render. */
+const NONE: never[] = []
+
 /**
  * Fetch all discrepancies from IndexedDB
  */
@@ -71,7 +74,7 @@ export function useDiscrepancies() {
   }, [mutateDiscrepancies])
 
   return {
-    discrepancies: data ?? [],
+    discrepancies: data ?? NONE,
     isLoading,
     error,
     refresh,
@@ -109,7 +112,7 @@ export function useUnresolvedDiscrepancies() {
   }, [mutateDiscrepancies])
 
   return {
-    unresolvedDiscrepancies: data ?? [],
+    unresolvedDiscrepancies: data ?? NONE,
     isLoading,
     error,
     refresh,

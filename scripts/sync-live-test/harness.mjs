@@ -26,7 +26,8 @@ export async function resetDb() {
 export async function newSessionToken(deviceId) {
   const token = crypto.randomBytes(24).toString("hex")
   const now = new Date()
-  await db().collection("sessions").insertOne({ token, userId: USER.userId, callsign: USER.callsign, deviceId, expiresAt: new Date(Date.now() + 30 * 864e5), lastAccessedAt: now, updatedAt: now, createdAt: now })
+  // The row holds the hash, as `issueSession` writes it; the cookie carries the raw value.
+  await db().collection("sessions").insertOne({ token: crypto.createHash("sha256").update(token).digest("hex"), userId: USER.userId, callsign: USER.callsign, deviceId, expiresAt: new Date(Date.now() + 30 * 864e5), lastAccessedAt: now, updatedAt: now, createdAt: now })
   return token
 }
 

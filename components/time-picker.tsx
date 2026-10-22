@@ -7,15 +7,34 @@ import { createPortal } from "react-dom"
 import { MODAL_SCRIM } from "@/components/ui/chrome-overlays"
 import { useBackDismiss } from "@/hooks/use-back-dismiss"
 import { cn } from "@/lib/utils"
+import { formatTimezoneOffset, getCurrentTimeUTC, isValidHHMM, localToUTC, utcToLocal } from "@/lib/utils/time"
 
 interface TimePickerProps {
   isOpen?: boolean
-  initialTime?: string // HH:MM format
+  /** HH:MM, in UTC — whichever frame the wheels show. */
+  initialTime?: string
+  /** Always UTC: a local edit is converted back before it is handed over. */
   onSelect?: (value: string) => void
   onClose: () => void
   label?: string
   timezoneOffset?: number // In hours for local time display
+  /** A length of time rather than a point in time: no NOW, no local clock. */
+  duration?: boolean
+  /**
+   * Which clock the wheels show. "local" edits the time at `timezoneOffset`
+   * — the row's local column — and the other clock is shown beneath NOW, so
+   * each one is checked against the other while it is being set.
+   */
+  frame?: "utc" | "local"
 }
+
+function parseClock(hhmm: string): { hours: number; minutes: number } {
+  if (!isValidHHMM(hhmm)) return { hours: 0, minutes: 0 }
+  const [h, m] = hhmm.split(":").map(Number)
+  return { hours: h, minutes: m }
+}
+
+const pad = (n: number) => n.toString().padStart(2, "0")
 
 // Generate options for hours (0-23) and minutes (0-59)
 const hourOptions = Array.from({ length: 24 }, (_, i) => ({
@@ -39,22 +58,16 @@ export function TimePicker({
   onClose,
   label,
   timezoneOffset = 0,
+  duration = false,
+  frame = "utc",
 }: TimePickerProps) {
-  const [hours, setHours] = useState(0)
-  const [minutes, setMinutes] = useState(0)
-
-  // Parse initial value
-  useEffect(() => {
-    if (initialTime) {
-      const parts = initialTime.split(":")
-      if (parts.length === 2) {
-        const h = Number.parseInt(parts[0], 10)
-        const m = Number.parseInt(parts[1], 10)
-        if (!Number.isNaN(h) && h >= 0 && h <= 23) setHours(h)
-        if (!Number.isNaN(m) && m >= 0 && m <= 59) setMinutes(m)
-      }
-    }
-  }, [initialTime])
+  const local = frame === "local" && !duration
+  // Seeded once per open — the sheet mounts each time it opens (and the form
+  // keys it on the field and frame), so a sync landing underneath an open
+  // picker cannot move the wheels out from under the finger.
+  const [initial] = useState(() => parseClock(local ? utcToLocal(initialTime, timezoneOffset) : initialTime))
+  const [hours, setHours] = useState(initial.hours)
+  const [minutes, setMinutes] = useState(initial.minutes)
 
   // Lock body scroll when open
   useEffect(() => {
@@ -77,25 +90,26 @@ export function TimePicker({
     return () => window.removeEventListener("keydown", onKey)
   }, [isOpen, dismiss])
 
+  const shown = `${pad(hours)}:${pad(minutes)}`
+
   const handleConfirm = useCallback(() => {
-    const formatted = `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
-    onSelect?.(formatted)
+    onSelect?.(local ? localToUTC(shown, timezoneOffset) : shown)
     dismiss()
-  }, [hours, minutes, onSelect, dismiss])
+  }, [local, shown, timezoneOffset, onSelect, dismiss])
 
   const handleSetNow = useCallback(() => {
-    const now = new Date()
-    setHours(now.getUTCHours())
-    setMinutes(now.getUTCMinutes())
-  }, [])
+    const utcNow = getCurrentTimeUTC()
+    const now = parseClock(local ? utcToLocal(utcNow, timezoneOffset) : utcNow)
+    setHours(now.hours)
+    setMinutes(now.minutes)
+  }, [local, timezoneOffset])
 
-  // Calculate local time if offset provided
-  const getLocalTime = useCallback(() => {
-    let localHours = hours + timezoneOffset
-    if (localHours < 0) localHours += 24
-    if (localHours >= 24) localHours -= 24
-    return `${localHours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`
-  }, [hours, minutes, timezoneOffset])
+  // The OTHER clock, read live off the wheels, so a local edit shows the UTC
+  // it will store and a UTC edit the local time it means.
+  const otherClock = local
+    ? { label: "UTC", value: localToUTC(shown, timezoneOffset) }
+    : { label: "Local", value: utcToLocal(shown, timezoneOffset) }
+  const frameLabel = duration ? null : local ? `Local ${formatTimezoneOffset(timezoneOffset)}` : "UTC"
 
   if (!isOpen || typeof document === "undefined") return null
 
@@ -132,19 +146,23 @@ export function TimePicker({
           </button>
 
           <div className="flex flex-col items-center">
-            {label && (
-              <span className="text-xs text-muted-foreground mb-1">{label}</span>
+            {(label || frameLabel) && (
+              <span className="text-xs text-muted-foreground mb-1">
+                {[label, frameLabel].filter(Boolean).join(" · ")}
+              </span>
             )}
-            <button
-              type="button"
-              onClick={handleSetNow}
-              className="text-sm font-medium text-primary active:opacity-70 relative after:absolute after:-inset-3 after:content-['']"
-            >
-              NOW
-            </button>
-            {timezoneOffset !== 0 && (
-              <span className="text-xs text-muted-foreground mt-0.5">
-                Local: {getLocalTime()}
+            {!duration && (
+              <button
+                type="button"
+                onClick={handleSetNow}
+                className="text-sm font-medium text-primary active:opacity-70 relative after:absolute after:-inset-3 after:content-['']"
+              >
+                NOW
+              </button>
+            )}
+            {!duration && timezoneOffset !== 0 && (
+              <span className="text-xs text-muted-foreground mt-0.5 tabular-nums">
+                {otherClock.label}: {otherClock.value}
               </span>
             )}
           </div>

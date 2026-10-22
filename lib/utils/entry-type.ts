@@ -13,6 +13,7 @@ import type { EntryType, FlightLog } from "@/types/entities/flight.types";
 export const ENTRY_TYPES: ReadonlyArray<{ value: EntryType; label: string }> = [
   { value: "flight", label: "Flight" },
   { value: "simulator", label: "Simulator" },
+  { value: "positioning", label: "Positioning" },
 ];
 
 /** The entry's type, falling back to the legacy `isSimulator` flag. */
@@ -27,6 +28,20 @@ export function isSimulatorEntry(
   flight: Pick<FlightLog, "entryType" | "isSimulator">
 ): boolean {
   return getEntryType(flight) === "simulator";
+}
+
+/** Carried as a passenger to or from a duty — duty time, but no flight time at all. */
+export function isPositioningEntry(
+  flight: Pick<FlightLog, "entryType" | "isSimulator">
+): boolean {
+  return getEntryType(flight) === "positioning";
+}
+
+/** A sector the pilot OPERATED — the only kind of entry that carries flight time. */
+export function isOperatedFlight(
+  flight: Pick<FlightLog, "entryType" | "isSimulator">
+): boolean {
+  return getEntryType(flight) === "flight";
 }
 
 /**
@@ -47,6 +62,8 @@ const SIMULATOR_ZERO_FIELDS = [
   "flightTime",
   "dayTime",
   "crossCountryTime",
+  "multiPilotTime",
+  "soloTime",
   "picTime",
   "sicTime",
   "picusTime",
@@ -55,7 +72,7 @@ const SIMULATOR_ZERO_FIELDS = [
 ] as const satisfies ReadonlyArray<keyof FlightLog>;
 
 /** The role times — the pilot may pin one deliberately, so an override holds. */
-const PINNABLE = new Set<string>(["picTime", "sicTime", "picusTime", "dualTime", "instructorTime", "crossCountryTime"]);
+const PINNABLE = new Set<string>(["picTime", "sicTime", "picusTime", "dualTime", "instructorTime", "crossCountryTime", "multiPilotTime", "soloTime"]);
 
 const hasDuration = (v: unknown) => typeof v === "string" && v !== "" && v !== "00:00" && v !== "0:00";
 
@@ -85,16 +102,74 @@ export function simulatorRepairPatch(
   return patch;
 }
 
-/** Duration a card should show: block time for a flight, session length for a sim. */
+/**
+ * Every time and count a POSITIONING sector carries none of. It is duty (its
+ * OUT/IN stay, and the FDP pipeline reads them) but the pilot flew nothing:
+ * a block time would reach every flight-hour total, a role time the licence
+ * record, a landing the 90-day recency. Pins do not survive it either — there
+ * is no figure a pilot can own on a flight they did not operate.
+ */
+const POSITIONING_ZERO_TIMES = [
+  ...SIMULATOR_ZERO_FIELDS,
+  "nightTime",
+  "ifrTime",
+  "actualInstrumentTime",
+  "simulatedInstrumentTime",
+] as const satisfies ReadonlyArray<keyof FlightLog>;
+const POSITIONING_ZERO_COUNTS = [
+  "dayTakeoffs",
+  "dayLandings",
+  "nightTakeoffs",
+  "nightLandings",
+  "autolands",
+] as const satisfies ReadonlyArray<keyof FlightLog>;
+
+/** What it takes to put a positioning sector right: empty when it already carries nothing. */
+export function positioningPatch(flight: Partial<FlightLog>): Partial<FlightLog> {
+  if (!isPositioningEntry({ entryType: flight.entryType, isSimulator: flight.isSimulator })) return {};
+  const patch: Partial<FlightLog> = {};
+  for (const field of POSITIONING_ZERO_TIMES) {
+    if (hasDuration(flight[field])) patch[field] = "00:00";
+  }
+  for (const field of POSITIONING_ZERO_COUNTS) {
+    if ((flight[field] ?? 0) !== 0) patch[field] = 0;
+  }
+  if (flight.pilotFlying) patch.pilotFlying = false;
+  return patch;
+}
+
+/**
+ * OUT→IN as H:MM, wrapping midnight; "" without both. A positioning sector's
+ * length (which it stores nowhere), and a simulator session's when its start
+ * and end were recorded.
+ */
+export function gateSpan(outTime?: string, inTime?: string): string {
+  const parse = (t?: string) => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(t ?? "");
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+  };
+  const out = parse(outTime);
+  const inn = parse(inTime);
+  if (out === null || inn === null) return "";
+  const span = (inn - out + 1440) % 1440;
+  return `${Math.floor(span / 60)}:${String(span % 60).padStart(2, "0")}`;
+}
+
+/**
+ * Duration a card should show: block time for a flight, session length for a
+ * sim, and OUT→IN for a positioning sector (its time on board, which counts
+ * as duty but is held in no hour field).
+ */
 export function entryDuration(
   flight: Pick<
     FlightLog,
     "entryType" | "isSimulator" | "blockTime" | "simulatedInstrumentTime"
-  >
+  > & Partial<Pick<FlightLog, "outTime" | "inTime">>
 ): string {
-  return isSimulatorEntry(flight)
-    ? flight.simulatedInstrumentTime || flight.blockTime || ""
-    : flight.blockTime || "";
+  const type = getEntryType(flight);
+  if (type === "simulator") return flight.simulatedInstrumentTime || flight.blockTime || "";
+  if (type === "positioning") return gateSpan(flight.outTime, flight.inTime);
+  return flight.blockTime || "";
 }
 
 /**

@@ -249,7 +249,7 @@
 /* PWA safe area - handled in app layout container instead of body */
 /* Utility class for safe area top padding */
 .pt-safe {
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: var(--top-inset);
 }
 
 /* No `.pb-safe`. A scroller gets its bottom clearance ONCE, from
@@ -282,7 +282,16 @@
 
      3.25rem = the controls' 4px top margin + their 44px height + a 4px gap.
      It was 4rem when they were 56px tall. */
-  --chrome-top: calc(3.25rem + env(safe-area-inset-top, 0px));
+  --chrome-top: calc(3.25rem + var(--top-inset));
+  /* The status bar's inset as the app UNDER the install/update banner sees
+     it. Normally the real inset; while the banner is up it is 0, because the
+     banner is the topmost thing on screen and has already cleared the status
+     bar — the chrome below it clearing it again left a dead band. Set (and
+     cleared) by `pwa-install-prompt.tsx` along with `--install-banner-height`,
+     which viewport-FIXED surfaces add to sit below the banner. Read
+     `--top-inset`, never the raw env(), for anything under the banner. */
+  --top-inset: env(safe-area-inset-top, 0px);
+  --install-banner-height: 0px;
   /* How far BELOW the action buttons a tap still means "scroll to the top".
      The header row itself is only `--chrome-top` tall, so aiming a little low
      used to land on a flight card and open it. A real element, so a drag that
@@ -310,7 +319,7 @@
      it does not scroll the list — 24px is enough to catch an aimed tap and
      small enough that it is not where a flick begins. */
   --chrome-tap: 1.25rem;
-  --chrome-top-sm: calc(2.75rem + env(safe-area-inset-top, 0px));
+  --chrome-top-sm: calc(2.75rem + var(--top-inset));
   /* How far above the physical bottom edge the floating nav rests — the ONE
      number the bottom pill, the sidebar's lower end, and the content
      clearance all derive from, so the pill↔sidebar morph endpoints and the
@@ -368,7 +377,7 @@
   height: var(--chrome-bottom);
 }
 .pt-chrome-bar {
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: var(--top-inset);
 }
 
 /* At the desktop tier the nav pill lives at the TOP, so the bottom owes only
@@ -518,29 +527,6 @@ input:focus-within,
 select:focus-within,
 textarea:focus-within {
   z-index: 20;
-}
-
-/* Ken Burns animation for cockpit background */
-@keyframes ken-burns {
-  0% {
-    transform: scale(1) translate(0, 0);
-  }
-  50% {
-    transform: scale(1.08) translate(-1%, -1%);
-  }
-  100% {
-    transform: scale(1) translate(0, 0);
-  }
-}
-
-.animate-ken-burns {
-  animation: ken-burns 25s ease-in-out infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .animate-ken-burns {
-    animation: none;
-  }
 }
 
 /* Login TOTP border feedback animations.

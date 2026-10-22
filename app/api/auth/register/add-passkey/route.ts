@@ -13,6 +13,7 @@ import {
 import type { User, PasskeyCredential, StoredChallenge } from "@/lib/auth/types"
 import { normalizePasskeyTransports } from "@/lib/auth/server/passkey-maintenance"
 import { cookies } from "next/headers"
+import { sessionTokenFilter } from "@/lib/auth/server/session"
 
 // GET: Generate options for an existing user to add a new device
 export async function GET(request: NextRequest) {
@@ -31,7 +32,7 @@ export async function GET(request: NextRequest) {
     const db = await getDB()
 
     const session = await db.collection("sessions").findOne({
-      token: sessionId,
+      ...sessionTokenFilter(sessionId ?? ""),
       expiresAt: { $gt: new Date() },
     })
 
@@ -113,7 +114,7 @@ export async function POST(request: NextRequest) {
     const sessionId = cookieStore.get("session")?.value
 
     const session = await db.collection("sessions").findOne({
-      token: sessionId,
+      ...sessionTokenFilter(sessionId ?? ""),
       expiresAt: { $gt: new Date() },
     })
 
@@ -168,7 +169,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Clear recovery flag in session
-    await db.collection("sessions").updateOne({ token: sessionId }, { $unset: { recoveryLogin: "" } })
+    await db.collection("sessions").updateOne({ _id: session._id }, { $unset: { recoveryLogin: "" } })
 
     // Self-heal any pre-existing malformed passkey transports. Fire-and-forget.
     void normalizePasskeyTransports(db, session.userId.toString())

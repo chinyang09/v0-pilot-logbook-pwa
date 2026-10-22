@@ -78,11 +78,12 @@ function isoDaysAgo(days: number): string {
   return `${y}-${m}-${d}`
 }
 
+const RANGE_DAY = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" })
+
 function formatRangeLabel(fromIso: string, toIso: string): string {
   const from = new Date(`${fromIso}T00:00:00`)
   const to = new Date(`${toIso}T00:00:00`)
-  const fmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" })
-  return `${fmt.format(from)} – ${fmt.format(to)}`
+  return `${RANGE_DAY.format(from)} – ${RANGE_DAY.format(to)}`
 }
 
 export function resolvePeriod(period: DashboardPeriod): ResolvedPeriod {

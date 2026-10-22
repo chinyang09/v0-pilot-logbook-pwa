@@ -14,14 +14,14 @@
 
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { Sun, Moon, Pen, Lock, MonitorPlay } from "lucide-react";
+import { Sun, Moon, Pen, Lock, MonitorPlay, Ticket } from "lucide-react";
 import type { FlightLog } from "@/types/entities/flight.types";
 import type { DisplayPreferences } from "@/types/db/stores.types";
 import type { FieldDiff } from "@/lib/utils/roster/reconciler";
 import { getDepartureDisplay, getArrivalDisplay } from "@/lib/utils/airport-display";
 import { formatClockDisplay, formatHHMMDisplay } from "@/lib/utils/time";
 import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date";
-import { entryDuration, isSimulatorEntry } from "@/lib/utils/entry-type";
+import { entryDuration, isPositioningEntry, isSimulatorEntry } from "@/lib/utils/entry-type";
 
 const MONTHS = [
   "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
@@ -151,6 +151,14 @@ export function FlightCardBody({
         scheduled: false,
       };
     }
+    // Positioning holds no hours: its OUT→IN is duty, and says so ("pos").
+    if (isPositioningEntry(flight) && hasOut && hasIn) {
+      return {
+        text: formatHHMMDisplay(entryDuration(flight), displayPrefs?.timeFormat),
+        suffix: "pos",
+        scheduled: false,
+      };
+    }
     if (hasOut && hasIn) {
       return {
         text: formatHHMMDisplay(flight.blockTime, displayPrefs?.timeFormat),
@@ -231,6 +239,8 @@ export function FlightCardBody({
   const hasFlightNumber =
     Boolean(flightNumberDiff) || Boolean((flight.flightNumber || "").trim());
   const isSim = isSimulatorEntry(flight);
+  // Carried as a passenger: the second entry kind worth an icon.
+  const isPositioning = isPositioningEntry(flight);
 
   return (
     <div
@@ -339,9 +349,11 @@ export function FlightCardBody({
         >
           {metaParts.length > 0 && (
             <span className="inline-flex min-w-0 items-center gap-1">
-              {/* Only the simulator carries an icon — it is the thing worth
+              {/* Only a simulator or a positioning sector carries an icon — the
+                  entries that are NOT flying are the thing worth
                   calling out. A plane on every flight row said nothing. */}
               {isSim && <MonitorPlay className="size-3 shrink-0" aria-hidden />}
+              {isPositioning && <Ticket className="size-3 shrink-0" aria-label="Positioning" />}
               {/* One inline run so the comma sits tight against the value it
                   follows — a gapped flex row reads "9V-NCE , A21N". Separators
                   go only BETWEEN present values, so a sector with no aircraft

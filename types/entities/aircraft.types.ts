@@ -17,7 +17,9 @@ export interface Aircraft {
   typeDesignator: string;
   model: string;
   category: string;
-  engineType: EngineType;
+  /** Unknown (absent) when the type could not be classified — the dashboard
+   *  then reads the engine off the type's DOC 8643 description. */
+  engineType?: EngineType;
   isComplex: boolean;
   isHighPerformance: boolean;
   /**

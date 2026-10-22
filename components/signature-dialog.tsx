@@ -8,10 +8,8 @@ import {
   type SignatureCrewMember,
 } from "@/components/signature-canvas";
 import type { FlightSignature } from "@/types/entities/flight.types";
-import { useDesktopPill, useIsDesktop } from "@/hooks/use-is-desktop";
-import { useSidebar } from "@/hooks/use-sidebar-context";
 import { useBackDismiss } from "@/hooks/use-back-dismiss";
-import { SIDEBAR_WIDTH_PX } from "@/lib/layout/panel-widths";
+import { useContentRegionStyle } from "@/components/ui/region-sheet";
 import { cn } from "@/lib/utils";
 
 /**
@@ -71,9 +69,7 @@ export function SignatureDialog({
   initialSignature?: FlightSignature | null;
   flightCrew: SignatureCrewMember[];
 }) {
-  const isDesktop = useIsDesktop();
-  const canPushSidebar = useDesktopPill();
-  const { isOpen: sidebarOpen } = useSidebar();
+  const { style: region, isDesktop } = useContentRegionStyle();
 
   // Escape is the desktop half of "get me out of here"; the system back gesture
   // is the other half, and this is full-screen — it must not be possible to
@@ -88,17 +84,6 @@ export function SignatureDialog({
   }, [open, dismiss]);
 
   if (!open || typeof document === "undefined") return null;
-
-  const pushedBy = canPushSidebar && sidebarOpen ? SIDEBAR_WIDTH_PX : 0;
-  const region: React.CSSProperties = isDesktop
-    ? {
-        top: "var(--chrome-top)",
-        bottom: "var(--chrome-bottom)",
-        left: `calc(${pushedBy}px + var(--panel-gutter))`,
-        right: "var(--panel-gutter)",
-        transition: "left 200ms cubic-bezier(0.25, 0.1, 0.25, 1)",
-      }
-    : { inset: 0 };
 
   // z-[110]: above the app chrome (header z-99, nav pill z-100) and BELOW
   // Radix's popper layer (z-150). At z-[200] the crew `Select` opened *behind*

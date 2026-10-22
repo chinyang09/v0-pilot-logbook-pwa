@@ -4,6 +4,10 @@ import { useCallback } from "react"
 import useSWR from "swr"
 import { getAllAircraft, type Aircraft } from "@/lib/db"
 import { useDBReady, CACHE_KEYS, checkDBReady } from "./use-db"
+import { useHeldWhileHidden } from "@/hooks/use-page-active"
+
+/** One empty list, so "no data yet" is the same reference every render. */
+const NONE: never[] = []
 
 /**
  * Fetch user aircraft from IndexedDB
@@ -43,8 +47,11 @@ export function useAircraft() {
     return mutateAircraft()
   }, [mutateAircraft])
 
+  // Held while this page is behind another tab — see `useHeldWhileHidden`.
+  const live = useHeldWhileHidden(data)
+
   return {
-    aircraft: data ?? [],
+    aircraft: live ?? NONE,
     // isLoading (no data yet) shows skeleton; isValidating (revalidating with existing data)
     // is excluded so revalidations keep the list visible instead of flashing a skeleton.
     isLoading,

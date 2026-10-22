@@ -14,21 +14,18 @@
  * not `inset-0`, or the sidebar and the nav pill draw over it on a tablet.
  */
 
-import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { DateRow } from "@/components/ui/date-row";
 import { FormSection } from "@/components/ui/form-section";
+import { RegionSheet } from "@/components/ui/region-sheet";
+import { TimeRow } from "@/components/ui/time-row";
 import { SettingsRow, SelectRow } from "@/components/ui/settings-row";
 import { useBackDismiss } from "@/hooks/use-back-dismiss";
-import { useDesktopPill, useIsDesktop } from "@/hooks/use-is-desktop";
-import { useSidebar } from "@/hooks/use-sidebar-context";
-import { SIDEBAR_WIDTH_PX } from "@/lib/layout/panel-widths";
 import { addScheduleEntry, updateScheduleEntry } from "@/lib/db";
 import type { DutyType, ScheduleEntry } from "@/types/entities/roster.types";
 import { isValidHHMM } from "@/lib/utils/time";
-import { cn } from "@/lib/utils";
 
 /**
  * The kinds a pilot can enter by hand.
@@ -71,9 +68,6 @@ export function DutyEntryDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const isDesktop = useIsDesktop();
-  const canPushSidebar = useDesktopPill();
-  const { isOpen: sidebarOpen } = useSidebar();
   const dismiss = useBackDismiss(open, onClose);
 
   // Seeded from the entry by `useState` initialisers, and re-seeded by the
@@ -92,13 +86,6 @@ export function DutyEntryDialog({
   const [start, setStart] = useState(() => entry?.reportTime ?? "");
   const [end, setEnd] = useState(() => entry?.debriefTime ?? "");
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && dismiss();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, dismiss]);
 
   const wantsWindow = HAS_WINDOW.has(dutyType);
   const timesValid =
@@ -120,20 +107,7 @@ export function DutyEntryDialog({
     ? `Needs ${missing.length > 1 ? missing.slice(0, -1).join(", ") + " and " + missing[missing.length - 1] : missing[0]}`
     : null;
 
-  const region: React.CSSProperties = useMemo(() => {
-    const pushedBy = canPushSidebar && sidebarOpen ? SIDEBAR_WIDTH_PX : 0;
-    return isDesktop
-      ? {
-          top: "var(--chrome-top)",
-          bottom: "var(--chrome-bottom)",
-          left: `calc(${pushedBy}px + var(--panel-gutter))`,
-          right: "var(--panel-gutter)",
-          transition: "left 200ms cubic-bezier(0.25, 0.1, 0.25, 1)",
-        }
-      : { inset: 0 };
-  }, [isDesktop, canPushSidebar, sidebarOpen]);
-
-  if (!open || typeof document === "undefined") return null;
+  if (!open) return null;
 
   const save = async () => {
     if (!canSave) return;
@@ -169,50 +143,29 @@ export function DutyEntryDialog({
     }
   };
 
-  return createPortal(
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="duty-dialog-title"
-      style={region}
-      className={cn(
-        // Above the app chrome (header z-99, nav pill z-100) — at z-[65] the
-        // nav pill covered Save/Cancel on a phone and the roster's header
-        // buttons drew over the dialog. Below Radix's popper layer (z-150), so
-        // the duty-type Select still opens in front. See signature-dialog.
-        "fixed z-[110] flex flex-col bg-background",
-        isDesktop && "rounded-2xl border border-border overflow-hidden shadow-2xl"
-      )}
+  return (
+    <RegionSheet
+      titleId="duty-dialog-title"
+      title={entry ? "Edit duty" : "Add duty"}
+      onDismiss={dismiss}
+      footer={
+        <>
+          {blockedReason && (
+            <p className="mr-auto min-w-0 text-xs text-muted-foreground" role="status">
+              {blockedReason}
+            </p>
+          )}
+          <Button variant="ghost" onClick={() => dismiss()}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={!canSave}>
+            {saving ? "Saving…" : "Save"}
+          </Button>
+        </>
+      }
     >
-      <div
-        className={cn(
-          "flex items-center justify-between px-4 h-14 flex-shrink-0 border-b border-border",
-          !isDesktop && "pt-safe"
-        )}
-      >
-        <h2 id="duty-dialog-title" className="text-base font-semibold">
-          {entry ? "Edit duty" : "Add duty"}
-        </h2>
-        <button
-          type="button"
-          onClick={() => dismiss()}
-          aria-label="Close"
-          className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <X className="h-5 w-5" />
-        </button>
-      </div>
-
-      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide px-panel py-4 space-y-4">
         <FormSection title="Duty">
-          <SettingsRow
-            label="Date"
-            value={date}
-            onChange={setDate}
-            type="date"
-            required
-            swipeToClear={false}
-          />
+          <DateRow label="Date" value={date} onChange={setDate} required />
           <SelectRow
             label="Type"
             value={dutyType}
@@ -237,44 +190,16 @@ export function DutyEntryDialog({
 
         {wantsWindow && (
           <FormSection title="Window (UTC)">
-            <SettingsRow
-              label="Start"
-              value={start}
-              onChange={setStart}
-              placeholder="06:00"
-              required
-            />
-            <SettingsRow
+            <TimeRow label="Start" value={start} onChange={setStart} required />
+            <TimeRow
               label="End"
               value={end}
               onChange={setEnd}
-              placeholder="18:00"
               description="An end earlier than the start means the next day."
               required
             />
           </FormSection>
         )}
-      </div>
-
-      <div
-        className={cn(
-          "flex items-center justify-end gap-2 px-4 h-16 flex-shrink-0 border-t border-border",
-          !isDesktop && "pb-safe"
-        )}
-      >
-        {blockedReason && (
-          <p className="mr-auto min-w-0 text-xs text-muted-foreground" role="status">
-            {blockedReason}
-          </p>
-        )}
-        <Button variant="ghost" onClick={() => dismiss()}>
-          Cancel
-        </Button>
-        <Button onClick={save} disabled={!canSave}>
-          {saving ? "Saving…" : "Save"}
-        </Button>
-      </div>
-    </div>,
-    document.body
+    </RegionSheet>
   );
 }

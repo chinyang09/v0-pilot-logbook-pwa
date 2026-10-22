@@ -48,6 +48,7 @@ import { parseUserAgent } from "@/lib/utils/user-agent"
 import { getOrCreateDeviceId } from "@/lib/utils/device"
 import { cn } from "@/lib/utils"
 import { syncService } from "@/lib/sync"
+import { appAlert, appConfirm } from "@/lib/utils/app-alert"
 
 interface ProfileData {
   userId: string
@@ -397,10 +398,12 @@ export default function AccountPage() {
   const confirmUnsyncedLoss = async (): Promise<boolean> => {
     const left = await syncService.flushBeforeSignOut()
     if (left === 0) return true
-    return window.confirm(
-      `${left} change${left === 1 ? "" : "s"} on this device ${left === 1 ? "hasn't" : "haven't"} synced yet ` +
-        `and will be lost if you sign out now. Sign out anyway?`
-    )
+    return appConfirm({
+      title: `${left} unsynced change${left === 1 ? "" : "s"}`,
+      message: `${left === 1 ? "It hasn't" : "They haven't"} reached the server and will be lost if you sign out now.`,
+      confirmLabel: "Sign out",
+      destructive: true,
+    })
   }
 
   const handleRevokeSession = async (session: SessionData) => {
@@ -436,7 +439,10 @@ export default function AccountPage() {
     // offline, the pilot was signed out here believing the lost phone was too,
     // while its session stayed perfectly valid.
     if (typeof navigator !== "undefined" && !navigator.onLine) {
-      window.alert("You're offline. Signing out of all devices needs a connection — try again once you're back online.")
+      await appAlert({
+        title: "You're offline",
+        message: "Signing out of all devices needs a connection. Try again once you're back online.",
+      })
       return
     }
     if (!(await confirmUnsyncedLoss())) return
@@ -448,7 +454,10 @@ export default function AccountPage() {
         body: JSON.stringify({ all: true }),
       }).catch(() => null)
       if (!res?.ok) {
-        window.alert("Couldn't sign out your other devices — nothing was changed. Check your connection and try again.")
+        await appAlert({
+          title: "Couldn't sign out your other devices",
+          message: "Nothing was changed. Check your connection and try again.",
+        })
         return
       }
       // confirmUnsyncedLoss already pushed; the session is revoked now, so a

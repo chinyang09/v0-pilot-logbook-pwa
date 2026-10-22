@@ -1,12 +1,14 @@
 /**
  * Batch enrichment API
  *
- * POST /api/enrichment/batch
+ * GET  /api/enrichment/batch  — Vercel Cron (`vercel.json`; Cron only sends GET)
+ * POST /api/enrichment/batch  — manual invocation (admin)
  *
  * Processes pending aircraft and airport submissions.
- * Designed to be triggered by:
- *   - Vercel cron
- *   - Manual invocation (admin)
+ *
+ * There was no cron behind this for its whole life — no `vercel.json`, and the
+ * route took POST only, which Vercel Cron never sends — so a registration FR24
+ * missed at submission stayed `pending` and out of the shared pool for good.
  *
  * Aircraft: FR24 enrichment with retry tracking
  * Airports: geo-tz timezone derivation from coordinates
@@ -24,13 +26,27 @@ export const maxDuration = 60
 
 const MAX_AIRCRAFT_PER_RUN = 20
 const MAX_AIRPORTS_PER_RUN = 50
-const MAX_RETRIES = 3
+// A registration FR24 does not know yet is usually an aeroplane not yet
+// delivered or not yet flying, so it is asked again at a widening interval —
+// 1, 2, 4, 8, 16, 32 days — rather than given up on after three daily tries.
+const MAX_RETRIES = 6
+const DAY_MS = 24 * 60 * 60 * 1000
+const retryDue = (doc: Record<string, unknown>, now: number) =>
+  now - Number(doc.lastRetryAt ?? 0) >= 2 ** Number(doc.retryCount ?? 0) * DAY_MS
 // Stop starting new FR24 lookups past this point so the run finishes cleanly
 // within maxDuration; unprocessed pending docs are simply retried next run.
 const AIRCRAFT_TIME_BUDGET_MS = 45_000
 
+export async function GET(request: Request) {
+  return runBatch(request)
+}
+
 export async function POST(request: Request) {
-  // Auth: check cron secret or admin session
+  return runBatch(request)
+}
+
+async function runBatch(request: Request) {
+  // Auth: Vercel Cron sends `Authorization: Bearer $CRON_SECRET`.
   const authHeader = request.headers.get("authorization")
   const cronSecret = process.env.CRON_SECRET
 
@@ -54,9 +70,10 @@ export async function POST(request: Request) {
         { retryCount: { $lt: MAX_RETRIES } },
       ],
     })
-    .sort({ submittedAt: 1 })
-    .limit(MAX_AIRCRAFT_PER_RUN)
+    .sort({ lastRetryAt: 1, submittedAt: 1 })
+    .limit(MAX_AIRCRAFT_PER_RUN * 5)
     .toArray()
+    .then((docs) => docs.filter((d) => retryDue(d, startedAt)).slice(0, MAX_AIRCRAFT_PER_RUN))
 
   for (const doc of pendingAircraft) {
     // Leave the rest pending (retryCount untouched) for the next run rather than

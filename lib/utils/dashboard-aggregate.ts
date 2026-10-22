@@ -14,52 +14,22 @@ import type { Aircraft } from "@/types/entities/aircraft.types"
 import type { AutoFillPreferences } from "@/types/db/stores.types"
 import { hhmmToMinutes } from "./time"
 import { isFlownFlight } from "./flight-calculations"
+import { isPositioningEntry } from "./entry-type"
 import { sortFlights } from "./flight-sort"
 import { normalizeRegistration } from "./string"
 import { normalizeAircraftType } from "./parsers/shared/aircraft-type-map"
+import { TIME_CATEGORIES } from "./logbook-rules"
 
 export type AutoFillKey = keyof AutoFillPreferences
 
 /**
- * Display order + label for each AutoFill-driven ring.
- * Order matches the Settings → Auto-fill time fields list.
+ * Maps each AutoFill key to the FlightLog field that stores its time — read
+ * off the one category table (`lib/utils/logbook-rules.ts`), so a category
+ * added there is totalled here too.
  */
-export const AUTO_FILL_DISPLAY: ReadonlyArray<{ key: AutoFillKey; label: string }> = [
-  { key: "night", label: "Night" },
-  { key: "pic", label: "PIC" },
-  { key: "sic", label: "SIC" },
-  { key: "p1us", label: "P1US" },
-  { key: "dualRcvd", label: "Dual" },
-  { key: "dualGiven", label: "Instr" },
-  { key: "xc", label: "XC" },
-  { key: "ifr", label: "IFR" },
-  { key: "actualInst", label: "Actual" },
-  { key: "simInst", label: "Sim" },
-  { key: "multiPilot", label: "MPil" },
-  { key: "solo", label: "Solo" },
-  { key: "ground", label: "Gnd" },
-  { key: "nvg", label: "NVG" },
-  { key: "sfe", label: "SFE" },
-  { key: "flightEngineer", label: "FE" },
-]
-
-/**
- * Maps each AutoFill key to the FlightLog field that stores its time.
- * Keys whose FlightLog field does not (yet) exist are left out — their
- * aggregated minutes stay 0 and the UI skips them.
- */
-const AUTO_FILL_FIELD_MAP: Partial<Record<AutoFillKey, keyof FlightLog>> = {
-  night: "nightTime",
-  pic: "picTime",
-  sic: "sicTime",
-  p1us: "picusTime",
-  dualRcvd: "dualTime",
-  dualGiven: "instructorTime",
-  xc: "crossCountryTime",
-  ifr: "ifrTime",
-  actualInst: "actualInstrumentTime",
-  simInst: "simulatedInstrumentTime",
-}
+const AUTO_FILL_FIELD_MAP: Partial<Record<AutoFillKey, keyof FlightLog>> = Object.fromEntries(
+  TIME_CATEGORIES.map((c) => [c.autoFill, c.field]),
+)
 
 export type AutoFillMinutes = Record<AutoFillKey, number>
 
@@ -68,7 +38,6 @@ function emptyAutoFillMinutes(): AutoFillMinutes {
     night: 0, pic: 0, sic: 0, p1us: 0,
     dualRcvd: 0, dualGiven: 0, xc: 0, ifr: 0,
     actualInst: 0, simInst: 0, multiPilot: 0, solo: 0,
-    ground: 0, nvg: 0, sfe: 0, flightEngineer: 0,
   }
 }
 
@@ -382,6 +351,10 @@ export function aggregateDashboard({
       }
       continue
     }
+
+    // A positioning sector is duty, not flying: no hours, no landings, and not
+    // one of the period's flights.
+    if (isPositioningEntry(flight)) continue
 
     // Exclude scheduled / not-yet-flown placeholders.
     if (!isFlownFlight(flight)) continue

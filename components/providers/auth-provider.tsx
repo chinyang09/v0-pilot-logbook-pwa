@@ -10,6 +10,7 @@ import { startAuthentication } from "@simplewebauthn/browser"
 import { getOrCreateDeviceId } from "@/lib/utils/device"
 import { classifySessionResponse, type SessionVerdict } from "@/lib/auth/shared/session-verdict"
 import { AppStatusOverlay } from "@/components/app-status-overlay"
+import { appConfirm } from "@/lib/utils/app-alert"
 
 /**
  * Ask the server whether the session cookie is still good.
@@ -203,11 +204,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const unsynced = await userDb.syncQueue.count().catch(() => 0)
       if (
         unsynced > 0 &&
-        !window.confirm(
-          `This device still holds ${unsynced} unsynced change${unsynced === 1 ? "" : "s"} from ` +
+        !(await appConfirm({
+          title: "Discard unsynced changes?",
+          message:
+            `This device still holds ${unsynced} unsynced change${unsynced === 1 ? "" : "s"} from ` +
             `${owner.callsign ? owner.callsign : "another account"}. Signing in as ${session.callsign} ` +
-            `removes them from this device.\n\nContinue?`
-        )
+            `removes them from this device.`,
+          confirmLabel: "Sign in",
+          destructive: true,
+        }))
       ) {
         throw new Error(
           `Sign-in cancelled. Sign in as ${owner.callsign ?? "the previous account"} to keep its unsynced changes.`

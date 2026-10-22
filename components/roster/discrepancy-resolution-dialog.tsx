@@ -1,56 +1,48 @@
 /**
- * Discrepancy Resolution Dialog Component
- * Allows users to resolve discrepancies by choosing a resolution method
+ * Resolve an import note — the same form shell as every other edit in the app
+ * (`RegionSheet`): the issue as read-only rows, the choice as a list with a
+ * check on the selected answer, notes as a row, Cancel/Resolve in the footer.
+ *
+ * It was a centred modal with a "Current Issue:" box, a dropdown for four
+ * answers that each needed a sentence of explanation, a boxed input and two
+ * full-width buttons — a web form, where four answers want a list you can see
+ * all of at once.
  */
 
 "use client"
 
 import { useState } from "react"
+import { Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Save, Loader2, FileText, Calendar, Merge, XCircle } from "lucide-react"
+import { FormSection } from "@/components/ui/form-section"
+import { RegionSheet } from "@/components/ui/region-sheet"
+import { ReadOnlyRow, SettingsRow } from "@/components/ui/settings-row"
+import { useBackDismiss } from "@/hooks/use-back-dismiss"
 import { resolveDiscrepancy } from "@/lib/db"
+import { cn } from "@/lib/utils"
+import { flightFieldLabel } from "@/lib/utils/field-labels"
 import type { Discrepancy } from "@/types/entities/roster.types"
 
 const RESOLUTION_OPTIONS = [
   {
     value: "keep_logbook",
-    label: "Keep Logbook Entry",
+    label: "Keep logbook entry",
     description: "Use the values from your logbook, discard schedule data",
-    icon: FileText,
   },
   {
     value: "keep_schedule",
-    label: "Keep Schedule Entry",
+    label: "Keep schedule entry",
     description: "Use the values from your schedule, update logbook if needed",
-    icon: Calendar,
   },
   {
     value: "merged",
-    label: "Merge Both",
+    label: "Merge both",
     description: "Combine information from both sources",
-    icon: Merge,
   },
   {
     value: "ignored",
     label: "Ignore",
     description: "Mark as resolved without taking action",
-    icon: XCircle,
   },
 ] as const
 
@@ -67,171 +59,105 @@ export function DiscrepancyResolutionDialog({
   discrepancy,
   onResolved,
 }: DiscrepancyResolutionDialogProps) {
-  const [resolution, setResolution] = useState<Discrepancy["resolvedBy"]>("keep_logbook")
+  if (!open || !discrepancy) return null
+  // Mounted only while open and keyed on the note, so every open starts from
+  // a fresh form rather than the last one's answer.
+  return (
+    <ResolutionForm
+      key={discrepancy.id}
+      discrepancy={discrepancy}
+      onClose={() => onOpenChange(false)}
+      onResolved={onResolved}
+    />
+  )
+}
+
+function ResolutionForm({
+  discrepancy,
+  onClose,
+  onResolved,
+}: {
+  discrepancy: Discrepancy
+  onClose: () => void
+  onResolved?: () => void
+}) {
+  const dismiss = useBackDismiss(true, onClose)
+  const [resolution, setResolution] = useState<NonNullable<Discrepancy["resolvedBy"]>>("keep_logbook")
   const [notes, setNotes] = useState("")
-  const [isResolving, setIsResolving] = useState(false)
-  const [showSuccess, setShowSuccess] = useState(false)
+  const [resolving, setResolving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const handleOpenChange = (next: boolean) => {
-    if (!next) setError(null)
-    onOpenChange(next)
-  }
-
-  const handleResolve = async () => {
-    if (!discrepancy || !resolution) return
-
+  const resolve = async () => {
+    setResolving(true)
+    setError(null)
     try {
-      setIsResolving(true)
-      setError(null)
-      await resolveDiscrepancy(discrepancy.id, resolution, notes || undefined)
-
-      setShowSuccess(true)
-      setTimeout(() => {
-        setShowSuccess(false)
-        onOpenChange(false)
-        onResolved?.()
-        // Reset form
-        setResolution("keep_logbook")
-        setNotes("")
-      }, 1000)
-    } catch (error) {
-      console.error("Failed to resolve discrepancy:", error)
-      setError("Couldn't resolve this discrepancy. Try again.")
-    } finally {
-      setIsResolving(false)
+      await resolveDiscrepancy(discrepancy.id, resolution, notes.trim() || undefined)
+      onResolved?.()
+      dismiss()
+    } catch (err) {
+      console.error("Failed to resolve discrepancy:", err)
+      setError("Couldn't resolve this. Try again.")
+      setResolving(false)
     }
   }
 
-  if (!discrepancy) return null
-
-  const selectedOption = RESOLUTION_OPTIONS.find((opt) => opt.value === resolution)
-  const SelectedIcon = selectedOption?.icon || FileText
-
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Resolve Discrepancy</DialogTitle>
-          <DialogDescription>
-            Choose how you want to resolve this discrepancy. This action will mark the discrepancy
-            as resolved.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4 py-4">
-          {/* Discrepancy Info */}
-          <div className="p-3 rounded-lg bg-secondary/30 space-y-2">
-            <div className="text-sm font-medium">Current Issue:</div>
-            <div className="text-sm text-muted-foreground">
-              {discrepancy.message || "Discrepancy detected"}
-            </div>
-            {discrepancy.field && (
-              <div className="text-xs text-muted-foreground">
-                <span className="font-medium">Field:</span> {discrepancy.field}
-              </div>
-            )}
-            {discrepancy.scheduleValue && (
-              <div className="text-xs">
-                <span className="font-medium">Schedule:</span>{" "}
-                <span className="text-muted-foreground">{discrepancy.scheduleValue}</span>
-              </div>
-            )}
-            {discrepancy.logbookValue && (
-              <div className="text-xs">
-                <span className="font-medium">Logbook:</span>{" "}
-                <span className="text-muted-foreground">{discrepancy.logbookValue}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Resolution Method */}
-          <div className="space-y-2">
-            <Label htmlFor="resolution-method">Resolution Method</Label>
-            <Select
-              value={resolution || ""}
-              onValueChange={(value) => setResolution(value as Discrepancy["resolvedBy"])}
-            >
-              <SelectTrigger id="resolution-method">
-                <SelectValue>
-                  {selectedOption && (
-                    <div className="flex items-center gap-2">
-                      <SelectedIcon className="h-4 w-4" />
-                      {selectedOption.label}
-                    </div>
-                  )}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {RESOLUTION_OPTIONS.map((option) => {
-                  const OptionIcon = option.icon
-                  return (
-                    <SelectItem key={option.value} value={option.value}>
-                      <div className="flex flex-col py-1">
-                        <div className="flex items-center gap-2">
-                          <OptionIcon className="h-4 w-4" />
-                          <span className="font-medium">{option.label}</span>
-                        </div>
-                        <span className="text-xs text-muted-foreground">{option.description}</span>
-                      </div>
-                    </SelectItem>
-                  )
-                })}
-              </SelectContent>
-            </Select>
-            {selectedOption && (
-              <p className="text-xs text-muted-foreground">{selectedOption.description}</p>
-            )}
-          </div>
-
-          {/* Notes */}
-          <div className="space-y-2">
-            <Label htmlFor="resolution-notes">Notes (Optional)</Label>
-            <Input
-              id="resolution-notes"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Add any additional notes about this resolution..."
-            />
-          </div>
-
+    <RegionSheet
+      titleId="resolve-dialog-title"
+      title="Resolve"
+      onDismiss={dismiss}
+      footer={
+        <>
           {error && (
-            <p role="alert" className="text-sm text-destructive">
+            <p className="mr-auto min-w-0 text-xs text-destructive" role="alert">
               {error}
             </p>
           )}
+          <Button variant="ghost" onClick={() => dismiss()}>
+            Cancel
+          </Button>
+          <Button onClick={resolve} disabled={resolving}>
+            {resolving ? "Resolving…" : "Resolve"}
+          </Button>
+        </>
+      }
+    >
+      <FormSection title="Issue">
+        <p className="row-divider px-4 py-3.5 text-sm text-foreground">
+          {discrepancy.message || "Discrepancy detected"}
+        </p>
+        {discrepancy.field && <ReadOnlyRow label="Field" value={flightFieldLabel(discrepancy.field)} />}
+        {discrepancy.scheduleValue && <ReadOnlyRow label="Schedule" value={String(discrepancy.scheduleValue)} />}
+        {discrepancy.logbookValue && <ReadOnlyRow label="Logbook" value={String(discrepancy.logbookValue)} />}
+      </FormSection>
 
-          {/* Action Buttons */}
-          <div className="flex items-center gap-2 pt-4">
-            <Button
-              variant="outline"
-              onClick={() => handleOpenChange(false)}
-              disabled={isResolving}
-              className="flex-1"
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleResolve} disabled={isResolving || !resolution || showSuccess} className="flex-1">
-              {isResolving ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Resolving...
-                </>
-              ) : showSuccess ? (
-                <>
-                  <Save className="h-4 w-4 mr-2" />
-                  Resolved!
-                </>
-              ) : (
-                <>
-                  <Save className="h-4 w-4 mr-2" />
-                  Resolve
-                </>
-              )}
-            </Button>
-          </div>
+      <FormSection title="Resolution">
+        <div role="radiogroup" aria-label="Resolution">
+          {RESOLUTION_OPTIONS.map((option) => {
+            const selected = option.value === resolution
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => setResolution(option.value)}
+                className="row-divider flex w-full items-center gap-3 px-4 py-3 text-left transition-colors active:bg-muted/50"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block text-foreground">{option.label}</span>
+                  <span className="block text-xs text-muted-foreground">{option.description}</span>
+                </span>
+                <Check className={cn("h-5 w-5 shrink-0 text-primary", !selected && "invisible")} aria-hidden />
+              </button>
+            )
+          })}
         </div>
-      </DialogContent>
-    </Dialog>
+      </FormSection>
+
+      <FormSection title="Notes">
+        <SettingsRow label="Notes" value={notes} onChange={setNotes} placeholder="Optional" />
+      </FormSection>
+    </RegionSheet>
   )
 }

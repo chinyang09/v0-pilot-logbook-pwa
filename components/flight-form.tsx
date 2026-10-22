@@ -20,6 +20,8 @@ import {
   Minus,
   Trash2,
   PenLine,
+  Lock,
+  X,
 } from "lucide-react";
 import { mutate } from "swr";
 import { CACHE_KEYS } from "@/hooks/data";
@@ -52,7 +54,14 @@ import {
   calculateRoleTimes,
   getApproachCategory,
   hasCoordinates,
+  categoryState,
+  BLOCK_FOLLOWING_FIELDS,
+  isBlockFollowingField,
+  ROLE_TIME_FIELDS,
+  type BlockFollowingField,
 } from "@/lib/utils/flight-calculations";
+import { inferPilotFlying, inferPilotRole, isMultiPilotFlight, isSoloFlight, soloConflict } from "@/lib/utils/flight-evidence";
+import { PILOT_ROLES, TIME_CATEGORIES, categoryLabel, roleLabel, showsCategory } from "@/lib/utils/logbook-rules";
 import { calculateNightTimeComplete } from "@/lib/utils/night-time";
 import {
   formatClockDisplay,
@@ -75,9 +84,12 @@ import { cn } from "@/lib/utils";
 import {
   ENTRY_TYPES,
   entryTypePatch,
+  gateSpan,
   getEntryType,
+  positioningPatch,
   withoutSimulatorPins,
 } from "@/lib/utils/entry-type";
+import { ADDITIONAL_CREW_ROLES, additionalCrewRoleLabel, requiresTwoPilots } from "@/lib/utils/crew-complement";
 import type { EntryType } from "@/types/entities/flight.types";
 import type { DisplayPreferences } from "@/types/db/stores.types";
 import type { ExtractedFlightData } from "@/lib/ocr";
@@ -220,7 +232,27 @@ function pressableRow(onActivate: () => void, name: string) {
   };
 }
 
-// Time row with UTC and Local display
+/**
+ * One column of a time row as its own control. The row is the UTC target; a
+ * column inside it claims its own taps, and its hit area grows into the row's
+ * padding so the target is the full row height without moving anything.
+ */
+function clockColumn(onActivate: () => void, name: string) {
+  return {
+    ...pressableRow(onActivate, name),
+    onClick: (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onActivate();
+    },
+    className:
+      "relative flex flex-col items-end rounded-md after:absolute after:-inset-x-1.5 after:-inset-y-3.5 after:content-[''] focus-visible:outline-2 focus-visible:outline-ring",
+  };
+}
+
+// Time row with UTC and Local display. Either clock can be edited: the UTC
+// column (and the rest of the row) opens the picker in UTC, the local column
+// opens it in the airport's time — and the picker shows the other clock
+// live, so each checks the other.
 function TimeRow({
   label,
   utcValue,
@@ -234,7 +266,7 @@ function TimeRow({
   label: string;
   utcValue: string;
   timezoneOffset: number;
-  onTap: () => void;
+  onTap: (frame: "utc" | "local") => void;
   onNow?: () => void;
   showNow?: boolean;
   clockSeparator?: DisplayPreferences["clockSeparator"];
@@ -256,11 +288,11 @@ function TimeRow({
     // on "Out" itself did nothing.
     <div
       className="flex items-center justify-between py-3.5 px-4 row-divider cursor-pointer focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
-      {...pressableRow(onTap, `${label}, ${shown} UTC`)}
+      {...pressableRow(() => onTap("utc"), `${label}, ${shown} UTC`)}
     >
       <span className="text-foreground">{label}</span>
       <div className="flex items-center gap-3">
-        <div className="flex flex-col items-end">
+        <div {...clockColumn(() => onTap("utc"), `${label}, ${shown} UTC`)}>
           <span
             className={`text-lg ${
               hasValue ? "text-foreground" : "text-muted-foreground"
@@ -290,7 +322,12 @@ function TimeRow({
               NOW
             </Button>
           ) : (
-            <>
+            <div
+              {...clockColumn(
+                () => onTap("local"),
+                `${label}, ${hasValue ? localValue : "not set"} ${tzLabel}`
+              )}
+            >
               <span
                 className={`text-lg ${
                   hasValue ? "text-foreground" : "text-muted-foreground"
@@ -301,7 +338,7 @@ function TimeRow({
                   : "--:--"}
               </span>
               <span className="text-xs text-muted-foreground">{tzLabel}</span>
-            </>
+            </div>
           )}
         </div>
       </div>
@@ -312,14 +349,26 @@ function TimeRow({
 // Time display row for calculated values
 function TimeDisplayRow({
   label,
+  helper,
+  warning = false,
   value,
   secondaryLabel,
   secondaryValue,
   onUse,
   useLabel,
   showUseButton = false,
+  onEdit,
+  locked = false,
 }: {
   label: string;
+  /** Tapping the row enters a figure of the pilot's own. */
+  onEdit?: () => void;
+  /** The figure is the pilot's own (`categoryState` "pinned"): no recalculation touches it. */
+  locked?: boolean;
+  /** Smaller line under the label — what the other logbook rules call it. */
+  helper?: string;
+  /** The helper is a problem with the figure, not a note about its name. */
+  warning?: boolean;
   value: string;
   secondaryLabel?: string;
   secondaryValue?: string;
@@ -328,9 +377,21 @@ function TimeDisplayRow({
   showUseButton?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between py-3.5 px-4 row-divider">
-      <span className="text-foreground">{label}</span>
-      <div className="flex items-center gap-4">
+    <div
+      className={cn("flex items-center justify-between gap-3 py-3.5 px-4 row-divider", onEdit && "cursor-pointer")}
+      {...(onEdit ? pressableRow(onEdit, `${label}: ${formatTimeShort(value)}`) : {})}
+    >
+      {helper ? (
+        <span className="flex min-w-0 flex-col">
+          <span className="text-foreground">{label}</span>
+          <span className={cn("text-xs", warning ? "text-destructive" : "text-muted-foreground")} role={warning ? "alert" : undefined}>
+            {helper}
+          </span>
+        </span>
+      ) : (
+        <span className="text-foreground">{label}</span>
+      )}
+      <div className="flex shrink-0 items-center gap-4">
         {secondaryLabel && secondaryValue ? (
           <>
             <span className="text-foreground">{formatTimeShort(value)}</span>
@@ -349,12 +410,20 @@ function TimeDisplayRow({
             variant="outline"
             size="sm"
             className="h-9 min-w-11 px-2 text-xs border-primary text-primary bg-transparent"
-            onClick={onUse}
+            onClick={(e) => {
+              // The row behind it opens the picker; this tap means "the block".
+              e.stopPropagation();
+              onUse();
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
           >
             {useLabel || "USE"}
           </Button>
         ) : (
-          <span className="text-foreground">{formatTimeShort(value)}</span>
+          <span className="flex items-center gap-1.5 text-foreground">
+            {locked && <Lock className="h-3.5 w-3.5 text-muted-foreground" aria-label="Entered by hand" />}
+            {formatTimeShort(value)}
+          </span>
         )}
       </div>
     </div>
@@ -442,8 +511,15 @@ export function FlightForm({
   const { personnel } = usePersonnel();
   const { preferences } = usePreferences();
   const clockSeparator = preferences.display.clockSeparator;
+  const authority = preferences.logging.authority;
   const [, setIsSubmitting] = useState(false);
   const [activeTimePicker, setActiveTimePicker] = useState<string | null>(null);
+  // Which clock the picker edits — the row's UTC column or its local one.
+  const [timePickerFrame, setTimePickerFrame] = useState<"utc" | "local">("utc");
+  const openTimePicker = useCallback((field: keyof FlightLog, frame: "utc" | "local") => {
+    setTimePickerFrame(frame);
+    setActiveTimePicker(field);
+  }, []);
   const [signatureOpen, setSignatureOpen] = useState(false);
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
@@ -497,6 +573,10 @@ export function FlightForm({
   const [manualOverrides, setManualOverrides] = useState<
     FlightLog["manualOverrides"]
   >(resolvedFlight?.manualOverrides || cachedFlight?.manualOverrides || {});
+  const manualOverridesRef = useRef(manualOverrides);
+  useLayoutEffect(() => {
+    manualOverridesRef.current = manualOverrides;
+  }, [manualOverrides]);
 
   // Keep the module cache current so the next re-mount can seed synchronously.
   useEffect(() => {
@@ -523,14 +603,18 @@ export function FlightForm({
   const getNumericOffset = (tzString?: string) =>
     tzString ? getAirportTimeInfo(tzString).offset : 0;
 
-  // Replace your old timezone constants with these dynamic ones
+  // The airport's zone when it is known; until then the offset the flight
+  // already carries. Defaulting to 0 while the lookup was pending — every
+  // open on a new install, while the airport table seeds — showed the local
+  // column as a second copy of UTC, and a local edit made then was stored as
+  // if it were UTC.
   const depTimezone = useMemo(
-    () => getNumericOffset(depAirport?.tz),
-    [depAirport]
+    () => (depAirport?.tz ? getNumericOffset(depAirport.tz) : formData.departureTimezone ?? 0),
+    [depAirport, formData.departureTimezone]
   );
   const arrTimezone = useMemo(
-    () => getNumericOffset(arrAirport?.tz),
-    [arrAirport]
+    () => (arrAirport?.tz ? getNumericOffset(arrAirport.tz) : formData.arrivalTimezone ?? 0),
+    [arrAirport, formData.arrivalTimezone]
   );
   // Tracks the flight currently loaded into the form. The instant-swap handling
   // when this changes lives in a useLayoutEffect defined after forceSave (below),
@@ -581,6 +665,25 @@ export function FlightForm({
     if (next.adopted.length === 0) return;
     if (baseline) baselineRef.current = next.baseline;
     setFormData(next.form);
+
+    // The overrides live in their own state, which is what every
+    // recalculation reads — so they have to follow the row too, key by key.
+    // Adopted into the form copy alone, another device's pin stayed "auto"
+    // here, and the next OUT/IN edit recomputed the figure and sent it back
+    // over the pin.
+    if (next.adopted.includes("manualOverrides")) {
+      const mine = manualOverridesRef.current ?? {};
+      const followed = rebaseForm<NonNullable<FlightLog["manualOverrides"]>>({
+        form: mine,
+        baseline: baselineOverridesRef.current ?? mine,
+        previous: previous.manualOverrides ?? {},
+        live: liveFlight.manualOverrides ?? {},
+      });
+      if (followed.adopted.length > 0) {
+        if (baselineOverridesRef.current) baselineOverridesRef.current = followed.baseline;
+        setManualOverrides(followed.form);
+      }
+    }
   }, [liveFlight, flightIdProp]);
 
   useEffect(() => {
@@ -650,27 +753,43 @@ export function FlightForm({
   }, [resolvedFlight?.id, personnel]);
 
   // Calculate derived fields
+  // A stored flight carries its own PF/PM and role; the evidence fallback only
+  // covers a row written without them (`lib/utils/flight-evidence.ts`).
+  const formPilotFlying = formData.pilotFlying ?? inferPilotFlying(formData);
+  const formPilotRole = formData.pilotRole || inferPilotRole(formData);
+  const entryKind = getEntryType(formData);
+  // A session's length when OUT/IN are recorded — offered, never assumed.
+  const sessionSpan = entryKind === "simulator" ? gateSpan(formData.outTime, formData.inTime) : "";
+  const soloWarning = soloConflict({ ...formData, pilotRole: formPilotRole });
+  const soloImpossible = requiresTwoPilots(formData.aircraftType);
+
   const calculatedFields = useMemo(() => {
     // A simulator derives nothing from its OUT/IN: its duration is
     // `simulatedInstrumentTime`, and a block time computed here was written
     // back on every open — four hours of block, and four of SIC from it,
     // for every session the pilot looked at.
-    if (getEntryType({ entryType: formData.entryType, isSimulator: formData.isSimulator }) === "simulator") {
+    // Nor does a positioning sector, which was not flown by this pilot at all:
+    // no night, no takeoff or landing either.
+    const entryType = getEntryType({ entryType: formData.entryType, isSimulator: formData.isSimulator });
+    if (entryType !== "flight") {
+      const positioning = entryType === "positioning";
       return {
         blockTime: "00:00",
         flightTime: "00:00",
-        nightTime: formData.nightTime || "00:00",
+        nightTime: positioning ? "00:00" : formData.nightTime || "00:00",
         dayTime: "00:00",
-        dayTakeoffs: formData.dayTakeoffs ?? 0,
-        dayLandings: formData.dayLandings ?? 0,
-        nightTakeoffs: formData.nightTakeoffs ?? 0,
-        nightLandings: formData.nightLandings ?? 0,
+        dayTakeoffs: positioning ? 0 : formData.dayTakeoffs ?? 0,
+        dayLandings: positioning ? 0 : formData.dayLandings ?? 0,
+        nightTakeoffs: positioning ? 0 : formData.nightTakeoffs ?? 0,
+        nightLandings: positioning ? 0 : formData.nightLandings ?? 0,
         picTime: "00:00",
         sicTime: "00:00",
         picusTime: "00:00",
         dualTime: "00:00",
         instructorTime: "00:00",
         crossCountryTime: "00:00",
+        multiPilotTime: "00:00",
+        soloTime: "00:00",
       };
     }
 
@@ -759,7 +878,7 @@ export function FlightForm({
             airborne.on,
             depAirport,
             arrAirport,
-            formData.pilotFlying ?? true,
+            formPilotFlying,
             formData.outTime
           )
         : {
@@ -771,7 +890,7 @@ export function FlightForm({
 
     const roleTimes = calculateRoleTimes(
       blockTime,
-      formData.pilotRole || "PIC"
+      formPilotRole
     );
 
     // Gate role times by auto-fill preferences
@@ -783,10 +902,31 @@ export function FlightForm({
       instructorTime: af.dualGiven !== false ? roleTimes.instructorTime : "00:00",
     };
 
-    // Auto-fill cross-country time
-    const crossCountryTime = af.xc !== false && formData.departureIcao && formData.arrivalIcao && formData.departureIcao !== formData.arrivalIcao
-      ? blockTime
-      : "00:00";
+    // Auto-fill cross-country and multi-pilot time. `null` when the switch is
+    // off: the form then leaves what the flight has alone.
+    const crossCountryTime = af.xc === false
+      ? null
+      : formData.departureIcao && formData.arrivalIcao && formData.departureIcao !== formData.arrivalIcao
+        ? blockTime
+        : "00:00";
+    const crew = {
+      pilotRole: formPilotRole,
+      aircraftType: formData.aircraftType,
+      picName: formData.picName,
+      sicName: formData.sicName,
+      additionalCrew: formData.additionalCrew,
+    };
+    const multiPilotTime = af.multiPilot === false
+      ? null
+      : isMultiPilotFlight(crew)
+        ? blockTime
+        : "00:00";
+    // Solo is opt-in: a record cannot see passengers (`isSoloFlight`).
+    const soloTime = af.solo !== true
+      ? null
+      : isSoloFlight(crew)
+        ? blockTime
+        : "00:00";
 
     return {
       blockTime,
@@ -796,6 +936,8 @@ export function FlightForm({
       ...toLdg,
       ...gatedRoleTimes,
       crossCountryTime,
+      multiPilotTime,
+      soloTime,
     };
   }, [
     formData.date,
@@ -803,10 +945,14 @@ export function FlightForm({
     formData.offTime,
     formData.onTime,
     formData.inTime,
-    formData.pilotFlying,
-    formData.pilotRole,
+    formPilotFlying,
+    formPilotRole,
     formData.departureIcao,
     formData.arrivalIcao,
+    formData.aircraftType,
+    formData.picName,
+    formData.sicName,
+    formData.additionalCrew,
     formData.nightTime,
     formData.dayTakeoffs,
     formData.dayLandings,
@@ -850,20 +996,22 @@ export function FlightForm({
         if (prev.nightLandings !== calculatedFields.nightLandings) updates.nightLandings = calculatedFields.nightLandings;
       }
 
-      if (!manualOverrides.picTime) {
-        if (prev.picTime !== calculatedFields.picTime) updates.picTime = calculatedFields.picTime;
-      }
-      if (!manualOverrides.sicTime) {
-        if (prev.sicTime !== calculatedFields.sicTime) updates.sicTime = calculatedFields.sicTime;
-      }
-      if (!manualOverrides.picusTime) {
-        if (prev.picusTime !== calculatedFields.picusTime) updates.picusTime = calculatedFields.picusTime;
-      }
-      if (!manualOverrides.dualTime) {
-        if (prev.dualTime !== calculatedFields.dualTime) updates.dualTime = calculatedFields.dualTime;
-      }
-      if (!manualOverrides.instructorTime) {
-        if (prev.instructorTime !== calculatedFields.instructorTime) updates.instructorTime = calculatedFields.instructorTime;
+      // The hour categories, on the rule the store's recalculation uses
+      // (`categoryState`): unset → its auto-fill rule; set to the block
+      // ("USE") → follows the block as OUT/IN move; any other figure → the
+      // pilot's, left alone. A real pin on one role time owns the whole split.
+      const stateOf = (f: BlockFollowingField) => categoryState(prev, f, manualOverrides);
+      const rolePinned = ROLE_TIME_FIELDS.some((f) => stateOf(f) === "pinned");
+      const computed: Partial<Record<BlockFollowingField, string | null>> = {
+        crossCountryTime: calculatedFields.crossCountryTime,
+        multiPilotTime: calculatedFields.multiPilotTime,
+        soloTime: calculatedFields.soloTime,
+      };
+      for (const f of ROLE_TIME_FIELDS) computed[f] = rolePinned ? null : calculatedFields[f];
+      for (const f of BLOCK_FOLLOWING_FIELDS) {
+        const state = stateOf(f);
+        const next = state === "block" ? calculatedFields.blockTime : state === "pinned" ? null : (computed[f] ?? null);
+        if (next !== null && prev[f] !== next) updates[f] = next;
       }
 
       // Nothing changed — return same reference so React skips the re-render
@@ -1069,7 +1217,7 @@ export function FlightForm({
   );
 
   /**
-   * Switch this record between flight and simulator.
+   * Switch this record between flight, simulator and positioning.
    *
    * The two carry their duration in different fields on purpose: a flight's is
    * `blockTime` (which feeds every flight-hour total), a simulator's is
@@ -1078,41 +1226,52 @@ export function FlightForm({
    * mis-typed entry stops inflating flight hours the moment it is corrected.
    */
   const setEntryType = useCallback((type: EntryType) => {
-    setFormData((prev) => {
-      if (getEntryType(prev) === type) return prev;
-      const patch = entryTypePatch(type);
-      if (type === "simulator") {
-        const duration =
-          prev.simulatedInstrumentTime && prev.simulatedInstrumentTime !== "00:00"
-            ? prev.simulatedInstrumentTime
-            : prev.blockTime || "00:00";
-        return {
-          ...prev,
-          ...patch,
-          simulatedInstrumentTime: duration,
-          blockTime: "00:00",
-          flightTime: "00:00",
-          manualOverrides: {
-            ...(prev.manualOverrides ?? {}),
-            simulatedInstrumentTime: true,
-          },
-        };
-      }
+    const prev = formDataRef.current;
+    if (getEntryType(prev) === type) return;
+    const patch = entryTypePatch(type);
+    // The overrides the save and every recalculation read are the
+    // `manualOverrides` STATE, not the copy on the form data. Writing only
+    // the copy discarded the switch's pins: a simulator turned into a flight
+    // kept its 00:00 night pin, the very thing `withoutSimulatorPins` exists
+    // to drop.
+    const pins = (mine: FlightLog["manualOverrides"] | undefined): FlightLog["manualOverrides"] =>
+      type === "simulator"
+        ? { ...(mine ?? {}), simulatedInstrumentTime: true }
+        : withoutSimulatorPins(mine ?? {}, prev.nightTime);
+    let next: Partial<FlightLog>;
+    if (type === "simulator") {
+      const duration =
+        prev.simulatedInstrumentTime && prev.simulatedInstrumentTime !== "00:00"
+          ? prev.simulatedInstrumentTime
+          : prev.blockTime || "00:00";
+      next = {
+        ...prev,
+        ...patch,
+        simulatedInstrumentTime: duration,
+        blockTime: "00:00",
+        flightTime: "00:00",
+      };
+    } else if (type === "positioning") {
+      // Every hour goes: the pilot was carried, not flying. The OUT/IN stay —
+      // they are the duty. A simulator's pins are dropped as for a flight.
+      const carried = { ...prev, ...patch };
+      next = { ...carried, ...positioningPatch(carried) };
+    } else {
+      // To a flight: from a simulator the duration moves across; from
+      // positioning there is none, and the block is worked out from OUT/IN.
       const duration =
         prev.blockTime && prev.blockTime !== "00:00"
           ? prev.blockTime
-          : prev.simulatedInstrumentTime || "00:00";
-      return {
-        ...prev,
-        ...patch,
-        blockTime: duration,
-        simulatedInstrumentTime: "00:00",
-        // A simulator pins its session time and its night time (00:00 — a
-        // sim has no sky). Carried into a FLIGHT those pins hold night at
-        // zero for good, because every recalculation respects a pin.
-        manualOverrides: withoutSimulatorPins(prev.manualOverrides ?? {}, prev.nightTime),
-      };
-    });
+          : getEntryType(prev) === "simulator"
+            ? prev.simulatedInstrumentTime || "00:00"
+            : "00:00";
+      // A simulator pins its session time and its night time (00:00 — a sim
+      // has no sky). Carried into a FLIGHT those pins hold night at zero for
+      // good, because every recalculation respects a pin.
+      next = { ...prev, ...patch, blockTime: duration, simulatedInstrumentTime: "00:00" };
+    }
+    setFormData(next);
+    setManualOverrides(pins);
   }, []);
 
   // Clear a field
@@ -1150,23 +1309,30 @@ export function FlightForm({
   // restored when the form re-mounts — switching out of the logbook section and
   // back, or returning from a picker on mobile. Kept current on every scroll so the
   // latest position is already saved by the time the form unmounts.
+  // Saved WITH the flight it belongs to. Saved bare, the offset was restored
+  // into whichever flight mounted next — open a different flight after
+  // scrolling one and it opened at the Landings section, not at its date.
+  const scrollFlightId = resolvedFlight?.id || flightIdProp || "";
+  const writeScroll = useCallback(() => {
+    if (scrollContainerRef.current && scrollFlightId) {
+      sessionStorage.setItem(
+        SCROLL_STORAGE_KEY,
+        `${scrollFlightId}|${scrollContainerRef.current.scrollTop}`
+      );
+    }
+  }, [scrollFlightId]);
+
   const handleScrollSave = useCallback(() => {
     if (scrollSaveRafRef.current) return;
     scrollSaveRafRef.current = true;
     requestAnimationFrame(() => {
       scrollSaveRafRef.current = false;
-      if (scrollContainerRef.current) {
-        sessionStorage.setItem(SCROLL_STORAGE_KEY, String(scrollContainerRef.current.scrollTop));
-      }
+      writeScroll();
     });
-  }, []);
+  }, [writeScroll]);
 
   // Save scroll position immediately (used right before navigating to a picker).
-  const saveScrollPosition = useCallback(() => {
-    if (scrollContainerRef.current) {
-      sessionStorage.setItem(SCROLL_STORAGE_KEY, String(scrollContainerRef.current.scrollTop));
-    }
-  }, []);
+  const saveScrollPosition = writeScroll;
 
   // Restore the saved scroll position synchronously, BEFORE the browser paints,
   // so there is no flash at the top before jumping to the saved offset.
@@ -1184,7 +1350,9 @@ export function FlightForm({
     didRestoreScrollRef.current = true;
     const saved = sessionStorage.getItem(SCROLL_STORAGE_KEY);
     if (!saved) return;
-    const scrollVal = Number(saved);
+    const [savedId, savedTop] = saved.split("|");
+    if (savedId !== scrollFlightId) return;
+    const scrollVal = Number(savedTop);
     if (Number.isFinite(scrollVal) && scrollVal > 0) {
       el.scrollTop = scrollVal;
     }
@@ -1192,6 +1360,17 @@ export function FlightForm({
     // is only read to confirm content is backed by data before restoring.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveFlight]);
+
+  // A different flight under a mounted form (desktop keeps the form up while
+  // the list selection moves) starts at its top, not at the depth the last
+  // one was read to. The FIRST id is left to the restore above.
+  const shownFlightIdRef = useRef(scrollFlightId);
+  useLayoutEffect(() => {
+    if (shownFlightIdRef.current === scrollFlightId) return;
+    const switched = shownFlightIdRef.current !== "";
+    shownFlightIdRef.current = scrollFlightId;
+    if (switched && scrollContainerRef.current) scrollContainerRef.current.scrollTop = 0;
+  }, [scrollFlightId]);
 
   // Force-save current form data before navigating away (bypasses debounce)
   // Skips save if nothing changed from last saved state to avoid sync queue bloat
@@ -1335,7 +1514,7 @@ export function FlightForm({
     router.push(`/aircraft?${params.toString()}`);
   };
 
-  const openCrewPicker = async (field: "picId" | "sicId") => {
+  const openCrewPicker = async (field: "picId" | "sicId" | "additionalCrew") => {
     if (!formData.id) return;
     saveScrollPosition();
     await forceSave();
@@ -1360,10 +1539,14 @@ export function FlightForm({
     (time: string) => {
       if (activeTimePicker) {
         updateField(activeTimePicker as keyof FlightLog, time);
+        // An hour category entered by hand is the pilot's. Equal to the block
+        // it simply follows the block (as USE does); any other figure is a
+        // pin no recalculation touches (`categoryState`).
+        if (isBlockFollowingField(activeTimePicker)) markManualOverride(activeTimePicker, true);
         setActiveTimePicker(null);
       }
     },
-    [activeTimePicker, updateField]
+    [activeTimePicker, updateField, markManualOverride]
   );
 
   const setNowTime = useCallback(
@@ -1375,19 +1558,7 @@ export function FlightForm({
   );
 
 
-  // Additional crew management
-  const addAdditionalCrew = useCallback(() => {
-    const newCrew: AdditionalCrew = {
-      id: crypto.randomUUID(),
-      name: "",
-      role: "Observer",
-    };
-    setFormData((prev) => ({
-      ...prev,
-      additionalCrew: [...(prev.additionalCrew || []), newCrew],
-    }));
-  }, []);
-
+  // Additional crew management (members are added through the crew picker)
   const updateAdditionalCrew = useCallback(
     (id: string, updates: Partial<AdditionalCrew>) => {
       setFormData((prev) => ({
@@ -1736,7 +1907,7 @@ export function FlightForm({
               utcValue={formData.reportTime || ""}
               derivedValue={rosteredReport}
               timezoneOffset={depTimezone}
-              onTap={() => setActiveTimePicker("reportTime")}
+              onTap={(frame) => openTimePicker("reportTime", frame)}
               onNow={() => setNowTime("reportTime")}
               clockSeparator={clockSeparator}
             />
@@ -1747,7 +1918,7 @@ export function FlightForm({
               label="Scheduled Out"
               utcValue={formData.scheduledOut || ""}
               timezoneOffset={depTimezone}
-              onTap={() => setActiveTimePicker("scheduledOut")}
+              onTap={(frame) => openTimePicker("scheduledOut", frame)}
               onNow={() => setNowTime("scheduledOut")}
             clockSeparator={clockSeparator}
             />
@@ -1758,7 +1929,7 @@ export function FlightForm({
               label="Scheduled In"
               utcValue={formData.scheduledIn || ""}
               timezoneOffset={arrTimezone}
-              onTap={() => setActiveTimePicker("scheduledIn")}
+              onTap={(frame) => openTimePicker("scheduledIn", frame)}
               onNow={() => setNowTime("scheduledIn")}
             clockSeparator={clockSeparator}
             />
@@ -1769,7 +1940,7 @@ export function FlightForm({
               label="Out"
               utcValue={formData.outTime || ""}
               timezoneOffset={depTimezone}
-              onTap={() => setActiveTimePicker("outTime")}
+              onTap={(frame) => openTimePicker("outTime", frame)}
               onNow={() => setNowTime("outTime")}
             clockSeparator={clockSeparator}
             />
@@ -1780,7 +1951,7 @@ export function FlightForm({
               label="Off"
               utcValue={formData.offTime || ""}
               timezoneOffset={depTimezone}
-              onTap={() => setActiveTimePicker("offTime")}
+              onTap={(frame) => openTimePicker("offTime", frame)}
               onNow={() => setNowTime("offTime")}
             clockSeparator={clockSeparator}
             />
@@ -1791,7 +1962,7 @@ export function FlightForm({
               label="On"
               utcValue={formData.onTime || ""}
               timezoneOffset={arrTimezone}
-              onTap={() => setActiveTimePicker("onTime")}
+              onTap={(frame) => openTimePicker("onTime", frame)}
               onNow={() => setNowTime("onTime")}
             clockSeparator={clockSeparator}
             />
@@ -1802,7 +1973,7 @@ export function FlightForm({
               label="In"
               utcValue={formData.inTime || ""}
               timezoneOffset={arrTimezone}
-              onTap={() => setActiveTimePicker("inTime")}
+              onTap={(frame) => openTimePicker("inTime", frame)}
               onNow={() => setNowTime("inTime")}
             clockSeparator={clockSeparator}
             />
@@ -1861,11 +2032,57 @@ export function FlightForm({
             />
           </SwipeableRow>
 
-          <div className="flex items-center justify-center py-3 row-divider">
+          {/* Crew beyond the two seats — a relief pilot on an augmented crew,
+              a check pilot, an instructor. The role is the native select laid
+              over the role text, as the Pilot Role row does it. */}
+          {(formData.additionalCrew ?? []).map((member, i) => (
+            <div
+              key={member.id ?? `${member.name}-${i}`}
+              className="flex items-center justify-between gap-2 py-1.5 pl-4 pr-2 row-divider"
+            >
+              <span className="flex min-w-0 items-center gap-2 text-foreground">
+                <User className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="truncate">{member.name || "Unnamed"}</span>
+              </span>
+              <span className="flex shrink-0 items-center">
+                <span className="relative flex h-9 items-center gap-1 px-2 text-muted-foreground focus-within:outline-2 focus-within:outline-ring">
+                  {additionalCrewRoleLabel(member.role)}
+                  <ChevronDown className="h-4 w-4" aria-hidden />
+                  <select
+                    aria-label={`Role of ${member.name || "crew member"}`}
+                    value={member.role}
+                    onChange={(e) =>
+                      member.id &&
+                      updateAdditionalCrew(member.id, { role: e.target.value as AdditionalCrew["role"] })
+                    }
+                    className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
+                  >
+                    {ADDITIONAL_CREW_ROLES.map((r) => (
+                      <option key={r.value} value={r.value}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 text-muted-foreground"
+                  aria-label={`Remove ${member.name || "crew member"}`}
+                  onClick={() => member.id && removeAdditionalCrew(member.id)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </span>
+            </div>
+          ))}
+
+          <div className="flex items-center justify-center py-1.5 row-divider">
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 px-3 text-xs text-primary"
+              className="h-9 px-3 text-xs text-primary"
+              onClick={() => openCrewPicker("additionalCrew")}
             >
               <Plus className="h-3.5 w-3.5 mr-1" />
               Add Crew
@@ -1881,140 +2098,111 @@ export function FlightForm({
             </h2>
           </div>
 
-          <TimeDisplayRow
-            label="Total Time"
-            value={formData.blockTime || "00:00"}
-          />
-
-          <TimeDisplayRow
-            label="Night"
-            value={formData.nightTime || calculatedFields.nightTime || "00:00"}
-            secondaryLabel="Day"
-            secondaryValue={
-              formData.dayTime || calculatedFields.dayTime || "00:00"
-            }
-          />
-
-          <SwipeableRow
-            onClear={() => {
-              updateField("picusTime", "00:00");
-              markManualOverride("picusTime", false);
-            }}
-          >
+          {entryKind === "positioning" ? (
+            // Carried, not flown: the time on board is duty (the FDP pipeline
+            // reads its OUT/IN) and is held in no hour field.
             <TimeDisplayRow
-              label="P1u/s"
-              value={formData.picusTime || "00:00"}
-              showUseButton={
-                formData.picusTime === "00:00" || !formData.picusTime
-              }
-              useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
-              onUse={() => {
-                updateField("picusTime", formData.blockTime || "00:00");
-              }}
+              label="Positioning"
+              helper="Counts as duty, not as flight time"
+              value={gateSpan(formData.outTime, formData.inTime) || "00:00"}
             />
-          </SwipeableRow>
-
-          <SwipeableRow
-            onClear={() => {
-              updateField("sicTime", "00:00");
-              markManualOverride("sicTime", false);
-            }}
-          >
-            <TimeDisplayRow
-              label="SIC"
-              value={formData.sicTime || "00:00"}
-              showUseButton={formData.sicTime === "00:00" || !formData.sicTime}
-              useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
-              onUse={() => {
-                updateField("sicTime", formData.blockTime || "00:00");
+          ) : entryKind === "simulator" ? (
+            // A session is an EVENT: its length lives in the one field a
+            // flight uses for hood time, told apart by the entry type.
+            <SwipeableRow
+              onClear={() => {
+                updateField("simulatedInstrumentTime", "00:00");
+                markManualOverride("simulatedInstrumentTime", false);
               }}
-            />
-          </SwipeableRow>
+            >
+              <TimeDisplayRow
+                label="Session"
+                helper="Training device — not flight time"
+                value={formData.simulatedInstrumentTime || "00:00"}
+                showUseButton={
+                  (formData.simulatedInstrumentTime || "00:00") === "00:00" && !!sessionSpan
+                }
+                useLabel={`USE ${sessionSpan}`}
+                onUse={() => {
+                  updateField("simulatedInstrumentTime", sessionSpan);
+                  markManualOverride("simulatedInstrumentTime", true);
+                }}
+                onEdit={() => openTimePicker("simulatedInstrumentTime", "utc")}
+              />
+            </SwipeableRow>
+          ) : (
+            <>
+              <TimeDisplayRow
+                label="Total Time"
+                value={formData.blockTime || "00:00"}
+              />
 
-          <SwipeableRow
-            onClear={() => {
-              updateField("crossCountryTime", "00:00");
-              markManualOverride("crossCountryTime", false);
-            }}
-          >
-            <TimeDisplayRow
-              label="XC"
-              value={formData.crossCountryTime || "00:00"}
-              showUseButton={
-                formData.crossCountryTime === "00:00" ||
-                !formData.crossCountryTime
-              }
-              useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
-              onUse={() => {
-                updateField("crossCountryTime", formData.blockTime || "00:00");
-              }}
-            />
-          </SwipeableRow>
+              <TimeDisplayRow
+                label="Night"
+                value={formData.nightTime || calculatedFields.nightTime || "00:00"}
+                secondaryLabel="Day"
+                secondaryValue={
+                  formData.dayTime || calculatedFields.dayTime || "00:00"
+                }
+              />
 
-          <SwipeableRow
-            onClear={() => {
-              updateField("actualInstrumentTime", "00:00");
-              markManualOverride("actualInstrumentTime", false);
-            }}
-          >
-            <TimeDisplayRow
-              label="Actual Inst"
-              value={formData.actualInstrumentTime || "00:00"}
-              showUseButton={
-                formData.actualInstrumentTime === "00:00" ||
-                !formData.actualInstrumentTime
-              }
-              useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
-              onUse={() => {
-                updateField(
-                  "actualInstrumentTime",
-                  formData.blockTime || "00:00"
+              {/* One row per hour category, named by the pilot's logbook
+                  rules (Settings › Logging) with the other authorities' names
+                  beneath. Night is the row above; a category the rules do not
+                  keep is offered only once it holds time, so nothing logged
+                  is hidden. */}
+              {TIME_CATEGORIES.filter(
+                (c) => c.field !== "nightTime" && showsCategory(c, authority, formData[c.field])
+              ).map((category) => {
+                const { field } = category;
+                const { label, helper } = categoryLabel(category, authority);
+                const value = formData[field] || "00:00";
+                // Solo on a two-pilot type, or with another pilot aboard, is
+                // a mistake in the record. Said, not silently corrected.
+                const warning = field === "soloTime" ? soloWarning : null;
+                // Nothing to offer while there is no block: a column of
+                // "USE 0:00" down an unflown sector offered to copy a zero.
+                const offerUse =
+                  value === "00:00" &&
+                  (formData.blockTime || "00:00") !== "00:00" &&
+                  !(field === "soloTime" && soloImpossible);
+                return (
+                  <SwipeableRow
+                    key={field}
+                    onClear={() => {
+                      updateField(field, "00:00");
+                      markManualOverride(field, false);
+                    }}
+                  >
+                    <TimeDisplayRow
+                      label={label}
+                      helper={warning ?? helper}
+                      warning={!!warning}
+                      value={value}
+                      showUseButton={offerUse}
+                      useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
+                      onUse={() => {
+                        // "Use the block" — not a pin. The override with a
+                        // figure EQUAL to the block is how that is stored, so
+                        // the category follows the block when OUT/IN move
+                        // and reads the same way when the flight is reopened.
+                        updateField(field, formData.blockTime || "00:00");
+                        markManualOverride(field, true);
+                      }}
+                      onEdit={() => openTimePicker(field, "utc")}
+                      locked={isBlockFollowingField(field) && categoryState(formData, field, manualOverrides) === "pinned"}
+                    />
+                  </SwipeableRow>
                 );
-              }}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow
-            onClear={() => {
-              updateField("ifrTime", "00:00");
-              markManualOverride("ifrTime", false);
-            }}
-          >
-            <TimeDisplayRow
-              label="IFR"
-              value={formData.ifrTime || "00:00"}
-              showUseButton={formData.ifrTime === "00:00" || !formData.ifrTime}
-              useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
-              onUse={() => {
-                updateField("ifrTime", formData.blockTime || "00:00");
-              }}
-            />
-          </SwipeableRow>
-
-          <SwipeableRow
-            onClear={() => {
-              updateField("simulatedInstrumentTime", "00:00");
-              markManualOverride("simulatedInstrumentTime", false);
-            }}
-          >
-            <TimeDisplayRow
-              label="Simulator"
-              value={formData.simulatedInstrumentTime || "00:00"}
-              showUseButton={
-                formData.simulatedInstrumentTime === "00:00" ||
-                !formData.simulatedInstrumentTime
-              }
-              useLabel={`USE ${formatTimeShort(formData.blockTime || "00:00")}`}
-              onUse={() => {
-                updateField(
-                  "simulatedInstrumentTime",
-                  formData.blockTime || "00:00"
-                );
-              }}
-            />
-          </SwipeableRow>
+              })}
+            </>
+          )}
         </div>
 
+        {/* A positioning sector was not flown by this pilot: no role, no
+            landings, no approaches to record. */}
+        {entryKind !== "positioning" && (
+        <>
         {/* DUTY Section */}
         <div className="rounded-xl bg-card border border-border overflow-hidden">
           <div className="px-4 py-2 bg-muted/30">
@@ -2025,7 +2213,7 @@ export function FlightForm({
 
           <ToggleRow
             label="Pilot Flying"
-            checked={formData.pilotFlying ?? true}
+            checked={formPilotFlying}
             onCheckedChange={(checked) => {
               updateField("pilotFlying", checked);
               // The role follows who had the controls: a first officer's
@@ -2033,7 +2221,7 @@ export function FlightForm({
               // PICUS falls back to SIC when they were monitoring. A captain
               // stays PIC either way — see `reconcilePilotRole`.
               const nextRole = reconcilePilotRole({
-                currentRole: formData.pilotRole || "PIC",
+                currentRole: formPilotRole,
                 pilotFlying: checked,
                 nonPicPfRole: nonPicPfRoleOf(
                   withLoggingPreferences(pickSelfCard(personnel), preferences.logging),
@@ -2052,12 +2240,12 @@ export function FlightForm({
           <div className="relative flex items-center justify-between py-3.5 px-4 row-divider focus-within:outline-2 focus-within:outline-ring focus-within:-outline-offset-2">
             <span className="text-foreground">Pilot Role</span>
             <span className="flex items-center gap-1 text-foreground">
-              {formData.pilotRole || "PIC"}
+              {roleLabel(formPilotRole, authority)}
               <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden />
             </span>
             <select
               aria-label="Pilot role"
-              value={formData.pilotRole || "PIC"}
+              value={formPilotRole}
               onChange={(e) =>
                 updateField(
                   "pilotRole",
@@ -2066,12 +2254,14 @@ export function FlightForm({
               }
               className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
             >
-              <option value="PIC">PIC</option>
-              <option value="SIC">SIC</option>
-              <option value="PICUS">PICUS</option>
-              <option value="Dual">Dual</option>
-              <option value="Instructor">Instructor</option>
-              <option value="Examiner">Examiner</option>
+              {/* Named by the logbook rules. "Examiner" used to be offered
+                  too; it is not a role the record can hold, so choosing it
+                  filed the flight's hours under nothing. */}
+              {PILOT_ROLES.map((role) => (
+                <option key={role} value={role}>
+                  {roleLabel(role, authority)}
+                </option>
+              ))}
             </select>
           </div>
         </div>
@@ -2212,6 +2402,9 @@ export function FlightForm({
           />
         </div>
 
+        </>
+        )}
+
         {/* REMARKS Section */}
         <div className="rounded-xl bg-card border border-border overflow-hidden">
           <div className="px-4 py-2 bg-muted/30">
@@ -2347,11 +2540,14 @@ export function FlightForm({
       {/* Time Picker Modal */}
       {activeTimePicker && (
         <TimePicker
+          key={`${activeTimePicker}:${timePickerFrame}`}
           isOpen={!!activeTimePicker}
           initialTime={formData[activeTimePicker as keyof FlightLog] as string}
           onSelect={handleTimeSelect}
           onClose={() => setActiveTimePicker(null)}
           timezoneOffset={getTimePickerTimezone()}
+          duration={isBlockFollowingField(activeTimePicker)}
+          frame={timePickerFrame}
         />
       )}
 

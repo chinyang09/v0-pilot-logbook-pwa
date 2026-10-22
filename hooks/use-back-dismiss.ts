@@ -148,7 +148,7 @@ export function useBackDismiss(active: boolean, onDismiss: () => void) {
     // just reclaimed a pending release, or the stack grows an entry per remount.
     if (!alreadyOwned) {
       window.history.pushState(
-        { ...window.history.state, __overlay: true },
+        { ...window.history.state, __overlay: true, __overlayId: markerId },
         "",
         window.location.href,
       )
@@ -158,6 +158,11 @@ export function useBackDismiss(active: boolean, onDismiss: () => void) {
     pushMarker(markerId)
 
     const onPop = () => {
+      // Every listener hears every popstate. If the entry now current is
+      // still OURS, the pop took an overlay opened ON TOP of this one — the
+      // date picker over a form sheet — and this one stays. Without the check
+      // saving a date closed the form underneath it as well.
+      if (window.history.state?.__overlayId === markerId) return
       // Our entry is gone — either the user swiped back or `dismiss()` popped
       // it. Both mean the same thing from here.
       ownsEntryRef.current = false

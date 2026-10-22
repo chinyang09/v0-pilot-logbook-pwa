@@ -8,6 +8,10 @@ import {
   type ScheduleEntry,
 } from "@/lib/db"
 import { useDBReady, CACHE_KEYS, checkDBReady } from "./use-db"
+import { useHeldWhileHidden } from "@/hooks/use-page-active"
+
+/** One empty list, so "no data yet" is the same reference every render. */
+const NONE: never[] = []
 
 /**
  * Fetch schedule entries from IndexedDB
@@ -47,8 +51,11 @@ export function useScheduleEntries() {
     return mutateEntries()
   }, [mutateEntries])
 
+  // Held while this page is behind another tab — see `useHeldWhileHidden`.
+  const live = useHeldWhileHidden(data)
+
   return {
-    scheduleEntries: data ?? [],
+    scheduleEntries: live ?? NONE,
     isLoading,
     error,
     refresh,
@@ -94,7 +101,7 @@ export function useScheduleEntriesByDateRange(startDate: string, endDate: string
   }, [mutateEntries])
 
   return {
-    scheduleEntries: data ?? [],
+    scheduleEntries: data ?? NONE,
     isLoading,
     error,
     refresh,

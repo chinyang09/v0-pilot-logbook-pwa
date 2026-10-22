@@ -66,7 +66,7 @@ vi.mock("../shared/airport-enricher", () => ({
 }));
 
 import { extractPdfRows } from "../extractors/pdf.extractor";
-import { parseScheduleCSV } from "../schedule-parser";
+import { parseScheduleCSV, readReportSubject } from "../schedule-parser";
 import type { NormalizedDocument } from "../types";
 
 async function loadReport(): Promise<NormalizedDocument> {
@@ -112,6 +112,18 @@ describe("schedule PDF — October 2026 report", () => {
       ["2026-10-13", "01:30", "07:30"],
       ["2026-10-14", "05:15", "11:15"],
     ]);
+  });
+
+  it("names its subject before anything is parsed", async () => {
+    // What a new account is asked to confirm as "This is me".
+    expect(readReportSubject(await loadReport())).toEqual({
+      crewId: "9766",
+      name: "Lim Chin Yang",
+      base: "SIN",
+      role: "FO",
+      aircraftType: "318",
+    });
+    expect(readReportSubject({ format: "csv", reportType: "schedule", rows: [], rawText: "" })).toBeNull();
   });
 
   it("reads a '¹' on the departure as the next day", async () => {

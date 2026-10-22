@@ -202,7 +202,9 @@ export async function updateEntity<T extends SyncableEntity>(
   table: Table<T>,
   tableName: SyncableTableName,
   id: string,
-  updates: Partial<T>
+  updates: Partial<T>,
+  /** Fields that follow from this edit on THIS row, judged against the row as it was. */
+  follow?: (existing: T, updates: Partial<T>) => Partial<T>
 ): Promise<T | null> {
   const existing = await table.get(id)
   if (!existing) return null
@@ -210,6 +212,7 @@ export async function updateEntity<T extends SyncableEntity>(
   const deviceId = await getDeviceId()
   const updatedEntity = {
     ...existing,
+    ...(follow ? follow(existing, updates) : {}),
     ...updates,
     updatedAt: Date.now(),
     deviceId,

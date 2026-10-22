@@ -109,7 +109,8 @@ export function normalizeAircraftFromServer(serverAircraft: Aircraft): Aircraft 
     typeDesignator: serverAircraft.typeDesignator || "",
     model: serverAircraft.model || "",
     category: serverAircraft.category || "",
-    engineType: serverAircraft.engineType || "SEP",
+    // Left unknown when the record does not say — see AIRCRAFT_FIELDS.
+    engineType: serverAircraft.engineType ?? undefined,
     isComplex: serverAircraft.isComplex || false,
     isHighPerformance: serverAircraft.isHighPerformance || false,
     createdAt: serverAircraft.createdAt || Date.now(),

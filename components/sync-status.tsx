@@ -74,20 +74,42 @@ export function SyncStatus({ className }: { className?: string }) {
           ? "Syncing"
           : status === "offline"
             ? "Offline"
-            : pendingCount > 0
-              ? `Sync now, ${pendingCount} pending`
-              : "Sync now"
+            : status === "error"
+              ? "Last sync failed, tap to retry"
+              : pendingCount > 0
+                ? `Sync now, ${pendingCount} pending`
+                : "Sync now"
       }
-      title={status === "offline" ? "Offline" : status === "syncing" ? "Syncing…" : "Tap to sync"}
+      title={
+        status === "offline"
+          ? "Offline"
+          : status === "syncing"
+            ? "Syncing…"
+            : status === "error"
+              ? "Last sync failed — tap to retry"
+              : "Tap to sync"
+      }
       className={cn(
         "relative flex items-center justify-center p-1.5 rounded-full transition-colors",
         status === "online" && "text-[var(--status-synced)]",
+        // Not the offline red: the device is connected, the server did not
+        // take the last cycle. Amber, with its own mark, so it is not colour
+        // alone that says so.
+        status === "error" && "text-[var(--status-pending)]",
         status === "offline" && "text-[var(--status-offline)] cursor-not-allowed",
         status === "syncing" && "text-[var(--status-pending)] cursor-wait",
         className,
       )}
     >
       {status === "online" && <Cloud className="h-5 w-5" />}
+      {status === "error" && (
+        <span className="relative flex">
+          <Cloud className="h-5 w-5" />
+          <span className="absolute inset-0 flex items-center justify-center pt-0.5 text-[10px] font-bold leading-none" aria-hidden>
+            !
+          </span>
+        </span>
+      )}
       {status === "offline" && <CloudOff className="h-5 w-5" />}
       {status === "syncing" && <RefreshCw className="h-5 w-5 animate-spin" />}
       {pendingCount > 0 && (

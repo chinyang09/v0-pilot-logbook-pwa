@@ -14,6 +14,10 @@ interface DatePickerProps {
   onSelect?: (value: string) => void
   onClose: () => void
   label?: string
+  /** Years offered before the current one (an old flight's own year is always offered). */
+  pastYears?: number
+  /** Years offered after the current one — an expiry date needs more than a flight. */
+  futureYears?: number
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -40,17 +44,24 @@ export function DatePicker({
   onSelect,
   onClose,
   label,
+  pastYears = 5,
+  futureYears = 4,
 }: DatePickerProps) {
   const [day, setDay] = useState(1)
   const [month, setMonth] = useState(0)
   const [year, setYear] = useState(new Date().getFullYear())
 
-  // Generate years array (current year - 5 to current year + 4)
+  // The wheel spans the window around THIS year AND the year being edited. A
+  // fixed five-back/four-ahead window had no row for a migrated 2011 flight's
+  // year (the wheel could not show the date it was opened on) or for a
+  // passport expiring in 2034.
   const currentYear = new Date().getFullYear()
-  const years = useMemo(
-    () => Array.from({ length: 10 }, (_, i) => currentYear - 5 + i),
-    [currentYear]
-  )
+  const initialYear = Number.parseInt(initialDate.slice(0, 4), 10)
+  const years = useMemo(() => {
+    const from = Math.min(currentYear, Number.isNaN(initialYear) ? currentYear : initialYear) - pastYears
+    const to = Math.max(currentYear, Number.isNaN(initialYear) ? currentYear : initialYear) + futureYears
+    return Array.from({ length: to - from + 1 }, (_, i) => from + i)
+  }, [currentYear, initialYear, pastYears, futureYears])
 
   const yearOptions = useMemo(
     () => years.map((y) => ({ value: y, label: y.toString() })),

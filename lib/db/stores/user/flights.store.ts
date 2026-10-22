@@ -21,7 +21,9 @@ import { DELETED_RETENTION_MS, isWithinRetention } from "@/lib/utils/retention"
 import { sortFlights } from "@/lib/utils/flight-sort"
 import { isSimulatorEntry, simulatorRepairPatch } from "@/lib/utils/entry-type"
 import { timezoneRepairPatch } from "@/lib/utils/flight-timezone"
-import { flightTimeRepairPatch } from "@/lib/utils/flight-calculations"
+import { blockFollowersPatch, flightTimeRepairPatch } from "@/lib/utils/flight-calculations"
+import { inferMultiPilotTime, inferPilotFlying, inferPilotRole } from "@/lib/utils/flight-evidence"
+import { withAdditionalCrew } from "@/lib/utils/crew-complement"
 import { getAirportByIcao, getAirportTimeInfo, isAirportTableSeeded } from "../reference/airports.store"
 
 /**
@@ -46,7 +48,10 @@ export async function addFlight(flight: FlightLogCreate): Promise<FlightLog> {
  * Update an existing flight
  */
 export async function updateFlight(id: string, updates: Partial<FlightLog>): Promise<FlightLog | null> {
-  return updateEntity<FlightLog>(userDb.flights, "flights", id, updates)
+  // An hour category the pilot set to the block ("USE") moves with it, from
+  // every writer — an import replaces OOOI and the block as company-owned
+  // fields, and a category left at the OLD block would then read as a pin.
+  return updateEntity<FlightLog>(userDb.flights, "flights", id, updates, blockFollowersPatch)
 }
 
 /**
@@ -211,6 +216,29 @@ export async function getFlightById(id: string): Promise<FlightLog | undefined> 
 }
 
 /**
+ * Put a crew member on a flight from the crew picker: into the PIC or SIC seat
+ * (`picId`/`sicId`), or appended to the additional crew. "Self" is how the
+ * pilot's own card is written into a seat. One function for both ways a
+ * picker ends — choosing an existing card, or creating one there and then.
+ */
+export async function assignCrewToFlight(
+  flightId: string,
+  field: string,
+  crew: { id: string; name: string; isMe?: boolean }
+): Promise<void> {
+  const name = crew.isMe ? "Self" : crew.name
+  if (field === "picId" || field === "pic") {
+    await updateFlight(flightId, { picId: crew.id, picName: name })
+  } else if (field === "sicId" || field === "sic") {
+    await updateFlight(flightId, { sicId: crew.id, sicName: name })
+  } else if (field === "additionalCrew") {
+    const flight = await getFlightById(flightId)
+    const additionalCrew = flight ? withAdditionalCrew(flight, { id: crew.id, name }) : null
+    if (additionalCrew) await updateFlight(flightId, { additionalCrew })
+  }
+}
+
+/**
  * Get all pending flights
  */
 export async function getPendingFlights(): Promise<FlightLog[]> {
@@ -258,8 +286,10 @@ export function normalizeFlightFromServer(serverFlight: FlightLog): FlightLog {
     sicId: serverFlight.sicId || "",
     sicName: serverFlight.sicName || "",
     additionalCrew: serverFlight.additionalCrew || [],
-    pilotFlying: serverFlight.pilotFlying ?? true,
-    pilotRole: serverFlight.pilotRole || "PIC",
+    // A gap is filled from the record's own figures — the same rule the server
+    // applies (`lib/utils/flight-evidence.ts`) — never a constant claim.
+    pilotFlying: serverFlight.pilotFlying ?? inferPilotFlying(serverFlight),
+    pilotRole: serverFlight.pilotRole || inferPilotRole(serverFlight),
     picTime: serverFlight.picTime || "00:00",
     sicTime: serverFlight.sicTime || "00:00",
     picusTime: serverFlight.picusTime || "00:00",
@@ -277,6 +307,8 @@ export function normalizeFlightFromServer(serverFlight: FlightLog): FlightLog {
     actualInstrumentTime: serverFlight.actualInstrumentTime || "00:00",
     simulatedInstrumentTime: serverFlight.simulatedInstrumentTime || "00:00",
     crossCountryTime: serverFlight.crossCountryTime || "00:00",
+    multiPilotTime: serverFlight.multiPilotTime || inferMultiPilotTime(serverFlight),
+    soloTime: serverFlight.soloTime || "00:00",
     approaches: serverFlight.approaches || [],
     holds: serverFlight.holds || 0,
     ipcIcc: serverFlight.ipcIcc || false,

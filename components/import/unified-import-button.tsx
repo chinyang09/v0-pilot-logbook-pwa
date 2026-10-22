@@ -35,11 +35,13 @@ import {
 import { LogtenReviewDialog } from "./logten-review-dialog";
 import {
   parseScheduleCSV,
+  readReportSubject,
   type PlannedImport,
 } from "@/lib/utils/parsers/schedule-parser";
 import { parseLogbookV2 } from "@/lib/utils/parsers/logbook-parser-v2";
 import {
   crossHydrate,
+  mergeImportPersonnel,
   logbookSectorToParsedSector,
 } from "@/lib/utils/parsers/cross-hydrate";
 import { reconcileRoster } from "@/lib/utils/roster/reconciler";
@@ -59,6 +61,7 @@ import {
 import {
   userDb,
   isLiveFlight,
+  addPersonnel,
   getCurrentUserPersonnel,
   getLoggingProfile,
   getUserPreferences,
@@ -70,6 +73,7 @@ import type { FlightLog } from "@/types/entities/flight.types";
 import type { NormalizedDocument } from "@/lib/utils/parsers/types";
 import { ImportReviewModalV2 } from "./import-review-modal-v2";
 import { ImportStatusDialog, type ImportStage } from "./import-status-dialog";
+import type { Personnel } from "@/types/entities/crew.types";
 import { nonPicPfRoleOf } from "@/lib/utils/roster/pilot-role";
 
 interface Props {
@@ -82,6 +86,16 @@ interface Props {
 /** "1 flight", "2 flights" — the summary line read "1 sim sessions". */
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
+type ReportSubject = PlannedImport["crewMember"];
+
+/** The seat a report's rank states — nothing for a rank it does not name. */
+function seatFromRank(rank: string): Pick<Personnel, "roles" | "defaultPIC" | "defaultSIC"> {
+  const r = rank.toUpperCase();
+  if (r === "CPT" || r === "CP" || r === "CA") return { roles: ["PIC"], defaultPIC: true };
+  if (r === "FO" || r === "SFO" || r === "SO") return { roles: ["SIC"], defaultSIC: true };
+  return {};
+}
+
 export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [progress, setProgress] = useState<ImportStage | null>(null);
@@ -91,6 +105,10 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
   const [summary, setSummary] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // An account with no "This is me" card, importing a report that names its
+  // pilot: asked, rather than refused. The files wait here for the answer.
+  const [subject, setSubject] = useState<ReportSubject | null>(null);
+  const pendingFilesRef = useRef<File[]>([]);
   const simSessionsRef = useRef<
     NonNullable<
       Parameters<typeof executeRosterImport>[1]
@@ -119,6 +137,8 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
     setLogtenPlan(null);
     setShowLogtenReview(false);
     logtenDocsRef.current = [];
+    setSubject(null);
+    pendingFilesRef.current = [];
     setBusy(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -253,6 +273,34 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         // Loaded alongside the extraction, and awaited before any parse.
         const airportsReady = ensureAirportDatabase();
         const docs = await extractDocuments(files);
+
+        // Every sector is logged FROM someone's seat, so the import needs the
+        // pilot's own crew card. A new account has none — and importing is the
+        // first thing a new pilot does — so it used to refuse outright. The
+        // schedule report names its subject; ask whether that is them.
+        // Asked as soon as the files are read — before the airport seed, which
+        // takes a fresh device seconds and is not needed to answer it.
+        const ecrewDocs = docs.filter(
+          (d) => d.reportType === "schedule" || d.reportType === "logbook"
+        );
+        if (
+          ecrewDocs.length > 0 &&
+          ecrewDocs.length === docs.length &&
+          !(await getCurrentUserPersonnel())
+        ) {
+          const schedule = ecrewDocs.find((d) => d.reportType === "schedule");
+          const named = schedule ? readReportSubject(schedule) : null;
+          if (!named) {
+            throw new Error(
+              "This report doesn't say whose it is. Import your schedule report — it names you — or add yourself under Crew with “This is me” on."
+            );
+          }
+          pendingFilesRef.current = files;
+          setSubject(named);
+          setProgress(null);
+          return;
+        }
+
         // A first seed on a fresh device takes seconds; say so rather than
         // leave the bar frozen at 5%. Fires only while a seed is running.
         const stopSeedProgress = onAirportSeedProgress((fraction) =>
@@ -378,7 +426,14 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             stage: "Merging",
             detail: "Hydrating logbook actuals into schedule rows...",
           });
-          const merged = crossHydrate(logbookPlan, schedulePlan);
+          const hydrated = crossHydrate(logbookPlan, schedulePlan);
+          // One card per person — see `mergeImportPersonnel`.
+          const crew = mergeImportPersonnel(
+            hydrated.sectors,
+            schedulePlan.personnelToCreate,
+            logbookPlan.personnelToCreate
+          );
+          const merged = { ...hydrated, sectors: crew.sectors };
 
           // Simulator sessions: prefer the schedule's richer EBT/Training
           // Details entries; add any logbook-only sim dates the schedule
@@ -446,10 +501,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             generatedAt: reportGeneratedAt ?? null,
             dateRange,
             operations: acceptedOps,
-            personnelToCreate: [
-              ...schedulePlan.personnelToCreate,
-              ...logbookPlan.personnelToCreate,
-            ],
+            personnelToCreate: crew.personnelToCreate,
             errors: [...schedulePlan.errors, ...logbookPlan.errors],
             warnings: [...schedulePlan.warnings, ...logbookPlan.warnings],
             summary: summarizeOperations(acceptedOps),
@@ -555,6 +607,21 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
     [handleExecute, runLogtenParse]
   );
 
+  const confirmSubject = useCallback(async () => {
+    const named = subject;
+    const files = pendingFilesRef.current;
+    setSubject(null);
+    pendingFilesRef.current = [];
+    if (!named || files.length === 0) return;
+    try {
+      await addPersonnel({ name: named.name, crewId: named.crewId, isMe: true, ...seatFromRank(named.role) });
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : "Couldn't create your crew card");
+      return;
+    }
+    await handleFiles(files);
+  }, [subject, handleFiles]);
+
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (files.length === 0) return;
@@ -600,6 +667,31 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         progress={progress}
         errorMsg={errorMsg}
         summary={summary}
+        question={
+          subject
+            ? {
+                title: "Is this you?",
+                description: "This report belongs to",
+                body: (
+                  <div className="rounded-2xl bg-foreground/[0.06] px-3 py-2.5">
+                    <p className="text-sm font-medium text-foreground">{subject.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {[subject.crewId, subject.role, subject.base].filter(Boolean).join(" · ")}
+                    </p>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Your logbook has no “This is me” crew card yet. Confirm to create it from this report and carry on.
+                    </p>
+                  </div>
+                ),
+                confirmLabel: "That’s me",
+                onConfirm: () => void confirmSubject(),
+                onCancel: () => {
+                  setIsOpen(false);
+                  reset();
+                },
+              }
+            : null
+        }
         context={context}
         onDone={() => {
           setIsOpen(false);
