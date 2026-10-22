@@ -2063,7 +2063,7 @@ the CPU throttled 3×). So:
 
 | | |
 |---|---|
-| camera menu opens | `warmOCR` loads and primes the DEVICE models (not the server) |
+| camera button pressed | `warmOCR` loads and primes the DEVICE models (not the server) |
 | photo arrives | `readOnDevice` |
 | device not done after `HEDGE_MS` (4s) | the server is asked too; the first answer wins |
 | device throws | the server is asked at once, and `deviceFailed` sends every later photo server-first (iOS before 16.4 has no WASM SIMD) |
@@ -2109,7 +2109,7 @@ Measured on the seven real photos (`lib/ocr/__tests__/fixtures/mcdu/`):
   `processWithServerOCR`; the browser engine decodes the original straight to
   `OCR_MAX_SIDE` (`createImageBitmap` + one canvas draw), with no JPEG
   round trip in between.
-- **The engine is woken when the camera menu OPENS** (`warmOCR`): the device
+- **The engine is woken when the camera button is PRESSED** (`warmOCR`, on pointerdown — the OS photo sheet follows): the device
   models load and run once while the pilot is still taking the photo. Only once
   the device has failed is the server's health check called instead, which
   boots the function and primes its models.
@@ -2589,7 +2589,13 @@ identical:
   prompt is a one-line box with no preview of what is already there.
 - **The Pilot Role row is the native select, laid over the whole row** at
   opacity 0, so the whole row is the target and the platform's own picker
-  opens.
+  opens — and so is every `SelectRow` (Settings, the duty and currency
+  forms). Their Radix Select was a floating web dropdown in a corner of the
+  row; the platform's picker is the wheel on iOS and the sheet on Android.
+- **The camera button opens the OS photo sheet directly** — one image input
+  with no `capture`, which iOS and Android already present as Take Photo /
+  Photo Library. An in-app dropdown offering the same two choices was a web
+  menu and an extra tap before the camera.
 - **No `alert()` for a form error** — an inline `role="alert"` line in the
   dialog, cleared when it closes. And no browser `confirm`/`alert` anywhere:
   a question that must be answered goes through `appConfirm` / `appAlert`

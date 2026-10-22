@@ -5,13 +5,7 @@ import type React from "react"
 import { useRef } from "react"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { ChevronDown } from "lucide-react"
 import { SwipeableCard } from "@/components/swipeable-card"
 import { cn } from "@/lib/utils"
 
@@ -172,9 +166,14 @@ export function ToggleRow({
 }
 
 /**
- * A row displaying a label and an inline select. The trigger is blended into
- * the row (no box) like the other inline inputs; the popover is a standard
- * Select menu.
+ * A row displaying a label and a choice — the PLATFORM's picker.
+ *
+ * A native `<select>` is laid over the whole row at opacity 0 (the flight
+ * form's Pilot Role does the same), so a tap anywhere on the row opens the
+ * operating system's own control: the wheel on iOS, the sheet on Android, a
+ * menu on a desktop. It was a Radix Select, whose floating list beside the
+ * trigger is a web page's dropdown on every platform — and on a phone, a
+ * small target in a corner of the row.
  */
 export function SelectRow<T extends string>({
   label,
@@ -189,32 +188,30 @@ export function SelectRow<T extends string>({
   description?: string
   value: T
   onValueChange: (value: T) => void
-  options: Array<{ value: T; label: React.ReactNode }>
+  options: Array<{ value: T; label: string }>
   disabled?: boolean
 }) {
+  const selected = options.find((o) => o.value === value)
   return (
-    <div className="flex items-center justify-between px-4 py-3.5 row-divider">
+    <div className="relative flex items-center justify-between px-4 py-3.5 row-divider focus-within:outline-2 focus-within:outline-ring focus-within:-outline-offset-2">
       <RowLabel label={label} description={description} disabled={disabled} />
-      <Select value={value} onValueChange={(v) => onValueChange(v as T)} disabled={disabled}>
-        <SelectTrigger
-          aria-label={label}
-          className={cn(
-            // Blend into the row like the inline text inputs — no box, right
-            // aligned, same type size as the read-only value.
-            "border-0 bg-transparent dark:bg-transparent shadow-none rounded-none h-auto p-0 w-auto min-w-0",
-            "justify-end gap-1 text-muted-foreground md:text-base focus-visible:ring-0"
-          )}
-        >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent align="end">
-          {options.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <span className="flex min-w-0 max-w-[55%] shrink items-center gap-1 text-muted-foreground">
+        <span className="truncate">{selected?.label ?? ""}</span>
+        <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
+      </span>
+      <select
+        aria-label={label}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onValueChange(e.target.value as T)}
+        className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0 disabled:cursor-default"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
     </div>
   )
 }
