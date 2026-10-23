@@ -72,9 +72,11 @@ const ACTIONS: { id: FlightQuickAction; label: string; icon: React.ReactNode }[]
  */
 export const ACTION_TILE_PX = 64;
 export const actionTileClass = cn(
-  "flex flex-col items-center justify-center gap-0.5 rounded-lg overflow-hidden",
-  "bg-secondary text-foreground shadow-lg select-none",
-  "transition-colors active:bg-muted"
+  // The ACTION SURFACE (globals.css `.control-surface`): a circle on the
+  // glass control face, the same thing a header control is. It was a
+  // `bg-secondary` rounded square — the flight card's own surface — so in the
+  // context preview the action row read as more card.
+  "control-surface flex flex-col items-center justify-center gap-0.5 rounded-full select-none"
 );
 export const ACTION_LABEL_CLASS = "text-xs font-medium leading-none";
 

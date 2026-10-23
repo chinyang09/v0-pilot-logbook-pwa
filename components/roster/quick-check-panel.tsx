@@ -223,7 +223,7 @@ export function QuickCheckPanel({
         {onViewChart && (
           <button
             onClick={onViewChart}
-            className="flex h-9 items-center gap-1.5 px-3 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+            className="control-surface flex h-9 items-center gap-1.5 rounded-full px-3 text-xs font-medium"
           >
             <BarChart3 className="h-3.5 w-3.5" />
             <span>View Chart</span>
@@ -279,7 +279,7 @@ export function QuickCheckPanel({
                     {isRemoved && (
                       <button
                         onClick={() => addSwap(dp.id, dp.date)}
-                        className="shrink-0 flex h-9 w-9 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                        className="control-surface shrink-0 flex h-9 w-9 items-center justify-center rounded-full"
                         title="Add replacement flight"
                         aria-label="Add replacement flight"
                       >

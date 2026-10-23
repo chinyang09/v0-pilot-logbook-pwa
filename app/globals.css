@@ -1260,6 +1260,66 @@ textarea:focus-within {
   mask-composite: exclude, exclude;
 }
 
+/**
+ * THE ACTION SURFACE — what a thing you can PRESS looks like, everywhere.
+ *
+ * The header controls and the nav are glass capsules; the context preview's
+ * actions, the `…` cascade and the swipe panel's buttons were `bg-secondary`
+ * rectangles — the same flat slab as the flight card they sat beside, so the
+ * preview's action row read as more card. The rule is now ONE pairing:
+ *
+ *   a thing you press  → a CAPSULE (or circle) on the glass control face
+ *   a thing you read   → a rounded RECTANGLE on the card surface
+ *
+ * This is the glass material's PAINTED half — the face colour it finishes at
+ * (`--on-glass`) and its specular rim (`--glass-rim`, the same mask as
+ * `.GlassMaterial::before`) — without a single `backdrop-filter`. Where it is
+ * used the backdrop is a scrim, a list row or a panel, so a blur would add
+ * nothing visible and cost a readback per button on exactly the frames these
+ * pop in. Floating chrome over moving content keeps the real glass.
+ *
+ *   .control-surface               neutral action
+ *   .control-surface-primary       the primary action (the selected-thing fill)
+ *   .control-surface-destructive   delete / sign out
+ */
+.control-surface {
+  position: relative;
+  isolation: isolate;
+  background-color: var(--on-glass);
+  color: var(--foreground);
+  box-shadow: 0 8px 20px -10px rgb(0 0 0 / 0.55);
+  transition: background-color 120ms ease;
+}
+.control-surface::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  padding: 1.1px;
+  border: 0 solid transparent;
+  background: var(--glass-rim);
+  mask:
+    linear-gradient(white 0 0) padding-box,
+    linear-gradient(white 0 0) content-box;
+  mask-composite: exclude, exclude;
+  pointer-events: none;
+}
+.control-surface:active:not(:disabled) {
+  background-color: color-mix(in oklab, var(--on-glass), var(--foreground) 12%);
+}
+.control-surface.control-surface-primary {
+  background-color: var(--on-glass-active);
+  color: var(--on-glass-active-fg);
+}
+.control-surface.control-surface-destructive {
+  background-color: var(--destructive);
+  color: var(--destructive-foreground);
+}
+.control-surface.control-surface-destructive:active:not(:disabled) {
+  background-color: color-mix(in oklab, var(--destructive), black 15%);
+}
+
 /* Reduced motion: disable heavy backdrop-filters and touch animations */
 @media (prefers-reduced-motion: reduce) {
   .GlassContent,

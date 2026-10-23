@@ -1722,10 +1722,12 @@ export function FlightForm({
     return minutesToHHMM((hhmmToMinutes(basis!) - 60 + 1440) % 1440);
   }, [formData.scheduledOut, formData.outTime]);
 
-  // Register detail panel actions for the desktop floating glass bar
+  // Register detail panel actions for the desktop floating glass bar. A TOOL,
+  // on its own capsule, carrying `overBlur` like every other header control
+  // (it was the one control without it, so it read a shade more solid).
   const detailActions = useMemo(() => {
     return (
-      <GlassContainer cornerRadius={22}>
+      <GlassContainer cornerRadius={22} overBlur>
         <ImageImportButton
           onDataExtracted={handleOCRDataExtracted}
           variant="ghost"
@@ -2006,10 +2008,10 @@ export function FlightForm({
 
           <div className="flex items-center justify-center py-2 border-b border-border">
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
               onClick={swapCrew}
-              className="h-8 px-3 text-xs text-muted-foreground hover:text-foreground"
+              className="text-xs"
             >
               <ArrowLeftRight className="h-3.5 w-3.5 mr-1" />
               Swap Crew

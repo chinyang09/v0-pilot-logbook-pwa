@@ -20,12 +20,11 @@ import Link from "next/link"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { useSessionState } from "@/hooks/use-session-state"
-import { GlassButtonGroup, GlassGroupButton } from "@/components/ui/glass-icon-button"
-import { RefreshCw, Plus, Shield, AlertCircle, TrendingUp } from "lucide-react"
+import { GlassButtonGroup, GlassIconButton } from "@/components/ui/glass-icon-button"
+import { Plus, Shield, AlertCircle, TrendingUp } from "lucide-react"
 import { useScheduleEntries, useDiscrepancyCounts, useFlights, refreshAllData } from "@/hooks/data"
 import { usePageActive } from "@/hooks/use-page-active"
 import { usePreferences } from "@/components/providers/preferences-provider"
-import { cn } from "@/lib/utils"
 import { parseYMDLocal, formatLocalYMD } from "@/lib/utils/date"
 import { UnifiedImportButton } from "@/components/import/unified-import-button"
 import { DutyDetailPanel } from "@/components/roster/duty-detail-panel"
@@ -197,11 +196,10 @@ export default function RosterPage() {
   const rosterActions = useMemo(
     () => (
       <>
-        <GlassButtonGroup>
-          <GlassGroupButton ariaLabel="Refresh roster" onClick={() => refreshEntries()} disabled={entriesLoading}>
-            <RefreshCw className={cn("h-5 w-5", entriesLoading && "animate-spin")} />
-          </GlassGroupButton>
-        </GlassButtonGroup>
+        {/* TOOLS, then CREATE (see the header rule in glass-icon-button.tsx).
+            There is no Refresh: it re-read the local table, which every write
+            and every sync already does, so it was a button with nothing to
+            show for itself — and easily mistaken for "sync". */}
         <GlassButtonGroup>
           <UnifiedImportButton
             context="roster"
@@ -210,13 +208,13 @@ export default function RosterPage() {
               refreshAllData()
             }}
           />
-          <GlassGroupButton ariaLabel="Add duty" onClick={openAddDuty}>
-            <Plus className="h-5 w-5" />
-          </GlassGroupButton>
         </GlassButtonGroup>
+        <GlassIconButton ariaLabel="Add duty" onClick={openAddDuty}>
+          <Plus className="h-5 w-5" />
+        </GlassIconButton>
       </>
     ),
-    [refreshEntries, entriesLoading, openAddDuty]
+    [refreshEntries, openAddDuty]
   )
 
   useRegisterMainActions(rosterActions, isActive)

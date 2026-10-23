@@ -16,7 +16,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Check } from "lucide-react"
-import { ActionRow } from "@/components/ui/action-row"
+import { ActionRow, ActionStack } from "@/components/ui/action-row"
 import { DetailFormPanel } from "@/components/ui/detail-form-panel"
 import { FormSection } from "@/components/ui/form-section"
 import { ReadOnlyRow, SettingsRow } from "@/components/ui/settings-row"
@@ -116,12 +116,12 @@ export function DiscrepancyDetailPanel({
       </FormSection>
 
       {discrepancy.flightLogId && (
-        <FormSection>
+        <ActionStack>
           <ActionRow
             label="Open flight"
             onClick={() => router.push(`/logbook?selected=${encodeURIComponent(discrepancy.flightLogId!)}`)}
           />
-        </FormSection>
+        </ActionStack>
       )}
 
       {open ? (
@@ -164,12 +164,16 @@ export function DiscrepancyDetailPanel({
             <ReadOnlyRow label="On" value={STAMP.format(new Date(discrepancy.resolvedAt))} />
           )}
           {discrepancy.resolutionNotes && <ReadOnlyRow label="Notes" value={discrepancy.resolutionNotes} />}
+        </FormSection>
+      )}
+      {!open && (
+        <ActionStack>
           <ActionRow
             disabled={busy}
             label={busy ? "Reopening…" : "Reopen"}
             onClick={() => run(() => unresolveDiscrepancy(discrepancy.id), "Couldn't reopen this. Try again.")}
           />
-        </FormSection>
+        </ActionStack>
       )}
     </DetailFormPanel>
   )

@@ -89,7 +89,6 @@ export function CrewFormBody({
                   variant={formData.roles.includes(role) ? "default" : "outline"}
                   size="sm"
                   onClick={() => toggleRole(role)}
-                  className="h-8"
                 >
                   {role}
                 </Button>

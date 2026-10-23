@@ -13,6 +13,7 @@
  */
 
 import useSWR from "swr"
+import { useAuth } from "@/components/providers/auth-provider"
 import { Monitor, Smartphone, Tablet } from "lucide-react"
 import { base64URLEncode, base64URLDecode } from "@/lib/auth/server/webauthn"
 import { syncService } from "@/lib/sync"
@@ -55,7 +56,13 @@ export interface StepUpAssertion {
 const PROFILE_KEY = "/api/account/profile"
 const SESSIONS_KEY = "/api/account/sessions"
 
-async function fetchJson<T>(url: string): Promise<T> {
+/**
+ * Keyed on the signed-in USER as well as the route: the cache outlives a
+ * sign-out, so keyed on the route alone the next account to sign in on this
+ * device was shown the previous one's callsign, passkeys and sessions until
+ * the revalidation landed.
+ */
+async function fetchJson<T>([url]: readonly [string, string]): Promise<T> {
   const res = await fetch(url, { cache: "no-store" })
   if (!res.ok) throw new Error(`${url} answered ${res.status}`)
   return res.json()
@@ -65,12 +72,22 @@ const OPTIONS = { revalidateOnFocus: true, dedupingInterval: 1000 }
 const NO_SESSIONS: SessionData[] = []
 
 export function useAccountProfile() {
-  const { data, isLoading, mutate } = useSWR<ProfileData>(PROFILE_KEY, fetchJson, OPTIONS)
+  const userId = useAuth().user?.userId
+  const { data, isLoading, mutate } = useSWR<ProfileData>(
+    userId ? ([PROFILE_KEY, userId] as const) : null,
+    fetchJson,
+    OPTIONS
+  )
   return { profile: data ?? null, isLoading, refresh: mutate }
 }
 
 export function useAccountSessions() {
-  const { data, isLoading, mutate } = useSWR<{ sessions: SessionData[] }>(SESSIONS_KEY, fetchJson, OPTIONS)
+  const userId = useAuth().user?.userId
+  const { data, isLoading, mutate } = useSWR<{ sessions: SessionData[] }>(
+    userId ? ([SESSIONS_KEY, userId] as const) : null,
+    fetchJson,
+    OPTIONS
+  )
   return { sessions: data?.sessions ?? NO_SESSIONS, isLoading, refresh: mutate }
 }
 

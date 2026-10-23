@@ -2198,7 +2198,8 @@ re-renders).
   action that opens something can anchor it to itself (the flight card's `…`),
   and `keepOpen` leaves the panel up afterwards — for an action that reveals
   more actions, the row they belong to has to stay put beneath them. Rendered
-  as **separate, rounded buttons** that
+  as **separate CAPSULES on the action surface** (`.control-surface`; a
+  destructive one red) that
   **scale/pop in** (spring, staggered, trailing first) and fill the row height.
   Buttons rest at `opacity 0` when closed so nothing peeks at the edge. The
   trailing button sits **flush** with the card's right edge; the left gap comes
@@ -2560,6 +2561,48 @@ re-renders).
     to carry, during the drag as well as the landing.
     Do **not** put the settle back on a bouncy geometry spring (that was the
     left/right springing that got removed), and do not put it back on JS.
+
+### The Action Surface — one look for everything you press
+
+**A thing you press is a CAPSULE (or circle) on the control surface; a thing
+you read is a rounded RECTANGLE on the card surface.** It used to depend on
+where you were: glass capsules in the header, `bg-secondary` rounded squares
+in the swipe panel, the `…` cascade and the context preview, bordered
+`rounded-md` boxes for `Button`, accent-coloured LIST ROWS for panel actions.
+In the context preview the action row was the same flat slab as the flight
+card above it, so the owner could not tell the actions from the card.
+
+| Where | Is |
+|---|---|
+| floating chrome over moving content (header, nav) | the real glass (`GlassContainer`) |
+| everything else you press — swipe actions, the `…` cascade, the preview's actions, `Button` (`outline` / `secondary`), panel actions (`ActionRow`), error and notice buttons | `.control-surface` — the glass face's PAINTED half: `--on-glass` (the colour the finished glass reads as) and its specular rim, no `backdrop-filter` |
+| the primary act among several (Restore, Reload) | `.control-surface-primary` — the selected-thing fill |
+| delete / sign out | `.control-surface-destructive` |
+
+- The painted surface is the same look as the glass wherever the backdrop is a
+  scrim, a row or a panel (blurring a flat field returns the field), and it
+  costs no readback — which matters because these pop in on the busiest frames.
+- `Button` is a capsule in every variant, and `sm` is `h-9`.
+- A panel's actions are `ActionRow` capsules in an `ActionStack`, under the
+  content — not rows inside a `FormSection`.
+- Kept as they are, on purpose: rows of a grouped list that OPEN something
+  (settings sections, a time row) — they are navigation, not actions — and
+  segmented tabs.
+
+### Header controls — one capsule per role (`glass-icon-button.tsx`)
+
+| Role | Controls | Capsule |
+|---|---|---|
+| Page switch | Legal / Summary | its own segmented capsule, FIRST |
+| View | search, calendar, date range, period | one group |
+| Tools | import, Quick Check, alerts, read-from-photo | one group |
+| Create | + | ALONE, and LAST |
+| Detail commits | Cancel, Save, Edit; Back | one capsule EACH |
+
+It was decided page by page: the logbook put import with search and the
+calendar, the roster put it with Add, the currencies page had Refresh and Add
+as two loose buttons — so a grouping never meant anything. There is no
+Refresh on any page any more (see Things to Avoid).
 
 ### Unified Settings/Form Layout
 
@@ -4047,23 +4090,21 @@ When making changes, be aware of these high-impact files:
   actions belong in it.
 
   **They are not a popover — they are the SWIPE PANEL'S OWN BUTTON, repeated.**
-  Each option is a 64px `rounded-lg` tile in `bg-secondary` carrying its icon
-  over a `text-xs` word, CENTRED on the `…`, and they travel out from it one
-  after another (`STAGGER_MS`) — the panel extending rather than a dialog
-  appearing over it. That is literally `swipeable-card.tsx`'s `BUTTON_WIDTH`,
-  radius, fill, gap and label size: the run comes out of a control in that
-  panel, so anything else read as a different family of control turning up next
-  to it. They were 56px circles in `bg-card` for a while, which was closer to
-  the grouped-row vocabulary than to the panel they belong to.
+  Each option is a 64px CIRCLE on the action surface (`.control-surface`, see
+  "The Action Surface") carrying its icon over a `text-xs` word, CENTRED on the
+  `…`, and they travel out from it one after another (`STAGGER_MS`) — the panel
+  extending rather than a dialog appearing over it. The swipe panel's buttons
+  are capsules on the same surface, so the run is visibly the same family as
+  the control it came out of. The word goes INSIDE the circle — outside it,
+  floating over a dense list, it landed on a flight's route.
 
-  Square rather than the swipe button's full row height — the cascade is a
-  COLUMN, and five row-height tiles is most of a screen. The one thing added to
-  the swipe button is a shadow, because unlike a swipe button these float over
-  the list instead of sitting inside a row. Deliberately NOT glass: glass is
-  chrome floating over content and these have to be read; over a list of cards
-  a glass slab showed the cards straight through the labels. The word goes
-  INSIDE the tile — outside it, floating over a dense list, it landed on a
-  flight's route and needed a backing plate of its own to stay legible.
+  They were `bg-secondary` rounded squares, deliberately NOT glass, and that
+  is what the owner reported against: in the context preview the action row
+  was the same flat slab as the card above it and read as more card. The
+  objection to glass was legibility over a list (a translucent slab showed the
+  cards through the labels); the action surface is the glass face's PAINTED
+  half — opaque, the colour the finished glass reads as, with its rim — so it
+  is the same material as a header control and nothing shows through.
 
   `ACTION_TILE_PX` / `actionTileClass` / `ACTION_LABEL_CLASS` are exported
   and the context preview uses them, so the two surfaces are the same control
@@ -4613,7 +4654,8 @@ When making changes, be aware of these high-impact files:
 - Do not thin the rim by dropping the conic's FLANKS — iOS's controls have a hairline you can see ALL THE WAY ROUND, and at flanks of ~0.05 three-quarters of the perimeter had none. Keep the lobes concentrated (that is what reads as light on a curve) and the flanks around 0.22; the ring's WIDTH (`--softness`, and `.Highlight`'s padding with it) is the separate knob, and it is only free to be fine BECAUSE the flanks hold the continuity
 - Do not open the flight card's `…` cascade behind a blocking scrim — the page must stay scrollable underneath (a scroll dismisses it) while taps are swallowed at the capture phase so nothing activates. And arm that swallow on a short timer, or the click from the tap that OPENED it closes it on the same gesture
 - Do not let the `…` cascade leave `pointerdown`/`touchstart` alone — they must be `stopPropagation`'d in the CAPTURE phase, or a swipe elsewhere still reaches framer-motion and reveals that row's swipe panel with the menu up. And do not add `preventDefault` to them: that is what would kill the compositor's touch scroll, which is the one interaction the menu is supposed to allow (`preventDefault` belongs on `mousedown`, to stop desktop focus, and on the swallowed `click`/`pointerup`)
-- Do not build the flight card's extra actions from glass — glass is chrome floating over content, and these have to be read; as a glass slab the flight cards showed straight through the labels. They are the SWIPE PANEL's button repeated (64px `rounded-lg`, `bg-secondary`, icon over a `text-xs` word, the panel's own 8px gap), because the run comes out of a control in that panel; 56px circles in `bg-card` read as a different family of control turning up beside it
+- Do not put an action back on the card surface (`bg-secondary`, `bg-card`, `bg-muted`) or give it a rectangle's corners — a thing you press is a CAPSULE or circle on `.control-surface`, a thing you read is a rounded rectangle. On the card surface the context preview's action row read as more card. And do not use the REAL glass (`GlassContainer`) for an action that sits over a scrim, a row or a panel: the painted surface is the same look with no `backdrop-filter`, and these pop in on exactly the frames a readback would cost most
+- Do not group header controls page by page — a header is VIEW (search, calendar, period) → TOOLS (import, Quick Check, alerts, read-from-photo) → CREATE (+, alone and last), one capsule per role, with a page switch first and detail commits (Cancel / Save / Edit, Back) one capsule each (`glass-icon-button.tsx`). And do not add a Refresh button: every list follows every write and every sync, so it re-reads the same rows, and it reads as "sync" — which is the cloud in the nav
 - Do not give the context preview's compact body `layout="position"` — it is the one block that exists in BOTH states, so it takes a FULL `layout`. Its height is unchanged either way, which makes its delta scaleX only: the row's content is condensed at the first frame and relaxes out as the card widens. `layout="position"` cancels the horizontal scale too, which lays it out at the RESTING width from frame one and lets the card clip it — on a tablet the arrival time and ICAO are missing until the card widens past them. The detail and the actions DO take `layout="position"`; they exist only while open. And keep the lift a static shadow on its own PROJECTED (`layout`) node faded by opacity, outside the clip: an interpolated `boxShadow` is rebuilt as a string every frame, and `overflow: hidden` on an ancestor eats a shadow entirely
 - Do not let the context preview come to rest in the row's own column — it settles CENTRED ON THE VIEWPORT at `MAX_WIDTH`, and only ever GROWS (a row already wider than that keeps its own width rather than shrinking, which would be the same frame-one mismatch in reverse). Keep the detail's own delayed reveal (opacity + y, ~30% of the morph in): the box growing and the content arriving are two things, and running them together reads as a jump. It does NOT animate `blur()` — that is a per-frame filter pass on the busiest frames of the overlay, and the delayed opacity/travel already says "settling into the room"
 - Do not give the context preview's backdrop a blur — it is a plain darken (`SCRIM`). Full-viewport `backdrop-filter` layers each sample the one below, so the whole stack recomputes every frame their opacity changes, and that landed on exactly the frames the card is travelling. Giving it its own short clock helped and was not enough; the reference implementation this morph was measured against has no blur either. A DIALOG's backdrop keeps its blur — nothing is animating a card behind it

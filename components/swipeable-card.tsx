@@ -123,12 +123,14 @@ interface SwipeableCardProps {
   onPointerCancel?: (e: React.PointerEvent) => void
 }
 
+/**
+ * Every swipe action is the app's ACTION SURFACE (`.control-surface`, see
+ * globals.css): a capsule on the glass control face, red for a destructive
+ * one. They were `bg-secondary` / `bg-muted` rectangles — the card's own
+ * vocabulary — so a revealed button read as more row.
+ */
 function variantClasses(variant?: SwipeAction["variant"]): string {
-  return cn(
-    variant === "destructive" && "bg-destructive text-destructive-foreground",
-    variant === "secondary" && "bg-secondary text-foreground",
-    (!variant || variant === "default") && "bg-muted text-muted-foreground"
-  )
+  return cn("control-surface", variant === "destructive" && "control-surface-destructive")
 }
 
 /**
@@ -169,7 +171,11 @@ function SwipeActionButton({
       }}
       onClick={(e: React.MouseEvent) => {
         e.stopPropagation()
-        if (action.disabled || action.fireOnPointerUp) return
+        // A `fireOnPointerUp` action already ran on the lift — except from the
+        // KEYBOARD, where Enter/Space produce a click with no pointer at all
+        // (`detail === 0`). Skipping every click left the flight card's `…`
+        // unreachable without a pointer.
+        if (action.disabled || (action.fireOnPointerUp && e.detail !== 0)) return
         // Confirm actions don't fire on tap — they hand off to an overlay
         // where the action counts down and the button cancels it.
         if (action.holdToConfirm) {
@@ -183,7 +189,7 @@ function SwipeActionButton({
       style={{ scale, opacity, width: BUTTON_WIDTH, touchAction: "manipulation" }}
       className={cn(
         "shrink-0 self-stretch flex flex-col items-center justify-center gap-0.5",
-        "rounded-lg overflow-hidden select-none",
+        "rounded-full overflow-hidden select-none",
         // NOT `disabled:opacity-50`: the reveal drives `opacity` as an inline
         // style, which always beats the class, so a disabled action (Delete on
         // a LOCKED flight) looked exactly as live as an enabled one. A filter

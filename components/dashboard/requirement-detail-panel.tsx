@@ -15,7 +15,7 @@ import { useRouter } from "next/navigation"
 import { DetailFormPanel } from "@/components/ui/detail-form-panel"
 import { FormSection } from "@/components/ui/form-section"
 import { ReadOnlyRow } from "@/components/ui/settings-row"
-import { ActionRow } from "@/components/ui/action-row"
+import { ActionRow, ActionStack } from "@/components/ui/action-row"
 import type { Requirement, RequirementState } from "@/lib/utils/dashboard/legality"
 
 const STATE_WORD: Record<RequirementState, string> = {
@@ -58,9 +58,9 @@ export function RequirementDetailPanel({ requirement }: { requirement: Requireme
           ))}
         </FormSection>
       )}
-      <FormSection>
+      <ActionStack>
         <ActionRow label={destination(href)} onClick={() => router.push(href)} />
-      </FormSection>
+      </ActionStack>
     </DetailFormPanel>
   )
 }

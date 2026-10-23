@@ -171,8 +171,13 @@ const DETAIL_MS = MORPH_MS * 0.76;
  * Deeper than the shared `MODAL_SCRIM` in both themes, because the blur was
  * carrying part of the separation and now nothing else is: a dialog keeps its
  * blur, this does not. ONE constant, so it is a single number to retune.
+ *
+ * 0.60 on the dark theme left the list's bright figures readable straight
+ * through it, so the row of action buttons sat on top of a flight card's
+ * route and the eye had two things to read at once. 0.75 takes the list down
+ * to a texture: still there (you know where you are), no longer competing.
  */
-const SCRIM = "bg-black/35 dark:bg-black/60";
+const SCRIM = "bg-black/45 dark:bg-black/75";
 /** The scrim is not part of the morph — it is just the lights going down. */
 const SCRIM_FADE = { duration: 0.2, ease: [0.32, 0.72, 0, 1] as const };
 

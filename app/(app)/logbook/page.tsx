@@ -564,7 +564,12 @@ export default function LogbookPage() {
             is now what opens the picker, so a second expanding label in the
             action bar was saying the same thing twice — and it was the thing
             that grew this group far enough to reach the centred nav pill. */}
+      </GlassButtonGroup>
 
+      {/* VIEW, then TOOLS, then CREATE — one capsule per role (see the header
+          rule in glass-icon-button.tsx). Import brings data in; it is not a
+          way of looking at the logbook, so it is not in the view group. */}
+      <GlassButtonGroup>
         <UnifiedImportButton
           context="logbook"
           onComplete={() => {

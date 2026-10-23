@@ -94,7 +94,7 @@ export const RosterAgenda = memo(function RosterAgenda({
                 <button
                   type="button"
                   onClick={() => onAddDuty(dayKey)}
-                  className="flex h-9 items-center gap-1 rounded-full px-3 text-xs font-medium text-primary hover:bg-secondary"
+                  className="control-surface flex h-9 items-center gap-1 rounded-full px-3 text-xs font-medium"
                 >
                   <Plus className="h-3.5 w-3.5" /> Add duty
                 </button>

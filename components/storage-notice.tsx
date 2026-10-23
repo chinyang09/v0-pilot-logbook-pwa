@@ -28,14 +28,14 @@ export function StorageNotice() {
         <button
           type="button"
           onClick={retryDBOpen}
-          className="h-9 shrink-0 rounded-full px-3 font-semibold text-primary transition-colors hover:bg-secondary"
+          className="control-surface control-surface-primary h-9 shrink-0 rounded-full px-3 font-semibold"
         >
           Retry
         </button>
         <button
           type="button"
           onClick={() => window.location.reload()}
-          className="h-9 shrink-0 rounded-full px-3 font-semibold text-primary transition-colors hover:bg-secondary"
+          className="control-surface h-9 shrink-0 rounded-full px-3 font-semibold"
         >
           Reload
         </button>
