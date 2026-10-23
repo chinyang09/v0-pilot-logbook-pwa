@@ -22,7 +22,7 @@
 
 "use client";
 
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { flightFieldLabel } from "@/lib/utils/field-labels";
 import { FlightCardBody } from "@/components/flight-card-body";
@@ -73,13 +73,19 @@ export function groupMismatches(
   return groups.sort((a, b) => b.flight.date.localeCompare(a.flight.date));
 }
 
-export function FlightMismatchCard({
+export const FlightMismatchCard = memo(function FlightMismatchCard({
   group,
   displayPrefs,
+  selected = false,
+  onOpen,
   onHoldingChange,
 }: {
   group: MismatchGroup;
   displayPrefs?: DisplayPreferences;
+  /** The flight is open in the detail panel beside the list. */
+  selected?: boolean;
+  /** Open the FLIGHT in the detail panel — the whole record behind the comparison. */
+  onOpen?: (flight: FlightLog) => void;
   /**
    * Switch which side a field holds. The caller writes the value to the
    * flight and updates the discrepancy row.
@@ -108,18 +114,31 @@ export function FlightMismatchCard({
   return (
     <div
       className={cn(
-        "rounded-xl border border-l-2 bg-card px-3 py-2",
-        holdsOwn ? "border-l-status-warning" : "border-l-border"
+        "rounded-xl border border-l-2 bg-card px-3 py-2 transition-colors",
+        holdsOwn ? "border-l-status-warning" : "border-l-border",
+        selected && "bg-primary/10"
       )}
     >
-      <FlightCardBody
-        flight={flight}
-        displayPrefs={displayPrefs}
-        diffs={noDiffs}
-        showLandingChips={false}
-        showStatusIcons={false}
-        showPilotRole={false}
-      />
+      {/* The flight itself is the way into its detail: the whole record, in
+          the detail panel, for deciding which side is right. The comparison
+          rows below stay tappable in place. */}
+      <button
+        type="button"
+        onClick={() => onOpen?.(flight)}
+        disabled={!onOpen}
+        aria-current={selected || undefined}
+        aria-label={`Open ${flight.flightNumber || "flight"} ${flight.date}`}
+        className="block w-full rounded-lg text-left active:bg-muted/40 disabled:pointer-events-none"
+      >
+        <FlightCardBody
+          flight={flight}
+          displayPrefs={displayPrefs}
+          diffs={noDiffs}
+          showLandingChips={false}
+          showStatusIcons={false}
+          showPilotRole={false}
+        />
+      </button>
 
       <div className="mt-2 space-y-1.5">
         {rows.map((row) => {
@@ -173,4 +192,4 @@ export function FlightMismatchCard({
       </div>
     </div>
   );
-}
+})

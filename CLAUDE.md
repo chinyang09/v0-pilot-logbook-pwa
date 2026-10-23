@@ -1239,10 +1239,13 @@ logbook read that errored is also never `logbookEmpty`.
 
 #### Nothing on this page navigates by default
 
-A cell EXPANDS in place and a second tap closes it. The reader came to check a
-status; a route change loses the screen they came for and costs a
-back-navigation to recover it. The deep link lives INSIDE the expansion, where
-it is a deliberate second step rather than the accidental result of a tap.
+A cell opens its detail in the DETAIL panel (`RequirementDetailPanel`, as
+`req:<id>`) — the owner's main / detail rule — beside the page on a tablet and
+as the overlay on a phone. Either way the dashboard stays where it was: no
+route change, nothing to navigate back to. The deep link lives INSIDE the
+panel, a deliberate second step rather than the accidental result of a tap.
+The detail used to unfold under the currency grid, inside the one surface that
+has to fit a phone's height.
 
 #### CURRENCY and LIMITS are separate bands
 
@@ -1272,12 +1275,10 @@ separation exists to avoid.
   tinting the met ones green too paints the whole band and leaves the one thing
   needing attention nothing to stand out against. The icon still carries the
   state — colour is never the only carrier.
-- **ONE cell opens at a time, and its detail opens BELOW the grid**, full width,
-  with a ring left on the cell it belongs to. A cell growing in place would
-  stretch its grid row and leave a hole beside it, and the detail is a
-  two-column `dl` with no room in half a phone's width. The open CELL ID is
-  held, not the requirement, so a background refresh that rebuilds the model
-  keeps the same cell open rather than closing it.
+- **ONE cell is open at a time, in the detail panel**, with a ring left on the
+  cell it belongs to where the panel is beside it. The open requirement's ID is
+  held (the selection), not the requirement, so the model rebuilding every
+  minute refreshes the panel rather than closing it.
 - **Limits are PAIRED by what they limit** — Duty over its 14d and 28d windows,
   then Flight over 28d and 1y. That is how the regulation is written and how a
   pilot holds it; four independent rows sorted by urgency scattered the pairs.
@@ -1334,8 +1335,8 @@ Three blocks, one column, in the order the questions get asked:
 
 **ONE COLUMN AT EVERY WIDTH.** The blocks stack in that order on a 390px phone
 and in the same order on a 1400px desktop: nothing moves, nothing is reordered.
-What a wider screen buys is DENSITY INSIDE each block — a flight's detail goes
-4 → 8 fields per row, the breakdown stacked → side by side.
+What a wider screen buys is DENSITY INSIDE each block — the breakdown goes
+stacked → side by side.
 
 Every one of those steps is a **container query, never a viewport breakpoint**.
 The page renders inside a resizable split panel, so the window's width says
@@ -1381,14 +1382,14 @@ one alert class neither page otherwise shows, and not a legality question.
   status ramp would teach the reader that the colour means the same thing there
   as on the legal page, where it means whether they can legally fly.
 
-#### The flight list opens IN PLACE
+#### A flight row opens the flight in the detail panel
 
-A row unfolds under itself rather than navigating. The list exists because the
-pilot is reading the period as a whole; a full flight page loses that period and
-costs a back-navigation to get it back. `PeriodFlight` carries the detail
-(OOOI, air, night, T/O–LDG, reg, type, role, PF/PM) — the aggregator already has
-all of it in hand, so it costs field copies rather than a per-row read when a row
-opens. The row still offers the full page for anything beyond that.
+The list exists because the pilot is reading the period as a whole, so a row
+never NAVIGATES — it opens the flight (`FlightForm`) in the detail panel, the
+way a flight opens anywhere else, with the period still in place beside it or
+under the overlay. It used to unfold eight fields under itself; the panel has
+the whole record. The dashboard page owns that half of the panel and the
+clearing; the legal page writes its own `req:` selections.
 
 `periodFlights` is ordered by **`sortFlights`**, the one comparator — sorting on
 the date alone left same-day sectors in table order, so they could read in a
@@ -1738,6 +1739,40 @@ JUL  WSSS                             WICA        ← "SIMULATOR" for a sim
 - `showLandingChips` / `showStatusIcons` / `showPilotRole` let a consumer drop
   parts; the signed (✎) and locked (🔒) icons are how the card says "this entry
   is yours" — do not reintroduce a separate "replaces yours" banner.
+
+### Main / Detail on every page (the owner's rule, Oct 2026)
+
+"All pages should operate in [one] model: more details are shown on the detail
+panel, while the main page occupies the main panel." A page's LIST or overview
+is the main panel; what is behind a row opens in the detail panel — beside the
+list on a tablet, the full-screen overlay (with its back entry) on a phone —
+through `useDetailPanel`'s `setSelectedId` + `setDetailContent`, never a sheet
+or a dialog over the list.
+
+| Page | Main panel | Detail panel |
+|---|---|---|
+| logbook, aircraft, airports, crew | the list | the record |
+| roster, currencies | month + agenda / the list | the duty / currency form (`DetailFormPanel`) |
+| discrepancies | comparisons, notes | a comparison's FLIGHT (`FlightForm`); a note and its Resolve (`DiscrepancyDetailPanel`) |
+| recently deleted | the bin | what the item was, how long it is kept, Restore / Delete forever |
+| FDP | the timeline chart | a tapped DAY (`FdpDayPanel`), or the Quick Check |
+| account, settings | the sections | the section |
+| dashboard | legal / summary | a requirement cell (`RequirementDetailPanel`); a period flight (`FlightForm`) |
+
+- **A panel that only READS is still a `DetailFormPanel`** (`dirty={false}`):
+  one title, one scroller, the chrome spacers — and no header buttons.
+- **Actions inside a panel are `ActionRow`s** (`components/ui/action-row.tsx`):
+  a row in a grouped section with the label in the accent or red, never a
+  full-width filled button.
+- **One selection id per page, namespaced where tables can collide**
+  (recently deleted keys `kind:id`; FDP's days are `day:YYYY-MM-DD` beside the
+  Quick Check's `legal-check`).
+- **The row that is open is lit only where the panel BESIDE it shows it**
+  (`isDesktop && …`) — a phone has no such panel.
+- **Account sections own their state.** The detail panel is rendered by the
+  shell, OUTSIDE the page's tree, so a section cannot read the page's state or
+  context; the profile and the sessions are one SWR cache each
+  (`components/account/account-data.ts`), shared by the list and the panel.
 
 ### Discrepancies as the Comparison Record
 
@@ -2706,7 +2741,7 @@ Next.js wraps pages in internal `LayoutRouter` components that unmount contents 
   its panel from the remembered selection; the phone opens on the list
 - `DetailPanelProvider` does NOT clear `detailContent` when navigating between two
   keep-alive routes that own detail content; routes without a detail panel
-  (dashboard, roster) always clear it
+  (the dashboard) always clear it
 - Each persistent page re-syncs its detail panel via its `usePageActive` callback (`syncDetailPanel`)
 - Selections stored in `sessionStorage` for restoration across full page reloads
 - `setSelectedId(id, { explicit: false })` is for **programmatic** selections
@@ -3260,7 +3295,9 @@ opened for, sat at the far end of the history.
   UTC date; local → the device zone). Both tables key on the UTC date, so a
   06:00 SGT standby is stored on the previous day; with no start time (leave,
   off) the stored date is the only fact there is.
-- Add duty pre-fills the selected day (`DutyEntryDialog`'s `defaultDate`).
+- The header's Add duty pre-fills the selected day, and an empty day's own
+  "Add duty" pre-fills THAT day (`onAddDuty(dayKey)` — it used to add to the
+  selected day whichever empty day was tapped).
 
 #### The roster holds NON-FLIGHT duties only
 
@@ -3270,13 +3307,14 @@ imports go to the logbook) and, before that, a parser stage: `schedule-parser`
 offered every non-flight row to `tryExtractSimDuty` and dropped whatever was
 not a simulator, so **standby had never been extracted at all**.
 
-**Duties are hand-editable.** `components/roster/duty-entry-dialog.tsx` adds and
-edits one; the card is swipe-to-delete. It is a full-screen DIALOG over the
-content region (`signature-dialog.tsx`'s bounds), not a detail panel — the
-roster is `hasDetailPanel: false` and populating detail panels on non-detail
-routes is owner-design work that must not be done piecemeal. The form re-seeds
-by a `key` on the component rather than a seeding effect, so there is no
-setState-in-effect and a sync write cannot clobber an edit in progress.
+**Duties are hand-editable.** `components/roster/duty-detail-panel.tsx` adds and
+edits one, in the DETAIL panel — beside the month on a tablet, the full-screen
+overlay on a phone — the way a flight opens in the logbook (owner's request,
+Oct 2026: the roster is `hasDetailPanel: true` now). The card is
+swipe-to-delete. The form holds a DRAFT over the live entry (`useDraft`), so a
+sync write cannot clobber an edit in progress and every field the pilot has not
+touched follows the record. Selecting, adding and the phone's `__new__`
+sentinel follow the crew page's pattern.
 Deleting is a **soft** delete into Recently Deleted, like everything else the
 pilot can delete — the old hard-delete rule held while these were import
 bookkeeping the next report regenerates, and stopped holding the moment the
@@ -3384,6 +3422,12 @@ crew logbook and `DEFAULT_FTL_LIMITS` carries the flight-crew figures — do not
 - **A LOCAL_STATION schedule report's time was shifted by the departure
   offset**, double-counting it — eight hours, two bands of Table A, on a UTC+0
   departure.
+- **A report before midnight UTC was clamped to 00:00Z.** The rostered report
+  is the scheduled gate-out less an hour, and for a departure before 01:00Z it
+  falls on the previous day — `Math.max(0, …)` moved it to midnight of the
+  flight's date, dropping up to an hour of duty and entering Table A on the
+  wrong local time (07:55 SGT read as 08:00 — across a band boundary). The duty
+  now carries the date it was REPORTED for; its id stays on the flights' date.
 - **`calculateRestUntilLegal` still had the if/else chain** the same pass fixed
   in `calculateRestPeriod` — so the countdown a pilot actually reads off the
   dashboard under-stated an 11-hour duty's rest by an hour, and measured the
@@ -3460,13 +3504,8 @@ assessment on record:
 
 ### Deferred design work (owner-approved to-do)
 
-- **Populate the split-view detail panel on non-detail routes** (layout audit
-  L·8): dashboard, roster, FDP, currencies, discrepancies, and account leave
-  the ≥720px right panel on a permanent "Select an item to view details"
-  placeholder. Highest-value first step: the roster's agenda (the selected
-  day onward) could render into the detail panel beside its month. To be
-  designed together with the owner in a future session — do not implement
-  piecemeal.
+- **The split-view detail panel on every route** — no longer deferred: the
+  owner set the rule (Oct 2026), see "Main / Detail on every page".
 
 ### Performance work surveyed but NOT actioned (audit trail)
 
@@ -4394,11 +4433,16 @@ When making changes, be aware of these high-impact files:
 - Do not answer "was this standby called out" in two places — `findActivationMinute` is the rule, with `truncateActivatedStandby` (duty periods) and `standbyActivation` (schedule entries + flights, for the roster page) as its two callers. And read the ROSTERED report when finding it, or a pushback delay moves the activation later and credits duty hours as standby
 - Do not let a standby into the dashboard's active-duty search — it would become the ACTIVE duty carrying `maxFdpMinutes: 0`, so the panel reads as a flight duty whose limit failed to compute. `DutyStatus.standby` is its own band
 - Do not hard-delete a roster duty, and do not let a binned one be matched by `bulkUpsertScheduleEntries` — updating a deleted row silently resurrects a duty the user deleted, the same rule the flight reconciler follows. Every read filters `isLiveEntity`
-- Do not put the duty form in a detail panel — the roster is `hasDetailPanel: false` and populating detail panels on non-detail routes is owner-design work that must not be done piecemeal. It is a full-screen dialog over the CONTENT region, and it re-seeds by a `key` rather than a seeding effect (an effect there is a cascading render, and keying on the entry OBJECT clobbers an edit in progress on every sync write)
+- Do not open what is behind a row in a sheet, a dialog or an in-list expansion on a page with a detail panel — it opens IN the detail panel (see "Main / Detail on every page"). The discrepancy resolution was a sheet over the list it was chosen from; account was one long scroll with accordions
+- Do not key the FDP chart's x-axis (or any lookup on it) on `dateLabel` — "13 Oct" repeats once a zoomed-out window spans a year, and every lookup by label lands on the first year. The axis is the `date`, printed through `tickFormatter`
+- Do not take a tapped chart day from the `onClick` state Recharts hands over — it is the TOOLTIP's last index, which on a touch tap is still the previous position (measured: a tap on 15 Oct opened 3 Oct). And do not use `useXAxisInverseDataSnapScale` for it either: it snaps to the nearest band START, so the right half of a column picks the next day. `DayAtPixelProbe` hit-tests the click against each day's band, the rule the tooltip follows
+- Do not listen for `beforeinstallprompt` in a component — the install banner's module captures and spends it at page load, before any page mounts. Read the offer through `useInstallOffer()` (`pwa-install-prompt.tsx`); the account page's own listener never saw an offer, so its Install button only ever showed manual steps
+- Do not put the duty or currency form back in a sheet over the page — a selected duty or currency opens in the DETAIL panel (`DutyDetailPanel` / `CurrencyDetailPanel` on `DetailFormPanel`), beside its list on a tablet and as the overlay on a phone, like a flight or a crew member; a sheet covered the very list it was chosen from. And keep their forms a DRAFT over the live record (`useDraft`), never a copy seeded once — a copy goes stale at the next pull and saving it reverts another device's edit
 - Do not count a standby's full length toward the 90h/180h limits — para 6(7) counts **20%** of home standby, and para 6(3) folds AIRPORT standby into the rest period or the following FDP so it contributes nothing separately. `countedDutyMinutes` carries the discount and `calculateRollingStats` reads `countedDutyMinutes ?? dutyMinutes`, so every ordinary duty is untouched
 - Do not leave an activated standby at its rostered length (para 6(6)) — `truncateActivatedStandby` cuts it back to the following duty's report before the 20% is taken, or the called-out hours are counted twice: once as standby and again in full as the duty they became
 - Do not put flights back into `scheduleEntries`. The roster holds NON-FLIGHT duties only — standby, ground, leave, off — precisely because they have no logbook counterpart and so nothing to reconcile. A parallel record of flights needing reconciliation against the logbook is what made the old roster heavy. And do not add standby as a `FlightLog.entryType` instead: it puts non-flight rows in the legal flight record and breaks the fixed-height card the virtualised list depends on
 - Do not drop a non-flight schedule row on the floor. `schedule-parser` used to offer every one to `tryExtractSimDuty` and skip whatever was not a simulator, which is why standby had NEVER been extracted; `tryExtractGroundDuty` runs after it. Normalise the window to UTC and remember the conversion can move the DATE — 06:00 SGT is 22:00 the previous day, and the app keys a duty on its UTC date
+- Do not clamp a duty's report to midnight of its flights' date — a 00:30Z departure reports at 23:30Z the DAY BEFORE. Put the duty on the date it was reported for (`dutyDate` in `createDutyPeriodFromFlightGroup`), so every reader building an instant from `date` + `reportTime` gets the right one; keep its id on the flights' date
 - Do not compute an FDP maximum anywhere but `deriveMaxFDP` — it is the ONE derivation, and every stage (both producers, the overnight merge, the acclimatisation pass, the hypothetical-duty builders) goes through it. Four sites recomputing it from whatever inputs each had is what put 10:15 on a duty the schedule allows 12:15 for
 - Do not enter Table A on `reportTime`. That is when the duty STARTED; the table is entered on `fdpStartLocal`, which is the **original** (scheduled) reporting time in the DEPARTURE station's clock. Para 10(a) is explicit — a delay under 4 hours keeps the maximum on the original report while the FDP starts at the actual one — and a 23-minute pushback on a 2150 report crosses into the 2200–0559 band and takes an hour and a half off the maximum, which then reads as an exceedance the pilot never committed
 - Do not shift a LOCAL_STATION report time by the departure offset — it is ALREADY the local time where the crew member reports, so shifting double-counts (eight hours, two bands of Table A, on a UTC+0 departure). UTC shifts by the departure offset; LOCAL_BASE shifts from SGT to it
@@ -4408,7 +4452,7 @@ When making changes, be aware of these high-impact files:
 - Do not fall back to the fullest rolling limit for the "tightest" constraint — a limit REFILLS, so 41% of a 12-month flight allowance is not tight, and reporting it named the least urgent thing on the page. With nothing flagged the answer is the nearest EXPIRY, which is why only `currency` requirements carry `daysUntil`
 - Do not sort currencies and rolling limits into one grid. They are different kinds of thing (days that expire vs hours that refill) and mixing them is what made the panel unreadable at a glance — separate bands, and keep the limits PAIRED (Duty 14d/28d, then Flight 28d/1y) rather than four rows sorted by urgency
 - Do not split 90-day recency back into separate takeoff and landing cells — they are two halves of one question, and urgency-sorted they did not even sit beside each other. One cell answers with the binding half; expanding shows both
-- Do not turn the currency band back into a column of full-width rows, and do not give a currency cell a bar. A currency is a name and a number of DAYS — one small fact — so it is a figure over a caption in a grid read at a glance; a bar belongs to the limits band, where the number really is a fraction of something. And do not expand a cell IN PLACE: in a grid that stretches its row and leaves a hole beside it, so one cell opens at a time into a full-width block under the grid, with a ring left on the cell it describes
+- Do not turn the currency band back into a column of full-width rows, and do not give a currency cell a bar. A currency is a name and a number of DAYS — one small fact — so it is a figure over a caption in a grid read at a glance; a bar belongs to the limits band, where the number really is a fraction of something. And do not expand a cell IN PLACE: one cell opens at a time, in the detail panel, with a ring left on the cell it describes
 - Do not tint the currency cells that are MET. The status ramp means met / close / not met, so tinting all of them paints the whole band and leaves the one flagged cell nothing to stand out against
 - Do not put rest back in the currency band — it is a property of the duty just flown, not a standing qualification, and a live countdown among expiry dates reads as a different kind of thing. It lives in the duty band, and the annunciator has to fold it into the verdict itself since it is no longer one of the requirements
 - Do not print the rolling limits in the duty band as well as the limits band — that was the duplication the rework removed. The duty band carries FDP and flight time for THIS duty only
@@ -4416,7 +4460,7 @@ When making changes, be aware of these high-impact files:
 - Do not put the duty band's ring back. The off-duty question is a COMPARISON of two instants on one axis — when the rest becomes legal, and when the next duty reports — and an arc has nowhere to put the second one. It is a timeline with the report as a CARET and the rest still owed as a red band, so a duty rostered inside the rest period is visible before a word is read
 - Do not print a bare rest countdown in the annunciator. The hero is `nextAction.headline`, which is the CONTEXTUAL form of the same fact ("Rest short by 3:00", "Rest until 04:36"); a raw countdown there, a copy inside the ring and an "N to go" line beside "Legal from" were three printings of one number
 - Do not let `pilot-status.ts` format its own clocks — it is pure, so the formatter is INJECTED (`buildPilotStatus({ formatClock })`, wired by `usePilotStatus(recency, now, display)`). Its own `Intl.DateTimeFormat` was device-local 24-hour with a colon, so a Zulu-configured pilot read one convention in the hero line and another two lines below it
-- Do not make the legal page's cells navigate on tap — they EXPAND in place and a second tap closes them. The reader came to check a status, and a route change loses the screen they came for. The deep link belongs inside the expansion
+- Do not make the legal page's cells navigate on tap — they open their detail in the detail panel, with the dashboard still in place. The reader came to check a status, and a route change loses the screen they came for. The deep link belongs inside the panel
 - Do not replace the sector chain with a list of recent flights — that list showed history, not THIS duty, and could not answer "where am I in a four-sector day". The chain comes from `deriveSectorLegs` off the duty's own route
 - Do not let the summary page's flight list grow the page — it scrolls in its own bounded box, so a year-long period cannot push the breakdown below it out of reach
 - Do not read an in-progress duty from the logbook alone. `mergeDutyPeriods` prefers the logbook for today, and mid-duty the logbook holds only the sectors already flown — so a two-sector day with one sector logged reads as a duty that ended at lunchtime and the panel falls through to a rest countdown. Pass `scheduleDutyPeriods` into `deriveDutyStatus`; where the roster runs later, the duty is still on
@@ -4451,7 +4495,7 @@ When making changes, be aware of these high-impact files:
 - Do not re-add a ring for the dashboard's period hours — the one it replaced was metered against a hardcoded 100-hour max, so a week and a year drew the same arc. A ratio needs a real denominator; period block hours have none, so the form is a hero figure (with PROPORTIONAL figures — `tabular-nums` reads loose at display size). Day/night does have one and is drawn
 - Do not draw the engine split with a single class present — a one-segment part-to-whole bar is a 100% fill under a one-item legend, restating the hero figure. Gate it on ≥2 non-zero classes
 - Do not put a number on the dashboard twice. Night and sim live in the period summary (`SHOWN_ELSEWHERE` keeps them out of the breakdown), recency/limits/rest/expiries live in the legality panel, and the alerts bell is scoped to import notes — the one alert class the page does not otherwise show. Every one of those was printed in two places before
-- Do not send the dashboard's flight rows to a full page to show their detail — they open IN PLACE, because the reader is looking at the period as a whole and navigating away loses it. `PeriodFlight` already carries the detail off the aggregator's existing walk
+- Do not send the dashboard's flight rows to a full page — they open the flight in the detail panel, because the reader is looking at the period as a whole and navigating away loses it. And gate every dashboard write to the panel on BOTH `isActive` and the pathname being `/`: the dashboard is keep-alive, and the pathname moves a commit before the active-route store, so on its own `isActive` let a navigation away write the ARRIVING page's selection into the dashboard's panel
 - Do not order flights anywhere but `lib/utils/flight-sort.ts` — the order must be TOTAL (date, then actual-or-SCHEDULED out time, then departure, then id) or rows move on their own: a new flight sat at the top of the logbook until the next refetch and then jumped, and reading `outTime` alone treated every unflown sector as 00:00 so scheduled flights sank below completed ones on the same day. An optimistic cache write inserts with `insertFlightSorted`, never by prepending
 - Do not read a user table for a list, a total or an import match without filtering deleted rows (`isLiveFlight` for flights, `isLiveEntity` for the rest) — a binned row reaching the reconciler silently updates, and so resurrects, something the user deleted. The store's own `getAllX` already filters; go through it rather than hitting the table
 - Do not use `RETENTION_MS` for a deletion sweep or `DELETED_RETENTION_MS` for a decision — they are 90 and 30 days and the helpers take the window as an argument precisely so a caller has to say which
@@ -4537,7 +4581,7 @@ When making changes, be aware of these high-impact files:
 - Do not let the header veil go solid or lean on blur for the treatment — `ChromeFade` is a **darken with a hint of blur**: the gradient tops out at 50% `--background` and the blur ramp peaks at 2.4px. A solid veil hides the content passing under the status bar (reads as the app stopping there — the web-page-in-a-frame look the edge-to-edge work removed), and a heavy blur smears it into an unreadable band. Text sliding under the bar must stay legible enough to make out roughly what it says
 - Do not re-enable the native scrollbar on an app scroller — iOS draws its indicator across the scroller's whole box, i.e. from the screen edge over the status bar. Scrollers carry `scrollbar-hide` + `components/ui/scroll-indicator.tsx` as the FIRST CHILD; it draws the same affordance inset to `--chrome-top` / `--nav-bottom-offset`, so it starts below the action buttons like a native scroll view's `scrollIndicatorInsets` while content still scrolls under the chrome. At either end it must **compress against the end of its track**, not ride the rubber-band: progress is clamped so the thumb is already parked, and the overscroll distance squashes it (asymptotically, so a hard fling never collapses it to nothing)
 - Do not cache the scroll indicator's scroller box behind a ResizeObserver alone — opening the sidebar SLIDES the main panel across without resizing it (`0..360` → `199..559`), so no observer fires and the thumb stays at the closed layout's right edge, drawing a grey rule down the middle of the flight cards. Re-read the box in the update
-- Do not rely on the cascade's event blocking alone to keep cards still — while a menu is open `SwipeableCard` sets `pointer-events: none` on its root and drops `drag` (`lib/utils/menu-lock.ts`). Intercepting events only covers the events you thought of, in the order an engine happens to send them; removing the row as a hit-test target covers all of them, and the touch still reaches the scroller behind it so the list keeps scrolling
+- Do not rely on the cascade's event blocking alone to keep cards still — while a menu is open `SwipeableCard` sets `pointer-events: none` on its root and drops `drag` (`lib/utils/menu-lock.ts`). Intercepting events only covers the events you thought of, in the order an engine happens to send them; removing the row as a hit-test target covers all of them, and the touch still reaches the scroller behind it so the list keeps scrolling. The lock is a COUNTED hold (`setMenuOpen(true)` takes one, `false` releases one): with a single flag, whichever overlay's cleanup ran last decided the answer, so a menu closing as another opened could unlock the rows under the one still up
 - Do not move the scroll indicator's thumb back INSIDE the scroller — it is a `position: fixed` element in `document.body`, placed against the scroller's cached box. It lived on a sticky anchor inside the scroller once, with its drift measured and cancelled per frame: that pinned correctly while a finger dragged, but the rubber-band RELEASE is compositor-animated and the correction runs on the main thread from coalesced scroll events, so the track visibly snapped back with the bounce. Nothing inside the scroller can win that race. The zero-height sticky marker that remains is only a rubber-band **sensor** (its drift is the bounce distance for engines that clamp `scrollTop`) and is read at the TOP only — at the bottom it stays pinned, so measuring there returns the whole scrolled distance and collapses the thumb
 - Do not let the logbook's first card butt against the chrome — `LIST_TOP_GAP` (20px) starts it where crew / aircraft / airports start theirs (measured: first card at 72 against `--chrome-top` 52 on both). It is DROPPED while the search or the calendar is open: that panel's own bottom edge is the separation there, and the gap read as slack hanging off the calendar (measured: first card at 415, exactly the calendar's bottom)
 - Do not give a page's content its own bottom padding on top of the shared clearance — one clearance per scroller, from `--chrome-bottom` (`.pb-chrome` / `.h-chrome-bottom`), and a card list's per-row gap belongs on the row's TOP (`pt-1`), never its bottom. A trailing per-row gap stacks on the spacer and lands that panel's last row lower than every other panel's (the logbook, aircraft, airports and crew lists each had one; the logbook's 8px is subtracted from its spacer because its wrapper padding can't move)
@@ -4557,7 +4601,11 @@ When making changes, be aware of these high-impact files:
 - Do not turn the currencies page back into a card per currency or put filter chips over it — it is ONE grouped list (`CurrencyCard` is a row), "Needs attention" then "Current", soonest first, and a pilot's ten documents fit one phone screen (measured: 0px overflow at 390×844 and 360×780). A card each was ~210px and five screens of scrolling to learn what runs out next. Thresholds, notes and the auto-update switch are settings OF a currency and live in its editor; past a year the figure is years ("7.9y"), not "2888d"
 - Do not let a `useBackDismiss` overlay close on a popstate that was not its own — every listener hears every pop, so a date picker opened OVER a form sheet closed the sheet too when it saved. Each marker entry carries `__overlayId`, and a listener whose entry is still the current one ignores the pop
 - Do not vertically CENTRE the login form — centred, every step's different card height moved the brand and the card, and on a short phone iOS panned the page to lift a centred field above the keyboard. It is anchored at `clamp(1rem, 12vh, 7rem)` (`vh`: the large viewport, which a toolbar does not change), compact under 500px of height, over a FIXED, still background (the Ken Burns zoom read as the page moving)
-- Do not hand-roll a form dialog — `RegionSheet` (`components/ui/region-sheet.tsx`) is the shell: content-region bounds, header with a close, grouped `FormSection` rows, Cancel/Save in the footer with the reason Save is disabled said beside it. The duty, currency and discrepancy-resolution forms use it (a choice among a few answers is a checked LIST, not a dropdown), and the signature pad takes its bounds from `useContentRegionStyle`. The currency form was a centred modal of boxed inputs with a full-width button and read as a different app. Mount the form only while open and key it on the record, so `useState` initialisers seed it — never a reset effect
+- Do not hand-roll a form dialog — `RegionSheet` (`components/ui/region-sheet.tsx`) is the shell: content-region bounds, header with a close, grouped `FormSection` rows, Cancel/Save in the footer with the reason Save is disabled said beside it. The discrepancy-resolution form uses it (a choice among a few answers is a checked LIST, not a dropdown), and the signature pad takes its bounds from `useContentRegionStyle`. A form for a record chosen from a LIST is not a sheet at all — it opens in the detail panel (`DetailFormPanel`). The currency form was a centred modal of boxed inputs with a full-width button and read as a different app. Mount the form only while open and key it on the record, so `useState` initialisers seed it — never a reset effect
+- Do not clear the header's action buttons unconditionally on cleanup — `useRegisterActions` clears only what THIS page put there (`current === own ? null : current`). A keep-alive page learns it is inactive from the route store AFTER the commit that mounted the next page, whose layout effect has already registered its own buttons, so an unconditional `set(null)` wiped them: currencies, discrepancies and FDP came up with an empty header when arrived at from the logbook (once their code was prefetched), and with a full one from any ordinary page
+- Do not show "Something went wrong" for a chunk that will not load — that is the previous deploy's HTML asking for code the new deploy no longer serves (navigations are cache-first). `ErrorScreen` (every error boundary) recognises it (`isChunkLoadError`), drops the route's stale page from the worker's cache and reloads ONCE, guarded by `sessionStorage` so a genuinely missing chunk cannot loop
+- Do not let the wheel picker emit a value before its settle lands, and do not let a zero-length settle stop between rows — the library (`@ncdai/react-wheel-picker`, `patches/`) truncated the index on both paths, so releasing between 09 and 10 always took 09 and a controlled picker's own value change cancelled the settle on every release. A release held still (>100ms since the last move) has no fling and settles to the NEAREST row. The patch is part of webpack's cache key (`PATCHES_FINGERPRINT` in `next.config.mjs`): webpack re-reads `node_modules` only on a version change and a patch keeps the version, so a restored `.next/cache` shipped the unpatched module. A new patch goes through `pnpm patch`, with `patchedDependencies` in `package.json` (not `pnpm-workspace.yaml`) and only the patch lines changed in the lockfile
+- Do not make the wheel's highlight row translucent — the wheel draws the selected value twice (small and rotated, then bold in the highlight), and a translucent strip showed both. `.wheel-fill` (globals.css) is opaque, on the bar AND each wheel's row (`wheelClassNames`). It is a CSS class rather than an arbitrary `bg-[color-mix(…)]`: Tailwind generated nothing for that one
 - Do not give a full-surface overlay `inset-0` on desktop — the sidebar and the nav pill draw above it, so it ends up BEHIND them with its top unreachable (that was the signature pad on iPad). Take the content region: `--chrome-top`/`--chrome-bottom`, plus `SIDEBAR_WIDTH_PX` on the left only while the sidebar is PUSHING (below 1120 it overlays full-width panels and the region has not moved). Mobile keeps `inset-0` — there the dialog is above the bottom nav and the viewport IS the region
 - Do not redeclare the sidebar's width — it is `SIDEBAR_WIDTH_PX` in `lib/layout/panel-widths.ts`, part of the same budget as the panel widths (1180 − 199 − 1 = 980 on iPad Air 5 landscape). It had drifted into three separate copies
 - Do not hardcode the panel widths — they live in `lib/layout/panel-widths.ts` and are a single budget. `DUAL_MONTH_PX` is 600 rather than 620 because 620 + 360 detail is EXACTLY the space iPad Air 5 landscape has with the sidebar open, so it fit with zero slack and any rounding took the dual-month toggle away on the owner's device

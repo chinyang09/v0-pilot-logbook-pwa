@@ -20,9 +20,14 @@
  * Each row states how long it has left, because after that it really is
  * destroyed: the sweep runs on load, so what you can see here is exactly what
  * is still recoverable.
+ *
+ * MAIN / DETAIL, like every other page: tapping an item opens what it WAS —
+ * its details, when it was deleted, how long it is kept — with Restore and
+ * Delete forever, in the detail panel. The swipe keeps both for the quick
+ * case; the panel is where you check it is the one you want back.
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Trash2, RotateCcw, Plane, Users, BadgeCheck, CalendarClock } from "lucide-react"
 import { AnimatePresence, motion } from "framer-motion"
 import { mutate } from "swr"
@@ -33,7 +38,14 @@ import { Card, CardContent } from "@/components/ui/card"
 import { SwipeableCard } from "@/components/swipeable-card"
 import { FlightCardBody } from "@/components/flight-card-body"
 import { usePreferences } from "@/components/providers/preferences-provider"
-import { useDBReady, CACHE_KEYS } from "@/hooks/data"
+import { useDBReady } from "@/hooks/data"
+import { DetailFormPanel } from "@/components/ui/detail-form-panel"
+import { FormSection } from "@/components/ui/form-section"
+import { ReadOnlyRow } from "@/components/ui/settings-row"
+import { ActionRow } from "@/components/ui/action-row"
+import { useDetailPanel } from "@/hooks/use-detail-panel"
+import { useIsDesktop } from "@/hooks/use-is-desktop"
+import { formatYMDMedium } from "@/lib/utils/date"
 import { LIST_ITEM_TRANSITION } from "@/lib/motion"
 import {
   getDeletedFlights,
@@ -84,14 +96,31 @@ type Binned = {
   flight?: FlightLog
   title?: string
   subtitle?: string
+  /** What the detail panel lists — label, value — beyond the row. */
+  details: [string, string][]
 }
 
+/** One selection for every kind: ids from different tables can collide. */
+const binKey = (row: Pick<Binned, "kind" | "id">) => `${row.kind}:${row.id}`
+
+const STAMP = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+})
+
+/** Drop the empty pairs, so a panel lists only what the record holds. */
+const filled = (pairs: [string, string | null | undefined][]): [string, string][] =>
+  pairs.filter((p): p is [string, string] => !!p[1])
+
 const SECTIONS = [
-  { kind: "flight", label: "Flights", icon: Plane },
-  { kind: "aircraft", label: "Aircraft", icon: Plane },
-  { kind: "crew", label: "Crew", icon: Users },
-  { kind: "currency", label: "Currencies", icon: BadgeCheck },
-  { kind: "duty", label: "Duties", icon: CalendarClock },
+  { kind: "flight", label: "Flights", noun: "Flight", icon: Plane },
+  { kind: "aircraft", label: "Aircraft", noun: "Aircraft", icon: Plane },
+  { kind: "crew", label: "Crew", noun: "Crew member", icon: Users },
+  { kind: "currency", label: "Currencies", noun: "Currency", icon: BadgeCheck },
+  { kind: "duty", label: "Duties", noun: "Duty", icon: CalendarClock },
 ] as const
 
 /**
@@ -158,6 +187,9 @@ async function loadBinned(): Promise<Binned[]> {
       kind: "flight",
       deletedAt: f.deletedAt ?? 0,
       flight: f,
+      title: f.flightNumber || "Flight",
+      // The flight card says it all — date, times, route, aircraft, crew.
+      details: [],
     })),
     ...aircraft.map((a): Binned => {
       // The reference row stores its detail as a JSON blob; `normalizeAircraft`
@@ -176,6 +208,11 @@ async function loadBinned(): Promise<Binned[]> {
         deletedAt: a.deletedAt ?? 0,
         title: a.registration || "Aircraft",
         subtitle: [ac?.typecode, ac?.operator].filter(Boolean).join(" · "),
+        details: filled([
+          ["Registration", a.registration],
+          ["Type", ac?.typecode],
+          ["Operator", ac?.operator],
+        ]),
       };
     }),
     ...crew.map((c): Binned => ({
@@ -184,6 +221,11 @@ async function loadBinned(): Promise<Binned[]> {
       deletedAt: c.deletedAt ?? 0,
       title: c.name || "Crew member",
       subtitle: [c.crewId, c.roles?.join(", ")].filter(Boolean).join(" · "),
+      details: filled([
+        ["Name", c.name],
+        ["Crew ID", c.crewId],
+        ["Roles", c.roles?.join(", ")],
+      ]),
     })),
     ...currencies.map((c): Binned => ({
       id: c.id,
@@ -191,6 +233,11 @@ async function loadBinned(): Promise<Binned[]> {
       deletedAt: c.deletedAt ?? 0,
       title: c.description || c.code || "Currency",
       subtitle: c.expiryDate ? `Expires ${c.expiryDate}` : undefined,
+      details: filled([
+        ["Name", c.description],
+        ["Code", c.code],
+        ["Expires", c.expiryDate ? formatYMDMedium(c.expiryDate) : null],
+      ]),
     })),
     ...duties.map((d): Binned => ({
       id: d.id,
@@ -203,6 +250,12 @@ async function loadBinned(): Promise<Binned[]> {
       ]
         .filter(Boolean)
         .join(" · "),
+      details: filled([
+        ["Code", d.dutyCode],
+        ["Type", d.dutyType],
+        ["Date", d.date ? formatYMDMedium(d.date) : null],
+        ["Window (UTC)", d.reportTime && d.debriefTime ? `${d.reportTime} – ${d.debriefTime}` : null],
+      ]),
     })),
   ]
 }
@@ -259,14 +312,82 @@ export default function RecentlyDeletedPage() {
   const isLoading = rows === null
   const isEmpty = !isLoading && rows.length === 0
 
+  const { selectedId, setSelectedId, setDetailContent } = useDetailPanel()
+  const isDesktop = useIsDesktop()
+  const selected = useMemo(
+    () => (selectedId ? rows?.find((r) => binKey(r) === selectedId) ?? null : null),
+    [rows, selectedId]
+  )
+  const openRow = useCallback((row: Binned) => setSelectedId(binKey(row)), [setSelectedId])
+
+  // Restoring or destroying the open item closes its panel along with the row.
+  const restoreSelected = useCallback(
+    async (row: Binned) => {
+      setSelectedId(null)
+      await handleRestore(row)
+    },
+    [handleRestore, setSelectedId]
+  )
+  const destroySelected = useCallback(
+    async (row: Binned) => {
+      setSelectedId(null)
+      await handleDeleteForever(row)
+    },
+    [handleDeleteForever, setSelectedId]
+  )
+
+  useEffect(() => {
+    setDetailContent(
+      selected ? (
+        <DetailFormPanel
+          key={binKey(selected)}
+          title={selected.title || "Deleted item"}
+          dirty={false}
+          canSave={false}
+          saving={false}
+          onSave={() => {}}
+          onCancel={() => {}}
+        >
+          {selected.flight && (
+            <div className="rounded-xl border bg-card px-3 py-1 opacity-60">
+              <FlightCardBody
+                flight={selected.flight}
+                displayPrefs={preferences.display}
+                showStatusIcons={false}
+              />
+            </div>
+          )}
+          {selected.details.length > 0 && (
+            <FormSection title={SECTIONS.find((s) => s.kind === selected.kind)?.noun ?? "Item"}>
+              {selected.details.map(([label, value]) => (
+                <ReadOnlyRow key={label} label={label} value={value} />
+              ))}
+            </FormSection>
+          )}
+          <FormSection title="Deleted">
+            <ReadOnlyRow label="On" value={STAMP.format(new Date(selected.deletedAt))} />
+            <ReadOnlyRow
+              label="Kept for"
+              value={retentionLabel(selected.deletedAt, Date.now(), DELETED_RETENTION_MS)}
+            />
+          </FormSection>
+          <FormSection>
+            <ActionRow label="Restore" onClick={() => restoreSelected(selected)} />
+            <ActionRow label="Delete forever" destructive onClick={() => destroySelected(selected)} />
+          </FormSection>
+        </DetailFormPanel>
+      ) : null
+    )
+  }, [selected, preferences.display, restoreSelected, destroySelected, setDetailContent])
+
   return (
     <PageContainer>
       <div className="px-panel pt-4 space-y-3">
         {!isLoading && !isEmpty && (
           <p className="text-xs text-muted-foreground">
             Deleted items are kept for 30 days and count towards nothing while
-            they are here. After that they are gone for good. Swipe an item
-            left to restore it.
+            they are here. After that they are gone for good. Tap an item to
+            see it, or swipe it left to restore it.
           </p>
         )}
 
@@ -305,6 +426,7 @@ export default function RecentlyDeletedPage() {
                       >
                         <SwipeableCard
                           id={`bin-${row.id}`}
+                          onClick={() => openRow(row)}
                           actions={[
                             {
                               icon: <RotateCcw className="h-5 w-5" />,
@@ -320,7 +442,13 @@ export default function RecentlyDeletedPage() {
                             },
                           ]}
                         >
-                          <Card className="relative border-border bg-card py-0">
+                          <Card
+                            className={cn(
+                              "relative cursor-pointer border-border bg-card py-0 transition-colors",
+                              // Lit only where the panel beside the list shows it.
+                              isDesktop && selectedId === binKey(row) && "bg-primary/10"
+                            )}
+                          >
                             <CardContent className="px-3 py-1">
                               {/* Muted, because this is not one of your records
                                   any more — it is one you can have back. */}

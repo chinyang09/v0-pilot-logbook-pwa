@@ -44,11 +44,13 @@ export function daysFigure(days: number): string {
 
 interface CurrencyCardProps {
   currency: CurrencyWithStatus
+  /** Shown in the detail panel beside the list. */
+  selected?: boolean
   onEdit?: (currency: CurrencyWithStatus) => void
   onDelete?: (currency: CurrencyWithStatus) => void
 }
 
-export const CurrencyCard = memo(function CurrencyCard({ currency, onEdit, onDelete }: CurrencyCardProps) {
+export const CurrencyCard = memo(function CurrencyCard({ currency, selected = false, onEdit, onDelete }: CurrencyCardProps) {
   const status = STATUS[currency.status]
   const Icon = status.icon
   const flagged = currency.status !== "valid"
@@ -78,7 +80,11 @@ export const CurrencyCard = memo(function CurrencyCard({ currency, onEdit, onDel
       onClick={onEdit ? () => onEdit(currency) : undefined}
     >
       <div
-        className={cn("flex items-center gap-3 px-4 py-2", onEdit && "cursor-pointer")}
+        className={cn(
+          "flex items-center gap-3 px-4 py-2 transition-colors",
+          onEdit && "cursor-pointer",
+          selected && "bg-primary/10"
+        )}
         aria-label={`${currency.description}, ${status.label}, ${daysFigure(currency.daysRemaining)}, expires ${formatDate(currency.expiryDate)}`}
       >
         <Icon className={cn("h-5 w-5 shrink-0", status.text)} aria-hidden />

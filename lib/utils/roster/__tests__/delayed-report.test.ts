@@ -189,3 +189,27 @@ describe("a multi-sector duty", () => {
     expect(dp.maxFdpMinutes).toBe(13 * 60 + 15)
   })
 })
+
+describe("a report before midnight UTC", () => {
+  // Scheduled off the gate at 00:30Z on the 14th (08:30 SGT), so the crew
+  // reported at 23:30Z on the 13TH. The report used to be clamped to 00:00Z of
+  // the flight's own date: half an hour of duty went missing, and Table A was
+  // entered on 08:00 local instead of 07:30 — across a band boundary.
+  const [dp] = createDutyPeriodsFromFlights([
+    f({ id: "m", scheduledOut: "00:30", scheduledIn: "03:30", blockTime: "03:00", outTime: "00:30", inTime: "03:30" }),
+  ])
+
+  it("puts the duty on the day it was REPORTED for", () => {
+    expect(dp.date).toBe("2026-08-13")
+    expect(dp.reportTime).toBe("23:30")
+  })
+
+  it("counts the whole duty", () => {
+    // 23:30Z → 03:30Z + the half hour of post-flight checks.
+    expect(dp.dutyMinutes).toBe(4 * 60 + 30)
+  })
+
+  it("enters Table A on the real local report", () => {
+    expect(dp.fdpStartLocal).toBe("07:30")
+  })
+})

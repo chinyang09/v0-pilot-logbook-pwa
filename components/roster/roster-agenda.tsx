@@ -54,9 +54,12 @@ interface RosterAgendaProps {
   todayKey: string
   display?: DisplayPreferences
   activations: ReadonlyMap<string, { at: string; standbyMinutes: number } | null>
+  /** The duty shown in the detail panel beside the agenda, if any. */
+  selectedId?: string | null
   onEditDuty: (entry: ScheduleEntry) => void
   onDeleteDuty: (entry: ScheduleEntry) => void
-  onAddDuty: () => void
+  /** Add a duty ON this day — an empty later day used to add it to the first. */
+  onAddDuty: (dayKey: string) => void
 }
 
 /** One formatter for every day heading — `toLocaleDateString` builds one per call. */
@@ -67,6 +70,7 @@ export const RosterAgenda = memo(function RosterAgenda({
   todayKey,
   display,
   activations,
+  selectedId = null,
   onEditDuty,
   onDeleteDuty,
   onAddDuty,
@@ -89,8 +93,8 @@ export const RosterAgenda = memo(function RosterAgenda({
                 <span className="text-sm text-muted-foreground">Nothing rostered</span>
                 <button
                   type="button"
-                  onClick={onAddDuty}
-                  className="flex h-8 items-center gap-1 rounded-full px-3 text-xs font-medium text-primary hover:bg-secondary"
+                  onClick={() => onAddDuty(dayKey)}
+                  className="flex h-9 items-center gap-1 rounded-full px-3 text-xs font-medium text-primary hover:bg-secondary"
                 >
                   <Plus className="h-3.5 w-3.5" /> Add duty
                 </button>
@@ -115,6 +119,7 @@ export const RosterAgenda = memo(function RosterAgenda({
                     item={item}
                     display={display}
                     activation={activations.get(item.id) ?? null}
+                    selected={item.id === selectedId}
                     onClick={() => onEditDuty(item.entry)}
                   />
                 </SwipeableCard>
@@ -135,11 +140,13 @@ function DutyRow({
   item,
   display,
   activation,
+  selected,
   onClick,
 }: {
   item: Extract<RosterItem, { kind: "duty" }>
   display?: DisplayPreferences
   activation: { at: string; standbyMinutes: number } | null
+  selected: boolean
   onClick: () => void
 }) {
   const { entry } = item
@@ -157,7 +164,8 @@ function DutyRow({
           onClick()
         }
       }}
-      className={ROW}
+      aria-current={selected || undefined}
+      className={cn(ROW, selected && "border-primary/40 bg-primary/10")}
     >
       <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", itemTone(item))}>
         <Icon className="h-4 w-4" />

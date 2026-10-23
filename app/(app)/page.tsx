@@ -1,12 +1,18 @@
 "use client"
 
-import { useMemo } from "react"
+import { useEffect, useMemo } from "react"
+import { usePathname } from "next/navigation"
+import { mutate } from "swr"
 
 import { PageContainer } from "@/components/page-container"
 import { PageLoading } from "@/components/ui/page-loading"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { useAuth } from "@/components/providers/auth-provider"
-import { refreshAllData } from "@/hooks/data"
+import { CACHE_KEYS, refreshAllData } from "@/hooks/data"
+import { useDetailPanel } from "@/hooks/use-detail-panel"
+import { useIsDesktop } from "@/hooks/use-is-desktop"
+import { FlightForm } from "@/components/flight-form"
+import { syncService } from "@/lib/sync"
 
 import { usePageActive } from "@/hooks/use-page-active"
 import { useDashboardView } from "@/hooks/use-dashboard-view"
@@ -44,6 +50,41 @@ export default function Dashboard() {
 
   const dashboardActions = useMemo(() => <DashboardActions />, [])
   useRegisterMainActions(dashboardActions, isActive)
+
+  // MAIN / DETAIL: a summary flight row opens the FLIGHT in the detail panel;
+  // a legal-page requirement (`req:<id>`) is written by the legal page itself,
+  // which holds the model it comes from. This effect owns everything else —
+  // including clearing the panel, since the dashboard now has one.
+  const { selectedId, setSelectedId, setDetailContent } = useDetailPanel()
+  const isDesktop = useIsDesktop()
+  // The pathname moves in the same render as the selection; the active-route
+  // store a commit later. Gating on both stops a navigation away from writing
+  // the ARRIVING page's selection into this page's panel for a frame.
+  const onDashboard = usePathname() === "/"
+  useEffect(() => {
+    // Keep-alive: a hidden dashboard must not write the panel another page owns.
+    if (!isActive || !onDashboard) return
+    if (selectedId?.startsWith("req:")) {
+      if (view !== "legal") setDetailContent(null)
+      return
+    }
+    setDetailContent(
+      selectedId ? (
+        <div className="h-full overflow-hidden bg-background">
+          <FlightForm
+            key={selectedId}
+            flightId={selectedId}
+            isDesktop={isDesktop}
+            onFlightAdded={() => {
+              mutate(CACHE_KEYS.flights)
+              if (navigator.onLine) syncService.fullSync()
+            }}
+            onClose={() => setSelectedId(null)}
+          />
+        </div>
+      ) : null
+    )
+  }, [isActive, onDashboard, selectedId, view, isDesktop, setDetailContent, setSelectedId])
 
   if (authLoading) {
     return <PageLoading />

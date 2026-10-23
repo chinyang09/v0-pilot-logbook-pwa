@@ -221,9 +221,9 @@ export function SelectRow<T extends string>({
  */
 export function ReadOnlyRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between px-4 py-3.5 row-divider">
-      <span className="text-foreground">{label}</span>
-      <span className="text-muted-foreground">{value || "-"}</span>
+    <div className="flex items-center justify-between gap-3 px-4 py-3.5 row-divider">
+      <span className="shrink-0 text-foreground">{label}</span>
+      <span className="min-w-0 text-right text-muted-foreground">{value || "-"}</span>
     </div>
   )
 }

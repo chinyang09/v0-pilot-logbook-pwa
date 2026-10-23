@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, memo, Suspense, lazy, Component, type Reac
 import { usePathname } from "next/navigation"
 import { ActiveRouteProvider, KeepAlivePageScope } from "@/hooks/use-page-active"
 import { PageLoading } from "@/components/ui/page-loading"
+import { ErrorScreen } from "@/components/ui/error-screen"
 import { type KeepAliveRouteKey } from "@/components/keep-alive-routes"
 
 /**
@@ -13,15 +14,15 @@ import { type KeepAliveRouteKey } from "@/components/keep-alive-routes"
  */
 class PageErrorBoundary extends Component<
   { children: ReactNode },
-  { hasError: boolean }
+  { error: unknown }
 > {
   constructor(props: { children: ReactNode }) {
     super(props)
-    this.state = { hasError: false }
+    this.state = { error: null }
   }
 
-  static getDerivedStateFromError(): { hasError: boolean } {
-    return { hasError: true }
+  static getDerivedStateFromError(error: unknown): { error: unknown } {
+    return { error: error ?? new Error("Unknown error") }
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
@@ -29,24 +30,13 @@ class PageErrorBoundary extends Component<
   }
 
   render() {
-    if (this.state.hasError) {
+    if (this.state.error) {
       return (
-        <div className="flex flex-1 items-center justify-center bg-background px-4">
-          <div className="text-center max-w-sm">
-            <h2 className="text-lg font-semibold text-foreground mb-1">
-              Page failed to load
-            </h2>
-            <p className="text-sm text-muted-foreground mb-6">
-              This page encountered an error. Please reload the app.
-            </p>
-            <button
-              onClick={() => window.location.reload()}
-              className="px-4 py-2 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
-            >
-              Reload App
-            </button>
-          </div>
-        </div>
+        <ErrorScreen
+          error={this.state.error}
+          title="Page failed to load"
+          message="This page encountered an error. Please reload the app."
+        />
       )
     }
     return this.props.children

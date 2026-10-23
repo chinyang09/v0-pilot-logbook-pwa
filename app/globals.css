@@ -1281,6 +1281,15 @@ textarea:focus-within {
   }
 }
 
+/* The wheel pickers' highlight: the bar behind the wheels AND each wheel's
+   bold selected row (components/ui/wheel-styles.ts). OPAQUE on purpose — the
+   wheel draws the selected value a second time, small and rotated, under the
+   bold one, and a translucent strip let it show through. --muted at 40% over
+   the sheet's --card is the colour the old translucent bar resolved to. */
+.wheel-fill {
+  background-color: color-mix(in oklab, var(--muted) 40%, var(--card));
+}
+
 /* Inset row divider — a 1px line aligned with the row's px-4 content (iOS
    style) rather than spanning the full card width. */
 .row-divider {

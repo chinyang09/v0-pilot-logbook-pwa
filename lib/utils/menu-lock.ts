@@ -23,12 +23,19 @@ import { useSyncExternalStore } from "react"
  * because `useSyncExternalStore` gives the cards the new value in the same
  * commit the menu opens rather than a frame later.
  */
+// A COUNT, not a flag: two menus can overlap for a commit (one closing as the
+// other opens), and with a flag whichever cleanup ran last decided the answer
+// — the closing one could unlock the rows under the one still open.
+let holders = 0
 let open = false
 const listeners = new Set<() => void>()
 
+/** Take (`true`) or release (`false`) one hold on the lock. Pair every take with a release. */
 export function setMenuOpen(next: boolean): void {
-  if (next === open) return
-  open = next
+  holders = Math.max(0, holders + (next ? 1 : -1))
+  const now = holders > 0
+  if (now === open) return
+  open = now
   listeners.forEach((l) => l())
 }
 

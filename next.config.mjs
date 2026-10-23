@@ -1,5 +1,8 @@
 import { createRequire } from "node:module";
 import path from "node:path";
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 /**
  * The in-browser OCR engine imports bare `onnxruntime-web`, whose default
@@ -25,6 +28,28 @@ function ortWasmOnlyEntry() {
   }
 }
 const ORT_WASM_ONLY = ortWasmOnlyEntry();
+
+/**
+ * A fingerprint of `patches/` (pnpm's patched dependencies), folded into
+ * webpack's persistent cache version below.
+ *
+ * Webpack treats `node_modules` as immutable and re-reads a package only when
+ * its `package.json` VERSION changes — and a pnpm patch keeps the version. A
+ * build restoring the previous `.next/cache`, which Vercel does, therefore
+ * shipped the UNPATCHED module: measured locally, the wheel picker's second
+ * patch never reached the bundle until the cache was deleted.
+ */
+function patchesFingerprint() {
+  try {
+    const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "patches");
+    const hash = createHash("sha256");
+    for (const name of readdirSync(dir).sort()) hash.update(name).update(readFileSync(path.join(dir, name)));
+    return hash.digest("hex").slice(0, 16);
+  } catch {
+    return null;
+  }
+}
+const PATCHES_FINGERPRINT = patchesFingerprint();
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -71,6 +96,9 @@ const nextConfig = {
     ];
   },
   webpack: (config, { isServer }) => {
+    if (PATCHES_FINGERPRINT && config.cache && typeof config.cache === "object") {
+      config.cache.version = `${config.cache.version ?? ""}|patches:${PATCHES_FINGERPRINT}`;
+    }
     if (isServer) {
       config.externals = config.externals || [];
       config.externals.push({ sharp: "commonjs sharp" });

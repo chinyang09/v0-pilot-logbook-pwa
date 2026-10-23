@@ -111,6 +111,35 @@ function readEligibility(): "ios" | "prompt" | null {
 let eligibility: "ios" | "prompt" | null | undefined
 const getEligibility = () => (eligibility === undefined ? (eligibility = readEligibility()) : eligibility)
 
+/** Where this browser stands on installing — read once a snapshot is asked for. */
+function readInstallPlatform(): "installed" | "ios" | "prompt" {
+  if (isStandalone()) return "installed"
+  return isIOS() ? "ios" : "prompt"
+}
+
+/**
+ * The install offer for a surface OTHER than the banner (Account › Install
+ * app). It reads the same module-held event: the account page used to listen
+ * for `beforeinstallprompt` in a mount effect of its own, and the event had
+ * always fired (and been captured here) long before that page mounted — so its
+ * Install button never had an offer and only ever showed the manual steps.
+ */
+export function useInstallOffer() {
+  const platform = useSyncExternalStore(noSubscribe, readInstallPlatform, () => null)
+  const promptEvent = useSyncExternalStore(subscribePrompt, () => deferredPrompt, () => null)
+  const install = useCallback(async () => {
+    const event = deferredPrompt
+    if (!event) return
+    // Single-use, as in the banner: spend it before prompting.
+    deferredPrompt = null
+    notifyPrompt()
+    await event.prompt()
+    const { outcome } = await event.userChoice
+    if (outcome === "dismissed") rememberDismissal()
+  }, [])
+  return { platform, canPrompt: !!promptEvent, install }
+}
+
 /**
  * PWA install prompt — sits in layout flow at the top of the app shell, above
  * the edge-to-edge chrome, which it offsets through `--install-banner-height`

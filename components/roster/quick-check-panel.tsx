@@ -223,7 +223,7 @@ export function QuickCheckPanel({
         {onViewChart && (
           <button
             onClick={onViewChart}
-            className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+            className="flex h-9 items-center gap-1.5 px-3 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
           >
             <BarChart3 className="h-3.5 w-3.5" />
             <span>View Chart</span>
@@ -238,7 +238,7 @@ export function QuickCheckPanel({
           <button
             onClick={() => setMode("add")}
             className={cn(
-              "flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors",
+              "flex-1 flex h-9 items-center justify-center gap-1 px-2 rounded-md text-xs font-medium transition-colors",
               mode === "add" ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground"
             )}
           >
@@ -247,7 +247,7 @@ export function QuickCheckPanel({
           <button
             onClick={() => setMode("swap")}
             className={cn(
-              "flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors",
+              "flex-1 flex h-9 items-center justify-center gap-1 px-2 rounded-md text-xs font-medium transition-colors",
               mode === "swap" ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground"
             )}
           >
@@ -261,7 +261,7 @@ export function QuickCheckPanel({
             <p className="text-[10px] text-muted-foreground">Tap scheduled duties to remove/swap:</p>
             {/* pr-1: lane for the overlay scrollbar so it doesn't draw over the
                 right-aligned duty times (same fix as the dashboard flight list). */}
-            <div className="max-h-[160px] overflow-y-auto space-y-0.5 pr-1">
+            <div className="max-h-[200px] overflow-y-auto space-y-1 pr-1">
               {futureDPs.map((dp) => {
                 const isRemoved = removedDutyIds.has(dp.id)
                 return (
@@ -269,7 +269,7 @@ export function QuickCheckPanel({
                     <button
                       onClick={() => toggleRemoveDuty(dp.id, dp.date)}
                       className={cn(
-                        "flex-1 flex items-center justify-between px-2 py-1.5 rounded text-[11px] transition-colors",
+                        "flex-1 flex h-9 items-center justify-between px-2 rounded text-xs transition-colors",
                         isRemoved ? "bg-status-error/10 text-status-error line-through" : "bg-secondary/50 text-foreground hover:bg-secondary"
                       )}
                     >
@@ -279,10 +279,11 @@ export function QuickCheckPanel({
                     {isRemoved && (
                       <button
                         onClick={() => addSwap(dp.id, dp.date)}
-                        className="shrink-0 p-1 rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                        className="shrink-0 flex h-9 w-9 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
                         title="Add replacement flight"
+                        aria-label="Add replacement flight"
                       >
-                        <ArrowLeftRight className="h-3 w-3" />
+                        <ArrowLeftRight className="h-4 w-4" />
                       </button>
                     )}
                   </div>
@@ -417,7 +418,7 @@ export function QuickCheckPanel({
               )}
             </div>
 
-            <Button variant="ghost" onClick={handleReset} className="w-full h-7 text-[10px] text-muted-foreground" size="sm">
+            <Button variant="ghost" onClick={handleReset} className="w-full h-9 text-xs text-muted-foreground" size="sm">
               Reset
             </Button>
           </div>

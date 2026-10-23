@@ -1,6 +1,16 @@
 "use client"
 
-import React, { createContext, useContext, useState, useLayoutEffect, useMemo, useRef, type ReactNode } from "react"
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react"
 
 /**
  * The action buttons the shell's header row renders for the active page.
@@ -21,9 +31,9 @@ interface PageActionsState {
 
 interface PageActionsSetters {
   /** Register main panel actions (call from active page) */
-  setMainActions: (actions: ReactNode) => void
+  setMainActions: Dispatch<SetStateAction<ReactNode>>
   /** Register detail panel actions (call from active page) */
-  setDetailActions: (actions: ReactNode) => void
+  setDetailActions: Dispatch<SetStateAction<ReactNode>>
 }
 
 const PageActionsStateContext = createContext<PageActionsState | null>(null)
@@ -66,20 +76,35 @@ export function usePageActions(): PageActionsState {
 function useRegisterActions(
   actions: ReactNode,
   isActive: boolean,
-  set: (actions: ReactNode) => void,
+  set: Dispatch<SetStateAction<ReactNode>>,
 ) {
   const actionsRef = useRef(actions)
   actionsRef.current = actions
+  // What THIS page last put in the header. The cleanup clears only that.
+  const ownRef = useRef<ReactNode>(null)
 
   // LAYOUT effects, both of them: a page becoming active and its buttons
   // arriving in the header must be the same painted frame. As passive effects
   // the header lagged the page by a frame or two on every tab switch — the
   // dashboard showed under the logbook's search/calendar/import buttons.
   useLayoutEffect(() => {
-    if (isActive) set(actionsRef.current)
-    // Clears on unmount (non-keepalive) AND on inactive→active transition cleanup (keepalive).
-    // This prevents stale actions persisting when lazy-loaded pages race during navigation.
-    return () => set(null)
+    if (isActive) {
+      ownRef.current = actionsRef.current
+      set(actionsRef.current)
+    }
+    // Clears on unmount (non-keepalive) AND on the active→inactive transition
+    // (keep-alive) — but ONLY if the header still holds this page's buttons.
+    // A keep-alive page learns it is inactive from the route STORE, which is
+    // published in a passive effect AFTER the commit that mounted the next
+    // page; that page's layout effect has already registered its own buttons,
+    // and an unconditional `set(null)` here wiped them. That is why the
+    // currencies, discrepancies and FDP headers came up empty when arriving
+    // from the logbook, and full when arriving from another ordinary page.
+    return () => {
+      const own = ownRef.current
+      ownRef.current = null
+      set((current) => (current === own ? null : current))
+    }
     // `actions` is deliberately absent: this effect reads it only through the
     // ref, so re-running on a new node would cleanup→re-register and flash the
     // buttons off. Nothing to silence here — the effect body references no
@@ -89,7 +114,10 @@ function useRegisterActions(
   // Sync ref-held actions to context when the ReactNode identity changes
   // (separate from the mount/unmount effect to avoid cleanup flicker).
   useLayoutEffect(() => {
-    if (isActive) set(actionsRef.current)
+    if (isActive) {
+      ownRef.current = actionsRef.current
+      set(actionsRef.current)
+    }
   }, [isActive, set, actions])
 }
 
