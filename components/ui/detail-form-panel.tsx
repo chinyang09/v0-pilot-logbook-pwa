@@ -28,6 +28,7 @@ export function DetailFormPanel({
   error,
   onSave,
   onCancel,
+  saveLabel = "Save",
   children,
 }: {
   /** What the pane is — "New currency", "Medical". */
@@ -41,6 +42,8 @@ export function DetailFormPanel({
   error?: string | null
   onSave: () => void
   onCancel: () => void
+  /** The commit's verb, where "Save" is not it ("Resolve"). */
+  saveLabel?: string
   children: ReactNode
 }) {
   // The header's buttons are memoised; they call the latest handlers by ref,
@@ -58,11 +61,11 @@ export function DetailFormPanel({
         <>
           <GlassTextButton onClick={() => cancelRef.current()}>Cancel</GlassTextButton>
           <GlassTextButton primary disabled={!canSave || saving} onClick={() => saveRef.current()}>
-            {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Save"}
+            {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : saveLabel}
           </GlassTextButton>
         </>
       ) : null,
-    [dirty, canSave, saving]
+    [dirty, canSave, saving, saveLabel]
   )
   useRegisterDetailActions(actions, true)
 

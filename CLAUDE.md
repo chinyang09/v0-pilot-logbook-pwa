@@ -1739,6 +1739,39 @@ JUL  WSSS                             WICA        ← "SIMULATOR" for a sim
   parts; the signed (✎) and locked (🔒) icons are how the card says "this entry
   is yours" — do not reintroduce a separate "replaces yours" banner.
 
+### Main / Detail on every page (the owner's rule, Oct 2026)
+
+"All pages should operate in [one] model: more details are shown on the detail
+panel, while the main page occupies the main panel." A page's LIST or overview
+is the main panel; what is behind a row opens in the detail panel — beside the
+list on a tablet, the full-screen overlay (with its back entry) on a phone —
+through `useDetailPanel`'s `setSelectedId` + `setDetailContent`, never a sheet
+or a dialog over the list.
+
+| Page | Main panel | Detail panel |
+|---|---|---|
+| logbook, aircraft, airports, crew | the list | the record |
+| roster, currencies | month + agenda / the list | the duty / currency form (`DetailFormPanel`) |
+| discrepancies | comparisons, notes | a comparison's FLIGHT (`FlightForm`); a note and its Resolve (`DiscrepancyDetailPanel`) |
+| recently deleted | the bin | what the item was, how long it is kept, Restore / Delete forever |
+| FDP | the timeline chart | a tapped DAY (`FdpDayPanel`), or the Quick Check |
+| account, settings | the sections | the section |
+
+- **A panel that only READS is still a `DetailFormPanel`** (`dirty={false}`):
+  one title, one scroller, the chrome spacers — and no header buttons.
+- **Actions inside a panel are `ActionRow`s** (`components/ui/action-row.tsx`):
+  a row in a grouped section with the label in the accent or red, never a
+  full-width filled button.
+- **One selection id per page, namespaced where tables can collide**
+  (recently deleted keys `kind:id`; FDP's days are `day:YYYY-MM-DD` beside the
+  Quick Check's `legal-check`).
+- **The row that is open is lit only where the panel BESIDE it shows it**
+  (`isDesktop && …`) — a phone has no such panel.
+- **Account sections own their state.** The detail panel is rendered by the
+  shell, OUTSIDE the page's tree, so a section cannot read the page's state or
+  context; the profile and the sessions are one SWR cache each
+  (`components/account/account-data.ts`), shared by the list and the panel.
+
 ### Discrepancies as the Comparison Record
 
 `app/(app)/discrepancies/page.tsx` leads with **Comparisons**: one
@@ -3463,12 +3496,8 @@ assessment on record:
 
 ### Deferred design work (owner-approved to-do)
 
-- **Populate the split-view detail panel on non-detail routes** (layout audit
-  L·8): dashboard, FDP, discrepancies and account leave the ≥720px right panel
-  on a permanent "Select an item to view details" placeholder. The roster and
-  currencies were done at the owner's request (Oct 2026): a selected duty or
-  currency opens there, like a flight. The rest is to be designed together
-  with the owner — do not implement piecemeal.
+- **The split-view detail panel on every route** — no longer deferred: the
+  owner set the rule (Oct 2026), see "Main / Detail on every page".
 
 ### Performance work surveyed but NOT actioned (audit trail)
 
@@ -4396,6 +4425,10 @@ When making changes, be aware of these high-impact files:
 - Do not answer "was this standby called out" in two places — `findActivationMinute` is the rule, with `truncateActivatedStandby` (duty periods) and `standbyActivation` (schedule entries + flights, for the roster page) as its two callers. And read the ROSTERED report when finding it, or a pushback delay moves the activation later and credits duty hours as standby
 - Do not let a standby into the dashboard's active-duty search — it would become the ACTIVE duty carrying `maxFdpMinutes: 0`, so the panel reads as a flight duty whose limit failed to compute. `DutyStatus.standby` is its own band
 - Do not hard-delete a roster duty, and do not let a binned one be matched by `bulkUpsertScheduleEntries` — updating a deleted row silently resurrects a duty the user deleted, the same rule the flight reconciler follows. Every read filters `isLiveEntity`
+- Do not open what is behind a row in a sheet, a dialog or an in-list expansion on a page with a detail panel — it opens IN the detail panel (see "Main / Detail on every page"). The discrepancy resolution was a sheet over the list it was chosen from; account was one long scroll with accordions
+- Do not key the FDP chart's x-axis (or any lookup on it) on `dateLabel` — "13 Oct" repeats once a zoomed-out window spans a year, and every lookup by label lands on the first year. The axis is the `date`, printed through `tickFormatter`
+- Do not take a tapped chart day from the `onClick` state Recharts hands over — it is the TOOLTIP's last index, which on a touch tap is still the previous position (measured: a tap on 15 Oct opened 3 Oct). And do not use `useXAxisInverseDataSnapScale` for it either: it snaps to the nearest band START, so the right half of a column picks the next day. `DayAtPixelProbe` hit-tests the click against each day's band, the rule the tooltip follows
+- Do not listen for `beforeinstallprompt` in a component — the install banner's module captures and spends it at page load, before any page mounts. Read the offer through `useInstallOffer()` (`pwa-install-prompt.tsx`); the account page's own listener never saw an offer, so its Install button only ever showed manual steps
 - Do not put the duty or currency form back in a sheet over the page — a selected duty or currency opens in the DETAIL panel (`DutyDetailPanel` / `CurrencyDetailPanel` on `DetailFormPanel`), beside its list on a tablet and as the overlay on a phone, like a flight or a crew member; a sheet covered the very list it was chosen from. And keep their forms a DRAFT over the live record (`useDraft`), never a copy seeded once — a copy goes stale at the next pull and saving it reverts another device's edit
 - Do not count a standby's full length toward the 90h/180h limits — para 6(7) counts **20%** of home standby, and para 6(3) folds AIRPORT standby into the rest period or the following FDP so it contributes nothing separately. `countedDutyMinutes` carries the discount and `calculateRollingStats` reads `countedDutyMinutes ?? dutyMinutes`, so every ordinary duty is untouched
 - Do not leave an activated standby at its rostered length (para 6(6)) — `truncateActivatedStandby` cuts it back to the following duty's report before the 20% is taken, or the called-out hours are counted twice: once as standby and again in full as the duty they became

@@ -21,6 +21,7 @@ import {
 } from "@/types/entities/roster.types"
 import { FDPTimelineChart } from "@/components/roster/fdp-timeline-chart"
 import { QuickCheckPanel } from "@/components/roster/quick-check-panel"
+import { FdpDayPanel } from "@/components/roster/fdp-day-panel"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import type { ScenarioResult } from "@/lib/utils/roster/fdp-calculator"
 import { cn } from "@/lib/utils"
@@ -184,6 +185,35 @@ export default function FDPPage() {
     prevSelectedIdRef.current = selectedId
   }, [selectedId, quickCheckOpen])
 
+  // A DAY of the chart, opened in the detail panel (`day:YYYY-MM-DD`). It
+  // shares the panel with the Quick Check, which owns it while open — a tap on
+  // the chart then reads the scenario rather than replacing the check.
+  const selectedDay = selectedId?.startsWith("day:") ? selectedId.slice(4) : null
+  const selectDay = useCallback(
+    (date: string) => {
+      if (quickCheckOpen) return
+      setSelectedIdRef.current(`day:${date}`)
+    },
+    [quickCheckOpen]
+  )
+  const prevSelectedDayRef = useRef<string | null>(null)
+  useEffect(() => {
+    const was = prevSelectedDayRef.current
+    prevSelectedDayRef.current = selectedDay
+    if (selectedDay) {
+      setDetailContentRef.current(
+        <FdpDayPanel
+          date={selectedDay}
+          point={timelineData.find((p) => p.date === selectedDay)}
+          duties={allDutyPeriods.filter((dp) => dp.date === selectedDay)}
+          limits={activeLimits}
+        />
+      )
+    } else if (was) {
+      setDetailContentRef.current(null)
+    }
+  }, [selectedDay, timelineData, allDutyPeriods, activeLimits])
+
   // Next scheduled duty drives the banner — no more ticking countdown.
   //
   // IMPORTANT: we deliberately do NOT mirror `restUntilLegal`, `futureDuties`,
@@ -328,6 +358,7 @@ export default function FDPPage() {
               scenarioModifiedDates={scenarioResult?.modifiedDates}
               scenarioRemovedDates={scenarioResult?.removedDates}
               onClearScenario={() => setScenarioResult(null)}
+              onSelectDate={selectDay}
             />
           </ChartErrorBoundary>
         ) : !isLoading ? (

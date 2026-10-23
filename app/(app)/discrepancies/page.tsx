@@ -22,9 +22,16 @@
  * Everything else the importer records (duplicates, stale reports, missing
  * sectors) is a one-off note rather than a standing comparison, so it sits
  * below in a compact list.
+ *
+ * MAIN / DETAIL, like every other page: the lists live in the main panel and
+ * what is behind a row opens in the detail panel. A comparison opens its
+ * FLIGHT — the whole record, to decide which side is right — and a note opens
+ * its values and its resolution (`DiscrepancyDetailPanel`). The resolution
+ * used to be a sheet over the whole content region, covering the list.
  */
 
-import { useState, useMemo, useCallback, useEffect } from "react"
+import { useMemo, useCallback, useEffect } from "react"
+import { mutate } from "swr"
 import { useSessionState } from "@/hooks/use-session-state"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
@@ -35,8 +42,14 @@ import { FilterChips } from "@/components/ui/filter-chips"
 import { RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react"
 import { AnimatePresence, motion } from "framer-motion"
 import { LIST_ITEM_TRANSITION } from "@/lib/motion"
-import { useDiscrepancies, useFlights } from "@/hooks/data"
-import { DiscrepancyCard, DiscrepancyResolutionDialog } from "@/components/roster"
+import { CACHE_KEYS, useDiscrepancies, useFlights } from "@/hooks/data"
+import { DiscrepancyDetailPanel, DiscrepancyRow } from "@/components/roster"
+import { FlightForm } from "@/components/flight-form"
+import { FormSection } from "@/components/ui/form-section"
+import { PanelLoading } from "@/components/ui/page-loading"
+import { useDetailPanel } from "@/hooks/use-detail-panel"
+import { useIsDesktop } from "@/hooks/use-is-desktop"
+import { syncService } from "@/lib/sync"
 import {
   FlightMismatchCard,
   groupMismatches,
@@ -113,8 +126,8 @@ export default function DiscrepanciesPage() {
   const filterType: FilterType = TABS.includes(storedFilter)
     ? storedFilter
     : "comparisons"
-  const [discrepancyToResolve, setDiscrepancyToResolve] =
-    useState<Discrepancy | null>(null)
+  const { selectedId, setSelectedId, setDetailContent } = useDetailPanel()
+  const isDesktop = useIsDesktop()
 
   const flightsById = useMemo(() => {
     const map = new Map<string, FlightLog>()
@@ -214,14 +227,67 @@ export default function DiscrepanciesPage() {
     [refresh]
   )
 
-  const handleReopen = useCallback(
-    async (d: Discrepancy) => {
-      const { unresolveDiscrepancy } = await import("@/lib/db")
-      await unresolveDiscrepancy(d.id)
-      await refresh()
-    },
-    [refresh]
+  const openNote = useCallback((d: Discrepancy) => setSelectedId(d.id), [setSelectedId])
+  const openFlight = useCallback((f: FlightLog) => setSelectedId(f.id), [setSelectedId])
+  const closeDetail = useCallback(() => setSelectedId(null), [setSelectedId])
+
+  /**
+   * What the detail panel shows: the selected note, or the selected flight.
+   * One selection serves both — a note's id and a flight's id never collide
+   * (a comparison's own id is `mismatch:<flight>:<field>`, and comparisons
+   * select their FLIGHT).
+   */
+  const selectedNote = useMemo(
+    () =>
+      selectedId
+        ? discrepancies.find((d) => d.id === selectedId && !MISMATCH_TYPES.has(d.type)) ?? null
+        : null,
+    [discrepancies, selectedId]
   )
+  const selectedFlightId =
+    selectedId && !selectedNote && flightsById.has(selectedId) ? selectedId : null
+
+  useEffect(() => {
+    if (selectedNote) {
+      setDetailContent(
+        <DiscrepancyDetailPanel
+          key={selectedNote.id}
+          discrepancy={selectedNote}
+          onChanged={refresh}
+          onClose={closeDetail}
+        />
+      )
+    } else if (selectedFlightId) {
+      setDetailContent(
+        <div className="h-full overflow-hidden bg-background">
+          <FlightForm
+            key={selectedFlightId}
+            flightId={selectedFlightId}
+            isDesktop={isDesktop}
+            onFlightAdded={() => {
+              mutate(CACHE_KEYS.flights)
+              if (navigator.onLine) syncService.fullSync()
+            }}
+            onClose={closeDetail}
+          />
+        </div>
+      )
+    } else if (selectedId && isLoading && discrepancies.length === 0) {
+      setDetailContent(<PanelLoading />)
+    } else {
+      setDetailContent(null)
+    }
+  }, [
+    selectedNote,
+    selectedFlightId,
+    selectedId,
+    isLoading,
+    discrepancies.length,
+    isDesktop,
+    refresh,
+    closeDetail,
+    setDetailContent,
+  ])
 
   const discrepancyActions = useMemo(
     () => (
@@ -298,6 +364,9 @@ export default function DiscrepanciesPage() {
                     <FlightMismatchCard
                       group={group}
                       displayPrefs={preferences.display}
+                      // Lit only where the panel beside the list shows it.
+                      selected={isDesktop && group.flight.id === selectedFlightId}
+                      onOpen={openFlight}
                       onHoldingChange={handleHoldingChange}
                     />
                   </motion.div>
@@ -308,54 +377,34 @@ export default function DiscrepanciesPage() {
         )}
 
         {filterType === "notes" && (
-          <div className="space-y-3">
-            <AnimatePresence initial={false} mode="popLayout">
-              {notes.map((discrepancy) => (
-                <motion.div
-                  key={discrepancy.id}
-                  layout
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.97 }}
-                  transition={LIST_ITEM_TRANSITION}
-                >
-                  <DiscrepancyCard
-                    discrepancy={discrepancy}
-                    onResolve={(d) => setDiscrepancyToResolve(d)}
-                    onReopen={handleReopen}
+          <>
+            {notes.length > 0 && (
+              <FormSection title={`Open · ${notes.length}`}>
+                {notes.map((d) => (
+                  <DiscrepancyRow
+                    key={d.id}
+                    discrepancy={d}
+                    selected={isDesktop && d.id === selectedId}
+                    onOpen={openNote}
                   />
-                </motion.div>
-              ))}
-            </AnimatePresence>
-
+                ))}
+              </FormSection>
+            )}
             {/* Handled notes stay in the same tab, below the open ones — they
                 are the same list in its settled state, not a separate concern. */}
             {handledNotes.length > 0 && (
-              <>
-                <h2 className="pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Handled
-                </h2>
-                <AnimatePresence initial={false} mode="popLayout">
-                  {handledNotes.map((discrepancy) => (
-                    <motion.div
-                      key={discrepancy.id}
-                      layout
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.97 }}
-                      transition={LIST_ITEM_TRANSITION}
-                    >
-                      <DiscrepancyCard
-                        discrepancy={discrepancy}
-                        onResolve={(d) => setDiscrepancyToResolve(d)}
-                        onReopen={handleReopen}
-                      />
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </>
+              <FormSection title={`Handled · ${handledNotes.length}`}>
+                {handledNotes.map((d) => (
+                  <DiscrepancyRow
+                    key={d.id}
+                    discrepancy={d}
+                    selected={isDesktop && d.id === selectedId}
+                    onOpen={openNote}
+                  />
+                ))}
+              </FormSection>
             )}
-          </div>
+          </>
         )}
 
         {showing === 0 && !isLoading && (
@@ -369,13 +418,6 @@ export default function DiscrepanciesPage() {
           />
         )}
       </div>
-
-      <DiscrepancyResolutionDialog
-        open={!!discrepancyToResolve}
-        onOpenChange={(open) => !open && setDiscrepancyToResolve(null)}
-        discrepancy={discrepancyToResolve}
-        onResolved={refresh}
-      />
     </PageContainer>
   )
 }
