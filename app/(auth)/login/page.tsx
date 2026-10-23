@@ -651,6 +651,7 @@ export default function LoginPage() {
 
                   {passkeySupported && (
                     <Button
+                      variant="ghost"
                       className="w-full h-12 text-base bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[1.03]"
                       onClick={attemptPasskeyLogin}
                       disabled={isLoading || isOffline}
@@ -670,8 +671,8 @@ export default function LoginPage() {
                   </div>
 
                   <Button
-                    variant="outline"
-                    className="w-full h-12 text-base bg-transparent text-white/80 border-white/20 hover:bg-white/10 hover:text-white transition-all active:scale-[1.03]"
+                    variant="ghost"
+                    className="w-full h-12 text-base bg-transparent text-white/80 border border-white/20 hover:bg-white/10 hover:text-white transition-all active:scale-[1.03]"
                     onClick={() => {
                       setError("")
                       setStep("recovery")
@@ -843,6 +844,7 @@ export default function LoginPage() {
                   </div>
 
                   <Button
+                    variant="ghost"
                     className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[1.03]"
                     onClick={startRegistration}
                     disabled={isLoading || !callsign.trim()}
@@ -927,6 +929,7 @@ export default function LoginPage() {
                       This enables fast login with Face ID, Touch ID, or device PIN
                     </p>
                     <Button
+                      variant="ghost"
                       className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[1.03]"
                       onClick={registerPasskey}
                       disabled={isLoading}
@@ -1042,6 +1045,7 @@ export default function LoginPage() {
                     </div>
                   )}
                   <Button
+                    variant="ghost"
                     className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[1.03]"
                     onClick={registerAdditionalPasskey}
                     disabled={isLoading}

@@ -130,7 +130,9 @@ interface SwipeableCardProps {
  * vocabulary — so a revealed button read as more row.
  */
 function variantClasses(variant?: SwipeAction["variant"]): string {
-  return cn("control-surface", variant === "destructive" && "control-surface-destructive")
+  // `-inset`: these sit INSIDE the row, which clips (it has to — the content
+  // slides out of it), so a drop shadow is cut off at the row's edge.
+  return cn("control-surface control-surface-inset", variant === "destructive" && "control-surface-destructive")
 }
 
 /**
@@ -156,7 +158,12 @@ function SwipeActionButton({
 }) {
   // 0 (hidden) → 1 (fully revealed) across this button's stagger window.
   const reveal = useTransform(x, [endX, startX], [1, 0], { clamp: true })
-  const scale = useSpring(useTransform(reveal, [0, 1], [0.4, 1]), POP_SPRING)
+  // Capped at 1: POP_SPRING overshoots (~10%), and a button that fills the
+  // row's height grew past the panel's clip at the peak — its top and bottom
+  // were sliced flat on every reveal. The pop is the rise from 0.4 and the
+  // fade; the overshoot only ever showed as clipping.
+  const popScale = useSpring(useTransform(reveal, [0, 1], [0.4, 1]), POP_SPRING)
+  const scale = useTransform(popScale, (v) => Math.min(v, 1))
   const opacity = useSpring(reveal, POP_SPRING)
 
   return (

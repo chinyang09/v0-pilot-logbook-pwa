@@ -312,7 +312,7 @@ function TimeRow({
               variant="outline"
               size="sm"
               aria-label={`${label} now`}
-              className="h-9 min-w-11 px-2 text-xs border-primary text-primary bg-transparent"
+              className="h-9 min-w-11 px-2 text-xs text-primary control-surface-inset"
               onClick={(e) => {
                 e.stopPropagation();
                 onNow?.();
@@ -409,7 +409,7 @@ function TimeDisplayRow({
           <Button
             variant="outline"
             size="sm"
-            className="h-9 min-w-11 px-2 text-xs border-primary text-primary bg-transparent"
+            className="h-9 min-w-11 px-2 text-xs text-primary control-surface-inset"
             onClick={(e) => {
               // The row behind it opens the picker; this tap means "the block".
               e.stopPropagation();
@@ -451,7 +451,7 @@ function NumberRow({
           variant="outline"
           size="icon"
           aria-label={`Decrease ${label}`}
-          className="h-9 w-9 rounded-full bg-transparent"
+          className="h-9 w-9 control-surface-inset"
           disabled={value <= 0}
           onClick={() => onChange(Math.max(0, value - 1))}
         >
@@ -462,7 +462,7 @@ function NumberRow({
           variant="outline"
           size="icon"
           aria-label={`Increase ${label}`}
-          className="h-9 w-9 rounded-full bg-transparent"
+          className="h-9 w-9 control-surface-inset"
           onClick={() => onChange(value + 1)}
         >
           <Plus className="h-4 w-4" />

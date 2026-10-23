@@ -1282,42 +1282,77 @@ textarea:focus-within {
  *   .control-surface-primary       the primary action (the selected-thing fill)
  *   .control-surface-destructive   delete / sign out
  */
-.control-surface {
-  position: relative;
-  isolation: isolate;
-  background-color: var(--on-glass);
-  color: var(--foreground);
-  box-shadow: 0 8px 20px -10px rgb(0 0 0 / 0.55);
-  transition: background-color 120ms ease;
-}
-.control-surface::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  border-radius: inherit;
-  padding: 1.1px;
-  border: 0 solid transparent;
-  background: var(--glass-rim);
-  mask:
-    linear-gradient(white 0 0) padding-box,
-    linear-gradient(white 0 0) content-box;
-  mask-composite: exclude, exclude;
-  pointer-events: none;
-}
-.control-surface:active:not(:disabled) {
-  background-color: color-mix(in oklab, var(--on-glass), var(--foreground) 12%);
-}
-.control-surface.control-surface-primary {
-  background-color: var(--on-glass-active);
-  color: var(--on-glass-active-fg);
-}
-.control-surface.control-surface-destructive {
-  background-color: var(--destructive);
-  color: var(--destructive-foreground);
-}
-.control-surface.control-surface-destructive:active:not(:disabled) {
-  background-color: color-mix(in oklab, var(--destructive), black 15%);
+/* In the COMPONENTS layer, so a call site's utilities still win. Unlayered,
+   it beat every Tailwind class: the login page's "Authenticator Code" button
+   (outline, over the photo) took the opaque face and dark text however its own
+   `bg-transparent text-white/80` read. */
+@layer components {
+  .control-surface {
+    position: relative;
+    isolation: isolate;
+    background-color: var(--on-glass);
+    color: var(--foreground);
+    /* The GLASS's own shadow, not one of its own. It had a hard
+       `0 8px 20px -10px black/55`, which on the light theme read as a different
+       material from the header capsule beside it: a dark smudge under a white
+       disc where the glass carries a soft warm lift. */
+    box-shadow: var(--glass-shadow);
+    transition: background-color 120ms ease;
+  }
+  /* Set INTO a surface rather than floating over one — the swipe panel's
+     buttons, which sit inside the row they belong to. A drop shadow there is
+     cut off by the row's own edge (it clips, because the row slides), which on
+     the light theme drew a grey band under the buttons ending in a straight
+     line. The face and the rim are unchanged. */
+  .control-surface.control-surface-inset {
+    box-shadow: none;
+  }
+  /* FLOATING over live content — the context preview's actions and the `…`
+     cascade, both over the list. Painted opaque they read as a different
+     material from the header capsule a few centimetres above them: the header
+     glass is translucent, so over the preview's scrim it takes on the dimmed
+     list and the circles stayed stark white. This is the glass's own FACE —
+     the same two coats (`--glass-base` + `--glass-veil`) over the same single
+     filter list as `.GlassBlur` — on one element, so there is still exactly one
+     backdrop-filter per control (on a 64px box, which is a small readback).
+
+     It must not sit under an ancestor whose OPACITY animates: that ancestor is
+     a backdrop root, and the blur would sample nothing until the fade ended
+     and then snap on. Fade the control itself. */
+  .control-surface.control-surface-float {
+    background-color: var(--glass-base);
+    background-image: linear-gradient(var(--glass-veil), var(--glass-veil));
+    backdrop-filter: blur(var(--glass-face-blur, 4.4px)) brightness(var(--glass-blur-brightness, 1.25)) saturate(1.5);
+  }
+  .control-surface::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border-radius: inherit;
+    padding: 1.1px;
+    border: 0 solid transparent;
+    background: var(--glass-rim);
+    mask:
+      linear-gradient(white 0 0) padding-box,
+      linear-gradient(white 0 0) content-box;
+    mask-composite: exclude, exclude;
+    pointer-events: none;
+  }
+  .control-surface:active:not(:disabled) {
+    background-color: color-mix(in oklab, var(--on-glass), var(--foreground) 12%);
+  }
+  .control-surface.control-surface-primary {
+    background-color: var(--on-glass-active);
+    color: var(--on-glass-active-fg);
+  }
+  .control-surface.control-surface-destructive {
+    background-color: var(--destructive);
+    color: var(--destructive-foreground);
+  }
+  .control-surface.control-surface-destructive:active:not(:disabled) {
+    background-color: color-mix(in oklab, var(--destructive), black 15%);
+  }
 }
 
 /* Reduced motion: disable heavy backdrop-filters and touch animations */

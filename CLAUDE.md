@@ -2580,9 +2580,33 @@ card above it, so the owner could not tell the actions from the card.
 | delete / sign out | `.control-surface-destructive` |
 
 - The painted surface is the same look as the glass wherever the backdrop is a
-  scrim, a row or a panel (blurring a flat field returns the field), and it
-  costs no readback — which matters because these pop in on the busiest frames.
-- `Button` is a capsule in every variant, and `sm` is `h-9`.
+  flat row or panel (blurring a flat field returns the field), and it costs no
+  readback.
+- **Two placements, two modifiers.** `.control-surface-inset` — set INTO a
+  surface that clips (the swipe panel: the row has to clip, its content slides
+  out of it) — drops the shadow, which the row's edge cut off into a grey band
+  with a straight bottom on the light theme. `.control-surface-float` — over
+  LIVE content (the context preview's actions, the `…` cascade) — is the
+  glass's own translucent face: `--glass-base` + `--glass-veil` over the
+  `.GlassBlur` filter list, ONE backdrop-filter on a 64px box. Painted opaque
+  there, the circles stayed stark white while the header glass above them took
+  on the dimmed list, which read as a different material. A `-float` control
+  must FADE ITSELF: under an ancestor whose opacity animates (a backdrop root)
+  its blur samples nothing until the fade ends and then snaps on.
+- The shadow is the glass's own (`--glass-shadow`), not a hard black one.
+- The surface lives in `@layer components`, so a call site's utilities still
+  win. Unlayered it beat every Tailwind class, and the login page's outline
+  button over the photo silently took the opaque face.
+- `Button` is a capsule in every variant, and `sm` is `h-9`. `default` IS the
+  primary surface and `destructive` the red one — the default used to be a
+  solid accent pill, so there were two primaries for one job (Save Signature /
+  Check Legality / Install beside Restore / Reload). `ghost` and `link` carry no
+  surface, for a control with its own look (the login page's buttons on the
+  photo). A dialog's buttons are `outline` + default, never a ghost inside a
+  `GlassContainer` — glass over a flat dialog came out a near-black disc.
+- The swipe buttons' pop spring is CAPPED at scale 1: they fill the row's
+  height, so its ~10% overshoot sliced their tops and bottoms off at the
+  panel's clip on every reveal.
 - A panel's actions are `ActionRow` capsules in an `ActionStack`, under the
   content — not rows inside a `FormSection`.
 - Kept as they are, on purpose: rows of a grouped list that OPEN something
@@ -3575,11 +3599,6 @@ alone on purpose. The reason is recorded so the next pass doesn't re-derive it
   cache would collapse them, but a cached offset would pin a PLACEHOLDER
   timezone if a custom airport were enriched later, and that feeds the FDP
   legality math. Do not cache it without invalidation tied to enrichment.
-- **The OCR preloader fires on a fixed 3s timer** (`ocr-models-preloader.tsx`),
-  which lands while the user is making their first interactions. The ~16MB
-  fetch itself is done by the service worker, so it is off the main thread and
-  this is network contention only — but `requestIdleCallback` (with the 3s as a
-  floor and a timeout so it always runs) would be strictly better timed.
 - **The Google Fonts stylesheet is render-blocking** — a third-party
   `<link rel="stylesheet">` in `<head>`, so first paint waits on a
   `fonts.googleapis.com` round trip on a cold start. See the `next/font` note
@@ -4654,6 +4673,7 @@ When making changes, be aware of these high-impact files:
 - Do not thin the rim by dropping the conic's FLANKS — iOS's controls have a hairline you can see ALL THE WAY ROUND, and at flanks of ~0.05 three-quarters of the perimeter had none. Keep the lobes concentrated (that is what reads as light on a curve) and the flanks around 0.22; the ring's WIDTH (`--softness`, and `.Highlight`'s padding with it) is the separate knob, and it is only free to be fine BECAUSE the flanks hold the continuity
 - Do not open the flight card's `…` cascade behind a blocking scrim — the page must stay scrollable underneath (a scroll dismisses it) while taps are swallowed at the capture phase so nothing activates. And arm that swallow on a short timer, or the click from the tap that OPENED it closes it on the same gesture
 - Do not let the `…` cascade leave `pointerdown`/`touchstart` alone — they must be `stopPropagation`'d in the CAPTURE phase, or a swipe elsewhere still reaches framer-motion and reveals that row's swipe panel with the menu up. And do not add `preventDefault` to them: that is what would kill the compositor's touch scroll, which is the one interaction the menu is supposed to allow (`preventDefault` belongs on `mousedown`, to stop desktop focus, and on the swallowed `click`/`pointerup`)
+- Do not put a segmented choice back as a pair of filled rectangles — it is `SegmentedTabs` (glass, a sliding indicator, `h-9` segments), as in the import dialogs and the Quick Check. And measure its segments from ONE ResizeObserver: reading `offsetLeft` in a ref callback that is rebuilt on every selection forced a layout per tap and attached a new observer to every segment each time, never disconnecting the old ones
 - Do not put an action back on the card surface (`bg-secondary`, `bg-card`, `bg-muted`) or give it a rectangle's corners — a thing you press is a CAPSULE or circle on `.control-surface`, a thing you read is a rounded rectangle. On the card surface the context preview's action row read as more card. And do not use the REAL glass (`GlassContainer`) for an action that sits over a scrim, a row or a panel: the painted surface is the same look with no `backdrop-filter`, and these pop in on exactly the frames a readback would cost most
 - Do not group header controls page by page — a header is VIEW (search, calendar, period) → TOOLS (import, Quick Check, alerts, read-from-photo) → CREATE (+, alone and last), one capsule per role, with a page switch first and detail commits (Cancel / Save / Edit, Back) one capsule each (`glass-icon-button.tsx`). And do not add a Refresh button: every list follows every write and every sync, so it re-reads the same rows, and it reads as "sync" — which is the cloud in the nav
 - Do not give the context preview's compact body `layout="position"` — it is the one block that exists in BOTH states, so it takes a FULL `layout`. Its height is unchanged either way, which makes its delta scaleX only: the row's content is condensed at the first frame and relaxes out as the card widens. `layout="position"` cancels the horizontal scale too, which lays it out at the RESTING width from frame one and lets the card clip it — on a tablet the arrival time and ICAO are missing until the card widens past them. The detail and the actions DO take `layout="position"`; they exist only while open. And keep the lift a static shadow on its own PROJECTED (`layout`) node faded by opacity, outside the clip: an interpolated `boxShadow` is rebuilt as a string every frame, and `overflow: hidden` on an ancestor eats a shadow entirely

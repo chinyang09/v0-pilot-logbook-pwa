@@ -61,22 +61,24 @@ const ACTIONS: { id: FlightQuickAction; label: string; icon: React.ReactNode }[]
  * preview — and it is the SWIPE PANEL's button, not a shape of its own.
  *
  * The cascade comes out of the `…` in that panel, so anything else made the run
- * read as a different family of control appearing next to it: `rounded-lg` at
- * `BUTTON_WIDTH` (64) in `bg-secondary`, with the icon over a `text-xs` label,
- * is what a swipe action already looks like (`swipeable-card.tsx`). The one
- * addition is a shadow, because unlike a swipe button these FLOAT over the
- * list rather than sitting inside a row.
+ * read as a different family of control appearing next to it: the action
+ * surface at `BUTTON_WIDTH` (64), the icon over a `text-xs` label, is what a
+ * swipe action already looks like (`swipeable-card.tsx`). The one difference is
+ * that these FLOAT over the list rather than sitting inside a row, so they take
+ * the glass's translucent face and its shadow (`control-surface-float`).
  *
- * Square rather than the swipe button's full row height: the cascade is a
- * COLUMN, and five row-height tiles is most of a screen.
+ * A circle rather than the swipe button's full-height capsule: the cascade is a
+ * COLUMN, and five row-height buttons is most of a screen.
  */
 export const ACTION_TILE_PX = 64;
 export const actionTileClass = cn(
   // The ACTION SURFACE (globals.css `.control-surface`): a circle on the
   // glass control face, the same thing a header control is. It was a
   // `bg-secondary` rounded square — the flight card's own surface — so in the
-  // context preview the action row read as more card.
-  "control-surface flex flex-col items-center justify-center gap-0.5 rounded-full select-none"
+  // context preview the action row read as more card. `-float` because both
+  // users float over the list: the translucent glass face, not the painted
+  // stand-in, or it reads as a different material from the header.
+  "control-surface control-surface-float flex flex-col items-center justify-center gap-0.5 rounded-full select-none"
 );
 export const ACTION_LABEL_CLASS = "text-xs font-medium leading-none";
 

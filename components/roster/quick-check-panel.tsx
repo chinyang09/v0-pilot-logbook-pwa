@@ -18,6 +18,12 @@ import { simulateScenario } from "@/lib/utils/roster/fdp-calculator"
 import type { ScenarioChange, ScenarioResult } from "@/lib/utils/roster/fdp-calculator"
 import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
 import type { DutyPeriod, FTLLimits } from "@/types/entities/roster.types"
+import { SegmentedTabs, type SegmentedTab } from "@/components/import/segmented-tabs"
+
+const MODE_TABS: SegmentedTab<"add" | "swap">[] = [
+  { value: "add", label: "Add a duty" },
+  { value: "swap", label: "Swap / remove" },
+]
 
 interface QuickCheckPanelProps {
   dutyPeriods: DutyPeriod[]
@@ -233,27 +239,15 @@ export function QuickCheckPanel({
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-        {/* Mode selector */}
-        <div className="flex gap-1">
-          <button
-            onClick={() => setMode("add")}
-            className={cn(
-              "flex-1 flex h-9 items-center justify-center gap-1 px-2 rounded-md text-xs font-medium transition-colors",
-              mode === "add" ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground"
-            )}
-          >
-            <Plus className="h-3 w-3" /> Add Flight
-          </button>
-          <button
-            onClick={() => setMode("swap")}
-            className={cn(
-              "flex-1 flex h-9 items-center justify-center gap-1 px-2 rounded-md text-xs font-medium transition-colors",
-              mode === "swap" ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground"
-            )}
-          >
-            <ArrowLeftRight className="h-3 w-3" /> Swap / Remove
-          </button>
-        </div>
+        {/* Mode selector — the app's segmented control, not two filled
+            rectangles. And named for what each mode DOES to the roster: it
+            said "Add Flight" here and again on the button below, which adds
+            one more hypothetical duty in either mode. */}
+        <SegmentedTabs
+          tabs={MODE_TABS}
+          value={mode}
+          onChange={setMode}
+        />
 
         {/* Swap mode: show future DPs to remove */}
         {mode === "swap" && futureDPs.length > 0 && (
@@ -370,7 +364,7 @@ export function QuickCheckPanel({
         {/* Action buttons */}
         <div className="flex gap-1.5">
           <Button onClick={addChange} variant="outline" size="sm" className="flex-1 h-9 text-xs">
-            <Plus className="h-3 w-3 mr-1" /> Add Flight
+            <Plus className="h-3 w-3 mr-1" /> Another duty
           </Button>
           <Button onClick={handleCheck} size="sm" className="flex-1 h-9 text-xs">
             Check Legality

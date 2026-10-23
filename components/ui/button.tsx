@@ -8,7 +8,12 @@ import { cn } from '@/lib/utils'
  * Every button is a CAPSULE — the app's one shape for a thing you press (see
  * `.control-surface` in globals.css). `outline` and `secondary` are the action
  * surface itself, the glass control's face and rim, so a button in a form or
- * an empty state is visibly the same kind of thing as a header control.
+ * an empty state is visibly the same kind of thing as a header control;
+ * `default` is its PRIMARY fill and `destructive` its red one. The default
+ * used to be a solid accent pill, so the app had two primaries — that one
+ * (Save Signature, Check Legality, Install) and the action surface's (Restore,
+ * Reload) — for the same job. `ghost` and `link` carry no surface, for a
+ * control that has its own look (the login page's buttons over the photo).
  * Content (cards, rows, sections) keeps the rounded rectangle.
  *
  * `sm` is 36px, not 32: every control a thumb has to hit is at least `h-9`.
@@ -18,9 +23,9 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground hover:bg-primary/90',
+        default: 'control-surface control-surface-primary',
         destructive:
-          'bg-destructive text-destructive-foreground hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60',
+          'control-surface control-surface-destructive focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40',
         outline: 'control-surface',
         secondary: 'control-surface',
         ghost:

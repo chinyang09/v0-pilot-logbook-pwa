@@ -22,7 +22,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { GlassContainer } from "@/components/ui/glass-container";
 import {
   MODAL_SCRIM,
   RadialBlurBackdrop,
@@ -163,18 +162,12 @@ export function ImportStatusDialog({
           <>
             <div className="mt-4">{question.body}</div>
             <div className="mt-4 flex justify-end gap-2">
-              <Button variant="ghost" className="h-10 rounded-full px-4" onClick={question.onCancel}>
+              <Button variant="outline" className="h-10 px-4" onClick={question.onCancel}>
                 Cancel
               </Button>
-              <GlassContainer cornerRadius={20}>
-                <Button
-                  variant="ghost"
-                  className="h-10 rounded-full px-5 font-semibold text-primary"
-                  onClick={question.onConfirm}
-                >
-                  {question.confirmLabel}
-                </Button>
-              </GlassContainer>
+              <Button className="h-10 px-5 font-semibold" onClick={question.onConfirm}>
+                {question.confirmLabel}
+              </Button>
             </div>
           </>
         )}
@@ -185,15 +178,9 @@ export function ImportStatusDialog({
 
         {done && (
           <div className="mt-4 flex justify-end">
-            <GlassContainer cornerRadius={20}>
-              <Button
-                variant="ghost"
-                className="h-10 rounded-full px-5 font-semibold text-primary"
-                onClick={onDone}
-              >
-                Done
-              </Button>
-            </GlassContainer>
+            <Button className="h-10 px-5 font-semibold" onClick={onDone}>
+              Done
+            </Button>
           </div>
         )}
       </DialogContent>

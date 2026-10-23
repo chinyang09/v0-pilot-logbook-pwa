@@ -27,7 +27,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { GlassContainer } from "@/components/ui/glass-container";
 import {
   MODAL_SCRIM,
   RadialBlurBackdrop,
@@ -236,28 +235,25 @@ export function LogtenReviewDialog({
         <div className="mt-5 flex shrink-0 items-center justify-end gap-2">
           {!nothingToDo && (
             <Button
-              variant="ghost"
-              className="h-10 rounded-full px-4"
+              variant="outline"
+              className="h-10 px-4"
               disabled={busy}
               onClick={onCancel}
             >
               Cancel
             </Button>
           )}
-          <GlassContainer cornerRadius={20}>
-            {/* A plan with nothing to apply gets a DONE button, not a disabled
-                Import one. A dead primary button reads as the dialog being
-                broken — which is exactly how it read after deleting an
-                aircraft and re-importing the same file. */}
-            <Button
-              variant="ghost"
-              className="h-10 rounded-full px-5 font-semibold text-primary"
-              disabled={busy}
-              onClick={nothingToDo ? onCancel : onConfirm}
-            >
-              {nothingToDo ? "Done" : "Import"}
-            </Button>
-          </GlassContainer>
+          {/* A plan with nothing to apply gets a DONE button, not a disabled
+              Import one. A dead primary button reads as the dialog being
+              broken — which is exactly how it read after deleting an
+              aircraft and re-importing the same file. */}
+          <Button
+            className="h-10 px-5 font-semibold"
+            disabled={busy}
+            onClick={nothingToDo ? onCancel : onConfirm}
+          >
+            {nothingToDo ? "Done" : "Import"}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
