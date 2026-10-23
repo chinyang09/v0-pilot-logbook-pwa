@@ -7,13 +7,11 @@ import { GlassIconButton } from "@/components/ui/glass-icon-button"
 import { Card, CardContent } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/empty-state"
 import {
-  RefreshCw,
   TrendingUp,
   AlertTriangle,
   Calculator,
 } from "lucide-react"
 import { useFDPData, useFDPTimeline } from "@/hooks/data/use-fdp-data"
-import { useScheduleEntries } from "@/hooks/data/use-schedule"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import {
   FTL_PRESETS,
@@ -81,7 +79,6 @@ function extractDestination(route?: string): string {
 }
 
 export default function FDPPage() {
-  const { refresh } = useScheduleEntries()
   const {
     allDutyPeriods,
     capacity,
@@ -228,32 +225,25 @@ export default function FDPPage() {
   const restRequiredMinutes = restUntilLegal?.requiredRestMinutes ?? 0
   const isRestMet = restHadMinutes >= restRequiredMinutes
 
-  // Header actions: refresh + quick check
+  // Header actions: the Quick Check, a TOOL — one capsule (see the header
+  // rule in glass-icon-button.tsx). There is no Refresh: it re-read the
+  // schedule table, which every write and every sync already does.
   const fdpActions = useMemo(
     () => (
-      <div className="flex gap-2">
-        <GlassIconButton
-          ariaLabel="Legality quick check"
-          onClick={() => setQuickCheckOpen((prev) => !prev)}
-        >
-          <Calculator className={cn("h-5 w-5", quickCheckOpen && "text-primary")} />
-        </GlassIconButton>
-        <GlassIconButton
-          ariaLabel="Refresh FDP data"
-          onClick={() => refresh()}
-          disabled={isLoading}
-        >
-          <RefreshCw className={cn("h-5 w-5", isLoading && "animate-spin")} />
-        </GlassIconButton>
-      </div>
+      <GlassIconButton
+        ariaLabel="Legality quick check"
+        onClick={() => setQuickCheckOpen((prev) => !prev)}
+      >
+        <Calculator className={cn("h-5 w-5", quickCheckOpen && "text-primary")} />
+      </GlassIconButton>
     ),
-    [refresh, isLoading, quickCheckOpen]
+    [quickCheckOpen]
   )
 
   useRegisterMainActions(fdpActions, true)
 
   return (
-    <PageContainer>
+    <PageContainer title="FDP">
       <div className="px-panel pt-2 space-y-2">
         {/* Next duty banner — reports next scheduled duty + rest vs. requirement.
             Static snapshot from useFDPData; no tick interval to avoid setState

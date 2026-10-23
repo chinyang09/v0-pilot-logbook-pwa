@@ -710,6 +710,7 @@ export default function AircraftPage() {
 
   return (
     <PageContainer
+      title="Aircraft"
       rightContent={
         showFastScroll ? (
           <FastScroll

@@ -51,14 +51,14 @@ export function ErrorScreen({
             {onRetry && (
               <button
                 onClick={onRetry}
-                className="h-9 rounded-md border border-border bg-secondary px-4 text-sm font-medium text-secondary-foreground transition-colors hover:bg-accent"
+                className="control-surface h-9 rounded-full px-4 text-sm font-medium"
               >
                 Try again
               </button>
             )}
             <button
               onClick={() => window.location.reload()}
-              className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+              className="control-surface control-surface-primary h-9 rounded-full px-4 text-sm font-semibold"
             >
               Reload app
             </button>

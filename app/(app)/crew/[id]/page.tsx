@@ -59,7 +59,7 @@ export default function CrewDetailPage() {
       }
     },
   });
-  const { crew, isLoading, isEditing, isSaving, setIsEditing, formData } = form;
+  const { crew, isLoading, isDirty, isSaving, formData } = form;
 
   // Latest handlers/state behind a ref (synced in an effect, read only inside
   // event handlers) so the memoised glass actions stay stable across keystrokes.
@@ -67,7 +67,7 @@ export default function CrewDetailPage() {
     save: form.handleSave,
     reset: form.resetForm,
     isNew,
-    isEditing,
+    isDirty,
     hasCrew: !!crew,
   });
   useEffect(() => {
@@ -75,7 +75,7 @@ export default function CrewDetailPage() {
       save: form.handleSave,
       reset: form.resetForm,
       isNew,
-      isEditing,
+      isDirty,
       hasCrew: !!crew,
     };
   });
@@ -84,7 +84,7 @@ export default function CrewDetailPage() {
     const l = latestRef.current;
     if (l.isNew) {
       router.back();
-    } else if (l.isEditing && l.hasCrew) {
+    } else if (l.isDirty && l.hasCrew) {
       l.reset();
     } else {
       router.back();
@@ -92,9 +92,10 @@ export default function CrewDetailPage() {
   }, [router]);
 
   // Floating glass header actions — same system as every other page (no
-  // embedded page header). Editing/new: Cancel + Save; viewing: Back + Edit.
+  // embedded page header). Changed/new: Cancel + Save; otherwise just Back —
+  // the card is edited in place, like every other record.
   const actions = useMemo(() => {
-    if (isEditing) {
+    if (isDirty) {
       return (
         <>
           <GlassTextButton onClick={handleCancel}>
@@ -115,12 +116,9 @@ export default function CrewDetailPage() {
         <GlassIconButton ariaLabel="Back" onClick={handleCancel}>
           <ChevronLeft className="h-5 w-5" />
         </GlassIconButton>
-        <GlassTextButton primary onClick={() => setIsEditing(true)}>
-          Edit
-        </GlassTextButton>
       </>
     );
-  }, [isEditing, isSaving, formData.name, setIsEditing, handleCancel]);
+  }, [isDirty, isSaving, formData.name, handleCancel]);
 
   useRegisterMainActions(actions, true);
 
@@ -142,7 +140,6 @@ export default function CrewDetailPage() {
         ) : (
           <CrewFormBody
             formData={formData}
-            isEditing={isEditing}
             existingSelfId={form.existingSelfId}
             updateField={form.updateField}
             handleIsMeChange={form.handleIsMeChange}

@@ -42,7 +42,7 @@ import { useDBReady } from "@/hooks/data"
 import { DetailFormPanel } from "@/components/ui/detail-form-panel"
 import { FormSection } from "@/components/ui/form-section"
 import { ReadOnlyRow } from "@/components/ui/settings-row"
-import { ActionRow } from "@/components/ui/action-row"
+import { ActionRow, ActionStack } from "@/components/ui/action-row"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { formatYMDMedium } from "@/lib/utils/date"
@@ -371,17 +371,17 @@ export default function RecentlyDeletedPage() {
               value={retentionLabel(selected.deletedAt, Date.now(), DELETED_RETENTION_MS)}
             />
           </FormSection>
-          <FormSection>
-            <ActionRow label="Restore" onClick={() => restoreSelected(selected)} />
+          <ActionStack>
+            <ActionRow label="Restore" primary onClick={() => restoreSelected(selected)} />
             <ActionRow label="Delete forever" destructive onClick={() => destroySelected(selected)} />
-          </FormSection>
+          </ActionStack>
         </DetailFormPanel>
       ) : null
     )
   }, [selected, preferences.display, restoreSelected, destroySelected, setDetailContent])
 
   return (
-    <PageContainer>
+    <PageContainer title="Recently deleted">
       <div className="px-panel pt-4 space-y-3">
         {!isLoading && !isEmpty && (
           <p className="text-xs text-muted-foreground">

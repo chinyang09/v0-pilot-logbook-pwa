@@ -16,18 +16,17 @@ import {
 /**
  * Presentational crew form body shared by the crew detail panel and the
  * full-page crew route. Uses the shared FormSection + settings rows so it
- * matches the flight form's sectioned layout.
+ * matches the flight form's sectioned layout, and like every other record it
+ * is always editable — there is no read-only view behind an Edit button.
  */
 export function CrewFormBody({
   formData,
-  isEditing,
   existingSelfId,
   updateField,
   handleIsMeChange,
   toggleRole,
 }: {
   formData: CrewFormData
-  isEditing: boolean
   existingSelfId: string | null
   updateField: (field: keyof CrewFormData, value: string | boolean | string[] | null) => void
   handleIsMeChange: (checked: boolean) => void
@@ -52,7 +51,6 @@ export function CrewFormBody({
           value={formData.name}
           onChange={(v) => updateField("name", v)}
           placeholder="Required"
-          readOnly={!isEditing}
           required
         />
         <SettingsRow
@@ -60,60 +58,50 @@ export function CrewFormBody({
           value={formData.crewId}
           onChange={(v) => updateField("crewId", v)}
           placeholder="Crew ID"
-          readOnly={!isEditing}
         />
         <SettingsRow
           label="Organization"
           value={formData.organization}
           onChange={(v) => updateField("organization", v)}
           placeholder="Company"
-          readOnly={!isEditing}
         />
         <SettingsRow
           label="Licence Number"
           value={formData.licenceNumber}
           onChange={(v) => updateField("licenceNumber", v)}
           placeholder="Licence #"
-          readOnly={!isEditing}
         />
 
         {/* Type / roles */}
         <div className="px-4 py-3.5 row-divider">
           <span className="text-foreground block mb-2">Type</span>
-          {isEditing ? (
-            <div className="flex flex-wrap gap-2">
-              {CREW_ROLE_OPTIONS.map((role) => (
-                <Button
-                  key={role}
-                  type="button"
-                  variant={formData.roles.includes(role) ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => toggleRole(role)}
-                  className="h-8"
-                >
-                  {role}
-                </Button>
-              ))}
-            </div>
-          ) : (
-            <span className="text-muted-foreground">
-              {formData.roles.length > 0 ? formData.roles.join(", ") : "-"}
-            </span>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {CREW_ROLE_OPTIONS.map((role) => (
+              <Button
+                key={role}
+                type="button"
+                variant={formData.roles.includes(role) ? "default" : "outline"}
+                size="sm"
+                aria-pressed={formData.roles.includes(role)}
+                onClick={() => toggleRole(role)}
+              >
+                {role}
+              </Button>
+            ))}
+          </div>
         </div>
 
         <ToggleRow
           label="This is Me"
+          // Said under the switch rather than as a warning paragraph: with the
+          // card always editable, that paragraph sat on every other person's
+          // card permanently.
+          description={
+            !formData.isMe && existingSelfId ? "Your own card. Turning this on moves it here." : "Your own card"
+          }
           checked={formData.isMe}
           onCheckedChange={handleIsMeChange}
-          readOnly={!isEditing}
         />
-        {isEditing && existingSelfId && !formData.isMe && (
-          <p className="text-xs text-muted-foreground px-4 pb-3 -mt-1">
-            Another crew member is already marked as &quot;Self&quot;. Enabling this will
-            remove that designation.
-          </p>
-        )}
       </FormSection>
 
       {/* The seat and the PF convention are a USER setting now (Settings ›
@@ -143,7 +131,6 @@ export function CrewFormBody({
           onChange={(v) => updateField("email", v)}
           placeholder="email@example.com"
           type="email"
-          readOnly={!isEditing}
         />
         <SettingsRow
           label="Phone"
@@ -151,14 +138,12 @@ export function CrewFormBody({
           onChange={(v) => updateField("phone", v)}
           placeholder="+1 234 567 8900"
           type="tel"
-          readOnly={!isEditing}
         />
         <SettingsRow
           label="Comment"
           value={formData.comment}
           onChange={(v) => updateField("comment", v)}
           placeholder="Add comment"
-          readOnly={!isEditing}
         />
       </FormSection>
 
@@ -167,7 +152,6 @@ export function CrewFormBody({
           label="Favorite"
           checked={formData.favorite}
           onCheckedChange={(checked) => updateField("favorite", checked)}
-          readOnly={!isEditing}
         />
       </FormSection>
     </div>

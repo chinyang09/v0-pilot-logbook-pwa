@@ -349,7 +349,7 @@ export function AirportNewForm({
                     variant="ghost"
                     size="sm"
                     onClick={handleViewExisting}
-                    className="text-primary h-6 px-2 text-xs font-semibold"
+                    className="text-primary px-3 text-xs font-semibold"
                   >
                     View
                   </Button>

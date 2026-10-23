@@ -28,7 +28,7 @@ export function CountdownConfirmButton({
   duration = 10_000,
   className,
   ariaLabel,
-  radius = 12,
+  radius = 22,
   progress: externalProgress,
   showBorder = true,
   deadline,
@@ -82,8 +82,11 @@ export function CountdownConfirmButton({
       }}
       style={{ touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
       className={cn(
-        "relative inline-flex h-11 select-none items-center justify-center gap-2 isolate",
-        "rounded-xl border border-border bg-secondary px-4 text-sm font-medium text-foreground",
+        // The action surface, as a capsule — it is a thing you press (to stop
+        // it). It was a bordered `bg-secondary` rounded rectangle: the card
+        // surface, the one shape the app keeps for things you READ.
+        "control-surface relative inline-flex h-11 select-none items-center justify-center gap-2",
+        "rounded-full px-4 text-sm font-medium",
         className,
       )}
     >

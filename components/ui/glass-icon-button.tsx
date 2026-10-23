@@ -20,6 +20,28 @@ import { cn } from "@/lib/utils"
  * - `GlassSearchButton` (components/ui/glass-search-button.tsx) — the
  *   expanding search control; collapsed it matches `GlassIconButton`.
  *
+ * ## Which controls share a capsule — the header rule
+ *
+ * A header bar reads left to right as "what am I looking at → what can I do →
+ * what can I make", and each of those ROLES gets one capsule. Controls that
+ * share a role share a capsule; a role with one control is one capsule. It
+ * used to be decided page by page: the logbook put import in with search and
+ * the calendar, the roster put it in with Add, the currencies page left Refresh
+ * and Add as two loose buttons, so nothing taught the reader what a grouping
+ * meant.
+ *
+ * | Role | Controls | Capsule |
+ * |---|---|---|
+ * | Page switch | Legal / Summary | its own segmented capsule, FIRST |
+ * | View | search, calendar, date range, period | one group |
+ * | Tools | import, Quick Check, alerts, read-from-photo | one group |
+ * | Create | + | ALONE, and LAST — the primary act of a list page |
+ * | Detail commits | Cancel, Save, Edit; Back | one capsule EACH |
+ *
+ * There is no Refresh anywhere: every list follows every write and every sync
+ * on its own, so it re-read a table to show the same rows — and read as
+ * "sync", which is the cloud in the nav.
+ *
  * All of them carry `overBlur`: a header control is, by definition, sitting in
  * the header's `ChromeFade` band, which has already blurred and darkened
  * whatever is scrolling under it. A thick undercoat on top of that only buries

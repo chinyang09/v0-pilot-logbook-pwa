@@ -7,20 +7,24 @@
  * accordions inside the first; what is behind each row now lives in
  * `components/account/account-sections.tsx`.
  *
- * "Log out of all devices" stays on the list, at the top. It is not a section
- * of anything — it is the one thing a pilot who has lost a phone comes here
- * to do.
+ * Signing out is at the BOTTOM, as two destructive actions under the
+ * sections, the way every platform's account screen ends: "Sign out" for this
+ * device, "Sign out of all devices" for a lost one. There was no plain sign-out
+ * at all — the only way off this device was to open Active sessions, find
+ * your own row and swipe it for an unlabelled icon — and the all-devices one
+ * sat ABOVE the sections, the first thing on the page being the most
+ * destructive thing on it.
  */
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
-import { ChevronRight, Download, KeyRound, Loader2, LogOut, MonitorSmartphone, UserRound } from "lucide-react"
+import { ChevronRight, Download, KeyRound, LogOut, MonitorSmartphone, UserRound } from "lucide-react"
 import { useAuth } from "@/components/providers/auth-provider"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { FormSection } from "@/components/ui/form-section"
-import { Button } from "@/components/ui/button"
+import { ActionRow, ActionStack } from "@/components/ui/action-row"
 import { CountdownConfirmButton } from "@/components/ui/countdown-confirm-button"
 import { AccountSection, deviceHasPasskey, type AccountSectionKey } from "@/components/account/account-sections"
 import { confirmUnsyncedLoss, useAccountProfile, useAccountSessions } from "@/components/account/account-data"
@@ -104,6 +108,19 @@ export default function AccountPage() {
     }
   }, [logout])
 
+  const [isSigningOut, setIsSigningOut] = useState(false)
+  const handleSignOut = useCallback(async () => {
+    // Pushes first, while the session still works, and asks before throwing
+    // anything unsynced away — then `logout` revokes this device's session.
+    if (!(await confirmUnsyncedLoss())) return
+    setIsSigningOut(true)
+    try {
+      await logout({ skipSync: true })
+    } finally {
+      setIsSigningOut(false)
+    }
+  }, [logout])
+
   const passkeyCount = profile?.passkeys.length ?? null
   const rows: Record<AccountSectionKey, { label: string; icon: typeof KeyRound; summary: string }> = {
     profile: { label: "Profile", icon: UserRound, summary: profile?.callsign || user?.callsign || "" },
@@ -124,33 +141,8 @@ export default function AccountPage() {
   }
 
   return (
-    <PageContainer>
+    <PageContainer title="Account">
       <div className="px-panel pt-4 space-y-4">
-        {/* Global logout — prominent, at the very top. Tapping ARMS it: the
-            logout then runs on a countdown the same button cancels. */}
-        {logoutArmed ? (
-          <CountdownConfirmButton
-            label="Cancel log out"
-            icon={<LogOut className="h-4 w-4" />}
-            onConfirm={() => {
-              setLogoutArmed(false)
-              handleLogoutAll()
-            }}
-            onCancel={() => setLogoutArmed(false)}
-            className="w-full"
-          />
-        ) : (
-          <Button
-            variant="outline"
-            className="w-full h-11 gap-2"
-            disabled={isLoggingOutAll}
-            onClick={() => setLogoutArmed(true)}
-          >
-            {isLoggingOutAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
-            {isLoggingOutAll ? "Logging out…" : "Log out of all devices"}
-          </Button>
-        )}
-
         <FormSection>
           {sections.map((key) => {
             const { label, icon: Icon, summary } = rows[key]
@@ -179,6 +171,39 @@ export default function AccountPage() {
             )
           })}
         </FormSection>
+
+        <ActionStack>
+          <ActionRow
+            destructive
+            icon={<LogOut />}
+            label={isSigningOut ? "Signing out…" : "Sign out"}
+            disabled={isSigningOut || isLoggingOutAll}
+            onClick={handleSignOut}
+          />
+          {/* Tapping ARMS it: the sign-out then runs on a countdown the same
+              button cancels. There is no undo once it fires — every device
+              has to sign in again. */}
+          {logoutArmed ? (
+            <CountdownConfirmButton
+              label="Cancel sign out"
+              icon={<LogOut className="h-4 w-4" />}
+              onConfirm={() => {
+                setLogoutArmed(false)
+                handleLogoutAll()
+              }}
+              onCancel={() => setLogoutArmed(false)}
+              className="w-full text-[15px]"
+            />
+          ) : (
+            <ActionRow
+              destructive
+              icon={<LogOut />}
+              label={isLoggingOutAll ? "Signing out…" : "Sign out of all devices"}
+              disabled={isLoggingOutAll || isSigningOut}
+              onClick={() => setLogoutArmed(true)}
+            />
+          )}
+        </ActionStack>
       </div>
     </PageContainer>
   )

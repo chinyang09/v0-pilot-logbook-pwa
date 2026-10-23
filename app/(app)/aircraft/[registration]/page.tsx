@@ -197,7 +197,7 @@ export default function AircraftDetailPage() {
                   size="sm"
                   onClick={handleSave}
                   disabled={!formData.registration.trim() || isSaving}
-                  className="text-primary h-8 px-2 font-semibold"
+                  className="text-primary px-3 font-semibold"
                 >
                   {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
                 </Button>
@@ -206,7 +206,7 @@ export default function AircraftDetailPage() {
                   variant="ghost"
                   size="sm"
                   onClick={() => setIsEditing(true)}
-                  className="text-primary h-8 px-2 font-semibold"
+                  className="text-primary px-3 font-semibold"
                 >
                   Edit
                 </Button>

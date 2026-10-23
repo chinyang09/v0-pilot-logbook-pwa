@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import {
   getPersonnelById,
   updatePersonnel,
@@ -118,7 +118,6 @@ export function useCrewForm({
   const [crew, setCrew] = useState<Personnel | null>(null)
   const [isLoading, setIsLoading] = useState(!isNew)
   const [isSaving, setIsSaving] = useState(false)
-  const [isEditing, setIsEditing] = useState(isNew)
   const [existingSelfId, setExistingSelfId] = useState<string | null>(null)
   const [formData, setFormData] = useState<CrewFormData>(EMPTY_FORM)
 
@@ -127,10 +126,7 @@ export function useCrewForm({
     let mounted = true
     const idChanged = id !== prevIdRef.current
     prevIdRef.current = id
-    if (idChanged) {
-      setIsEditing(isNew)
-      setIsSaving(false)
-    }
+    if (idChanged) setIsSaving(false)
     if (!crew && !isNew) setIsLoading(true)
 
     const load = async () => {
@@ -161,6 +157,21 @@ export function useCrewForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isNew])
 
+  /**
+   * The form is ALWAYS editable, like every other record's (a currency, a
+   * duty, a flight): Cancel and Save appear once something differs from the
+   * stored card. It used to open read-only behind an Edit button — the one
+   * record in the app that did, with "Name *" and "-" placeholders in a view
+   * nothing could be typed into.
+   */
+  const isDirty = useMemo(
+    () =>
+      isNew ||
+      (crew != null &&
+        Object.keys(formPatch(personnelFromForm(formData), personnelFromForm(formFromCrew(crew)))).length > 0),
+    [isNew, crew, formData]
+  )
+
   const updateField = useCallback(
     (field: keyof CrewFormData, value: string | boolean | string[] | null) => {
       setFormData((prev) => ({ ...prev, [field]: value }))
@@ -168,16 +179,13 @@ export function useCrewForm({
     []
   )
 
-  const handleIsMeChange = useCallback(
-    async (checked: boolean) => {
-      if (checked && existingSelfId) {
-        await updatePersonnel(existingSelfId, { isMe: false })
-        setExistingSelfId(null)
-      }
-      setFormData((prev) => ({ ...prev, isMe: checked }))
-    },
-    [existingSelfId]
-  )
+  // Only the FORM changes here. It used to un-flag the current self card in
+  // the database the moment the switch moved — before Save, and untouched by
+  // Cancel — so a stray flip on an always-editable card left the logbook with
+  // no self card at all. `handleSave` clears the other flags when it commits.
+  const handleIsMeChange = useCallback((checked: boolean) => {
+    setFormData((prev) => ({ ...prev, isMe: checked }))
+  }, [])
 
   const toggleRole = useCallback((role: CrewRole) => {
     setFormData((prev) => ({
@@ -215,7 +223,6 @@ export function useCrewForm({
       }
 
       await mutate(CACHE_KEYS.personnel)
-      setIsEditing(false)
       onSaved?.(saved)
       return saved
     } catch (error) {
@@ -228,15 +235,13 @@ export function useCrewForm({
 
   const resetForm = useCallback(() => {
     if (crew) setFormData(formFromCrew(crew))
-    setIsEditing(false)
   }, [crew])
 
   return {
     crew,
     isLoading,
     isSaving,
-    isEditing,
-    setIsEditing,
+    isDirty,
     existingSelfId,
     formData,
     updateField,

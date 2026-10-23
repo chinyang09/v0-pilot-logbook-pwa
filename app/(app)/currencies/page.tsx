@@ -8,14 +8,13 @@ import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FormSection } from "@/components/ui/form-section"
-import { Shield, RefreshCw, Plus } from "lucide-react"
+import { Shield, Plus } from "lucide-react"
 import { useCurrencies } from "@/hooks/data"
 import { CurrencyCard, CurrencyDetailPanel } from "@/components/roster"
 import { PanelLoading } from "@/components/ui/page-loading"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import type { Currency, CurrencyWithStatus } from "@/types/entities/roster.types"
-import { cn } from "@/lib/utils"
 import { deleteCurrency, restoreCurrency } from "@/lib/db"
 import { showUndoToast } from "@/lib/utils/undo-toast"
 
@@ -119,17 +118,17 @@ export default function CurrenciesPage() {
     [refresh, selectedId, setSelectedId]
   )
 
-  // Glass action buttons for the floating header bar
-  const currencyActions = useMemo(() => (
-    <>
-      <GlassIconButton ariaLabel="Refresh currencies" onClick={() => refresh()} disabled={isLoading}>
-        <RefreshCw className={cn("h-5 w-5", isLoading && "animate-spin")} />
-      </GlassIconButton>
+  // CREATE, alone — the only thing this page's header does (see the header
+  // rule in glass-icon-button.tsx). There is no Refresh: the list follows
+  // every write and every sync on its own.
+  const currencyActions = useMemo(
+    () => (
       <GlassIconButton ariaLabel="Add currency" onClick={openNew}>
         <Plus className="h-5 w-5" />
       </GlassIconButton>
-    </>
-  ), [refresh, isLoading, openNew])
+    ),
+    [openNew]
+  )
 
   useRegisterMainActions(currencyActions, true)
 
@@ -151,7 +150,7 @@ export default function CurrenciesPage() {
     )
 
   return (
-    <PageContainer>
+    <PageContainer title="Currencies">
       <div className="px-panel pt-4 space-y-4">
         {/* First-load skeleton */}
         {isLoading && currencies.length === 0 && (

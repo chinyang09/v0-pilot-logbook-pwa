@@ -35,11 +35,10 @@ import { mutate } from "swr"
 import { useSessionState } from "@/hooks/use-session-state"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
-import { GlassIconButton } from "@/components/ui/glass-icon-button"
 import { EmptyState } from "@/components/ui/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FilterChips } from "@/components/ui/filter-chips"
-import { RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react"
+import { AlertCircle, CheckCircle2 } from "lucide-react"
 import { AnimatePresence, motion } from "framer-motion"
 import { LIST_ITEM_TRANSITION } from "@/lib/motion"
 import { CACHE_KEYS, useDiscrepancies, useFlights } from "@/hooks/data"
@@ -62,7 +61,6 @@ import {
 } from "@/lib/db"
 import type { Discrepancy } from "@/types/entities/roster.types"
 import type { FlightLog } from "@/types/entities/flight.types"
-import { cn } from "@/lib/utils"
 
 /**
  * Three tabs, not four. The page holds two kinds of thing, each with an open
@@ -289,20 +287,10 @@ export default function DiscrepanciesPage() {
     setDetailContent,
   ])
 
-  const discrepancyActions = useMemo(
-    () => (
-      <GlassIconButton
-        ariaLabel="Refresh discrepancies"
-        onClick={() => refresh()}
-        disabled={isLoading}
-      >
-        <RefreshCw className={cn("h-5 w-5", isLoading && "animate-spin")} />
-      </GlassIconButton>
-    ),
-    [refresh, isLoading]
-  )
-
-  useRegisterMainActions(discrepancyActions, true)
+  // Nothing in the header: the lists follow every write and every sync, so a
+  // Refresh had nothing to do. An empty registration still claims the slot,
+  // so the previous page's buttons do not linger.
+  useRegisterMainActions(null, true)
 
   const showing =
     filterType === "comparisons"
@@ -314,7 +302,7 @@ export default function DiscrepanciesPage() {
   const cardGroups = filterType === "accepted" ? acceptedGroups : groups
 
   return (
-    <PageContainer>
+    <PageContainer title="Discrepancies">
       <div className="px-panel pt-4 space-y-4">
         <FilterChips<FilterType>
           value={filterType}

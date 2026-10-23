@@ -47,6 +47,27 @@ interface AppShellProps {
  *
  * Other pages fall back to the legacy detailContent from context.
  */
+/**
+ * What an empty detail panel says, per page — the thing a row there opens.
+ * It said "Select an item to view details" everywhere but the logbook, which
+ * on Crew or Currencies left the reader to work out what an "item" was.
+ */
+const DETAIL_PLACEHOLDER: Record<string, string> = {
+  "/": "Select a requirement or a flight",
+  "/logbook": "Select a flight",
+  "/aircraft": "Select an aircraft",
+  "/airports": "Select an airport",
+  "/crew": "Select a crew member",
+  "/roster": "Select a duty or a day",
+  "/currencies": "Select a currency",
+  "/discrepancies": "Select a comparison or a note",
+  "/fdp": "Tap a day on the chart",
+  "/recently-deleted": "Select a deleted item",
+}
+function detailPlaceholder(pathname: string | null): string {
+  return (pathname && DETAIL_PLACEHOLDER[pathname]) || "Select an item to view details"
+}
+
 function DetailPanelContent() {
   const { selectedId, setSelectedId, detailContent } = useDetailPanel()
   const isDesktop = useIsDesktop()
@@ -94,7 +115,7 @@ function DetailPanelContent() {
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-          <p>{isLogbook ? "Select a flight to view details" : "Select an item to view details"}</p>
+          <p>{detailPlaceholder(pathname)}</p>
         </div>
       )}
     </div>

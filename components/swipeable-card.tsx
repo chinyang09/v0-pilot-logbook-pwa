@@ -123,12 +123,16 @@ interface SwipeableCardProps {
   onPointerCancel?: (e: React.PointerEvent) => void
 }
 
+/**
+ * Every swipe action is the app's ACTION SURFACE (`.control-surface`, see
+ * globals.css): a capsule on the glass control face, red for a destructive
+ * one. They were `bg-secondary` / `bg-muted` rectangles — the card's own
+ * vocabulary — so a revealed button read as more row.
+ */
 function variantClasses(variant?: SwipeAction["variant"]): string {
-  return cn(
-    variant === "destructive" && "bg-destructive text-destructive-foreground",
-    variant === "secondary" && "bg-secondary text-foreground",
-    (!variant || variant === "default") && "bg-muted text-muted-foreground"
-  )
+  // `-inset`: these sit INSIDE the row, which clips (it has to — the content
+  // slides out of it), so a drop shadow is cut off at the row's edge.
+  return cn("control-surface control-surface-inset", variant === "destructive" && "control-surface-destructive")
 }
 
 /**
@@ -154,7 +158,12 @@ function SwipeActionButton({
 }) {
   // 0 (hidden) → 1 (fully revealed) across this button's stagger window.
   const reveal = useTransform(x, [endX, startX], [1, 0], { clamp: true })
-  const scale = useSpring(useTransform(reveal, [0, 1], [0.4, 1]), POP_SPRING)
+  // Capped at 1: POP_SPRING overshoots (~10%), and a button that fills the
+  // row's height grew past the panel's clip at the peak — its top and bottom
+  // were sliced flat on every reveal. The pop is the rise from 0.4 and the
+  // fade; the overshoot only ever showed as clipping.
+  const popScale = useSpring(useTransform(reveal, [0, 1], [0.4, 1]), POP_SPRING)
+  const scale = useTransform(popScale, (v) => Math.min(v, 1))
   const opacity = useSpring(reveal, POP_SPRING)
 
   return (
@@ -169,7 +178,11 @@ function SwipeActionButton({
       }}
       onClick={(e: React.MouseEvent) => {
         e.stopPropagation()
-        if (action.disabled || action.fireOnPointerUp) return
+        // A `fireOnPointerUp` action already ran on the lift — except from the
+        // KEYBOARD, where Enter/Space produce a click with no pointer at all
+        // (`detail === 0`). Skipping every click left the flight card's `…`
+        // unreachable without a pointer.
+        if (action.disabled || (action.fireOnPointerUp && e.detail !== 0)) return
         // Confirm actions don't fire on tap — they hand off to an overlay
         // where the action counts down and the button cancels it.
         if (action.holdToConfirm) {
@@ -183,7 +196,7 @@ function SwipeActionButton({
       style={{ scale, opacity, width: BUTTON_WIDTH, touchAction: "manipulation" }}
       className={cn(
         "shrink-0 self-stretch flex flex-col items-center justify-center gap-0.5",
-        "rounded-lg overflow-hidden select-none",
+        "rounded-full overflow-hidden select-none",
         // NOT `disabled:opacity-50`: the reveal drives `opacity` as an inline
         // style, which always beats the class, so a disabled action (Delete on
         // a LOCKED flight) looked exactly as live as an enabled one. A filter

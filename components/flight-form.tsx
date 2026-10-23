@@ -312,7 +312,7 @@ function TimeRow({
               variant="outline"
               size="sm"
               aria-label={`${label} now`}
-              className="h-9 min-w-11 px-2 text-xs border-primary text-primary bg-transparent"
+              className="h-9 min-w-11 px-2 text-xs text-primary control-surface-inset"
               onClick={(e) => {
                 e.stopPropagation();
                 onNow?.();
@@ -409,7 +409,7 @@ function TimeDisplayRow({
           <Button
             variant="outline"
             size="sm"
-            className="h-9 min-w-11 px-2 text-xs border-primary text-primary bg-transparent"
+            className="h-9 min-w-11 px-2 text-xs text-primary control-surface-inset"
             onClick={(e) => {
               // The row behind it opens the picker; this tap means "the block".
               e.stopPropagation();
@@ -451,7 +451,7 @@ function NumberRow({
           variant="outline"
           size="icon"
           aria-label={`Decrease ${label}`}
-          className="h-9 w-9 rounded-full bg-transparent"
+          className="h-9 w-9 control-surface-inset"
           disabled={value <= 0}
           onClick={() => onChange(Math.max(0, value - 1))}
         >
@@ -462,7 +462,7 @@ function NumberRow({
           variant="outline"
           size="icon"
           aria-label={`Increase ${label}`}
-          className="h-9 w-9 rounded-full bg-transparent"
+          className="h-9 w-9 control-surface-inset"
           onClick={() => onChange(value + 1)}
         >
           <Plus className="h-4 w-4" />
@@ -1722,10 +1722,12 @@ export function FlightForm({
     return minutesToHHMM((hhmmToMinutes(basis!) - 60 + 1440) % 1440);
   }, [formData.scheduledOut, formData.outTime]);
 
-  // Register detail panel actions for the desktop floating glass bar
+  // Register detail panel actions for the desktop floating glass bar. A TOOL,
+  // on its own capsule, carrying `overBlur` like every other header control
+  // (it was the one control without it, so it read a shade more solid).
   const detailActions = useMemo(() => {
     return (
-      <GlassContainer cornerRadius={22}>
+      <GlassContainer cornerRadius={22} overBlur>
         <ImageImportButton
           onDataExtracted={handleOCRDataExtracted}
           variant="ghost"
@@ -2006,10 +2008,10 @@ export function FlightForm({
 
           <div className="flex items-center justify-center py-2 border-b border-border">
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
               onClick={swapCrew}
-              className="h-8 px-3 text-xs text-muted-foreground hover:text-foreground"
+              className="text-xs"
             >
               <ArrowLeftRight className="h-3.5 w-3.5 mr-1" />
               Swap Crew
