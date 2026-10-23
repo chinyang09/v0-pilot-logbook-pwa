@@ -1239,10 +1239,13 @@ logbook read that errored is also never `logbookEmpty`.
 
 #### Nothing on this page navigates by default
 
-A cell EXPANDS in place and a second tap closes it. The reader came to check a
-status; a route change loses the screen they came for and costs a
-back-navigation to recover it. The deep link lives INSIDE the expansion, where
-it is a deliberate second step rather than the accidental result of a tap.
+A cell opens its detail in the DETAIL panel (`RequirementDetailPanel`, as
+`req:<id>`) — the owner's main / detail rule — beside the page on a tablet and
+as the overlay on a phone. Either way the dashboard stays where it was: no
+route change, nothing to navigate back to. The deep link lives INSIDE the
+panel, a deliberate second step rather than the accidental result of a tap.
+The detail used to unfold under the currency grid, inside the one surface that
+has to fit a phone's height.
 
 #### CURRENCY and LIMITS are separate bands
 
@@ -1272,12 +1275,10 @@ separation exists to avoid.
   tinting the met ones green too paints the whole band and leaves the one thing
   needing attention nothing to stand out against. The icon still carries the
   state — colour is never the only carrier.
-- **ONE cell opens at a time, and its detail opens BELOW the grid**, full width,
-  with a ring left on the cell it belongs to. A cell growing in place would
-  stretch its grid row and leave a hole beside it, and the detail is a
-  two-column `dl` with no room in half a phone's width. The open CELL ID is
-  held, not the requirement, so a background refresh that rebuilds the model
-  keeps the same cell open rather than closing it.
+- **ONE cell is open at a time, in the detail panel**, with a ring left on the
+  cell it belongs to where the panel is beside it. The open requirement's ID is
+  held (the selection), not the requirement, so the model rebuilding every
+  minute refreshes the panel rather than closing it.
 - **Limits are PAIRED by what they limit** — Duty over its 14d and 28d windows,
   then Flight over 28d and 1y. That is how the regulation is written and how a
   pilot holds it; four independent rows sorted by urgency scattered the pairs.
@@ -1334,8 +1335,8 @@ Three blocks, one column, in the order the questions get asked:
 
 **ONE COLUMN AT EVERY WIDTH.** The blocks stack in that order on a 390px phone
 and in the same order on a 1400px desktop: nothing moves, nothing is reordered.
-What a wider screen buys is DENSITY INSIDE each block — a flight's detail goes
-4 → 8 fields per row, the breakdown stacked → side by side.
+What a wider screen buys is DENSITY INSIDE each block — the breakdown goes
+stacked → side by side.
 
 Every one of those steps is a **container query, never a viewport breakpoint**.
 The page renders inside a resizable split panel, so the window's width says
@@ -1381,14 +1382,14 @@ one alert class neither page otherwise shows, and not a legality question.
   status ramp would teach the reader that the colour means the same thing there
   as on the legal page, where it means whether they can legally fly.
 
-#### The flight list opens IN PLACE
+#### A flight row opens the flight in the detail panel
 
-A row unfolds under itself rather than navigating. The list exists because the
-pilot is reading the period as a whole; a full flight page loses that period and
-costs a back-navigation to get it back. `PeriodFlight` carries the detail
-(OOOI, air, night, T/O–LDG, reg, type, role, PF/PM) — the aggregator already has
-all of it in hand, so it costs field copies rather than a per-row read when a row
-opens. The row still offers the full page for anything beyond that.
+The list exists because the pilot is reading the period as a whole, so a row
+never NAVIGATES — it opens the flight (`FlightForm`) in the detail panel, the
+way a flight opens anywhere else, with the period still in place beside it or
+under the overlay. It used to unfold eight fields under itself; the panel has
+the whole record. The dashboard page owns that half of the panel and the
+clearing; the legal page writes its own `req:` selections.
 
 `periodFlights` is ordered by **`sortFlights`**, the one comparator — sorting on
 the date alone left same-day sectors in table order, so they could read in a
@@ -1756,6 +1757,7 @@ or a dialog over the list.
 | recently deleted | the bin | what the item was, how long it is kept, Restore / Delete forever |
 | FDP | the timeline chart | a tapped DAY (`FdpDayPanel`), or the Quick Check |
 | account, settings | the sections | the section |
+| dashboard | legal / summary | a requirement cell (`RequirementDetailPanel`); a period flight (`FlightForm`) |
 
 - **A panel that only READS is still a `DetailFormPanel`** (`dirty={false}`):
   one title, one scroller, the chrome spacers — and no header buttons.
@@ -3420,6 +3422,12 @@ crew logbook and `DEFAULT_FTL_LIMITS` carries the flight-crew figures — do not
 - **A LOCAL_STATION schedule report's time was shifted by the departure
   offset**, double-counting it — eight hours, two bands of Table A, on a UTC+0
   departure.
+- **A report before midnight UTC was clamped to 00:00Z.** The rostered report
+  is the scheduled gate-out less an hour, and for a departure before 01:00Z it
+  falls on the previous day — `Math.max(0, …)` moved it to midnight of the
+  flight's date, dropping up to an hour of duty and entering Table A on the
+  wrong local time (07:55 SGT read as 08:00 — across a band boundary). The duty
+  now carries the date it was REPORTED for; its id stays on the flights' date.
 - **`calculateRestUntilLegal` still had the if/else chain** the same pass fixed
   in `calculateRestPeriod` — so the countdown a pilot actually reads off the
   dashboard under-stated an 11-hour duty's rest by an hour, and measured the
@@ -4434,6 +4442,7 @@ When making changes, be aware of these high-impact files:
 - Do not leave an activated standby at its rostered length (para 6(6)) — `truncateActivatedStandby` cuts it back to the following duty's report before the 20% is taken, or the called-out hours are counted twice: once as standby and again in full as the duty they became
 - Do not put flights back into `scheduleEntries`. The roster holds NON-FLIGHT duties only — standby, ground, leave, off — precisely because they have no logbook counterpart and so nothing to reconcile. A parallel record of flights needing reconciliation against the logbook is what made the old roster heavy. And do not add standby as a `FlightLog.entryType` instead: it puts non-flight rows in the legal flight record and breaks the fixed-height card the virtualised list depends on
 - Do not drop a non-flight schedule row on the floor. `schedule-parser` used to offer every one to `tryExtractSimDuty` and skip whatever was not a simulator, which is why standby had NEVER been extracted; `tryExtractGroundDuty` runs after it. Normalise the window to UTC and remember the conversion can move the DATE — 06:00 SGT is 22:00 the previous day, and the app keys a duty on its UTC date
+- Do not clamp a duty's report to midnight of its flights' date — a 00:30Z departure reports at 23:30Z the DAY BEFORE. Put the duty on the date it was reported for (`dutyDate` in `createDutyPeriodFromFlightGroup`), so every reader building an instant from `date` + `reportTime` gets the right one; keep its id on the flights' date
 - Do not compute an FDP maximum anywhere but `deriveMaxFDP` — it is the ONE derivation, and every stage (both producers, the overnight merge, the acclimatisation pass, the hypothetical-duty builders) goes through it. Four sites recomputing it from whatever inputs each had is what put 10:15 on a duty the schedule allows 12:15 for
 - Do not enter Table A on `reportTime`. That is when the duty STARTED; the table is entered on `fdpStartLocal`, which is the **original** (scheduled) reporting time in the DEPARTURE station's clock. Para 10(a) is explicit — a delay under 4 hours keeps the maximum on the original report while the FDP starts at the actual one — and a 23-minute pushback on a 2150 report crosses into the 2200–0559 band and takes an hour and a half off the maximum, which then reads as an exceedance the pilot never committed
 - Do not shift a LOCAL_STATION report time by the departure offset — it is ALREADY the local time where the crew member reports, so shifting double-counts (eight hours, two bands of Table A, on a UTC+0 departure). UTC shifts by the departure offset; LOCAL_BASE shifts from SGT to it
@@ -4443,7 +4452,7 @@ When making changes, be aware of these high-impact files:
 - Do not fall back to the fullest rolling limit for the "tightest" constraint — a limit REFILLS, so 41% of a 12-month flight allowance is not tight, and reporting it named the least urgent thing on the page. With nothing flagged the answer is the nearest EXPIRY, which is why only `currency` requirements carry `daysUntil`
 - Do not sort currencies and rolling limits into one grid. They are different kinds of thing (days that expire vs hours that refill) and mixing them is what made the panel unreadable at a glance — separate bands, and keep the limits PAIRED (Duty 14d/28d, then Flight 28d/1y) rather than four rows sorted by urgency
 - Do not split 90-day recency back into separate takeoff and landing cells — they are two halves of one question, and urgency-sorted they did not even sit beside each other. One cell answers with the binding half; expanding shows both
-- Do not turn the currency band back into a column of full-width rows, and do not give a currency cell a bar. A currency is a name and a number of DAYS — one small fact — so it is a figure over a caption in a grid read at a glance; a bar belongs to the limits band, where the number really is a fraction of something. And do not expand a cell IN PLACE: in a grid that stretches its row and leaves a hole beside it, so one cell opens at a time into a full-width block under the grid, with a ring left on the cell it describes
+- Do not turn the currency band back into a column of full-width rows, and do not give a currency cell a bar. A currency is a name and a number of DAYS — one small fact — so it is a figure over a caption in a grid read at a glance; a bar belongs to the limits band, where the number really is a fraction of something. And do not expand a cell IN PLACE: one cell opens at a time, in the detail panel, with a ring left on the cell it describes
 - Do not tint the currency cells that are MET. The status ramp means met / close / not met, so tinting all of them paints the whole band and leaves the one flagged cell nothing to stand out against
 - Do not put rest back in the currency band — it is a property of the duty just flown, not a standing qualification, and a live countdown among expiry dates reads as a different kind of thing. It lives in the duty band, and the annunciator has to fold it into the verdict itself since it is no longer one of the requirements
 - Do not print the rolling limits in the duty band as well as the limits band — that was the duplication the rework removed. The duty band carries FDP and flight time for THIS duty only
@@ -4451,7 +4460,7 @@ When making changes, be aware of these high-impact files:
 - Do not put the duty band's ring back. The off-duty question is a COMPARISON of two instants on one axis — when the rest becomes legal, and when the next duty reports — and an arc has nowhere to put the second one. It is a timeline with the report as a CARET and the rest still owed as a red band, so a duty rostered inside the rest period is visible before a word is read
 - Do not print a bare rest countdown in the annunciator. The hero is `nextAction.headline`, which is the CONTEXTUAL form of the same fact ("Rest short by 3:00", "Rest until 04:36"); a raw countdown there, a copy inside the ring and an "N to go" line beside "Legal from" were three printings of one number
 - Do not let `pilot-status.ts` format its own clocks — it is pure, so the formatter is INJECTED (`buildPilotStatus({ formatClock })`, wired by `usePilotStatus(recency, now, display)`). Its own `Intl.DateTimeFormat` was device-local 24-hour with a colon, so a Zulu-configured pilot read one convention in the hero line and another two lines below it
-- Do not make the legal page's cells navigate on tap — they EXPAND in place and a second tap closes them. The reader came to check a status, and a route change loses the screen they came for. The deep link belongs inside the expansion
+- Do not make the legal page's cells navigate on tap — they open their detail in the detail panel, with the dashboard still in place. The reader came to check a status, and a route change loses the screen they came for. The deep link belongs inside the panel
 - Do not replace the sector chain with a list of recent flights — that list showed history, not THIS duty, and could not answer "where am I in a four-sector day". The chain comes from `deriveSectorLegs` off the duty's own route
 - Do not let the summary page's flight list grow the page — it scrolls in its own bounded box, so a year-long period cannot push the breakdown below it out of reach
 - Do not read an in-progress duty from the logbook alone. `mergeDutyPeriods` prefers the logbook for today, and mid-duty the logbook holds only the sectors already flown — so a two-sector day with one sector logged reads as a duty that ended at lunchtime and the panel falls through to a rest countdown. Pass `scheduleDutyPeriods` into `deriveDutyStatus`; where the roster runs later, the duty is still on
@@ -4486,7 +4495,7 @@ When making changes, be aware of these high-impact files:
 - Do not re-add a ring for the dashboard's period hours — the one it replaced was metered against a hardcoded 100-hour max, so a week and a year drew the same arc. A ratio needs a real denominator; period block hours have none, so the form is a hero figure (with PROPORTIONAL figures — `tabular-nums` reads loose at display size). Day/night does have one and is drawn
 - Do not draw the engine split with a single class present — a one-segment part-to-whole bar is a 100% fill under a one-item legend, restating the hero figure. Gate it on ≥2 non-zero classes
 - Do not put a number on the dashboard twice. Night and sim live in the period summary (`SHOWN_ELSEWHERE` keeps them out of the breakdown), recency/limits/rest/expiries live in the legality panel, and the alerts bell is scoped to import notes — the one alert class the page does not otherwise show. Every one of those was printed in two places before
-- Do not send the dashboard's flight rows to a full page to show their detail — they open IN PLACE, because the reader is looking at the period as a whole and navigating away loses it. `PeriodFlight` already carries the detail off the aggregator's existing walk
+- Do not send the dashboard's flight rows to a full page — they open the flight in the detail panel, because the reader is looking at the period as a whole and navigating away loses it. And gate every dashboard write to the panel on BOTH `isActive` and the pathname being `/`: the dashboard is keep-alive, and the pathname moves a commit before the active-route store, so on its own `isActive` let a navigation away write the ARRIVING page's selection into the dashboard's panel
 - Do not order flights anywhere but `lib/utils/flight-sort.ts` — the order must be TOTAL (date, then actual-or-SCHEDULED out time, then departure, then id) or rows move on their own: a new flight sat at the top of the logbook until the next refetch and then jumped, and reading `outTime` alone treated every unflown sector as 00:00 so scheduled flights sank below completed ones on the same day. An optimistic cache write inserts with `insertFlightSorted`, never by prepending
 - Do not read a user table for a list, a total or an import match without filtering deleted rows (`isLiveFlight` for flights, `isLiveEntity` for the rest) — a binned row reaching the reconciler silently updates, and so resurrects, something the user deleted. The store's own `getAllX` already filters; go through it rather than hitting the table
 - Do not use `RETENTION_MS` for a deletion sweep or `DELETED_RETENTION_MS` for a decision — they are 90 and 30 days and the helpers take the window as an argument precisely so a caller has to say which

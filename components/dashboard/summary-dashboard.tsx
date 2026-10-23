@@ -23,7 +23,7 @@ import { BreakdownPanel } from "./breakdown-panel"
  * Three blocks, one column, in the order the questions get asked:
  *
  * 1. `PeriodSummary` — what the period came to
- * 2. `PeriodFlights` — which flights those were, each row opening in place
+ * 2. `PeriodFlights` — which flights those were, each row opening the flight in the detail panel
  * 3. `BreakdownPanel` — how the hours split by role and by fleet
  *
  * ONE COLUMN AT EVERY WIDTH. A wider container buys DENSITY INSIDE each block

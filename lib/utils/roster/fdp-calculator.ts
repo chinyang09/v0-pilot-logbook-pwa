@@ -557,11 +557,17 @@ function createDutyPeriodFromFlightGroup(
   // A stated `flight.reportTime` overrides it. That is the case para 10
   // governs: informed of a delay before leaving the place of rest, so the
   // report itself moves while the scheduled departure may not.
-  const originalReportMinutes = Math.max(
-    0,
+  //
+  // It may fall BEFORE midnight of the flights' date: a 00:30Z departure
+  // reports at 23:30Z the day before. That used to be clamped to 00:00Z,
+  // which lost the duty's first half hour and entered Table A on the wrong
+  // local time — across a band boundary on a Singapore morning departure
+  // (07:30 vs 08:00 local). The duty is put on the day it was reported for
+  // instead (`dutyDate`, below), so every reader that builds an instant from
+  // `date` + `reportTime` gets the right one.
+  const originalReportMinutes =
     (earliestScheduledOut !== Infinity ? earliestScheduledOut : earliestOut) -
-      REPORT_BUFFER_MINUTES
-  )
+    REPORT_BUFFER_MINUTES
   const reportMinutes =
     earliestStatedReport !== Infinity ? earliestStatedReport : originalReportMinutes
 
@@ -587,9 +593,12 @@ function createDutyPeriodFromFlightGroup(
     ? reportDelayMinutes - DELAY_REBASE_MINUTES
     : 0
 
-  // Normalize to within 24h for display
-  const reportTime = minutesToHHMM(reportMinutes % 1440)
-  const debriefTime = minutesToHHMM(debriefMinutes % 1440)
+  // The duty's date is the day it was REPORTED for; the times are clocks on
+  // that day (a debrief earlier than the report is the next day, as before).
+  const reportDayShift = Math.floor(reportMinutes / 1440)
+  const dutyDate = reportDayShift === 0 ? date : daysToDate(dateToDays(date) + reportDayShift)
+  const reportTime = minutesToHHMM(((reportMinutes % 1440) + 1440) % 1440)
+  const debriefTime = minutesToHHMM(((debriefMinutes % 1440) + 1440) % 1440)
 
   const dutyMinutes = debriefMinutes - reportMinutes
 
@@ -633,8 +642,10 @@ function createDutyPeriodFromFlightGroup(
     ]) || (groupFlights.some((f) => isSimulatorEntry(f)) ? "SIM" : "")
 
   return {
+    // The id stays on the FLIGHTS' date: a duty moved back a day must not
+    // take the id of the duty that really is on that day.
     id,
-    date,
+    date: dutyDate,
     reportTime,
     debriefTime,
     dutyMinutes,

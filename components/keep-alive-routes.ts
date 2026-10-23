@@ -14,7 +14,7 @@
  * clear it, or they'd show the previous route's stale panel.
  */
 export const KEEPALIVE_ROUTES = {
-  "/": { hasDetailPanel: false },
+  "/": { hasDetailPanel: true },
   "/logbook": { hasDetailPanel: true },
   "/aircraft": { hasDetailPanel: true },
   "/airports": { hasDetailPanel: true },

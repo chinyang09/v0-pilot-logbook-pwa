@@ -3,27 +3,23 @@
 import * as React from "react"
 import Link from "next/link"
 import { ChevronRight, ArrowUpRight } from "lucide-react"
+import { useDetailPanel } from "@/hooks/use-detail-panel"
+import { useIsDesktop } from "@/hooks/use-is-desktop"
 
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { formatDecimalHours, type PeriodFlight } from "@/lib/utils/dashboard-aggregate"
 import { getAirportDisplayCode } from "@/lib/utils/airport-display"
-import { formatClockDisplay } from "@/lib/utils/time"
 import { formatYMDShort } from "@/lib/utils/date"
 import { cn } from "@/lib/utils"
 
 /**
- * The flights that make up the period's numbers — and what each one was.
+ * The flights that make up the period's numbers.
  *
- * A row opens IN PLACE rather than navigating. The whole point of the list is
- * that a pilot is reading the period as a whole; sending them to a full flight
- * page to check one out-time loses the period they were looking at and costs a
- * back-navigation to get it back. The detail a card cannot fit is small enough
- * to unfold underneath it, and the row still offers the full page for anything
- * beyond that.
- *
- * The same interaction on every screen size. A phone and a 1400px desktop open
- * the same row the same way — what changes with width is how many columns the
- * detail lays out in, never where the detail appears.
+ * A row opens the FLIGHT in the detail panel — beside the dashboard on a
+ * tablet, the overlay on a phone — the way a flight opens anywhere else (the
+ * owner's main / detail rule). The period stays where it was underneath, which
+ * is what the old in-place unfold was protecting; the panel shows the whole
+ * record rather than the eight fields the unfold had room for.
  */
 
 /**
@@ -49,7 +45,8 @@ export function PeriodFlights({
   className?: string
 }) {
   const { preferences } = usePreferences()
-  const [openId, setOpenId] = React.useState<string | null>(null)
+  const { selectedId, setSelectedId } = useDetailPanel()
+  const isDesktop = useIsDesktop()
 
   const shown = flights.slice(0, MAX_ROWS)
 
@@ -81,11 +78,9 @@ export function PeriodFlights({
             <FlightRow
               key={f.id}
               flight={f}
-              open={openId === f.id}
-              onToggle={() =>
-                setOpenId((current) => (current === f.id ? null : f.id))
-              }
-              clockSeparator={preferences.display.clockSeparator}
+              // Lit only where the panel BESIDE the list shows it.
+              selected={isDesktop && selectedId === f.id}
+              onOpen={setSelectedId}
               airportPref={preferences.display.airportIdentifier}
             />
           ))}
@@ -107,15 +102,13 @@ export function PeriodFlights({
 
 function FlightRow({
   flight,
-  open,
-  onToggle,
-  clockSeparator,
+  selected,
+  onOpen,
   airportPref,
 }: {
   flight: PeriodFlight
-  open: boolean
-  onToggle: () => void
-  clockSeparator: "colon" | "none"
+  selected: boolean
+  onOpen: (id: string) => void
   airportPref: "icao" | "iata" | "both"
 }) {
   const dep = getAirportDisplayCode(flight.departureIcao, flight.departureIata, airportPref)
@@ -125,17 +118,13 @@ function FlightRow({
     <li className="border-b border-border/40 last:border-b-0">
       <button
         type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-xs transition-colors hover:bg-[var(--on-glass-fill-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={() => onOpen(flight.id)}
+        aria-current={selected || undefined}
+        className={cn(
+          "flex min-h-9 w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-xs transition-colors hover:bg-[var(--on-glass-fill-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          selected && "bg-primary/10",
+        )}
       >
-        <ChevronRight
-          className={cn(
-            "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none",
-            open && "rotate-90",
-          )}
-          aria-hidden="true"
-        />
         <span className="w-11 shrink-0 tabular-nums text-muted-foreground">
           {formatYMDShort(flight.date)}
         </span>
@@ -151,78 +140,8 @@ function FlightRow({
         <span className="ml-auto shrink-0 tabular-nums text-foreground">
           {formatDecimalHours(flight.blockMinutes)}h
         </span>
+        <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
       </button>
-
-      {open && (
-        <FlightDetail flight={flight} clockSeparator={clockSeparator} dep={dep} arr={arr} />
-      )}
     </li>
-  )
-}
-
-function FlightDetail({
-  flight,
-  clockSeparator,
-  dep,
-  arr,
-}: {
-  flight: PeriodFlight
-  clockSeparator: "colon" | "none"
-  dep: string
-  arr: string
-}) {
-  const clock = (t: string) => formatClockDisplay(t, clockSeparator, "—")
-
-  return (
-    <div className="pb-2 pl-6 pr-1">
-      {/* OOOI first — it is what a logbook entry IS, and the reason the row was
-          opened. Two columns on a phone, four as the panel widens. */}
-      <dl className="grid grid-cols-4 gap-x-2 gap-y-1.5 @[22rem]:grid-cols-8">
-        <Field label="Out" value={clock(flight.outTime)} />
-        <Field label="Off" value={clock(flight.offTime)} />
-        <Field label="On" value={clock(flight.onTime)} />
-        <Field label="In" value={clock(flight.inTime)} />
-        <Field label="Air" value={`${formatDecimalHours(flight.flightMinutes)}h`} />
-        <Field label="Night" value={`${formatDecimalHours(flight.nightMinutes)}h`} />
-        <Field label="T/O" value={String(flight.takeoffs)} />
-        <Field label="Ldg" value={String(flight.landings)} />
-      </dl>
-
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-        {flight.aircraftReg && (
-          <span className="text-foreground/80">
-            {flight.aircraftReg}
-            {flight.aircraftType && `, ${flight.aircraftType}`}
-          </span>
-        )}
-        {flight.pilotRole && <span>{flight.pilotRole}</span>}
-        <span>{flight.pilotFlying ? "PF" : "PM"}</span>
-        {dep && arr && (
-          <span className="tabular-nums @[15rem]:hidden">
-            {dep}–{arr}
-          </span>
-        )}
-        <Link
-          href={`/flights/${flight.id}`}
-          className="group ml-auto inline-flex items-center gap-1 text-primary transition-colors hover:underline"
-        >
-          Open
-          <ArrowUpRight className="h-3 w-3" />
-        </Link>
-      </div>
-    </div>
-  )
-}
-
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
-      </dt>
-      <dd className="truncate text-[11px] font-semibold tabular-nums text-foreground">
-        {value}
-      </dd>
-    </div>
   )
 }

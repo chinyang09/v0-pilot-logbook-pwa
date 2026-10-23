@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { motion, AnimatePresence } from "framer-motion"
+import { usePathname } from "next/navigation"
 import { Check, TriangleAlert, OctagonAlert, ArrowUpRight, Info } from "lucide-react"
 
 import { usePilotStatus } from "@/hooks/data/use-pilot-status"
@@ -16,6 +16,9 @@ import { formatInstant, tzFormatter } from "@/lib/utils/tz-format"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import type { DisplayPreferences } from "@/types/db/stores.types"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useDetailPanel } from "@/hooks/use-detail-panel"
+import { useIsDesktop } from "@/hooks/use-is-desktop"
+import { RequirementDetailPanel } from "./requirement-detail-panel"
 import { cn } from "@/lib/utils"
 
 /**
@@ -29,10 +32,11 @@ import { cn } from "@/lib/utils"
  * own borders, radii and 12px margins spend roughly 120px of a phone's height
  * on separation alone, which is the difference between this fitting and not.
  *
- * **Nothing here navigates by default.** A cell EXPANDS in place — the reader
- * is checking a status, and sending them to another page loses the screen they
- * came to read and costs a back-navigation to recover it. A deep link is
- * offered inside the expansion, for the cases a couple of lines cannot answer.
+ * **Nothing here navigates by default.** A cell opens its DETAIL in the detail
+ * panel (the owner's main / detail rule) — beside the page on a tablet, the
+ * overlay on a phone, with the dashboard still underneath. It used to unfold
+ * under the grid, inside the one surface that has to fit a phone's height.
+ * The deep link is in the panel, a deliberate second step.
  *
  * **Currency and limits are separate bands, and that is not cosmetic.** A
  * currency is measured in DAYS and expires; a limit is measured in HOURS and
@@ -104,7 +108,6 @@ const REQ_TONE: Record<RequirementState, { icon: string; fill: string; track: st
 }
 
 /** One clock for every expansion on the page, so they feel like one control. */
-const EXPAND = { duration: 0.24, ease: [0.4, 0, 0.2, 1] as const }
 
 /**
  * A clock that ticks on the MINUTE, gated on this being the tab on screen.
@@ -165,6 +168,26 @@ export function LegalDashboard({ className }: { className?: string }) {
     preferences?.display,
   )
 
+  // A requirement opens in the detail panel as `req:<id>`. The id is held,
+  // not the requirement, so the model rebuilding every minute refreshes the
+  // open panel rather than closing it; a requirement that disappears clears it.
+  const { selectedId, setSelectedId, setDetailContent } = useDetailPanel()
+  const isDesktop = useIsDesktop()
+  const openReqId = selectedId?.startsWith("req:") ? selectedId.slice(4) : null
+  const openRequirement = openReqId
+    ? status.legality.requirements.find((r) => r.id === openReqId) ?? null
+    : null
+  const onDashboard = usePathname() === "/"
+  React.useEffect(() => {
+    // Keep-alive: a hidden dashboard must not write the panel another page
+    // owns (the pathname moves a commit before the active-route store does).
+    if (!isActive || !onDashboard || !openReqId) return
+    setDetailContent(
+      openRequirement ? <RequirementDetailPanel key={openRequirement.id} requirement={openRequirement} /> : null,
+    )
+  }, [isActive, onDashboard, openReqId, openRequirement, setDetailContent])
+  const openRequirementCell = React.useCallback((id: string) => setSelectedId(`req:${id}`), [setSelectedId])
+
   if (aggLoading || statusLoading) {
     return <Skeleton className={cn("h-full min-h-[24rem] rounded-3xl", className)} />
   }
@@ -174,6 +197,9 @@ export function LegalDashboard({ className }: { className?: string }) {
       status={status}
       now={now}
       display={preferences?.display}
+      // Lit only where the panel BESIDE the page shows it.
+      openRequirementId={isDesktop ? openReqId : null}
+      onOpenRequirement={openRequirementCell}
       className={className}
     />
   )
@@ -184,6 +210,8 @@ export function LegalDashboardView({
   status,
   now,
   display,
+  openRequirementId = null,
+  onOpenRequirement,
   className,
 }: {
   status: PilotStatus
@@ -194,6 +222,10 @@ export function LegalDashboardView({
    * disagree with the rest of the app about what time it is.
    */
   display?: DisplayPreferences
+  /** The requirement shown in the detail panel beside the page. */
+  openRequirementId?: string | null
+  /** Open a requirement's detail. Without it the cells are not buttons. */
+  onOpenRequirement?: (id: string) => void
   className?: string
 }) {
   const tone = TONE[status.state]
@@ -230,7 +262,7 @@ export function LegalDashboardView({
       <div className="relative flex min-h-0 flex-col divide-y divide-border/40 overflow-y-auto overscroll-contain scrollbar-hide">
         <Annunciator status={status} />
         <DutyBand status={status} now={now} display={display} />
-        <CurrencyBand requirements={currency} />
+        <CurrencyBand requirements={currency} openId={openRequirementId} onOpen={onOpenRequirement} />
         <LimitsBand requirements={limits} />
       </div>
     </div>
@@ -813,27 +845,19 @@ function SectorChain({ legs, nextRoute }: { legs: SectorLeg[]; nextRoute?: strin
  * question, and as separate urgency-sorted cells they did not even end up next
  * to each other. Opening the cell shows both counts.
  */
-function CurrencyBand({ requirements }: { requirements: Requirement[] }) {
+function CurrencyBand({
+  requirements,
+  openId,
+  onOpen,
+}: {
+  requirements: Requirement[]
+  openId: string | null
+  onOpen?: (id: string) => void
+}) {
   const ordered = React.useMemo(
     () => [...requirements].sort((a, b) => (a.daysUntil ?? 9e9) - (b.daysUntil ?? 9e9)),
     [requirements],
   )
-
-  /**
-   * ONE open cell at a time, and its detail opens BELOW the whole grid rather
-   * than inside the cell.
-   *
-   * A cell that grew in place would stretch its grid row and leave a hole
-   * beside it, and the detail is a two-column `dl` that has no room in half a
-   * phone's width. Full width under the grid gives it that room, and the open
-   * cell keeps a ring so it is never ambiguous which one is being described.
-   *
-   * The id is held rather than the requirement, so a background refresh that
-   * rebuilds the model keeps the same cell open instead of closing it. A cell
-   * that disappears simply closes — no effect, nothing to clean up.
-   */
-  const [openId, setOpenId] = React.useState<string | null>(null)
-  const open = ordered.find((r) => r.id === openId) ?? null
 
   return (
     <Band label="Currency" requirements={ordered} flexible>
@@ -854,14 +878,10 @@ function CurrencyBand({ requirements }: { requirements: Requirement[] }) {
             key={r.id}
             requirement={r}
             open={r.id === openId}
-            onToggle={() => setOpenId((v) => (v === r.id ? null : r.id))}
+            onOpen={onOpen}
           />
         ))}
       </div>
-
-      <AnimatePresence initial={false}>
-        {open && <CurrencyDetail key={open.id} requirement={open} />}
-      </AnimatePresence>
     </Band>
   )
 }
@@ -1049,23 +1069,24 @@ function Band({
 function CurrencyCell({
   requirement,
   open,
-  onToggle,
+  onOpen,
 }: {
   requirement: Requirement
+  /** Its detail is in the panel beside the page. */
   open: boolean
-  onToggle: () => void
+  onOpen?: (id: string) => void
 }) {
   const { label, state, value, progress, detail } = requirement
   const tone = REQ_TONE[state]
   const Icon = STATE_ICON[state]
-  const hasDetail = (detail?.length ?? 0) > 0
+  const hasDetail = !!onOpen && (detail?.length ?? 0) > 0
   const flagged = state !== "ok"
 
   return (
     <button
       type="button"
-      onClick={onToggle}
-      aria-expanded={hasDetail ? open : undefined}
+      onClick={() => onOpen?.(requirement.id)}
+      aria-current={open || undefined}
       disabled={!hasDetail}
       className={cn(
         "flex min-w-0 flex-col rounded-lg px-2 py-1.5 text-left transition-colors",
@@ -1104,60 +1125,5 @@ function CurrencyCell({
         </span>
       )}
     </button>
-  )
-}
-
-/**
- * The open cell's detail, under the grid.
- *
- * Nothing here navigates by default — the reader came to check a status, and a
- * route change loses the screen they came for and costs a back-navigation to
- * recover it. The deep link lives INSIDE the expansion, where it is a
- * deliberate second step rather than the accidental result of a tap.
- */
-function CurrencyDetail({ requirement }: { requirement: Requirement }) {
-  const { label, state, detail, href } = requirement
-  const tone = REQ_TONE[state]
-
-  return (
-    <motion.div
-      initial={{ height: 0, opacity: 0 }}
-      animate={{ height: "auto", opacity: 1 }}
-      exit={{ height: 0, opacity: 0 }}
-      transition={EXPAND}
-      className="overflow-hidden"
-    >
-      <div className="mt-1.5 rounded-lg bg-muted/40 px-2.5 py-2">
-        <p
-          className={cn(
-            "mb-1 text-[9px] font-semibold uppercase tracking-wider",
-            state === "ok" ? "text-muted-foreground" : tone.icon,
-          )}
-        >
-          {label}
-        </p>
-        {/* A real two-column grid, so every value lines up in a column instead
-            of landing wherever its label's length left it. */}
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-          {detail?.map((d) => (
-            <React.Fragment key={d.label}>
-              <dt className="text-[11px] text-muted-foreground">{d.label}</dt>
-              <dd className="text-[11px] font-medium tabular-nums text-foreground/90">
-                {d.value}
-              </dd>
-            </React.Fragment>
-          ))}
-          <dd className="col-span-2">
-            <Link
-              href={href}
-              className="mt-0.5 inline-flex w-fit items-center gap-1 text-[11px] font-medium text-primary hover:underline"
-            >
-              Open
-              <ArrowUpRight className="h-3 w-3" />
-            </Link>
-          </dd>
-        </dl>
-      </div>
-    </motion.div>
   )
 }
