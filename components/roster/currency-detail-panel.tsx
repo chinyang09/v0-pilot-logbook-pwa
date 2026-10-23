@@ -87,6 +87,17 @@ export function CurrencyDetailPanel({
 }) {
   const isNew = !currency
   const base = useMemo(() => fieldsOf(currency), [currency])
+  // A code the list does not know — a company code an import brought in —
+  // is offered as its own option. Without it the select had nothing to show
+  // and the Type row read blank; mapping it to "Custom" instead would rewrite
+  // the stored code on the next save and stop the schedule import matching it.
+  const typeOptions = useMemo(
+    () =>
+      currency && !TYPE_OPTIONS.some((o) => o.value === currency.code)
+        ? [{ value: currency.code, label: currency.description || currency.code }, ...TYPE_OPTIONS]
+        : TYPE_OPTIONS,
+    [currency]
+  )
   const { values, set, reset, dirty } = useDraft(base)
   const [saving, setSaving] = useState(false)
   // Inline, not `alert()`: a native alert blocks the page and reads as a
@@ -151,7 +162,7 @@ export function CurrencyDetailPanel({
       }}
     >
       <FormSection title="Currency">
-        <SelectRow label="Type" value={values.code} onValueChange={(v) => set("code", v)} options={TYPE_OPTIONS} />
+        <SelectRow label="Type" value={values.code} onValueChange={(v) => set("code", v)} options={typeOptions} />
         {isCustom && (
           <SettingsRow
             label="Description"

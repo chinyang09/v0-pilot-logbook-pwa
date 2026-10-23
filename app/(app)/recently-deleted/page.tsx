@@ -381,7 +381,7 @@ export default function RecentlyDeletedPage() {
   }, [selected, preferences.display, restoreSelected, destroySelected, setDetailContent])
 
   return (
-    <PageContainer>
+    <PageContainer title="Recently deleted">
       <div className="px-panel pt-4 space-y-3">
         {!isLoading && !isEmpty && (
           <p className="text-xs text-muted-foreground">

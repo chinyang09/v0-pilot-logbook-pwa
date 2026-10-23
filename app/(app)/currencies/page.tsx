@@ -150,7 +150,7 @@ export default function CurrenciesPage() {
     )
 
   return (
-    <PageContainer>
+    <PageContainer title="Currencies">
       <div className="px-panel pt-4 space-y-4">
         {/* First-load skeleton */}
         {isLoading && currencies.length === 0 && (

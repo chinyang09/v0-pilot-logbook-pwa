@@ -243,7 +243,7 @@ export default function FDPPage() {
   useRegisterMainActions(fdpActions, true)
 
   return (
-    <PageContainer>
+    <PageContainer title="FDP">
       <div className="px-panel pt-2 space-y-2">
         {/* Next duty banner — reports next scheduled duty + rest vs. requirement.
             Static snapshot from useFDPData; no tick interval to avoid setState

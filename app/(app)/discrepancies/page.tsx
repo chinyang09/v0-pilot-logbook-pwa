@@ -302,7 +302,7 @@ export default function DiscrepanciesPage() {
   const cardGroups = filterType === "accepted" ? acceptedGroups : groups
 
   return (
-    <PageContainer>
+    <PageContainer title="Discrepancies">
       <div className="px-panel pt-4 space-y-4">
         <FilterChips<FilterType>
           value={filterType}

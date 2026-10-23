@@ -223,7 +223,7 @@ export default function RosterPage() {
 
   return (
     <>
-      <PageContainer>
+      <PageContainer title="Roster">
         <div className="mx-auto max-w-2xl space-y-4 px-panel pt-4">
           <RosterMonth
             selectedKey={selectedKey}

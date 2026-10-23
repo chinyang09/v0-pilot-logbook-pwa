@@ -571,6 +571,7 @@ export default function CrewPage() {
 
   return (
     <PageContainer
+      title="Crew"
       rightContent={
         showFastScroll ? (
           <FastScroll

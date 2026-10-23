@@ -647,6 +647,7 @@ export default function AirportsPage() {
 
   return (
     <PageContainer
+      title="Airports"
       rightContent={
         showFastScroll ? (
           <FastScroll

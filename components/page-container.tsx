@@ -20,9 +20,19 @@ interface PageContainerProps {
    * pathname. Pass null to disable restoration for this page.
    */
   scrollRestoreKey?: string | null
+  /**
+   * The page's name, as a large title at the top of the main panel — the
+   * same place a detail panel names what it shows. Pages reachable only from
+   * the sidebar named themselves NOWHERE: on Account, Settings or Recently
+   * Deleted no nav tab lights up either, so nothing on screen said where you
+   * were. The logbook and the dashboard go without: their first row is
+   * already their own (the floating search/calendar stack, the Legal/Summary
+   * switch).
+   */
+  title?: string
 }
 
-export function PageContainer({ children, header, className, rightContent, mainRef, scrollRestoreKey }: PageContainerProps) {
+export function PageContainer({ children, header, className, rightContent, mainRef, scrollRestoreKey, title }: PageContainerProps) {
   const pathname = usePathname()
 
   // Freeze the pathname captured at mount as the default scroll key. Keep-alive
@@ -65,6 +75,9 @@ export function PageContainer({ children, header, className, rightContent, mainR
             element is always counted. The top one keeps the first row clear of
             the floating header + status bar, and content slides under both. */}
         <div className={header ? "h-chrome-top-sm" : "h-chrome-top"} />
+        {title && (
+          <h1 className="px-panel pt-4 text-[1.75rem] font-bold leading-tight tracking-tight">{title}</h1>
+        )}
         {children}
         <div className="h-chrome-bottom" />
       </main>

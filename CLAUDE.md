@@ -426,7 +426,7 @@ because the loss has no undo. It then signs out with `logout({ skipSync: true })
 (the session is already revoked, so a second sync would only meet a 401), and
 `logout` waits for an in-flight cycle (`syncService.whenIdle`) before wiping —
 or that cycle wrote the previous user's records back into the wiped tables.
-"Log out of all devices" refuses offline and requires the revoke to succeed:
+"Sign out of all devices" refuses offline and requires the revoke to succeed:
 it exists for a LOST device, and swallowing the failure signed out only this one.
 
 **Live multi-device test** — `scripts/sync-live-test/` drives the real app in
@@ -1759,6 +1759,25 @@ or a dialog over the list.
 | account, settings | the sections | the section |
 | dashboard | legal / summary | a requirement cell (`RequirementDetailPanel`); a period flight (`FlightForm`) |
 
+- **Every main panel names itself** — `PageContainer`'s `title`, a large
+  heading at the top of the list, as each detail panel names what it shows.
+  The pages reachable only from the sidebar named themselves nowhere: on
+  Account, Settings or Recently Deleted no nav tab lights up either, so
+  nothing on screen said where you were. The logbook and the dashboard go
+  without — their first row is already their own.
+- **An empty detail panel says what a row opens** (`DETAIL_PLACEHOLDER` in
+  `desktop-layout.tsx`: "Select a crew member", "Tap a day on the chart"),
+  not "Select an item".
+- **Every record is edited IN PLACE** — always editable, Cancel / Save in the
+  header only once something differs. Crew was the one record behind a
+  read-only view and an Edit button; it is a `DetailFormPanel` now, with the
+  person's name as its title, and `useCrewForm` derives `isDirty` from the
+  form against the stored card.
+- **Account ends with signing out**: "Sign out" (this device) and "Sign out
+  of all devices" as destructive capsules UNDER the sections. There was no
+  plain sign-out at all — only a swipe on your own row in Active sessions —
+  and the all-devices one sat above the sections as the first thing on the
+  page. The app says "sign out" everywhere, never "log out".
 - **A panel that only READS is still a `DetailFormPanel`** (`dirty={false}`):
   one title, one scroller, the chrome spacers — and no header buttons.
 - **Actions inside a panel are `ActionRow`s** (`components/ui/action-row.tsx`):
@@ -2003,7 +2022,7 @@ the page's own refresh. It is NOT a confirmation — the delete has already
 happened — so it does not reopen the countdown question. A new delete path
 calls `showUndoToast` after the soft delete succeeds.
 
-**The one exception is "Log out of all devices"** (`app/(app)/account/page.tsx`),
+**The one exception is "Sign out of all devices"** (`app/(app)/account/page.tsx`),
 which still uses `CountdownConfirmButton`. It is not a delete: nothing is
 recoverable afterwards because there is nothing to recover — the only undo is
 signing back in on each device, so the pause before it fires is the whole
@@ -2240,7 +2259,7 @@ re-renders).
 
 - **`components/ui/countdown-confirm-button.tsx`** (`CountdownConfirmButton`) —
   the shared confirm control, used by the swipe confirm overlay and the account
-  page's "Log out of all devices". Built on `hooks/use-countdown-confirm.ts` (a
+  page's "Sign out of all devices". Built on `hooks/use-countdown-confirm.ts` (a
   `MotionValue` progress 0→1 via rAF, with the whole-second label guarded so it
   re-renders at 1Hz rather than per frame). Accepts an external `progress`
   MotionValue so a surrounding surface can advance in lock-step, and
@@ -4452,7 +4471,7 @@ When making changes, be aware of these high-impact files:
 - Do not use `display:none` for hiding keep-alive pages — `visibility:hidden` is required to preserve scroll positions and virtualizer measurements
 - Do not re-add swipe "full-swipe to auto-trigger the primary action" to `SwipeableCard` — it was intentionally removed; actions fire only on button tap
 - Do not add a delete path without `showUndoToast` after it — the toast is how a one-tap delete tells the user it happened and how to take it back. It runs AFTER the soft delete; it is never a gate in front of one
-- Do not put a confirmation in front of a delete — not a dialog, not a hold, not an armed countdown. Deleting is one tap and `Recently Deleted` is the undo (30 days). The countdown machinery survives for exactly ONE caller, "Log out of all devices", because that genuinely has no undo; do not wire `holdToConfirm` to a delete again
+- Do not put a confirmation in front of a delete — not a dialog, not a hold, not an armed countdown. Deleting is one tap and `Recently Deleted` is the undo (30 days). The countdown machinery survives for exactly ONE caller, "Sign out of all devices", because that genuinely has no undo; do not wire `holdToConfirm` to a delete again
 - Do not move the armed-action timer back inside `SwipeableCard` — it lives in `lib/utils/pending-actions.ts` because a virtualised list recycles rows, and an in-component timer meant scrolling away silently cancelled the deletion. And always pass a **data-derived `id`** to a card that can be armed; the `useId()` fallback changes on recycle and orphans the registry entry
 - Do not move the sidebar's gravity blob back into a non-scrolling overlay translated from a scroll listener — that is a main-thread reaction to a scroll that already happened, so the blob trails the items by a frame. It belongs inside the scroller, where it moves on the compositor; the top band is masked anyway, so there is no overshoot clipping to protect it from
 - Do not give the morph different open and close leads — one `MORPH_LEAD` keeps the two directions exact mirrors, which is what makes the top pill and the bottom pill read as the same animation
@@ -4673,6 +4692,8 @@ When making changes, be aware of these high-impact files:
 - Do not thin the rim by dropping the conic's FLANKS — iOS's controls have a hairline you can see ALL THE WAY ROUND, and at flanks of ~0.05 three-quarters of the perimeter had none. Keep the lobes concentrated (that is what reads as light on a curve) and the flanks around 0.22; the ring's WIDTH (`--softness`, and `.Highlight`'s padding with it) is the separate knob, and it is only free to be fine BECAUSE the flanks hold the continuity
 - Do not open the flight card's `…` cascade behind a blocking scrim — the page must stay scrollable underneath (a scroll dismisses it) while taps are swallowed at the capture phase so nothing activates. And arm that swallow on a short timer, or the click from the tap that OPENED it closes it on the same gesture
 - Do not let the `…` cascade leave `pointerdown`/`touchstart` alone — they must be `stopPropagation`'d in the CAPTURE phase, or a swipe elsewhere still reaches framer-motion and reveals that row's swipe panel with the menu up. And do not add `preventDefault` to them: that is what would kill the compositor's touch scroll, which is the one interaction the menu is supposed to allow (`preventDefault` belongs on `mousedown`, to stop desktop focus, and on the swallowed `click`/`pointerup`)
+- Do not write to ANOTHER record from a form control before Save — the crew card's "This is Me" switch un-flagged the current self card in the database the moment it moved, untouched by Cancel, so a stray flip left the logbook with no self card. The form changes; `handleSave` clears the other flags when it commits
+- Do not let a select show blank for a stored value it has no option for — the currency Type row read empty for any company code an import brought in. Offer the record's own value as an option (`typeOptions`); mapping it to "Custom" would rewrite the stored code on the next save
 - Do not put a segmented choice back as a pair of filled rectangles — it is `SegmentedTabs` (glass, a sliding indicator, `h-9` segments), as in the import dialogs and the Quick Check. And measure its segments from ONE ResizeObserver: reading `offsetLeft` in a ref callback that is rebuilt on every selection forced a layout per tap and attached a new observer to every segment each time, never disconnecting the old ones
 - Do not put an action back on the card surface (`bg-secondary`, `bg-card`, `bg-muted`) or give it a rectangle's corners — a thing you press is a CAPSULE or circle on `.control-surface`, a thing you read is a rounded rectangle. On the card surface the context preview's action row read as more card. And do not use the REAL glass (`GlassContainer`) for an action that sits over a scrim, a row or a panel: the painted surface is the same look with no `backdrop-filter`, and these pop in on exactly the frames a readback would cost most
 - Do not group header controls page by page — a header is VIEW (search, calendar, period) → TOOLS (import, Quick Check, alerts, read-from-photo) → CREATE (+, alone and last), one capsule per role, with a page switch first and detail commits (Cancel / Save / Edit, Back) one capsule each (`glass-icon-button.tsx`). And do not add a Refresh button: every list follows every write and every sync, so it re-reads the same rows, and it reads as "sync" — which is the cloud in the nav

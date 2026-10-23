@@ -436,14 +436,14 @@ export default function SettingsPage() {
 
   if (isLoading) {
     return (
-      <PageContainer>
+      <PageContainer title="Settings">
         <PageLoading />
       </PageContainer>
     )
   }
 
   return (
-    <PageContainer>
+    <PageContainer title="Settings">
       <div className="px-panel pt-4">
         <FormSection>
           {SECTIONS.map((section) => {
