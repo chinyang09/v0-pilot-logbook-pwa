@@ -6,7 +6,7 @@ import { useTheme } from "next-themes"
 import { getUserPreferences, saveUserPreferences } from "@/lib/db"
 import { syncService } from "@/lib/sync/sync-service"
 import { resolveSeed } from "@/lib/theme/palette"
-import { applyPalette, syncThemeColor } from "@/lib/theme/apply"
+import { applyPalette } from "@/lib/theme/apply"
 import type {
   DisplayPreferences,
   AutoFillPreferences,
@@ -81,7 +81,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
   const [preferences, setPreferences] = useState<ResolvedPreferences>(defaultResolved)
   const [isLoading, setIsLoading] = useState(true)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const { setTheme, resolvedTheme } = useTheme()
+  const { setTheme } = useTheme()
 
   useEffect(() => {
     getUserPreferences().then((prefs) => {
@@ -152,11 +152,6 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     if (isLoading) return
     applyPalette(resolveSeed(palette, customPalette))
   }, [isLoading, palette, customPalette])
-
-  // The status bar follows the mode actually on screen.
-  useEffect(() => {
-    syncThemeColor()
-  }, [resolvedTheme])
 
   const persistPreferences = useCallback((updated: ResolvedPreferences) => {
     if (debounceRef.current) clearTimeout(debounceRef.current)

@@ -1773,11 +1773,26 @@ or a dialog over the list.
   read-only view and an Edit button; it is a `DetailFormPanel` now, with the
   person's name as its title, and `useCrewForm` derives `isDirty` from the
   form against the stored card.
-- **Account ends with signing out**: "Sign out" (this device) and "Sign out
-  of all devices" as destructive capsules UNDER the sections. There was no
-  plain sign-out at all — only a swipe on your own row in Active sessions —
-  and the all-devices one sat above the sections as the first thing on the
-  page. The app says "sign out" everywhere, never "log out".
+- **The title follows you up into the bar** (`useCollapsingTitle`,
+  `lib/layout/header-title.ts`, `HeaderTitle`). Once the large title has
+  scrolled under the header, a small copy (15px semibold) fades in IN the
+  header row — the main panel's over the main panel, a detail form's over
+  the detail panel (or between Back and the commits in the phone overlay).
+  Scrolled away it was gone, which left the reader exactly as lost as having
+  no title. Each region is a `.header-bar-grid`: the title is centred when it
+  fits and the BUTTONS get their full width first when it does not, so it
+  slides aside and truncates rather than going under one; on the desktop it
+  also keeps clear of the nav pill when the pill sits in the row
+  (`--header-main-w`, `--detail-pill-clear`), and an open search takes the
+  whole region. The panel writes to a module store only when the title
+  crosses the bar — a comparison per scroll event, no render.
+- **Account ends with signing out**: "Sign out" (this device, a NEUTRAL
+  capsule — it loses nothing, unsynced edits are pushed or asked about
+  first) and "Sign out of all devices" (red, on its countdown) UNDER the
+  sections. There was no plain sign-out at all — only a swipe on your own row
+  in Active sessions — and the all-devices one sat above the sections as the
+  first thing on the page. The app says "sign out" everywhere, never "log
+  out".
 - **A panel that only READS is still a `DetailFormPanel`** (`dirty={false}`):
   one title, one scroller, the chrome spacers — and no header buttons.
 - **Actions inside a panel are `ActionRow`s** (`components/ui/action-row.tsx`):
@@ -2970,11 +2985,20 @@ device.
   `applyPalette` while a slider moves — and commits to the preference 400ms
   after it settles. Committing per step re-rendered every consumer of the
   preferences context at slider rate.
-- **The status bar follows the mode actually on screen**: `syncThemeColor`
-  re-points both `<meta name="theme-color">` tags at the current mode's
-  ground (a light-mode pilot on a dark-mode phone would otherwise get a dark
-  bar over a light page). The static values in `app/layout.tsx`,
-  `public/manifest.json` and `public/offline.html` are Graphite's.
+- **The status bar follows the mode actually on screen, live.** The boot
+  script creates the ONE `<meta name="theme-color">` and keeps it on the
+  current mode's ground through a MutationObserver on `<html>`'s class
+  (`DEFAULT_GROUND` before any palette is stored; `syncThemeColor` re-runs it
+  for a new palette). Two bugs it replaces: the tag came from the layout's
+  `viewport.themeColor`, and Next put that static pair (keyed to the OS's
+  dark/light) back on every client navigation, so a light-theme pilot on a
+  dark-mode phone got a dark bar on every page after the first; and the sync
+  ran in the preferences provider's effect on `resolvedTheme`, which runs
+  BEFORE next-themes' own effect sets the class, so it read the old mode and
+  the bar only changed on the next launch. `public/manifest.json` and
+  `public/offline.html` still carry Graphite's values. (An installed iOS app
+  ignores theme-color: `black-translucent` draws white status-bar text over
+  the page, read once at launch.)
 - **A preferences row with no mode in it is NOT "dark".** The provider takes
   the mode next-themes is actually showing; holding the in-memory default meant
   the first unrelated setting saved (choosing a palette, say) wrote "dark" into
@@ -4692,6 +4716,8 @@ When making changes, be aware of these high-impact files:
 - Do not thin the rim by dropping the conic's FLANKS — iOS's controls have a hairline you can see ALL THE WAY ROUND, and at flanks of ~0.05 three-quarters of the perimeter had none. Keep the lobes concentrated (that is what reads as light on a curve) and the flanks around 0.22; the ring's WIDTH (`--softness`, and `.Highlight`'s padding with it) is the separate knob, and it is only free to be fine BECAUSE the flanks hold the continuity
 - Do not open the flight card's `…` cascade behind a blocking scrim — the page must stay scrollable underneath (a scroll dismisses it) while taps are swallowed at the capture phase so nothing activates. And arm that swallow on a short timer, or the click from the tap that OPENED it closes it on the same gesture
 - Do not let the `…` cascade leave `pointerdown`/`touchstart` alone — they must be `stopPropagation`'d in the CAPTURE phase, or a swipe elsewhere still reaches framer-motion and reveals that row's swipe panel with the menu up. And do not add `preventDefault` to them: that is what would kill the compositor's touch scroll, which is the one interaction the menu is supposed to allow (`preventDefault` belongs on `mousedown`, to stop desktop focus, and on the swallowed `click`/`pointerup`)
+- Do not put `themeColor` back in the layout's `viewport` export, and do not sync the status bar from an effect keyed on `resolvedTheme` — Next re-renders the static tags on every client navigation (the bar went dark again on the second page), and the effect runs before next-themes sets the class (the bar lagged a launch behind). The boot script owns the tag and follows the class
+- Do not let a panel's title scroll away with nothing in its place — a panel with a large title publishes it through `useCollapsingTitle` (`PageContainer` and `DetailFormPanel` already do), and the header carries it. And never place a header title absolutely over the row: it is the middle cell of a `.header-bar-grid`, which gives the buttons their width first, so it can neither cover a button nor be covered by one
 - Do not write to ANOTHER record from a form control before Save — the crew card's "This is Me" switch un-flagged the current self card in the database the moment it moved, untouched by Cancel, so a stray flip left the logbook with no self card. The form changes; `handleSave` clears the other flags when it commits
 - Do not let a select show blank for a stored value it has no option for — the currency Type row read empty for any company code an import brought in. Offer the record's own value as an option (`typeOptions`); mapping it to "Custom" would rewrite the stored code on the next save
 - Do not put a segmented choice back as a pair of filled rectangles — it is `SegmentedTabs` (glass, a sliding indicator, `h-9` segments), as in the import dialogs and the Quick Check. And measure its segments from ONE ResizeObserver: reading `offsetLeft` in a ref callback that is rebuilt on every selection forced a layout per tap and attached a new observer to every segment each time, never disconnecting the old ones

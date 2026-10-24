@@ -37,7 +37,7 @@ import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { EmptyState } from "@/components/ui/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
-import { FilterChips } from "@/components/ui/filter-chips"
+import { SegmentedTabs } from "@/components/import/segmented-tabs"
 import { AlertCircle, CheckCircle2 } from "lucide-react"
 import { AnimatePresence, motion } from "framer-motion"
 import { LIST_ITEM_TRANSITION } from "@/lib/motion"
@@ -304,10 +304,13 @@ export default function DiscrepanciesPage() {
   return (
     <PageContainer title="Discrepancies">
       <div className="px-panel pt-4 space-y-4">
-        <FilterChips<FilterType>
+        {/* Three views of one page — a segmented choice, like the Quick
+            Check's and the import dialogs'. It was a strip of ~28px chips
+            used nowhere else, under the 36px a thumb needs. */}
+        <SegmentedTabs<FilterType>
           value={filterType}
           onChange={setFilterType}
-          options={[
+          tabs={[
             {
               value: "comparisons",
               label: "Comparisons",

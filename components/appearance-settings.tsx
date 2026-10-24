@@ -335,7 +335,7 @@ function CustomPaletteEditor({ initial, onCommit }: { initial: PaletteSeed; onCo
                 key={preset.id}
                 type="button"
                 onClick={() => change(presetById(preset.id)!.seed)}
-                className="h-8 rounded-full border border-border px-3 text-xs font-medium transition-colors hover:bg-secondary"
+                className="control-surface h-9 rounded-full px-3.5 text-xs font-medium"
               >
                 {preset.name}
               </button>

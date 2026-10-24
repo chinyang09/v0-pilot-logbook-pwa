@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils"
 import { NavPill } from "@/components/nav-pill"
 import { BottomEdgeBlur } from "@/components/bottom-edge-blur"
 import { ChromeFade } from "@/components/ui/chrome-overlays"
+import { HeaderTitle } from "@/components/header-title"
 import { PushSidebar } from "@/components/push-sidebar"
 import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 import { usePageActions } from "@/hooks/use-page-actions"
@@ -255,6 +256,21 @@ function AppShellContent({ children }: AppShellProps) {
     return () => ro.disconnect()
   }, [isDesktop, wantDualMonth, snapTrigger])
 
+  // The header's main region spans the main PANEL, so it needs the panel's
+  // width. Written as a CSS variable from the observer's own callback — after
+  // layout, and without a React render for a value only CSS reads.
+  const contentAreaRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const panel = mainPanelRef.current
+    const area = contentAreaRef.current
+    if (!isDesktop || !panel || !area) return
+    const ro = new ResizeObserver(([entry]) => {
+      area.style.setProperty("--main-panel-w", `${Math.round(entry.contentRect.width)}px`)
+    })
+    ro.observe(panel)
+    return () => ro.disconnect()
+  }, [isDesktop])
+
   const smoothScrollToTop = useCallback((container: React.RefObject<HTMLDivElement | null>) => {
     // Scope to the given panel and skip mounted-but-hidden keep-alive pages so we
     // scroll the container the user is actually looking at.
@@ -296,7 +312,13 @@ function AppShellContent({ children }: AppShellProps) {
       {isDesktop && <PushSidebar />}
 
       {/* Main content area with resizable panels */}
-      <div className="flex-1 min-w-0 h-full relative">
+      <div
+        ref={contentAreaRef}
+        className="header-regions flex-1 min-w-0 h-full relative"
+        // The nav pill sits centred in the header row here, so the header's
+        // regions keep clear of it (see `.header-regions` in globals.css).
+        data-pill-top={canPushSidebar && !sidebarOpen ? "" : undefined}
+      >
         {/* Header bar — progressive gradient overlay, visible on both mobile and desktop.
             Hidden on mobile when detail overlay is shown (detail overlay has its own header). */}
         <div
@@ -329,38 +351,45 @@ function AppShellContent({ children }: AppShellProps) {
             onClick={scrollMainToTop}
           />
           <div className="relative z-[1] flex items-center px-4 w-full h-13">
-            {/* Main panel actions — flush left on desktop, fills width on mobile (for
-                search expansion). Tapping its bare area scrolls the main panel to top
-                (the e.target===currentTarget guard excludes the action buttons). */}
+            {/* MAIN region — over the main panel (see `--header-main-w`): its
+                actions, then the page's title once it has scrolled under the
+                bar (`.header-bar-grid` centres it when there is room and gives
+                the buttons their width first when there is not). On a phone it
+                is the whole row. Tapping any bare part scrolls the main panel
+                to the top. */}
             <div
-              className="flex items-center gap-2 md:flex-none flex-1 min-w-0 h-full cursor-pointer"
+              className="header-bar-grid h-full min-w-0 cursor-pointer"
+              style={isDesktop ? { width: "var(--header-main-w)", flex: "none" } : { flex: "1 1 0%" }}
               onClick={(e) => { if (e.target === e.currentTarget) scrollMainToTop() }}
             >
-              {mainActions}
+              <div
+                className="flex items-center gap-2 min-w-0 h-full"
+                onClick={(e) => { if (e.target === e.currentTarget) scrollMainToTop() }}
+              >
+                {mainActions}
+              </div>
+              <HeaderTitle slot="main" onClick={scrollMainToTop} />
+              <div aria-hidden className="h-full" onClick={scrollMainToTop} />
             </div>
 
-            {/* Main fall-through strip — desktop only (on mobile the main wrapper above
-                owns the slack); tapping it scrolls the main panel to top. */}
-            <div
-              className="hidden md:block flex-1 h-full cursor-pointer"
-              onClick={(e) => { if (e.target === e.currentTarget) scrollMainToTop() }}
-            />
-
-            {/* Nav pill placeholder — actual pill is fixed-positioned on top */}
-            <div className="flex-shrink-0 w-0" />
-
-            {/* Detail fall-through zone — desktop only; tapping it scrolls the detail panel to top */}
+            {/* DETAIL region — desktop only (mobile shows it in the overlay):
+                the open record's title when it has scrolled away, then its
+                commits flush right. Its first column keeps clear of the nav
+                pill when the pill sits in this row (`--detail-pill-clear`). */}
             {isDesktop && (
               <div
-                className="flex-1 h-full cursor-pointer"
+                className="header-bar-grid header-bar-grid-detail flex-1 h-full min-w-0 cursor-pointer"
                 onClick={(e) => { if (e.target === e.currentTarget) scrollDetailToTop() }}
-              />
-            )}
-
-            {/* Detail panel actions — desktop only (mobile shows in overlay) */}
-            {isDesktop && (
-              <div className="flex items-center gap-2 h-full">
-                {detailActions}
+              >
+                <div aria-hidden className="h-full" onClick={scrollDetailToTop} />
+                <HeaderTitle slot="detail" onClick={scrollDetailToTop} />
+                <div aria-hidden className="h-full" onClick={scrollDetailToTop} />
+                <div
+                  className="flex items-center justify-end gap-2 h-full"
+                  onClick={(e) => { if (e.target === e.currentTarget) scrollDetailToTop() }}
+                >
+                  {detailActions}
+                </div>
               </div>
             )}
           </div>
@@ -425,7 +454,7 @@ function AppShellContent({ children }: AppShellProps) {
           <div className="absolute top-0 left-0 right-0 z-[99] flex pointer-events-none pt-chrome-bar">
             {/* Same header treatment as the main shell */}
             <ChromeFade side="top" />
-            <div className="relative z-[1] flex items-center justify-between px-4 w-full pointer-events-auto h-13">
+            <div className="header-bar-grid header-bar-grid-balanced relative z-[1] px-4 w-full pointer-events-auto h-13">
               {/* Back button — flush left */}
               <GlassIconButton
                 ariaLabel="Back"
@@ -438,13 +467,11 @@ function AppShellContent({ children }: AppShellProps) {
               >
                   <ChevronLeft className="h-5 w-5" />
               </GlassIconButton>
-              {/* Fall-through zone — tapping its bare area scrolls the detail overlay to top */}
-              <div
-                className="flex-1 h-full cursor-pointer"
-                onClick={(e) => { if (e.target === e.currentTarget) scrollMobileDetailToTop() }}
-              />
+              {/* The record's title once it has scrolled away — centred
+                  between Back and the commits, and never under either. */}
+              <HeaderTitle slot="detail" onClick={scrollMobileDetailToTop} />
               {/* Detail actions — flush right */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center justify-end gap-2">
                 {detailActions}
               </div>
             </div>

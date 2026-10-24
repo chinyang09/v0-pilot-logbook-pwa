@@ -18,6 +18,8 @@ import { Loader2 } from "lucide-react"
 import { ScrollIndicator } from "@/components/ui/scroll-indicator"
 import { GlassTextButton } from "@/components/ui/glass-icon-button"
 import { useRegisterDetailActions } from "@/hooks/use-page-actions"
+import { useCollapsingTitle } from "@/hooks/use-collapsing-title"
+import { DETAIL_TITLE_KEY } from "@/lib/layout/header-title"
 
 export function DetailFormPanel({
   title,
@@ -69,13 +71,19 @@ export function DetailFormPanel({
   )
   useRegisterDetailActions(actions, true)
 
+  // Scrolled under the header, the title rides on it (small, between Back
+  // and the commits) — see lib/layout/header-title.ts.
+  const { titleRef, spacerRef, onScroll } = useCollapsingTitle(DETAIL_TITLE_KEY, title)
+
   return (
     <div className="relative flex h-full flex-col">
-      <div className="flex-1 overflow-auto overscroll-contain scrollbar-hide">
+      <div className="flex-1 overflow-auto overscroll-contain scrollbar-hide" onScroll={onScroll}>
         <ScrollIndicator />
-        <div className="h-chrome-top" />
+        <div ref={spacerRef} className="h-chrome-top" />
         <div className="space-y-4 px-panel pt-4">
-          <h2 className="px-1 text-xl font-semibold">{title}</h2>
+          <h2 ref={titleRef} className="px-1 text-xl font-semibold">
+            {title}
+          </h2>
           {error ? (
             <p className="px-1 text-sm text-destructive" role="alert">
               {error}

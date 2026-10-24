@@ -70,6 +70,9 @@ export function GlassSearchButton({
   return (
     <div
       ref={containerRef}
+      // An open search takes the header region's whole width — the title
+      // that would share it steps aside (`.header-bar-grid:has(...)`).
+      data-search-open={isOpen || undefined}
       // NO overflow-hidden here: the glass material's shadow, rim, and the
       // press bloom/stretch transform must escape this box (clipping them
       // drew a hard rectangle around the collapsed circle). The inner search
