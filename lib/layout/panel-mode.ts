@@ -78,3 +78,61 @@ export function useIsMainPanelFullWidth(): boolean {
     () => false
   )
 }
+
+/**
+ * A floating panel is open under the header (the logbook's search or
+ * calendar, the dashboard's calendar). Two things in the header step aside
+ * for it over the MAIN panel:
+ *
+ * - the tap-to-top strip (`--chrome-tap`). It claims the band just below the
+ *   action buttons — exactly where those panels put their own first control —
+ *   so the calendar's month selector could not be tapped on a desktop: the
+ *   tap scrolled the list to the top instead.
+ * - the fade's TAIL (`ChromeFade`'s `clearBelowBar`). The panel sits at
+ *   `--chrome-top`, i.e. inside the tail, and its top 41px came out dimmed and
+ *   blurred as if it were content scrolling away under the bar. It is a
+ *   control surface hanging from the bar. It cannot simply be raised above
+ *   the header: the page lives in its own keep-alive stacking context, below
+ *   the shell's.
+ *
+ * Same counted-hold shape as the full width above. A keep-alive page holds it
+ * only while it is the active route, or a calendar left open on the logbook
+ * would strip the header everywhere. The release is DEFERRED by
+ * `releaseAfterMs` — the panel's own collapse — so the fade does not land on
+ * it while it is still closing.
+ */
+let floatingHolds = 0
+const floatingListeners = new Set<() => void>()
+
+function emitFloating() {
+  floatingListeners.forEach((l) => l())
+}
+
+function subscribeFloating(listener: () => void): () => void {
+  floatingListeners.add(listener)
+  return () => floatingListeners.delete(listener)
+}
+
+export function useFloatingPanelUnderHeader(active: boolean, releaseAfterMs = 0): void {
+  useEffect(() => {
+    if (!active) return
+    floatingHolds += 1
+    emitFloating()
+    return () => {
+      const release = () => {
+        floatingHolds -= 1
+        emitFloating()
+      }
+      if (releaseAfterMs > 0) setTimeout(release, releaseAfterMs)
+      else release()
+    }
+  }, [active, releaseAfterMs])
+}
+
+export function useIsFloatingPanelUnderHeader(): boolean {
+  return useSyncExternalStore(
+    subscribeFloating,
+    () => floatingHolds > 0,
+    () => false
+  )
+}

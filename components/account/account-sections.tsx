@@ -625,9 +625,11 @@ function SessionsSection() {
   const [revokingToken, setRevokingToken] = useState<string | null>(null)
 
   const handleRevokeSession = async (session: SessionData) => {
-    if (session.isCurrent && !(await confirmUnsyncedLoss())) return
+    // Marked from the tap: the push before a current-session revoke can take
+    // seconds, and the row should say it is working meanwhile.
     setRevokingToken(session.id)
     try {
+      if (session.isCurrent && !(await confirmUnsyncedLoss())) return
       const res = await fetch("/api/account/sessions", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },

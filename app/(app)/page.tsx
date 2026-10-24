@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { usePathname } from "next/navigation"
 import { mutate } from "swr"
 
@@ -17,7 +17,7 @@ import { syncService } from "@/lib/sync"
 import { usePageActive } from "@/hooks/use-page-active"
 import { useDashboardView } from "@/hooks/use-dashboard-view"
 import { DashboardActions } from "@/components/dashboard/dashboard-actions"
-import { DashboardCalendarPanel } from "@/components/dashboard/dashboard-calendar-panel"
+import { DashboardCalendarPanel, DashboardCalendarSpacer } from "@/components/dashboard/dashboard-calendar-panel"
 import { LegalDashboard } from "@/components/dashboard/legal-dashboard"
 import { SummaryDashboard } from "@/components/dashboard/summary-dashboard"
 
@@ -38,6 +38,8 @@ import { SummaryDashboard } from "@/components/dashboard/summary-dashboard"
  */
 export default function Dashboard() {
   const { isLoading: authLoading, isAuthenticated } = useAuth()
+  // The calendar's measured height, which the summary reserves while it is open.
+  const [calendarHeight, setCalendarHeight] = useState(0)
   const view = useDashboardView()
 
   // No `onDataChanged` subscription here: `SyncProvider` owns the one global
@@ -116,13 +118,21 @@ export default function Dashboard() {
     // (so on split-pane layouts the picker stays centered over the dashboard,
     // not the entire viewport). Calendar is rendered as a sibling of
     // PageContainer's scrolling main, so it never scrolls with content.
+    //
+    // It PUSHES the summary down rather than floating over it. Floating, the
+    // period's hero figure sat right under the calendar's glass and read
+    // through it, between the day numbers. The spacer is the calendar's own
+    // measured height on `PANEL_MOTION`, so the panel opening and the page
+    // moving are one movement; `overflow-anchor: none` keeps the push from
+    // being cancelled by scroll anchoring (the logbook's rule).
     <div className="relative h-full">
-      <PageContainer>
+      <PageContainer className="[overflow-anchor:none]">
+        <DashboardCalendarSpacer height={calendarHeight} />
         <div className="mx-auto max-w-[1600px] px-panel">
           <SummaryDashboard />
         </div>
       </PageContainer>
-      <DashboardCalendarPanel />
+      <DashboardCalendarPanel onNaturalHeight={setCalendarHeight} />
     </div>
   )
 }

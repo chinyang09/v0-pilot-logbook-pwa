@@ -85,9 +85,12 @@ export default function AccountPage() {
       })
       return
     }
-    if (!(await confirmUnsyncedLoss())) return
+    // The label changes on the TAP: the push below can take seconds on a
+    // phone, and a button that does nothing visible for that long reads as
+    // broken.
     setIsLoggingOutAll(true)
     try {
+      if (!(await confirmUnsyncedLoss())) return
       const res = await fetch("/api/account/sessions", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
@@ -112,10 +115,19 @@ export default function AccountPage() {
   const handleSignOut = useCallback(async () => {
     // Pushes first, while the session still works, and asks before throwing
     // anything unsynced away — then `logout` revokes this device's session.
-    if (!(await confirmUnsyncedLoss())) return
+    // "Signing out…" from the TAP, not after the push — that push can take
+    // seconds on a phone, and a button that does nothing visible for that
+    // long reads as a sign-out that did not work.
     setIsSigningOut(true)
     try {
+      if (!(await confirmUnsyncedLoss())) return
       await logout({ skipSync: true })
+    } catch (error) {
+      console.error("[Account] sign out failed:", error)
+      await appAlert({
+        title: "Couldn't sign out",
+        message: "Something went wrong. Check your connection and try again.",
+      })
     } finally {
       setIsSigningOut(false)
     }

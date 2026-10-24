@@ -1340,7 +1340,11 @@ function SidebarNavItem({
       <span className={cn("flex-shrink-0 [&_svg]:!size-5", isActive ? "text-[var(--on-glass-active-fg)]" : "text-foreground")}>
         {icon}
       </span>
-      {label}
+      {/* ONE line, always. The active weight is wider than the resting one,
+          and a label that only just fitted broke onto a second line when its
+          row was selected ("Recently deleted"), so the row grew under the
+          gravity blob as it landed. */}
+      <span className="min-w-0 truncate whitespace-nowrap">{label}</span>
     </Link>
   )
 }
