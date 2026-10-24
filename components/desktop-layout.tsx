@@ -7,7 +7,7 @@ import { useIsDesktop, useDesktopPill, useHydrated } from "@/hooks/use-is-deskto
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import type { ImperativePanelHandle } from "react-resizable-panels"
 import { SINGLE_MONTH_PX, DUAL_MONTH_PX, DETAIL_MIN_PX } from "@/lib/layout/panel-widths"
-import { setPanelDualMonth } from "@/lib/layout/panel-mode"
+import { setPanelDualMonth, useIsMainPanelFullWidth } from "@/lib/layout/panel-mode"
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -62,7 +62,7 @@ const DETAIL_PLACEHOLDER: Record<string, string> = {
   "/roster": "Select a duty or a day",
   "/currencies": "Select a currency",
   "/discrepancies": "Select a comparison or a note",
-  "/fdp": "Tap a day on the chart",
+  "/fdp": "Open the Quick Check",
   "/recently-deleted": "Select a deleted item",
 }
 function detailPlaceholder(pathname: string | null): string {
@@ -141,6 +141,7 @@ function AppShellContent({ children }: AppShellProps) {
   const { isOpen: sidebarOpen } = useSidebar()
   const searchParams = useSearchParams()
   const { mainActions, detailActions } = usePageActions()
+  const mainFullWidth = useIsMainPanelFullWidth()
 
   // The main panel has exactly TWO widths — one calendar month or two. The
   // divider is a toggle rather than a drag handle: dragging it only ever
@@ -396,7 +397,14 @@ function AppShellContent({ children }: AppShellProps) {
         </div>
 
         {/* Resizable panels — full height, content scrolls behind absolute header */}
-        <div ref={panelGroupContainerRef} className="h-full md:overflow-x-auto">
+        {/* `data-main-full`: the page on screen wants the main panel to take
+            the whole width (`useMainPanelFullWidth`) — the detail panel and
+            the divider step aside, and come back with their sizes intact. */}
+        <div
+          ref={panelGroupContainerRef}
+          className="h-full md:overflow-x-auto"
+          data-main-full={isDesktop && mainFullWidth ? "" : undefined}
+        >
           <ResizablePanelGroup
             direction="horizontal"
             autoSaveId="desktop-panel-layout"
@@ -405,7 +413,7 @@ function AppShellContent({ children }: AppShellProps) {
           >
             {/* 360 = SINGLE_MONTH_PX. `minSize` is a PERCENT, so it has to stay low
                 enough that 360px is reachable — the real floor is this min-width. */}
-            <ResizablePanel ref={mainPanelHandleRef} defaultSize={35} minSize={20} className="md:min-w-[360px]">
+            <ResizablePanel ref={mainPanelHandleRef} defaultSize={35} minSize={20} className="split-main md:min-w-[360px]">
               <div ref={mainPanelRef} className="h-full flex flex-col overflow-hidden relative">
                 {children}
               </div>
@@ -414,7 +422,7 @@ function AppShellContent({ children }: AppShellProps) {
             {/* Resize handle — desktop only, snaps to mobile-width multiples */}
             <ResizableHandle
               disabled
-              className="hidden md:flex"
+              className="split-handle hidden md:flex"
               toggle={canFitDualMonth ? () => setWantDualMonth((v) => !v) : undefined}
               toggleLabel={wantDualMonth ? "Narrow the list panel" : "Widen the list panel"}
               toggleActive={wantDualMonth}
@@ -426,7 +434,7 @@ function AppShellContent({ children }: AppShellProps) {
                 a bare void until hydration. The placeholder is display:none'd
                 by the same md: rule on phones, so it costs nothing there. */}
             {/* 360 = DETAIL_MIN_PX — the detail pane stays at least a phone wide. */}
-            <ResizablePanel defaultSize={65} minSize={20} className="hidden md:block md:min-w-[360px]">
+            <ResizablePanel defaultSize={65} minSize={20} className="split-detail hidden md:block md:min-w-[360px]">
               <div ref={detailPanelRef} className="h-full">
                 {isDesktop ? (
                   <DetailPanelContent />

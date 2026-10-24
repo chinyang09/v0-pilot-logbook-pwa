@@ -91,6 +91,13 @@ interface FlightListProps {
  */
 const YEAR_RAIL_RESERVE = "24px";
 
+/**
+ * The space between two flight cards — the same 4px every other card list
+ * puts between its rows (`pt-1` on crew, aircraft, airports). It was 8, which
+ * read as a gap between separate items rather than a list.
+ */
+const ROW_GAP_PX = 4;
+
 /** How long after a dismissal an open request is treated as the same tap. */
 const CASCADE_REOPEN_GUARD_MS = 350;
 
@@ -756,7 +763,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       return (
         <div className="h-full overflow-y-auto overscroll-contain scrollbar-hide">
           <div style={{ height: topSpacerHeight }} />
-          <div className="px-panel pt-1 space-y-3">
+          <div className="px-panel pt-1 space-y-1">
           {Array.from({ length: 3 }).map((_, i) => (
             <Card key={i} className="bg-card border-border py-0 gap-0">
               <CardContent className="p-4">
@@ -895,9 +902,9 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                           style={{
                             // Horizontal = the shared --panel-gutter, so the
                             // logbook's cards line up with the detail panel
-                            // and the sidebar. Bottom 8px is this list's
+                            // and the sidebar. The bottom is this list's
                             // per-row gap (its spacer subtracts it).
-                            padding: `0 ${hasYearRail ? YEAR_RAIL_RESERVE : "var(--panel-gutter)"} 8px var(--panel-gutter)`,
+                            padding: `0 ${hasYearRail ? YEAR_RAIL_RESERVE : "var(--panel-gutter)"} ${ROW_GAP_PX}px var(--panel-gutter)`,
                             ...(isDeleting && {
                               opacity: 0,
                               transform: "translateX(-40px)",
@@ -924,11 +931,11 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
               })()}
             </div>
 
-            {/* Bottom padding — minus the 8px trailing gap every row wrapper
+            {/* Bottom padding — minus the trailing gap every row wrapper
                 already carries, so the LAST card's edge rests on the same
                 line as the sidebar's lower end and the other panels' last
                 rows (they end flush with their spacers; this list doesn't) */}
-            <div style={{ height: "calc(var(--chrome-bottom) - 8px)" }} />
+            <div style={{ height: `calc(var(--chrome-bottom) - ${ROW_GAP_PX}px)` }} />
           </div>
 
           {/* FastScroll rail (year-based navigation) - positioned in visible area below calendar/header */}

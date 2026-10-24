@@ -440,7 +440,7 @@ export function ImportReviewModalV2({
             flight list underneath, and the glass action buttons re-sampled
             their backdrop as it moved, which read as them being tapped. */}
         <div
-          className="h-full overflow-y-auto overscroll-contain px-4 sm:px-6"
+          className="h-full overflow-y-auto overflow-x-hidden overscroll-contain px-4 sm:px-6"
           style={{
             // Exactly the chrome height, like the main panel's pt-16 under its
             // h-16 header: content starts where the gradient has faded out.

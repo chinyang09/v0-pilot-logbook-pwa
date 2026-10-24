@@ -1,6 +1,6 @@
 "use client"
 
-import { useSyncExternalStore } from "react"
+import { useEffect, useSyncExternalStore } from "react"
 
 /**
  * Whether the main panel is currently at its DUAL-month width.
@@ -37,6 +37,44 @@ export function usePanelDualMonth(): boolean {
   return useSyncExternalStore(
     subscribe,
     () => dualMonth,
+    () => false
+  )
+}
+
+/**
+ * Whether the page on screen wants the MAIN panel to take the whole width —
+ * the detail panel and the divider step aside. The FDP page asks for it: its
+ * chart is the page, and there is nothing behind a row to open beside it
+ * until the Quick Check is opened, which gives the detail panel back.
+ *
+ * A COUNTED hold (`useMainPanelFullWidth` takes one while its argument is
+ * true), so a page leaving as another arrives cannot release the newcomer's
+ * claim. Only the split layout reads it; a phone has one panel anyway.
+ */
+let fullWidthHolds = 0
+const fullWidthListeners = new Set<() => void>()
+
+function subscribeFullWidth(listener: () => void): () => void {
+  fullWidthListeners.add(listener)
+  return () => fullWidthListeners.delete(listener)
+}
+
+export function useMainPanelFullWidth(active: boolean): void {
+  useEffect(() => {
+    if (!active) return
+    fullWidthHolds += 1
+    fullWidthListeners.forEach((l) => l())
+    return () => {
+      fullWidthHolds -= 1
+      fullWidthListeners.forEach((l) => l())
+    }
+  }, [active])
+}
+
+export function useIsMainPanelFullWidth(): boolean {
+  return useSyncExternalStore(
+    subscribeFullWidth,
+    () => fullWidthHolds > 0,
     () => false
   )
 }

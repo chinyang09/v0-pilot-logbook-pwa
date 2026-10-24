@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from "react"
+import { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import {
   ComposedChart,
   Bar,
@@ -12,7 +12,6 @@ import {
   ResponsiveContainer,
   Cell,
   Area,
-  useXAxisScale,
 } from "recharts"
 import { Card, CardContent } from "@/components/ui/card"
 import { ZoomIn, ZoomOut, RotateCcw, X } from "lucide-react"
@@ -86,8 +85,6 @@ interface FDPTimelineChartProps {
   /** Called when the user taps the on-chart reset button to clear the
    *  scenario overlay. When omitted, the reset button is hidden. */
   onClearScenario?: () => void
-  /** A day was tapped — open its detail. */
-  onSelectDate?: (date: string) => void
 }
 
 
@@ -97,45 +94,6 @@ interface FDPTimelineChartProps {
  * growing them sideways would make neighbouring targets overlap.
  */
 const TOOL_HIT = "relative after:absolute after:-inset-y-2.5 after:-inset-x-0.5 after:content-['']"
-
-/** Pixel → the day whose BAND contains it (the rule the tooltip follows). */
-type DayAtPixel = (x: number) => string | undefined
-
-/**
- * Hands the main chart's pixel → day mapping to the chart's click handler. A
- * component because the axis scale is only reachable from INSIDE the chart;
- * handed over after commit, never during render.
- *
- * Built on the forward scale's band edges rather than Recharts' inverse
- * "snap" scale, which snaps to the nearest band START — so a tap on the right
- * half of a day's column picked the next day.
- */
-function DayAtPixelProbe({ dates, onReady }: { dates: string[]; onReady: (f: DayAtPixel | undefined) => void }) {
-  const scale = useXAxisScale()
-  useLayoutEffect(() => {
-    if (!scale) {
-      onReady(undefined)
-      return
-    }
-    onReady((x) => {
-      let nearest: string | undefined
-      let nearestDistance = Infinity
-      for (const date of dates) {
-        const start = scale(date, { position: "start" })
-        const end = scale(date, { position: "end" })
-        if (start == null || end == null) continue
-        if (x >= start && x < end) return date
-        const distance = Math.abs(x - (start + end) / 2)
-        if (distance < nearestDistance) {
-          nearestDistance = distance
-          nearest = date
-        }
-      }
-      return nearest
-    })
-  }, [scale, dates, onReady])
-  return null
-}
 
 export function FDPTimelineChart({
   timelineData,
@@ -147,7 +105,6 @@ export function FDPTimelineChart({
   scenarioModifiedDates,
   scenarioRemovedDates,
   onClearScenario,
-  onSelectDate,
 }: FDPTimelineChartProps) {
   // Stage-by-stage diagnostics for chart render pipeline. These logs are
   // intentionally verbose so that a chart-failed-to-render report can be
@@ -185,11 +142,6 @@ export function FDPTimelineChart({
   const overviewDateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Hide tooltip after touch ends (Recharts doesn't auto-dismiss on mobile)
   const [tooltipActive, setTooltipActive] = useState(true)
-  // The main chart's pixel → day mapping, for a tapped day.
-  const dayAtPixelRef = useRef<DayAtPixel | undefined>(undefined)
-  const keepDayAtPixel = useCallback((f: DayAtPixel | undefined) => {
-    dayAtPixelRef.current = f
-  }, [])
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Defer Recharts mount by one frame. On hard refresh, the ResponsiveContainer
@@ -873,7 +825,6 @@ export function FDPTimelineChart({
     return Array.from(new Set(dates))
   }, [slicedData])
   const labelOfDate = useMemo(() => new Map(slicedData.map((d) => [d.date, d.dateLabel])), [slicedData])
-  const slicedDates = useMemo(() => slicedData.map((d) => d.date), [slicedData])
   const formatDateTick = useCallback((date: string) => labelOfDate.get(date) ?? date, [labelOfDate])
 
   // Shared axis/grid theme props — using resolved rgb from probe
@@ -1042,20 +993,6 @@ export function FDPTimelineChart({
                 <ComposedChart
                   data={slicedData}
                   margin={{ top: 14, right: 0, left: 0, bottom: 0 }}
-                  // A tap on a day opens it in the detail panel; the tooltip
-                  // stays the in-place reading while a finger scrubs. The day
-                  // comes from the click's OWN position: the state Recharts
-                  // hands the handler is the tooltip's last index, which on a
-                  // touch tap is still the previous position (measured: a tap
-                  // on 15 Oct opened 3 Oct).
-                  onClick={(_state, event) => {
-                    const dayAt = dayAtPixelRef.current
-                    const surface = (event as React.MouseEvent<Element>).currentTarget
-                    if (!dayAt || !onSelectDate || !(surface instanceof Element)) return
-                    const date = dayAt((event as React.MouseEvent).clientX - surface.getBoundingClientRect().left)
-                    if (date) onSelectDate(date)
-                  }}
-                  style={onSelectDate ? { cursor: "pointer" } : undefined}
                 >
                   <defs>
                     {selectedNonRestViews.map((view) => (
@@ -1089,7 +1026,6 @@ export function FDPTimelineChart({
                     padding={{ left: CHART_EDGE_PAD, right: CHART_EDGE_PAD }}
                   />
                   <YAxis hide domain={yDomain} />
-                  <DayAtPixelProbe dates={slicedDates} onReady={keepDayAtPixel} />
                   <Tooltip
                     content={<CustomTooltip />}
                     active={tooltipActive ? undefined : false}

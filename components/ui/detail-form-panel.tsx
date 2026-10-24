@@ -77,7 +77,7 @@ export function DetailFormPanel({
 
   return (
     <div className="relative flex h-full flex-col">
-      <div className="flex-1 overflow-auto overscroll-contain scrollbar-hide" onScroll={onScroll}>
+      <div className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain scrollbar-hide" onScroll={onScroll}>
         <ScrollIndicator />
         <div ref={spacerRef} className="h-chrome-top" />
         <div className="space-y-4 px-panel pt-4">

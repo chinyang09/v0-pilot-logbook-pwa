@@ -121,7 +121,7 @@ export function LogtenReviewDialog({
           </div>
         </DialogHeader>
 
-        <div className="-mx-1 mt-4 min-h-0 flex-1 overflow-y-auto px-1 scrollbar-hide">
+        <div className="-mx-1 mt-4 min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-1 scrollbar-hide">
           {plan.flights.dateRange.start && (
             <p className="text-xs text-muted-foreground">
               {plan.flights.dateRange.start}

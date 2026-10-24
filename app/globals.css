@@ -1378,6 +1378,20 @@ textarea:focus-within {
 
 
 /*
+ * A page that takes the whole width (`useMainPanelFullWidth`, the FDP chart):
+ * the main panel grows over the detail panel's share and the detail panel and
+ * the divider are not drawn. The library's own sizes are left alone, so the
+ * split comes back exactly as it was.
+ */
+[data-main-full] .split-main {
+  flex: 1 1 0% !important;
+}
+[data-main-full] .split-detail,
+[data-main-full] .split-handle {
+  display: none !important;
+}
+
+/*
  * The header row's regions — actions, a title, the other side — on the
  * native navigation bar's rule: the title is CENTRED over its panel when it
  * fits, and the buttons are given their full width FIRST when it does not.
