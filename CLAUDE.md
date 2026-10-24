@@ -1545,7 +1545,15 @@ had it.
 
 The calendar stays MOUNTED and collapsed to `height: 0` so its natural height
 is always measurable, and `onNaturalHeight` reports it — which is what the
-logbook's list spacer reserves. The **absorb** logic stays in the logbook
+logbook's list spacer reserves, and the dashboard's summary too
+(`DashboardCalendarSpacer`). **Both pages PUSH their content; neither floats
+the calendar over it.** The dashboard's used to float, and the period's hero
+figure read through the calendar's glass between the day numbers.
+
+**A range is drawn one capsule PER WEEK ROW** — a cell that starts a row
+(Sunday, or the 1st) or ends one (Saturday, or the month's last day) is rounded
+on that side, endpoints included. Square there, a range across weeks read as
+one blocky slab with a notch cut out of it. The **absorb** logic stays in the logbook
 (`handleCalendarHeight`): only the ResizeObserver moved.
 
 ### The Logbook's Floating Panels (search + calendar)
@@ -1676,13 +1684,24 @@ day grid beside the months that no longer fitted — its last week was cut off.
 A month is the same control as a day: a capsule, the selected one(s) solid
 accent, the current one ringed like today.
 
-**The header's tap-to-top band steps aside while a floating panel sits in it**
-(`useSuppressHeaderTap`, `lib/layout/panel-mode.ts`). The calendar's selector
-and the search field are the first thing under the action buttons, i.e. inside
-`--chrome-tap`, and with the band in place the month selector could not be
-tapped at all on a desktop — the tap scrolled the list to the top. The logbook
-and the dashboard hold it only while their panel is open AND their page is the
-active route.
+**The header steps aside for a floating panel hanging from it**
+(`useFloatingPanelUnderHeader`, `lib/layout/panel-mode.ts`). The calendar and
+the search field sit at `--chrome-top`, i.e. inside both the tap-to-top band
+(`--chrome-tap`) and the fade's 41px tail, so while one is open, over the MAIN
+panel:
+
+- the tap band is removed — with it in place the month selector could not be
+  tapped at all on a desktop; the tap scrolled the list to the top;
+- the fade's TAIL is cleared (`ChromeFade`'s `clearBelowBar`) — the panel's top
+  came out dimmed and blurred as if it were content scrolling away, the
+  selector reading as disabled. It cannot be RAISED above the header instead:
+  the page lives in its keep-alive stacking context, below the shell's.
+  The cut is a mask on each of the fade's LAYERS, never on its wrapper — a
+  mask on an ancestor makes it a backdrop root and the blur samples nothing.
+
+The logbook and the dashboard hold it only while their panel is open AND their
+page is the active route, and the release waits `PANEL_MS` so the fade does not
+land on the panel while it is still collapsing.
 
 **The header names BOTH months in dual mode** — `Jul – Aug 26`, and both years
 when the pair straddles a new year (`Dec 26 – Jan 27`), since "Dec – Jan 27"
@@ -1985,7 +2004,8 @@ report watermarks). Do not go back to an allowlist.
   is a REAL element, so a drag STARTING in it does not scroll — which is why it
   stays thin rather than covering the whole fade tail. And it is REMOVED while
   a floating panel (the logbook's search or calendar) sits under the buttons
-  (`useSuppressHeaderTap`): that panel's own first control lives in this band.
+  (`useFloatingPanelUnderHeader`): that panel's own first control lives in
+  this band. The fade's tail is cleared over the main panel then too.
 
   **`--chrome-clear` is a DIFFERENT number again and is deliberately larger** (3.5rem
   → 60px below the buttons, ~15px of air under the band). It is where the
@@ -4855,7 +4875,7 @@ When making changes, be aware of these high-impact files:
 - Do not let an overlay rely on Escape alone — on Android the back gesture is the other half of the same intent, and without `useBackDismiss` the router navigates and the overlay (portalled to `document.body`) is left over whatever page arrives. Every dismissal must go through the hook's `dismiss()`, and an action that navigates has to run as its FOLLOW-UP: closing first and popping the marker entry on the way out issues the `router.push` while our own `back()` is still queued, and the back then undoes it
 - Do not give a scroll handler ANY work that isn't per-frame cheap, and never let one write React state above the component that needs it. The logbook's list runs one rAF-throttled listener whose only job is the calendar sync; `topFlightDate` is pushed into state only while the calendar is actually OPEN, because the calendar is collapsed to `height: 0` rather than unmounted and updating it while stowed re-rendered a whole month grid per card scrolled past, for something nobody can see
 - Do not let a full-width page (`useMainPanelFullWidth`) take the sidebar toggle's main-width lock — it has no main width to hold, and the inline `max-width` capped the FDP chart at the split's main width for the length of the push
-- Do not put a control in the band just under the action buttons while the header's tap-to-top strip is there — hold `useSuppressHeaderTap` while the floating panel is open (and its page active), or the strip takes the tap. And do not hide the calendar's date selector when the month/year picker opens: the picker REPLACES the grid in the same box, under the same selector, so the panel's height does not move
+- Do not hang a floating panel under the action buttons without holding `useFloatingPanelUnderHeader` while it is open (and its page active) — or the tap-to-top strip takes its first control's tap and the fade's tail dims and blurs its top as if it were content scrolling away. And do not try to fix that with a z-index: the page is in its keep-alive stacking context, below the shell's header. Clear the tail with a mask on the fade's LAYERS, never on the `ChromeFade` wrapper (an ancestor mask is a backdrop root, so the blur would sample nothing). And do not hide the calendar's date selector when the month/year picker opens: the picker REPLACES the grid in the same box, under the same selector, so the panel's height does not move
 - Do not leave a sign-out (or any action that awaits a network round trip before its first visible change) silent until the round trip returns — change its label on the TAP, and bound the wait (`flushBeforeSignOut(maxWaitMs)`)
 - Do not hand-roll a spinner — waiting is one thing and should look like one thing. `PageLoading` is the route-level state (every `loading.tsx`, the keep-alive Suspense fallback) and `PanelLoading` is the detail-panel one, both in `components/ui/page-loading.tsx`. The aircraft, airports and crew pages each carried an identical copy of a `border-2 border-primary border-t-transparent` ring, so waiting for a pane looked like a different kind of waiting depending on which tab you were on
 - Do not size the mobile bottom pill from `PILL_HEIGHT` — it is `MOBILE_PILL_HEIGHT` (56 against the desktop 44). They are not the same control: one is a row of text tabs in a dense header, the other is the phone's only navigation, aimed at with a thumb
@@ -4863,6 +4883,7 @@ When making changes, be aware of these high-impact files:
 - Do not give the gravity blob a colour of its own — it is `--on-glass-active`, THE selected-thing fill, shared with an action button's active state so the nav and the header say "this is the one you are on" the same way. It must stay a mix of two OPAQUE colours: any translucency shows up as the blob letting the page through, which is the one thing it must not do
 - Do not put `--primary` on `--on-glass-active` — a 32% tint of a colour is the same hue at a similar lightness, which is exactly why the active action button read as barely selected. The label is `--on-glass-active-fg`, the primary pushed AWAY from the fill (lighter on dark, darker on light) so it still reads as the accent
 - Do not close the flight card's `…` cascade on POINTERDOWN — the overlay unmounts mid-gesture and the click that follows lands on the card underneath, so dismissing it also opened the flight. Close on the lift and swallow the synthesised click at the capture phase
+- Do not float a calendar panel over content that is not scrolling under it on purpose — the page reserves its height (`onNaturalHeight` → a spacer on `PANEL_MOTION`, with `overflow-anchor: none` on the scroller), or what sits beneath reads through the glass between the day numbers
 - Do not give a page its own copy of the calendar's wrapper — `CalendarPanel` is the one presentation, and the logbook and the dashboard both render it. They drifted into looking like two different calendars once already (radius, width, glass, dual month, and a duplicate month label in the dashboard's action bar)
 - Do not derive the calendar's dual/single mode from a ResizeObserver on the page — read `usePanelDualMonth()`. A measurement lands a frame behind the resize, and in that frame the calendar renders the outgoing mode at the incoming width (the "flash" on the collapse)
 - Do not scroll a dynamically-measured virtual list by asking the virtualizer where a row is — every offset it can give you is built from `estimateSize` for the rows it has never measured, so `scrollToIndex`/`getOffsetForIndex` are wrong by however far the estimate is off. `scrollToIndexSettled` scrolls roughly, then MEASURES the row in the DOM and corrects by the difference, which is exact

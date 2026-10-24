@@ -522,6 +522,19 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
               dayInfo.dateStr >= rangeStart! &&
               dayInfo.dateStr <= rangeEnd!;
             const isRangeMiddle = isInRange && !isRangeStart && !isRangeEnd;
+            // The range is drawn as one capsule PER WEEK ROW, the way a native
+            // calendar draws it: a middle cell that starts a row (Sunday, or
+            // the 1st) or ends one (Saturday, or the month's last day) is
+            // rounded on that side. Square there, a range wrapping weeks read
+            // as one blocky slab with a notch cut out of it.
+            const col = dayIndex % 7;
+            const nextDay = days[dayIndex + 1];
+            const startsRow = col === 0 || dayInfo.date.getDate() === 1;
+            const endsRow = col === 6 || !nextDay || !nextDay.isCurrentMonth;
+            // An endpoint at a row's edge closes that side too (a range
+            // starting on a Saturday, or ending on a Sunday).
+            const capLeft = (isRangeMiddle || (hasFullRange && isRangeEnd)) && startsRow;
+            const capRight = (isRangeMiddle || (hasFullRange && isRangeStart)) && endsRow;
 
             return (
               <button
@@ -531,6 +544,8 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                   "relative flex items-center justify-center aspect-square p-px",
                   // Continuous pill behind the row of in-range cells.
                   isRangeMiddle && "bg-[var(--on-glass-accent-soft)]",
+                  capLeft && "rounded-l-full",
+                  capRight && "rounded-r-full",
                   hasFullRange && isRangeStart && "bg-[var(--on-glass-accent-soft)] rounded-l-full",
                   hasFullRange && isRangeEnd && "bg-[var(--on-glass-accent-soft)] rounded-r-full",
                 )}

@@ -105,14 +105,69 @@ const BLUR_RAMP = "58%";
  */
 const FADE_TAIL = 41;
 
+/**
+ * The mask that clears the tail over a region starting at the left edge:
+ * keep the bar's own band (`--chrome-top` tall) across the full width, plus
+ * everything to the RIGHT of `width`. Two solid layers, added.
+ */
+function tailCutMask(width: string) {
+  return {
+    image: "linear-gradient(#000, #000), linear-gradient(#000, #000)",
+    size: `100% var(--chrome-top), calc(100% - ${width}) 100%`,
+    position: "0 0, 100% 0",
+  };
+}
+
 export function ChromeFade({
   side,
   className,
+  clearBelowBar,
 }: {
   side: Side;
   className?: string;
+  /**
+   * Clear the fade's TAIL (everything below `--chrome-top`) over this width
+   * from the left edge — a floating panel hangs there and is chrome, not
+   * content scrolling away (`useFloatingPanelUnderHeader`). The bar's own band
+   * keeps its treatment. Applied as a mask on each LAYER, never on this
+   * wrapper: a mask on an ancestor makes it a backdrop root, and the blur
+   * layer would then sample nothing.
+   */
+  clearBelowBar?: string;
 }) {
   const anchor = side === "top" ? { top: 0 } : { bottom: 0 };
+  const ramp = `linear-gradient(to ${side}, transparent 0, black ${BLUR_RAMP})`;
+  const cut = side === "top" && clearBelowBar ? tailCutMask(clearBelowBar) : null;
+  // The blur: its ramp INTERSECTED with (bar band ∪ right of the cut). Mask
+  // layers composite bottom-up, so the bottom two are added first.
+  const blurMask = cut
+    ? {
+        maskImage: `${ramp}, ${cut.image}`,
+        WebkitMaskImage: `${ramp}, ${cut.image}`,
+        maskSize: `100% 100%, ${cut.size}`,
+        WebkitMaskSize: `100% 100%, ${cut.size}`,
+        maskPosition: `0 0, ${cut.position}`,
+        WebkitMaskPosition: `0 0, ${cut.position}`,
+        maskRepeat: "no-repeat",
+        WebkitMaskRepeat: "no-repeat",
+        maskComposite: "intersect, add, add",
+        WebkitMaskComposite: "source-in, source-over, source-over",
+      }
+    : { maskImage: ramp, WebkitMaskImage: ramp };
+  const veilMask = cut
+    ? {
+        maskImage: cut.image,
+        WebkitMaskImage: cut.image,
+        maskSize: cut.size,
+        WebkitMaskSize: cut.size,
+        maskPosition: cut.position,
+        WebkitMaskPosition: cut.position,
+        maskRepeat: "no-repeat",
+        WebkitMaskRepeat: "no-repeat",
+        maskComposite: "add",
+        WebkitMaskComposite: "source-over",
+      }
+    : undefined;
   return (
     <div
       aria-hidden
@@ -127,11 +182,10 @@ export function ChromeFade({
           height: "100%",
           backdropFilter: `blur(${FACE_BLUR}px)`,
           WebkitBackdropFilter: `blur(${FACE_BLUR}px)`,
-          maskImage: `linear-gradient(to ${side}, transparent 0, black ${BLUR_RAMP})`,
-          WebkitMaskImage: `linear-gradient(to ${side}, transparent 0, black ${BLUR_RAMP})`,
+          ...blurMask,
         }}
       />
-      <div className="absolute inset-0" style={{ background: fadeFor(side) }} />
+      <div className="absolute inset-0" style={{ background: fadeFor(side), ...veilMask }} />
     </div>
   );
 }

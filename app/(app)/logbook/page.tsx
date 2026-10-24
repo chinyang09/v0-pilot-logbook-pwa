@@ -20,7 +20,7 @@ import { EmptyState } from "@/components/ui/empty-state"
 import { Button } from "@/components/ui/button"
 import { useRouter } from "next/navigation"
 import { GlassContainer } from "@/components/ui/glass-container"
-import { usePanelDualMonth, useSuppressHeaderTap } from "@/lib/layout/panel-mode"
+import { usePanelDualMonth, useFloatingPanelUnderHeader } from "@/lib/layout/panel-mode"
 import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date"
 import { insertFlightSorted } from "@/lib/utils/flight-sort"
 import { UnifiedImportButton } from "@/components/import/unified-import-button"
@@ -106,8 +106,9 @@ export default function LogbookPage() {
 
   // Refresh flight data when this keep-alive page becomes active again
   const isActive = usePageActive("/logbook", refreshFlights)
-  // The open panel's own first control sits in the header's tap-to-top band.
-  useSuppressHeaderTap(isActive && (showSearch || showCalendar))
+  // The open panel hangs from the bar: the header's tap band and fade tail
+  // step aside for it (released once its collapse has run).
+  useFloatingPanelUnderHeader(isActive && (showSearch || showCalendar), PANEL_MS)
 
   const calendarRef = useRef<CalendarHandle>(null)
   const flightListRef = useRef<FlightListRef>(null)

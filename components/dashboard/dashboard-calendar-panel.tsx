@@ -2,10 +2,10 @@
 
 import * as React from "react"
 
-import { CalendarPanel } from "@/components/calendar-panel"
+import { CalendarPanel, PANEL_MOTION, PANEL_MS } from "@/components/calendar-panel"
 import { useFlights } from "@/hooks/data/use-flights"
 import { useDashboardPeriod } from "@/hooks/use-dashboard-period"
-import { usePanelDualMonth, useSuppressHeaderTap } from "@/lib/layout/panel-mode"
+import { usePanelDualMonth, useFloatingPanelUnderHeader } from "@/lib/layout/panel-mode"
 import { usePageActive } from "@/hooks/use-page-active"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 
@@ -30,7 +30,12 @@ import { useIsDesktop } from "@/hooks/use-is-desktop"
  * month — comes from the shared `CalendarPanel`, so the two pages cannot drift
  * apart again.
  */
-export function DashboardCalendarPanel() {
+export function DashboardCalendarPanel({
+  onNaturalHeight,
+}: {
+  /** The calendar's measured height, so the page can make room for it. */
+  onNaturalHeight?: (height: number) => void
+} = {}) {
   const {
     resolved,
     period,
@@ -44,9 +49,10 @@ export function DashboardCalendarPanel() {
   const { flights } = useFlights()
   const dualMonth = usePanelDualMonth()
   const isSplitLayout = useIsDesktop()
-  // The calendar's month selector sits in the header's tap-to-top band.
+  // The calendar hangs from the bar: the header's tap band and fade tail
+  // step aside for it (released once its collapse has run).
   const isActive = usePageActive("/")
-  useSuppressHeaderTap(isActive && showCalendar)
+  useFloatingPanelUnderHeader(isActive && showCalendar, PANEL_MS)
 
   const [midPickStart, setMidPickStart] = React.useState<string | null>(null)
 
@@ -88,16 +94,16 @@ export function DashboardCalendarPanel() {
   const displayEnd = midPickStart ? null : resolved.toIso
 
   return (
-    /* Absolute, so the dashboard's grid scrolls behind it — the same
-       arrangement the logbook's list uses, and what the glass needs to have
-       something to see through. Full panel width rather than the old
-       `max-w-md` card. */
+    /* Absolute, over the top of the page, which reserves its height with a
+       spacer — the same arrangement the logbook's list uses. Full panel width
+       rather than the old `max-w-md` card. */
     <div
       className="z-40 absolute left-0 right-0"
       style={{ top: "var(--chrome-top)", contain: "layout style paint" }}
     >
       <CalendarPanel
         open={showCalendar}
+        onNaturalHeight={onNaturalHeight}
         flights={flights}
         selectedMonth={selectedMonth}
         onMonthChange={(year, month) => setSelectedMonth({ year, month })}
@@ -118,4 +124,15 @@ export function DashboardCalendarPanel() {
       />
     </div>
   )
+}
+
+/**
+ * The room the summary page makes for the calendar: its measured height while
+ * open, on the panel's own clock, so opening it and the page moving are one
+ * movement. Its own component so only it reads the period context — the page
+ * around it does not re-render with every period change.
+ */
+export function DashboardCalendarSpacer({ height }: { height: number }) {
+  const { showCalendar } = useDashboardPeriod()
+  return <div aria-hidden style={{ height: showCalendar ? height : 0, transition: PANEL_MOTION }} />
 }
