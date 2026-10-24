@@ -1487,6 +1487,10 @@ over.
 
 Three things keep the delta at zero:
 
+- **The gap between two cards is `ROW_GAP_PX` (4px)**, the same as every
+  other card list's `pt-1`. It was 8, which read as separate items rather than
+  a list. It is the row wrapper's bottom padding, and the list's bottom spacer
+  subtracts it, so the last card still rests on the shared line.
 - The two optional rows in `flight-card-body` reserve their line (`min-h-[1.25em]`,
   which is `leading-tight` at their font size) so a flight with no aircraft or
   no crew is not a shorter card. **Do not drop those** — a variable row height
@@ -1755,7 +1759,7 @@ or a dialog over the list.
 | roster, currencies | month + agenda / the list | the duty / currency form (`DetailFormPanel`) |
 | discrepancies | comparisons, notes | a comparison's FLIGHT (`FlightForm`); a note and its Resolve (`DiscrepancyDetailPanel`) |
 | recently deleted | the bin | what the item was, how long it is kept, Restore / Delete forever |
-| FDP | the timeline chart | a tapped DAY (`FdpDayPanel`), or the Quick Check |
+| FDP | the timeline chart, at FULL width | the Quick Check, only while it is open |
 | account, settings | the sections | the section |
 | dashboard | legal / summary | a requirement cell (`RequirementDetailPanel`); a period flight (`FlightForm`) |
 
@@ -1765,8 +1769,16 @@ or a dialog over the list.
   Account, Settings or Recently Deleted no nav tab lights up either, so
   nothing on screen said where you were. The logbook and the dashboard go
   without — their first row is already their own.
+- **A page with nothing behind its rows takes the whole width**
+  (`useMainPanelFullWidth`, `lib/layout/panel-mode.ts`) — the FDP chart. The
+  detail panel and the divider step aside (`[data-main-full]`) with their
+  sizes kept, and come back when the page lets go: the Quick Check is the one
+  thing that needs the panel, so opening it gives the panel back. A tapped
+  chart DAY used to open in the detail panel, which on a phone covered the
+  chart on every tap of a gesture meant to scrub it, to say what the tooltip
+  and the chart's own series (select several) already say.
 - **An empty detail panel says what a row opens** (`DETAIL_PLACEHOLDER` in
-  `desktop-layout.tsx`: "Select a crew member", "Tap a day on the chart"),
+  `desktop-layout.tsx`: "Select a crew member", "Select a deleted item"),
   not "Select an item".
 - **Every record is edited IN PLACE** — always editable, Cancel / Save in the
   header only once something differs. Crew was the one record behind a
@@ -1799,8 +1811,8 @@ or a dialog over the list.
   a row in a grouped section with the label in the accent or red, never a
   full-width filled button.
 - **One selection id per page, namespaced where tables can collide**
-  (recently deleted keys `kind:id`; FDP's days are `day:YYYY-MM-DD` beside the
-  Quick Check's `legal-check`).
+  (recently deleted keys `kind:id`; the dashboard's requirement cells are
+  `req:<id>` beside its flights).
 - **The row that is open is lit only where the panel BESIDE it shows it**
   (`isDesktop && …`) — a phone has no such panel.
 - **Account sections own their state.** The detail panel is rendered by the
@@ -4538,7 +4550,8 @@ When making changes, be aware of these high-impact files:
 - Do not hard-delete a roster duty, and do not let a binned one be matched by `bulkUpsertScheduleEntries` — updating a deleted row silently resurrects a duty the user deleted, the same rule the flight reconciler follows. Every read filters `isLiveEntity`
 - Do not open what is behind a row in a sheet, a dialog or an in-list expansion on a page with a detail panel — it opens IN the detail panel (see "Main / Detail on every page"). The discrepancy resolution was a sheet over the list it was chosen from; account was one long scroll with accordions
 - Do not key the FDP chart's x-axis (or any lookup on it) on `dateLabel` — "13 Oct" repeats once a zoomed-out window spans a year, and every lookup by label lands on the first year. The axis is the `date`, printed through `tickFormatter`
-- Do not take a tapped chart day from the `onClick` state Recharts hands over — it is the TOOLTIP's last index, which on a touch tap is still the previous position (measured: a tap on 15 Oct opened 3 Oct). And do not use `useXAxisInverseDataSnapScale` for it either: it snaps to the nearest band START, so the right half of a column picks the next day. `DayAtPixelProbe` hit-tests the click against each day's band, the rule the tooltip follows
+- Do not open a tapped FDP chart day in the detail panel — a tap on the chart is part of scrubbing it, and on a phone the overlay covered the chart on every one. The tooltip reads the day, and selecting several series reads all four rolling figures at once. The page takes the full width instead (`useMainPanelFullWidth`) and gives the panel back only to the Quick Check
+- Do not let an app scroller scroll SIDEWAYS — `PageContainer`, `DetailFormPanel` and the dialog scrollers carry `overflow-x-hidden`. Glass inside one reaches past its own box by its edge-blur margin (`.GlassEdgeReflection`'s negative margin), so a segmented control on Discrepancies gave the page 14px of sideways play. Clip at the scroller, never on the glass, which would cut its shadow
 - Do not listen for `beforeinstallprompt` in a component — the install banner's module captures and spends it at page load, before any page mounts. Read the offer through `useInstallOffer()` (`pwa-install-prompt.tsx`); the account page's own listener never saw an offer, so its Install button only ever showed manual steps
 - Do not put the duty or currency form back in a sheet over the page — a selected duty or currency opens in the DETAIL panel (`DutyDetailPanel` / `CurrencyDetailPanel` on `DetailFormPanel`), beside its list on a tablet and as the overlay on a phone, like a flight or a crew member; a sheet covered the very list it was chosen from. And keep their forms a DRAFT over the live record (`useDraft`), never a copy seeded once — a copy goes stale at the next pull and saving it reverts another device's edit
 - Do not count a standby's full length toward the 90h/180h limits — para 6(7) counts **20%** of home standby, and para 6(3) folds AIRPORT standby into the rest period or the following FDP so it contributes nothing separately. `countedDutyMinutes` carries the discount and `calculateRollingStats` reads `countedDutyMinutes ?? dutyMinutes`, so every ordinary duty is untouched

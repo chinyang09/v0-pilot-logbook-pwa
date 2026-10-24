@@ -76,8 +76,11 @@ export function PageContainer({ children, header, className, rightContent, mainR
         // scrollbar-hide: the native overlay indicator spans the scroller's
         // full box, i.e. from the screen edge over the status bar — the inset
         // ScrollIndicator below replaces it, running from under the action
-        // buttons like a native scroll view's.
-        className={cn("flex-1 overflow-y-auto overscroll-contain scrollbar-hide", className)}
+        // buttons like a native scroll view's. overflow-x-hidden: a panel never
+        // scrolls sideways, and glass inside one (a segmented control) reaches
+        // past its own box by its edge-blur margin — on Discrepancies that was
+        // 14px of sideways play under a thumb.
+        className={cn("flex-1 overflow-y-auto overflow-x-hidden overscroll-contain scrollbar-hide", className)}
       >
         <ScrollIndicator />
         {/* Spacers, not padding on the scroller. A scroll container's

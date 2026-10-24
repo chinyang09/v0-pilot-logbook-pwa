@@ -11,7 +11,6 @@ import {
   Trash2,
   ArrowLeftRight,
   AlertTriangle,
-  BarChart3,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { simulateScenario } from "@/lib/utils/roster/fdp-calculator"
@@ -19,6 +18,9 @@ import type { ScenarioChange, ScenarioResult } from "@/lib/utils/roster/fdp-calc
 import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
 import type { DutyPeriod, FTLLimits } from "@/types/entities/roster.types"
 import { SegmentedTabs, type SegmentedTab } from "@/components/import/segmented-tabs"
+import { DetailFormPanel } from "@/components/ui/detail-form-panel"
+
+const noop = () => {}
 
 const MODE_TABS: SegmentedTab<"add" | "swap">[] = [
   { value: "add", label: "Add a duty" },
@@ -29,8 +31,6 @@ interface QuickCheckPanelProps {
   dutyPeriods: DutyPeriod[]
   limits?: FTLLimits
   onScenarioResult?: (result: ScenarioResult | null) => void
-  onClose?: () => void
-  onViewChart?: () => void
 }
 
 function tomorrow(): string {
@@ -127,8 +127,6 @@ export function QuickCheckPanel({
   dutyPeriods,
   limits = DEFAULT_FTL_LIMITS,
   onScenarioResult,
-  onClose,
-  onViewChart,
 }: QuickCheckPanelProps) {
   const [changes, setChanges] = useState<ChangeEntry[]>([newAddEntry()])
   const [result, setResult] = useState<ScenarioResult | null>(null)
@@ -222,23 +220,19 @@ export function QuickCheckPanel({
   const addEntries = changes.filter((c) => c.type === "add")
 
   return (
-    <div className="flex flex-col h-full pt-chrome">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
-        <h2 className="text-sm font-semibold">Legality Check</h2>
-        {onViewChart && (
-          <button
-            onClick={onViewChart}
-            className="control-surface flex h-9 items-center gap-1.5 rounded-full px-3 text-xs font-medium"
-          >
-            <BarChart3 className="h-3.5 w-3.5" />
-            <span>View Chart</span>
-          </button>
-        )}
-      </div>
-
-      {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+    // The same shell as every other detail form — one title (which rides the
+    // header once scrolled away), one scroller, the chrome spacers. It used
+    // to draw its own title bar with a "View Chart" button, which on a phone
+    // did what Back does and on a tablet pointed at the chart beside it.
+    <DetailFormPanel
+      title="Legality check"
+      dirty={false}
+      canSave={false}
+      saving={false}
+      onSave={noop}
+      onCancel={noop}
+    >
+      <div className="space-y-3">
         {/* Mode selector — the app's segmented control, not two filled
             rectangles. And named for what each mode DOES to the roster: it
             said "Add Flight" here and again on the button below, which adds
@@ -412,12 +406,12 @@ export function QuickCheckPanel({
               )}
             </div>
 
-            <Button variant="ghost" onClick={handleReset} className="w-full h-9 text-xs text-muted-foreground" size="sm">
+            <Button variant="outline" onClick={handleReset} className="w-full h-9 text-xs" size="sm">
               Reset
             </Button>
           </div>
         )}
       </div>
-    </div>
+    </DetailFormPanel>
   )
 }

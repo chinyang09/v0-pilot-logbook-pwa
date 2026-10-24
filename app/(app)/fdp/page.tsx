@@ -19,8 +19,8 @@ import {
 } from "@/types/entities/roster.types"
 import { FDPTimelineChart } from "@/components/roster/fdp-timeline-chart"
 import { QuickCheckPanel } from "@/components/roster/quick-check-panel"
-import { FdpDayPanel } from "@/components/roster/fdp-day-panel"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
+import { useMainPanelFullWidth } from "@/lib/layout/panel-mode"
 import type { ScenarioResult } from "@/lib/utils/roster/fdp-calculator"
 import { cn } from "@/lib/utils"
 import { formatMinutesHM, formatYMDShort as formatShortDate } from "@/lib/utils/date"
@@ -113,19 +113,6 @@ export default function FDPPage() {
     [activeRule]
   )
 
-  // Open/close quick check panel in detail panel (stable ref via closure over refs)
-  const closeQuickCheck = useCallback(() => {
-    setQuickCheckOpen(false)
-    setScenarioResult(null)
-    setDetailContentRef.current(null)
-    setSelectedIdRef.current(null)
-  }, [])
-
-  // "View Chart" dismisses mobile overlay but keeps scenario result
-  const handleViewChart = useCallback(() => {
-    setSelectedIdRef.current(null)
-  }, [])
-
   // Sync quickCheckOpen → detail panel. Uses refs to avoid infinite loop
   // from unstable setSelectedId/setDetailContent dependencies.
   //
@@ -152,8 +139,6 @@ export default function FDPPage() {
           dutyPeriods={allDutyPeriods}
           limits={activeLimits}
           onScenarioResult={setScenarioResult}
-          onClose={closeQuickCheck}
-          onViewChart={handleViewChart}
         />
       )
       // Only claim the detail-panel selection slot on the open transition.
@@ -168,7 +153,7 @@ export default function FDPPage() {
       setDetailContentRef.current(null)
       setSelectedIdRef.current(null)
     }
-  }, [quickCheckOpen, allDutyPeriods, activeLimits, closeQuickCheck, handleViewChart])
+  }, [quickCheckOpen, allDutyPeriods, activeLimits])
 
   // Sync quickCheckOpen when selectedId is cleared externally (e.g., mobile back button).
   // Only fires on non-null → null transitions to avoid interfering with initial panel open
@@ -182,34 +167,13 @@ export default function FDPPage() {
     prevSelectedIdRef.current = selectedId
   }, [selectedId, quickCheckOpen])
 
-  // A DAY of the chart, opened in the detail panel (`day:YYYY-MM-DD`). It
-  // shares the panel with the Quick Check, which owns it while open — a tap on
-  // the chart then reads the scenario rather than replacing the check.
-  const selectedDay = selectedId?.startsWith("day:") ? selectedId.slice(4) : null
-  const selectDay = useCallback(
-    (date: string) => {
-      if (quickCheckOpen) return
-      setSelectedIdRef.current(`day:${date}`)
-    },
-    [quickCheckOpen]
-  )
-  const prevSelectedDayRef = useRef<string | null>(null)
-  useEffect(() => {
-    const was = prevSelectedDayRef.current
-    prevSelectedDayRef.current = selectedDay
-    if (selectedDay) {
-      setDetailContentRef.current(
-        <FdpDayPanel
-          date={selectedDay}
-          point={timelineData.find((p) => p.date === selectedDay)}
-          duties={allDutyPeriods.filter((dp) => dp.date === selectedDay)}
-          limits={activeLimits}
-        />
-      )
-    } else if (was) {
-      setDetailContentRef.current(null)
-    }
-  }, [selectedDay, timelineData, allDutyPeriods, activeLimits])
+  // The chart IS the page, so on a tablet it takes the main AND detail
+  // panels' width — there is nothing behind it to open beside it. A tapped
+  // day used to open in the detail panel, which on a phone covered the chart
+  // on every tap of a gesture meant to scrub it, to say what the tooltip and
+  // the chart's own series already say. The Quick Check is the one thing
+  // that needs the panel, and opening it gives the panel back.
+  useMainPanelFullWidth(!quickCheckOpen)
 
   // Next scheduled duty drives the banner — no more ticking countdown.
   //
@@ -348,7 +312,6 @@ export default function FDPPage() {
               scenarioModifiedDates={scenarioResult?.modifiedDates}
               scenarioRemovedDates={scenarioResult?.removedDates}
               onClearScenario={() => setScenarioResult(null)}
-              onSelectDate={selectDay}
             />
           </ChartErrorBoundary>
         ) : !isLoading ? (
