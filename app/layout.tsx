@@ -31,16 +31,10 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  // Exactly the DEFAULT palette's background in each theme (Graphite, as
-  // `lib/theme/palette.ts` generates it). A chosen palette re-points these at
-  // runtime (`syncThemeColor`). Where a system
-  // bar is painted with this rather than left transparent, it has to be the
-  // SAME colour as the page or it reads as a band bolted to the top. The old
-  // values were cold near-blacks against a warm app.
-  themeColor: [
-    { media: "(prefers-color-scheme: dark)", color: "#06070a" },
-    { media: "(prefers-color-scheme: light)", color: "#f5f6f7" },
-  ],
+  // No `themeColor` here on purpose. The status bar's colour is the ground of
+  // the mode ON SCREEN, which only the page knows (the app's own light/dark,
+  // not the OS's), and a tag Next renders is put back to these static values
+  // on every client navigation. PALETTE_BOOT_SCRIPT creates and owns the tag.
   colorScheme: "dark light",
   width: "device-width",
   initialScale: 1,

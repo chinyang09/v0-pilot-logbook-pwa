@@ -197,7 +197,11 @@ const suppressLinkMenu = (e: React.MouseEvent) => e.preventDefault()
  * re-auth instead of silently 401ing. Do not reintroduce a bespoke button here.
  */
 function SyncIconButton({ className }: { className?: string }) {
-  return <SyncStatus className={cn("h-8 w-8 flex-shrink-0", className)} />
+  return (
+    <SyncStatus
+      className={cn("relative h-8 w-8 flex-shrink-0 after:absolute after:-inset-1 after:content-['']", className)}
+    />
+  )
 }
 
 // ─── Gravity active-tab indicator ────────────────────────────
@@ -979,7 +983,9 @@ function PillBarContent({
       <button
         onClick={onToggleSidebar}
         aria-label="Open sidebar"
-        className="flex items-center justify-center h-8 w-8 rounded-full text-foreground flex-shrink-0"
+        // 32px drawn, 40px hit: the pill's height has no room for a bigger
+        // circle, so the target grows on the pseudo-element instead.
+        className="relative flex items-center justify-center h-8 w-8 rounded-full text-foreground flex-shrink-0 after:absolute after:-inset-1 after:content-['']"
       >
         <PanelLeft className="h-5 w-5" />
       </button>
@@ -1161,7 +1167,7 @@ function SidebarTopStrip({ onToggle }: { onToggle: () => void }) {
       <button
         onClick={onToggle}
         aria-label="Close sidebar"
-        className="relative flex items-center justify-center h-8 w-8 rounded-full text-foreground flex-shrink-0"
+        className="relative flex items-center justify-center h-8 w-8 rounded-full text-foreground flex-shrink-0 after:absolute after:-inset-1 after:content-['']"
       >
         <PanelLeft className="h-5 w-5" />
       </button>
@@ -1622,6 +1628,12 @@ function DesktopPillMorph({
   // A px endpoint for the pill so `width` actually interpolates alongside
   // `left`/`transform` instead of snapping (see usePillWidth).
   const pillWidth = usePillWidth(ref, tabs.join(","), phase === "pill")
+
+  // The header's title regions keep clear of the pill while it sits in their
+  // row, so they need its width (`.header-regions` in globals.css).
+  useEffect(() => {
+    if (pillWidth != null) document.documentElement.style.setProperty("--nav-pill-w", `${pillWidth}px`)
+  }, [pillWidth])
 
   const transition = morphTransition(phase, DUR, LEAD, "top, left, transform, width")
   // Reveal the sidebar list in lock-step with the growing/shrinking HEIGHT

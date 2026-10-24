@@ -1376,6 +1376,69 @@ textarea:focus-within {
   }
 }
 
+
+/*
+ * The header row's regions — actions, a title, the other side — on the
+ * native navigation bar's rule: the title is CENTRED over its panel when it
+ * fits, and the buttons are given their full width FIRST when it does not.
+ * As a grid: each side column is at least as wide as its own buttons
+ * (`minmax(max-content, 1fr)`), the title column takes what is left up to its
+ * own width (`minmax(0, max-content)`, truncating below that), and the two
+ * sides split the rest equally — so the title sits dead centre until a side
+ * runs wide, then slides away from it rather than under it.
+ *
+ * The main region's second side holds nothing, so it may shrink to 0; the
+ * mobile detail overlay's holds the commits (`-balanced`); the desktop detail
+ * region first clears the nav pill when the pill is in this row (`-detail`).
+ * An open search takes the whole region (`:has`), since the
+ * search field is what the reader is looking at then.
+ */
+.header-bar-grid {
+  display: grid;
+  align-items: center;
+  grid-template-columns: minmax(max-content, 1fr) minmax(0, max-content) minmax(0, 1fr);
+}
+.header-bar-grid-balanced {
+  grid-template-columns: minmax(max-content, 1fr) minmax(0, max-content) minmax(max-content, 1fr);
+}
+.header-bar-grid-balanced > :first-child {
+  justify-self: start;
+}
+.header-bar-grid-detail {
+  /* The pill's clearance, then the title centred in what is left between it
+     and the commits. Centred on the whole region it sat hard against the
+     pill's edge and read as one of its tabs. */
+  grid-template-columns: var(--detail-pill-clear, 0px) minmax(0, 1fr) minmax(0, max-content) minmax(0, 1fr) max-content;
+}
+.header-bar-grid-detail > :first-child {
+  grid-column: span 2;
+}
+.header-bar-grid:has([data-search-open]) {
+  grid-template-columns: minmax(0, 1fr) 0 0;
+}
+.header-bar-grid:has([data-search-open]) > [data-header-title] {
+  visibility: hidden;
+}
+
+/*
+ * How wide the header's MAIN region is: the main panel (`--main-panel-w`,
+ * published by the shell) less the row's left padding — and, while the nav
+ * pill sits centred in this row (≥1120 with the sidebar closed,
+ * `[data-pill-top]`), no further than 12px short of the pill. The detail
+ * region's first column then clears the pill's right edge the same way.
+ */
+.header-regions {
+  --header-main-w: calc(var(--main-panel-w, 360px) - 16px);
+  --detail-pill-clear: 0px;
+}
+.header-regions[data-pill-top] {
+  --header-main-w: min(
+    calc(var(--main-panel-w, 360px) - 16px),
+    calc(50vw - var(--nav-pill-w, 480px) / 2 - 28px)
+  );
+  --detail-pill-clear: max(0px, calc(50vw + var(--nav-pill-w, 480px) / 2 + 12px - 16px - var(--header-main-w)));
+}
+
 /* The wheel pickers' highlight: the bar behind the wheels AND each wheel's
    bold selected row (components/ui/wheel-styles.ts). OPAQUE on purpose — the
    wheel draws the selected value a second time, small and rotated, under the

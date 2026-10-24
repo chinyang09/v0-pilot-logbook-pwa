@@ -1,10 +1,11 @@
 "use client"
 
-import { ReactNode, useCallback, useState, type RefCallback } from "react"
+import { ReactNode, useCallback, useState, type RefCallback, type UIEvent } from "react"
 import { usePathname } from "next/navigation"
 import { useScrollRestoration } from "@/hooks/use-scroll-restoration"
 import { cn } from "@/lib/utils"
 import { ScrollIndicator } from "@/components/ui/scroll-indicator"
+import { useCollapsingTitle } from "@/hooks/use-collapsing-title"
 
 interface PageContainerProps {
   children: ReactNode
@@ -27,7 +28,8 @@ interface PageContainerProps {
    * Deleted no nav tab lights up either, so nothing on screen said where you
    * were. The logbook and the dashboard go without: their first row is
    * already their own (the floating search/calendar stack, the Legal/Summary
-   * switch).
+   * switch). Scrolled under the header it is carried ON the header, small
+   * (`useCollapsingTitle`), so the page is never left unnamed.
    */
   title?: string
 }
@@ -46,6 +48,15 @@ export function PageContainer({ children, header, className, rightContent, mainR
   const restoreKey = scrollRestoreKey === undefined ? mountPathname : scrollRestoreKey
   const { ref: scrollRestoreRef, onScroll: onScrollSave } = useScrollRestoration(restoreKey)
 
+  const { titleRef, spacerRef, onScroll: onScrollTitle } = useCollapsingTitle(mountPathname, title)
+  const handleScroll = useCallback(
+    (e: UIEvent<HTMLElement>) => {
+      onScrollSave(e)
+      onScrollTitle(e)
+    },
+    [onScrollSave, onScrollTitle]
+  )
+
   // Compose the scroll-restoration ref with the optional external mainRef.
   const setMainRef = useCallback<RefCallback<HTMLElement>>(
     (node) => {
@@ -61,7 +72,7 @@ export function PageContainer({ children, header, className, rightContent, mainR
 
       <main
         ref={setMainRef}
-        onScroll={onScrollSave}
+        onScroll={handleScroll}
         // scrollbar-hide: the native overlay indicator spans the scroller's
         // full box, i.e. from the screen edge over the status bar — the inset
         // ScrollIndicator below replaces it, running from under the action
@@ -74,9 +85,9 @@ export function PageContainer({ children, header, className, rightContent, mainR
             WebKit, which strands the last row under the nav pill; an in-flow
             element is always counted. The top one keeps the first row clear of
             the floating header + status bar, and content slides under both. */}
-        <div className={header ? "h-chrome-top-sm" : "h-chrome-top"} />
+        <div ref={spacerRef} className={header ? "h-chrome-top-sm" : "h-chrome-top"} />
         {title && (
-          <h1 className="px-panel pt-4 text-[1.75rem] font-bold leading-tight tracking-tight">{title}</h1>
+          <h1 ref={titleRef} className="px-panel pt-4 text-[1.75rem] font-bold leading-tight tracking-tight">{title}</h1>
         )}
         {children}
         <div className="h-chrome-bottom" />

@@ -7,9 +7,9 @@
  * accordions inside the first; what is behind each row now lives in
  * `components/account/account-sections.tsx`.
  *
- * Signing out is at the BOTTOM, as two destructive actions under the
- * sections, the way every platform's account screen ends: "Sign out" for this
- * device, "Sign out of all devices" for a lost one. There was no plain sign-out
+ * Signing out is at the BOTTOM, under the sections, the way every
+ * platform's account screen ends: "Sign out" for this device (neutral) and
+ * "Sign out of all devices" for a lost one (red, on a countdown). There was no plain sign-out
  * at all — the only way off this device was to open Active sessions, find
  * your own row and swipe it for an unlabelled icon — and the all-devices one
  * sat ABOVE the sections, the first thing on the page being the most
@@ -173,8 +173,11 @@ export default function AccountPage() {
         </FormSection>
 
         <ActionStack>
+          {/* Neutral: signing out of THIS device loses nothing (unsynced
+              edits are pushed first, and asked about if they cannot be), so
+              it does not share the red of the one action here with no way
+              back. Two red capsules stacked read as two alarms. */}
           <ActionRow
-            destructive
             icon={<LogOut />}
             label={isSigningOut ? "Signing out…" : "Sign out"}
             disabled={isSigningOut || isLoggingOutAll}
