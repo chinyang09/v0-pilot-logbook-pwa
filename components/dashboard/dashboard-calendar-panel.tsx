@@ -5,7 +5,8 @@ import * as React from "react"
 import { CalendarPanel } from "@/components/calendar-panel"
 import { useFlights } from "@/hooks/data/use-flights"
 import { useDashboardPeriod } from "@/hooks/use-dashboard-period"
-import { usePanelDualMonth } from "@/lib/layout/panel-mode"
+import { usePanelDualMonth, useSuppressHeaderTap } from "@/lib/layout/panel-mode"
+import { usePageActive } from "@/hooks/use-page-active"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 
 /**
@@ -43,6 +44,9 @@ export function DashboardCalendarPanel() {
   const { flights } = useFlights()
   const dualMonth = usePanelDualMonth()
   const isSplitLayout = useIsDesktop()
+  // The calendar's month selector sits in the header's tap-to-top band.
+  const isActive = usePageActive("/")
+  useSuppressHeaderTap(isActive && showCalendar)
 
   const [midPickStart, setMidPickStart] = React.useState<string | null>(null)
 

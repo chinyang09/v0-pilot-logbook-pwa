@@ -232,12 +232,28 @@ class SyncService {
    * It must run while the session is still valid: the account page used to
    * revoke the session and THEN sign out, so this push got a 401 and every
    * unsynced edit went with the wipe, online or not.
+   *
+   * BOUNDED (`maxWaitMs`). It sits between a tap on "Sign out" and anything
+   * visibly happening, and a cycle can take many seconds on a phone (a round
+   * trip to the server, the reference pull, a slow or cold function) — or wait
+   * behind another tab's cycle for the cross-tab lock. Past the bound the
+   * count is taken as it stands, which can only OVER-count (the confirmation
+   * then asks about rows the running cycle may yet deliver), never lose an
+   * edit silently; `logout` still waits for that cycle before it wipes.
    */
-  async flushBeforeSignOut(): Promise<number> {
+  async flushBeforeSignOut(maxWaitMs = 8_000): Promise<number> {
+    let timer: ReturnType<typeof setTimeout> | undefined
     try {
-      await this.fullSync()
+      await Promise.race([
+        this.fullSync(),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, maxWaitMs)
+        }),
+      ])
     } catch (error) {
       console.error("[Sync] pre-sign-out push failed:", error)
+    } finally {
+      clearTimeout(timer)
     }
     return userDb.syncQueue.count().catch(() => 0)
   }

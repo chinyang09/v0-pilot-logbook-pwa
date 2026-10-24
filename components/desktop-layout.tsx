@@ -7,7 +7,7 @@ import { useIsDesktop, useDesktopPill, useHydrated } from "@/hooks/use-is-deskto
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import type { ImperativePanelHandle } from "react-resizable-panels"
 import { SINGLE_MONTH_PX, DUAL_MONTH_PX, DETAIL_MIN_PX } from "@/lib/layout/panel-widths"
-import { setPanelDualMonth, useIsMainPanelFullWidth } from "@/lib/layout/panel-mode"
+import { setPanelDualMonth, useIsMainPanelFullWidth, useIsHeaderTapSuppressed } from "@/lib/layout/panel-mode"
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -142,6 +142,7 @@ function AppShellContent({ children }: AppShellProps) {
   const searchParams = useSearchParams()
   const { mainActions, detailActions } = usePageActions()
   const mainFullWidth = useIsMainPanelFullWidth()
+  const headerTapSuppressed = useIsHeaderTapSuppressed()
 
   // The main panel has exactly TWO widths — one calendar month or two. The
   // divider is a toggle rather than a drag handle: dragging it only ever
@@ -168,6 +169,14 @@ function AppShellContent({ children }: AppShellProps) {
   useEffect(() => {
     if (!isDesktop || !canPushSidebar) return
     if (prevSidebarOpenRef.current === sidebarOpen) return
+    // A page taking the whole width (`useMainPanelFullWidth`) has no main
+    // width to hold — it IS the container. Locking it here capped the FDP
+    // chart at the split's main width for the length of the morph, so it
+    // shrank to the main panel and then sprang back to full width.
+    if (mainFullWidth) {
+      prevSidebarOpenRef.current = sidebarOpen
+      return
+    }
 
     const handle = mainPanelHandleRef.current
     const container = panelGroupContainerRef.current
@@ -219,7 +228,7 @@ function AppShellContent({ children }: AppShellProps) {
         mainPanelEl.style.maxWidth = ''
       }
     }
-  }, [sidebarOpen, isDesktop, canPushSidebar])
+  }, [sidebarOpen, isDesktop, canPushSidebar, mainFullWidth])
 
   // Size the main panel to whichever of the two widths is selected. Runs on
   // toggle, on sidebar open/close and on container resize, so the panel is
@@ -345,12 +354,17 @@ function AppShellContent({ children }: AppShellProps) {
               scroll the list — that is the trade, and why it stays thin
               (`--chrome-tap`, 24px) rather than covering the whole fade tail.
               Below the buttons only: the buttons themselves sit above it. */}
-          <div
-            aria-hidden
-            className="absolute inset-x-0 z-0 cursor-pointer"
-            style={{ top: "var(--chrome-top)", height: "var(--chrome-tap)" }}
-            onClick={scrollMainToTop}
-          />
+          {/* Steps aside while a floating panel sits in this band (the
+              logbook's search or calendar), or it swallows that panel's own
+              first control — see `useSuppressHeaderTap`. */}
+          {!headerTapSuppressed && (
+            <div
+              aria-hidden
+              className="absolute inset-x-0 z-0 cursor-pointer"
+              style={{ top: "var(--chrome-top)", height: "var(--chrome-tap)" }}
+              onClick={scrollMainToTop}
+            />
+          )}
           <div className="relative z-[1] flex items-center px-4 w-full h-13">
             {/* MAIN region — over the main panel (see `--header-main-w`): its
                 actions, then the page's title once it has scrolled under the

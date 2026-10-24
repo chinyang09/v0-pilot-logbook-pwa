@@ -429,6 +429,16 @@ or that cycle wrote the previous user's records back into the wiped tables.
 "Sign out of all devices" refuses offline and requires the revoke to succeed:
 it exists for a LOST device, and swallowing the failure signed out only this one.
 
+**A sign-out answers the TAP, and its push is bounded.** The button said
+nothing until `flushBeforeSignOut` came back, and that is a full cycle — on a
+phone a round trip to the server and the reference pull, or a wait behind
+another tab's cross-tab lock — so on device the tap read as a sign-out that did
+not work. The label turns to "Signing out…" on the tap, and the push is raced
+against 8s (`flushBeforeSignOut(maxWaitMs)`): past it the queue is counted as it
+stands, which can only OVER-count (the confirmation asks about rows the running
+cycle may yet deliver), and `logout` still waits for that cycle before wiping.
+A failure says so (`appAlert`) rather than leaving the button as it was.
+
 **Live multi-device test** — `scripts/sync-live-test/` drives the real app in
 separate browser profiles against a real MongoDB replica set (README there).
 It is what found the trigger gating, the stale-device overwrite, the logout
@@ -1657,6 +1667,23 @@ left action group into the centred nav pill; per-PANE captions were the same
 mistake at a smaller scale — with two panes that is two captions saying half a
 thing each. One header row also keeps single and dual the same HEIGHT for free.
 
+**The month/year picker REPLACES the grid in the same box.** The selector stays
+where it is (its chevron flips — it is the control that opens and closes the
+picker), the day grid stays in FLOW but hidden, and the picker is laid over it
+and FILLS it: 4×3 months, their rows sharing the grid's height. It used to hide
+the selector, which shrank the panel by a row, and in dual mode drew a second
+day grid beside the months that no longer fitted — its last week was cut off.
+A month is the same control as a day: a capsule, the selected one(s) solid
+accent, the current one ringed like today.
+
+**The header's tap-to-top band steps aside while a floating panel sits in it**
+(`useSuppressHeaderTap`, `lib/layout/panel-mode.ts`). The calendar's selector
+and the search field are the first thing under the action buttons, i.e. inside
+`--chrome-tap`, and with the band in place the month selector could not be
+tapped at all on a desktop — the tap scrolled the list to the top. The logbook
+and the dashboard hold it only while their panel is open AND their page is the
+active route.
+
 **The header names BOTH months in dual mode** — `Jul – Aug 26`, and both years
 when the pair straddles a new year (`Dec 26 – Jan 27`), since "Dec – Jan 27"
 would put December in the wrong year. The year is two digits because at four
@@ -1776,7 +1803,11 @@ or a dialog over the list.
   thing that needs the panel, so opening it gives the panel back. A tapped
   chart DAY used to open in the detail panel, which on a phone covered the
   chart on every tap of a gesture meant to scrub it, to say what the tooltip
-  and the chart's own series (select several) already say.
+  and the chart's own series (select several) already say. The sidebar
+  toggle's main-width LOCK (inline `min-width`/`max-width` for the 300ms of
+  the push) is skipped for such a page — it has no main width to hold, and the
+  lock capped the chart at the split's main width, so it shrank and sprang
+  back on every toggle.
 - **An empty detail panel says what a row opens** (`DETAIL_PLACEHOLDER` in
   `desktop-layout.tsx`: "Select a crew member", "Select a deleted item"),
   not "Select an item".
@@ -1883,6 +1914,11 @@ back in the bin. `isWithinRetention` and `isLiveFlight` therefore test `== null`
 
 ### Recently Deleted (everything you delete)
 
+The pilot sees it as **"Bin"** — the nav item, the page title, the flight
+form's "This flight is in the Bin". "Recently deleted" broke onto two lines in
+the sidebar once its row went bold, and the row grew under the gravity blob.
+Sidebar labels are single-line (`truncate`) whatever their length.
+
 **Every delete in the app is a SOFT delete**, not just flights. `deleteEntity`
 in `crud-helpers.ts` sets `deletedAt` and pushes an **update** — that is what
 makes Recently Deleted work across devices, since binning and restoring both
@@ -1947,7 +1983,9 @@ report watermarks). Do not go back to an allowlist.
   flight card and open it. 1.5rem claims the strip under the buttons, the same
   idea as iOS's status-bar tap: genuine chrome that the list does not own. It
   is a REAL element, so a drag STARTING in it does not scroll — which is why it
-  stays thin rather than covering the whole fade tail.
+  stays thin rather than covering the whole fade tail. And it is REMOVED while
+  a floating panel (the logbook's search or calendar) sits under the buttons
+  (`useSuppressHeaderTap`): that panel's own first control lives in this band.
 
   **`--chrome-clear` is a DIFFERENT number again and is deliberately larger** (3.5rem
   → 60px below the buttons, ~15px of air under the band). It is where the
@@ -4816,6 +4854,9 @@ When making changes, be aware of these high-impact files:
 - Do not release a `useBackDismiss` marker without checking the URL is still the one it was pushed at. `history.back()` only takes the marker back while the marker is the TOP of the stack; if something navigated in the meantime — the sidebar's close-on-`pathname` effect is exactly that shape, a route change tears the overlay down — the marker is buried one entry below the new page and the `back()` undoes the navigation. A buried marker is left alone: it is a duplicate entry for a page the user was already on, which is invisible, where undoing a navigation is not
 - Do not let an overlay rely on Escape alone — on Android the back gesture is the other half of the same intent, and without `useBackDismiss` the router navigates and the overlay (portalled to `document.body`) is left over whatever page arrives. Every dismissal must go through the hook's `dismiss()`, and an action that navigates has to run as its FOLLOW-UP: closing first and popping the marker entry on the way out issues the `router.push` while our own `back()` is still queued, and the back then undoes it
 - Do not give a scroll handler ANY work that isn't per-frame cheap, and never let one write React state above the component that needs it. The logbook's list runs one rAF-throttled listener whose only job is the calendar sync; `topFlightDate` is pushed into state only while the calendar is actually OPEN, because the calendar is collapsed to `height: 0` rather than unmounted and updating it while stowed re-rendered a whole month grid per card scrolled past, for something nobody can see
+- Do not let a full-width page (`useMainPanelFullWidth`) take the sidebar toggle's main-width lock — it has no main width to hold, and the inline `max-width` capped the FDP chart at the split's main width for the length of the push
+- Do not put a control in the band just under the action buttons while the header's tap-to-top strip is there — hold `useSuppressHeaderTap` while the floating panel is open (and its page active), or the strip takes the tap. And do not hide the calendar's date selector when the month/year picker opens: the picker REPLACES the grid in the same box, under the same selector, so the panel's height does not move
+- Do not leave a sign-out (or any action that awaits a network round trip before its first visible change) silent until the round trip returns — change its label on the TAP, and bound the wait (`flushBeforeSignOut(maxWaitMs)`)
 - Do not hand-roll a spinner — waiting is one thing and should look like one thing. `PageLoading` is the route-level state (every `loading.tsx`, the keep-alive Suspense fallback) and `PanelLoading` is the detail-panel one, both in `components/ui/page-loading.tsx`. The aircraft, airports and crew pages each carried an identical copy of a `border-2 border-primary border-t-transparent` ring, so waiting for a pane looked like a different kind of waiting depending on which tab you were on
 - Do not size the mobile bottom pill from `PILL_HEIGHT` — it is `MOBILE_PILL_HEIGHT` (56 against the desktop 44). They are not the same control: one is a row of text tabs in a dense header, the other is the phone's only navigation, aimed at with a thumb
 - Do not give the bottom bar a squarer corner than a stadium — `MOBILE_PILL_RADIUS` is half its own height, the same rule the 44px controls follow; it is a separate constant only because the bar is a different height. A third-of-the-height radius was tried (the proportion the reference tab bars use) and rejected on the look: what reads as a squircle there is CONTINUOUS CURVATURE, not a smaller radius, and a circular arc at that radius is just a rounded rectangle. Drawing the real thing needs `corner-shape`, and a corner shape one engine falls back from would leave iOS and Android with different bars

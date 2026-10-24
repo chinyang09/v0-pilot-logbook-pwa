@@ -1748,16 +1748,16 @@ export function FlightForm({
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-panel pt-chrome pb-chrome text-center">
         <p className="text-base font-semibold">
-          {binned ? "This flight is in Recently Deleted" : "Flight not found"}
+          {binned ? "This flight is in the Bin" : "Flight not found"}
         </p>
         <p className="max-w-xs text-sm text-muted-foreground">
           {binned
-            ? "Restore it from Recently Deleted to view or edit it again."
+            ? "Restore it from the Bin to view or edit it again."
             : "It may have been deleted on another device, or not synced to this one yet."}
         </p>
         {binned && (
           <Button variant="secondary" className="h-10" onClick={() => router.push("/recently-deleted")}>
-            Open Recently Deleted
+            Open Bin
           </Button>
         )}
       </div>

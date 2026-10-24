@@ -409,28 +409,44 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     const nowYear = new Date().getFullYear();
 
     // ─── Month/Year picker view ───────────────────────────────
+    //
+    // It REPLACES the day grid in the same box, under the same date selector,
+    // and fills that box — so opening it changes nothing about the panel's
+    // size. It used to drop the selector, which shrank the panel by a row,
+    // and in dual mode drew a SECOND day grid beside the months that no
+    // longer fitted the shrunken box: its last week was cut off.
+    //
+    // A month is the same control as a day: a capsule, the selected one in the
+    // solid accent, the current one ringed like today.
     const monthYearContent = (
-      <div className="px-2 py-2">
+      <div
+        className="mx-auto flex h-full w-full flex-col px-2 pt-1 pb-2"
+        style={{ maxWidth: dualMonth ? undefined : paneMaxWidth }}
+      >
         {/* Year navigation */}
-        <div className="flex items-center justify-between mb-3 px-1">
+        <div className="flex items-center justify-between px-1 pb-2">
           <button
+            type="button"
             onClick={() => onYearChange?.(selectedMonth.year - 1)}
             aria-label="Previous year"
-            className="h-9 w-9 flex items-center justify-center rounded-full bg-[var(--on-glass-fill-soft)] active:scale-95 transition-all"
+            className="h-9 w-9 flex items-center justify-center rounded-full bg-[var(--on-glass-fill-soft)] active:scale-95 transition-transform"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
           <span className="text-base font-semibold tabular-nums">{selectedMonth.year}</span>
           <button
+            type="button"
             onClick={() => onYearChange?.(selectedMonth.year + 1)}
             aria-label="Next year"
-            className="h-9 w-9 flex items-center justify-center rounded-full bg-[var(--on-glass-fill-soft)] active:scale-95 transition-all"
+            className="h-9 w-9 flex items-center justify-center rounded-full bg-[var(--on-glass-fill-soft)] active:scale-95 transition-transform"
           >
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
-        {/* Month grid — 4×3 */}
-        <div className="grid grid-cols-4 gap-1.5 px-1">
+        {/* Month grid — 4×3, its rows sharing whatever height the day grid
+            would have had. The CAPSULE keeps its own height, centred in its
+            row: stretched with the row it became a disc on a phone. */}
+        <div className="grid min-h-0 flex-1 grid-cols-4 grid-rows-3 items-center gap-x-1.5 px-1">
           {MONTHS.map((month, i) => {
             // In dual mode BOTH panes are on screen, so both are selected —
             // marking only the anchor left the right-hand month unaccounted
@@ -441,15 +457,17 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
             const isCurrent = i === nowMonth && selectedMonth.year === nowYear;
             return (
               <button
+                type="button"
                 key={month}
                 onClick={() => onMonthSelect?.(selectedMonth.year, i)}
+                aria-pressed={isSelected}
                 className={cn(
-                  "h-10 rounded-xl text-sm font-medium transition-all active:scale-95",
+                  "flex h-10 items-center justify-center rounded-full text-[15px] transition-colors active:scale-95",
                   isSelected
-                    ? "bg-primary text-primary-foreground shadow-sm"
+                    ? "bg-primary text-primary-foreground font-semibold shadow-md"
                     : isCurrent
-                      ? "bg-[var(--on-glass-accent)] text-primary font-semibold"
-                      : "text-[var(--on-glass-label)] active:bg-[var(--on-glass-fill-soft)]"
+                      ? "bg-[var(--on-glass-accent-strong)] ring-2 ring-inset ring-primary font-bold text-foreground"
+                      : "text-foreground hover:bg-[var(--on-glass-fill-soft)] active:bg-[var(--on-glass-fill-soft)]"
                 )}
               >
                 {month}
@@ -753,49 +771,35 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     // ─── View switcher with crossfade ─────────────────────────
     const activeContent = (
       <div className="relative">
-        {/* The one date selector, above whichever view is showing. It is
-            OUTSIDE the crossfade so it does not blink when the picker opens —
-            it is the control that opened it. */}
-        {view === "calendar" && dateSelector}
-        {/* Calendar view */}
-        <div
-          style={{
-            opacity: view === "calendar" ? 1 : 0,
-            visibility: view === "calendar" ? "visible" : "hidden",
-            transition: "opacity 0.15s ease-in-out",
-          }}
-        >
-          {calendarContent}
-        </div>
-        {/* Month/Year picker view — absolute overlay for crossfade */}
-        <div
-          className="absolute inset-0"
-          style={{
-            opacity: view === "monthYear" ? 1 : 0,
-            visibility: view === "monthYear" ? "visible" : "hidden",
-            transition: "opacity 0.15s ease-in-out",
-          }}
-        >
-          {dualMonth && view === "monthYear" ? (
-            <div className="flex gap-2">
-              <div
-                className="flex-1 min-w-0 touch-none"
-                style={{ touchAction: "none" }}
-                onTouchStart={handleTouchStart}
-                onTouchMove={handleTouchMove}
-                onTouchEnd={handleTouchEnd}
-                onWheel={handleWheel}
-              >
-                <div className="text-xs font-medium text-[var(--on-glass-muted)] text-center pb-0.5">
-                  {MONTHS[selectedMonth.month]} {selectedMonth.year}
-                </div>
-                {renderDayGrid(calendarDays, "m1-")}
-              </div>
-              <div className="flex-1 min-w-0">{monthYearContent}</div>
-            </div>
-          ) : (
-            monthYearContent
-          )}
+        {/* The one date selector, above whichever view is showing — it is the
+            control that opens and closes the picker, so it stays put (its
+            chevron flips) rather than vanishing with the grid. */}
+        {dateSelector}
+        <div className="relative">
+          {/* Calendar view — stays in FLOW under the picker, so the box keeps
+              the day grid's height whichever view is up. */}
+          <div
+            aria-hidden={view !== "calendar"}
+            style={{
+              opacity: view === "calendar" ? 1 : 0,
+              visibility: view === "calendar" ? "visible" : "hidden",
+              transition: "opacity 0.15s ease-in-out",
+            }}
+          >
+            {calendarContent}
+          </div>
+          {/* Month/Year picker view — over the grid, filling its box */}
+          <div
+            className="absolute inset-0"
+            aria-hidden={view !== "monthYear"}
+            style={{
+              opacity: view === "monthYear" ? 1 : 0,
+              visibility: view === "monthYear" ? "visible" : "hidden",
+              transition: "opacity 0.15s ease-in-out",
+            }}
+          >
+            {monthYearContent}
+          </div>
         </div>
       </div>
     );
