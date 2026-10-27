@@ -695,17 +695,12 @@ export default function LogbookPage() {
           monthYearView={showMonthPicker}
           onHeaderPress={() => setShowMonthPicker((v) => !v)}
           onMonthSelect={(year, month) => {
+            // Live: the wheels move the calendar and the list as they settle,
+            // and the date selector closes the picker.
             setSelectedMonth({ year, month })
             selectedMonthRef.current = { year, month }
             syncSourceRef.current = "calendar"
             handleCalendarMonthChange(year, month)
-            setShowMonthPicker(false)
-          }}
-          onYearChange={(newYear) => {
-            setSelectedMonth({ year: newYear, month: selectedMonth.month })
-            selectedMonthRef.current = { year: newYear, month: selectedMonth.month }
-            syncSourceRef.current = "calendar"
-            handleCalendarMonthChange(newYear, selectedMonth.month)
           }}
         />
       </div>

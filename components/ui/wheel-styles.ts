@@ -14,15 +14,26 @@ import type { WheelPickerClassNames } from "@ncdai/react-wheel-picker"
 
 /** `.wheel-fill` in globals.css. */
 export const WHEEL_FILL = "wheel-fill"
+/** `.wheel-fill-glass` — the same strip on a glass panel. */
+export const WHEEL_FILL_GLASS = "wheel-fill-glass"
 
 /** Which end of the shared highlight bar a wheel sits at, so its strip takes that corner. */
 type Edge = "start" | "middle" | "end"
 
-export function wheelClassNames(edge: Edge, numeric = true): WheelPickerClassNames {
+/**
+ * `surface` is what the wheel sits on: a sheet (`card`, the default) or a
+ * glass panel (`glass` — the calendar's month/year picker), where the strip is
+ * `--on-glass-fill`, the solid fill everything ON the glass uses.
+ */
+export function wheelClassNames(edge: Edge, numeric = true, surface: "card" | "glass" = "card"): WheelPickerClassNames {
   const nums = numeric ? " tabular-nums" : ""
+  const fill = surface === "glass" ? WHEEL_FILL_GLASS : WHEEL_FILL
+  // Whole class names, so Tailwind's scan finds them.
+  const round = surface === "glass" ? { l: " rounded-l-full", r: " rounded-r-full" } : { l: " rounded-l-lg", r: " rounded-r-lg" }
   return {
     optionItem: `text-lg${nums} text-muted-foreground/50 font-medium`,
     highlightItem: `text-xl${nums} text-foreground font-semibold`,
-    highlightWrapper: `${WHEEL_FILL}${edge === "start" ? " rounded-l-lg" : edge === "end" ? " rounded-r-lg" : ""}`,
+    // On glass the strip is a capsule, the shape of every selected thing there.
+    highlightWrapper: `${fill}${edge === "start" ? round.l : edge === "end" ? round.r : ""}`,
   }
 }

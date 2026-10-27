@@ -1342,6 +1342,35 @@ textarea:focus-within {
   .control-surface:active:not(:disabled) {
     background-color: color-mix(in oklab, var(--on-glass), var(--foreground) 12%);
   }
+  /* A MENU hung off a control — the option picker (`OptionMenu`). It floats
+     over live content, so it is the glass's own translucent face exactly as
+     `-float` is, with the same rim and shadow; but it is a SURFACE, not a
+     button: `.control-surface:active` would darken the whole panel on every
+     press (`:active` matches the ancestors of the pressed option too). */
+  .menu-surface {
+    position: relative;
+    isolation: isolate;
+    color: var(--foreground);
+    background-color: var(--glass-base);
+    background-image: linear-gradient(var(--glass-veil), var(--glass-veil));
+    backdrop-filter: blur(var(--glass-face-blur, 4.4px)) brightness(var(--glass-blur-brightness, 1.25)) saturate(1.5);
+    box-shadow: var(--glass-shadow);
+    border-radius: 18px;
+  }
+  .menu-surface::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border-radius: inherit;
+    padding: 1.1px;
+    background: var(--glass-rim);
+    mask:
+      linear-gradient(white 0 0) padding-box,
+      linear-gradient(white 0 0) content-box;
+    mask-composite: exclude, exclude;
+    pointer-events: none;
+  }
   .control-surface.control-surface-primary {
     background-color: var(--on-glass-active);
     color: var(--on-glass-active-fg);
@@ -1460,6 +1489,10 @@ textarea:focus-within {
    the sheet's --card is the colour the old translucent bar resolved to. */
 .wheel-fill {
   background-color: color-mix(in oklab, var(--muted) 40%, var(--card));
+}
+/* On a glass panel: the solid on-glass fill — opaque, for the same reason. */
+.wheel-fill-glass {
+  background-color: var(--on-glass-fill);
 }
 
 /* Inset row divider — a 1px line aligned with the row's px-4 content (iOS

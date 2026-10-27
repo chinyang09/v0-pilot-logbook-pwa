@@ -56,7 +56,13 @@ export function AlertsDropdown() {
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-72 p-2">
+      {/* The app's menu surface (`.menu-surface`, as `OptionMenu` uses) — the
+          glass face, not the popover's flat card. The utilities below win
+          over the shared popover's own fill, border, corner and shadow. */}
+      <DropdownMenuContent
+        align="end"
+        className="menu-surface w-72 rounded-[18px] border-0 bg-[var(--glass-base)] p-2 shadow-[var(--glass-shadow)]"
+      >
         <div className="px-2 pb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Import notes
         </div>
@@ -70,7 +76,7 @@ export function AlertsDropdown() {
               <li key={d.id}>
                 <Link
                   href="/discrepancies"
-                  className="flex items-start gap-2 rounded-md px-2 py-2 hover:bg-accent/40"
+                  className="relative z-[2] flex items-start gap-2 rounded-xl px-2 py-2 hover:bg-[var(--on-glass-fill-soft)] focus-visible:bg-[var(--on-glass-fill-soft)]"
                 >
                   <AlertCircle
                     className={cn(
@@ -93,7 +99,7 @@ export function AlertsDropdown() {
               <li>
                 <Link
                   href="/discrepancies"
-                  className="block rounded-md px-2 py-2 text-center text-xs text-primary hover:bg-accent/40"
+                  className="block rounded-xl px-2 py-2 text-center text-xs text-primary hover:bg-[var(--on-glass-fill-soft)]"
                 >
                   All {count} notes
                 </Link>

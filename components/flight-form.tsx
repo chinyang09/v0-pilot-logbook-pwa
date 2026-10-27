@@ -11,6 +11,7 @@ import { userDb } from "@/lib/db/user-db";
 import {
   ChevronDown,
   ChevronRight,
+  ChevronsUpDown,
   Plane,
   PlaneTakeoff,
   PlaneLanding,
@@ -90,6 +91,7 @@ import {
   withoutSimulatorPins,
 } from "@/lib/utils/entry-type";
 import { ADDITIONAL_CREW_ROLES, additionalCrewRoleLabel, requiresTwoPilots } from "@/lib/utils/crew-complement";
+import { ChoicePicker, type MenuOption } from "@/components/ui/option-menu";
 import type { EntryType } from "@/types/entities/flight.types";
 import type { DisplayPreferences } from "@/types/db/stores.types";
 import type { ExtractedFlightData } from "@/lib/ocr";
@@ -180,6 +182,22 @@ const fitTextareaRef = (el: HTMLTextAreaElement | null) => {
 };
 
 /** Fields only ever written straight to the database, by the pickers. */
+/** The seat a pilot can log, named by the logbook rules they log under. */
+const PILOT_ROLE_OPTIONS = (authority: Parameters<typeof roleLabel>[1]): Array<MenuOption<FlightLog["pilotRole"]>> =>
+  PILOT_ROLES.map((role) => ({ value: role, label: roleLabel(role, authority) }));
+
+const APPROACH_TYPES = ["ILS", "LOC", "VOR", "NDB", "RNAV", "RNP", "GLS", "Visual", "Circling"];
+
+/**
+ * The approach types offered — plus the record's own, when an import wrote one
+ * the list does not carry (LogTen writes "VISUAL"). Left out, the picker would
+ * show nothing chosen, and the first tap would rewrite the stored type.
+ */
+function approachTypeOptions(current: string): Array<MenuOption<string>> {
+  const types = APPROACH_TYPES.includes(current) || !current ? APPROACH_TYPES : [...APPROACH_TYPES, current];
+  return types.map((t) => ({ value: t, label: t }));
+}
+
 const PICKER_FIELDS: ReadonlySet<string> = new Set([
   "aircraftReg", "aircraftType",
   "departureIcao", "departureIata", "arrivalIcao", "arrivalIata",
@@ -558,6 +576,14 @@ export function FlightForm({
     }
     return createEmptyFlightLog();
   });
+  // An additional-crew row the pilot has added but not yet filled: its role,
+  // and how many crew the flight had when it was added. It is DERIVED away
+  // once the pick lands (the list has grown), with no effect to clear it.
+  const [crewSlot, setCrewSlot] = useState<{ role: AdditionalCrew["role"]; count: number } | null>(null);
+  const crewCount = formData.additionalCrew?.length ?? 0;
+  const crewSlotRole = crewSlot && crewSlot.count === crewCount ? crewSlot.role : null;
+  const setCrewSlotRole = (role: AdditionalCrew["role"] | null) =>
+    setCrewSlot(role ? { role, count: crewCount } : null);
   // The signature section starts open on a signed flight, as the accordion did.
   const [signatureSectionOpen, setSignatureSectionOpen] = useState(() => !!formData.signature);
   const signatureSectionId = useId();
@@ -1514,7 +1540,7 @@ export function FlightForm({
     router.push(`/aircraft?${params.toString()}`);
   };
 
-  const openCrewPicker = async (field: "picId" | "sicId" | "additionalCrew") => {
+  const openCrewPicker = async (field: "picId" | "sicId" | `additionalCrew:${AdditionalCrew["role"]}`) => {
     if (!formData.id) return;
     saveScrollPosition();
     await forceSave();
@@ -2035,8 +2061,8 @@ export function FlightForm({
           </SwipeableRow>
 
           {/* Crew beyond the two seats — a relief pilot on an augmented crew,
-              a check pilot, an instructor. The role is the native select laid
-              over the role text, as the Pilot Role row does it. */}
+              a check pilot, an instructor. Each is a ROW with two things to
+              choose, who and as what, and the role opens the app's menu. */}
           {(formData.additionalCrew ?? []).map((member, i) => (
             <div
               key={member.id ?? `${member.name}-${i}`}
@@ -2047,25 +2073,16 @@ export function FlightForm({
                 <span className="truncate">{member.name || "Unnamed"}</span>
               </span>
               <span className="flex shrink-0 items-center">
-                <span className="relative flex h-9 items-center gap-1 px-2 text-muted-foreground focus-within:outline-2 focus-within:outline-ring">
+                <ChoicePicker
+                  label={`Role of ${member.name || "crew member"}`}
+                  value={member.role}
+                  options={ADDITIONAL_CREW_ROLES}
+                  onValueChange={(role) => member.id && updateAdditionalCrew(member.id, { role })}
+                  className="flex h-9 items-center gap-1 rounded-md px-2 text-muted-foreground outline-none focus-visible:outline-2 focus-visible:outline-ring"
+                >
                   {additionalCrewRoleLabel(member.role)}
-                  <ChevronDown className="h-4 w-4" aria-hidden />
-                  <select
-                    aria-label={`Role of ${member.name || "crew member"}`}
-                    value={member.role}
-                    onChange={(e) =>
-                      member.id &&
-                      updateAdditionalCrew(member.id, { role: e.target.value as AdditionalCrew["role"] })
-                    }
-                    className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
-                  >
-                    {ADDITIONAL_CREW_ROLES.map((r) => (
-                      <option key={r.value} value={r.value}>
-                        {r.label}
-                      </option>
-                    ))}
-                  </select>
-                </span>
+                  <ChevronsUpDown className="h-4 w-4" aria-hidden />
+                </ChoicePicker>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -2079,17 +2096,59 @@ export function FlightForm({
             </div>
           ))}
 
-          <div className="flex items-center justify-center py-1.5 row-divider">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-9 px-3 text-xs text-primary"
-              onClick={() => openCrewPicker("additionalCrew")}
-            >
-              <Plus className="h-3.5 w-3.5 mr-1" />
-              Add Crew
-            </Button>
-          </div>
+          {/* "Add Crew" makes the ROW first: an empty slot whose role can be
+              set before anyone is in it, and whose name opens the crew picker
+              to fill it — the role travels with the pick
+              (\`additionalCrew:<role>\`). It is the form's own state until the
+              pick lands, so an abandoned slot leaves nothing on the flight. */}
+          {crewSlotRole && (
+            <div className="flex items-center justify-between gap-2 py-1.5 pl-4 pr-2 row-divider">
+              <button
+                type="button"
+                onClick={() => openCrewPicker(`additionalCrew:${crewSlotRole}`)}
+                className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md text-left outline-none focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                <User className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="truncate text-primary">Select crew</span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+              </button>
+              <span className="flex shrink-0 items-center">
+                <ChoicePicker
+                  label="Role of the new crew member"
+                  value={crewSlotRole}
+                  options={ADDITIONAL_CREW_ROLES}
+                  onValueChange={setCrewSlotRole}
+                  className="flex h-9 items-center gap-1 rounded-md px-2 text-muted-foreground outline-none focus-visible:outline-2 focus-visible:outline-ring"
+                >
+                  {additionalCrewRoleLabel(crewSlotRole)}
+                  <ChevronsUpDown className="h-4 w-4" aria-hidden />
+                </ChoicePicker>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 text-muted-foreground"
+                  aria-label="Remove the empty crew row"
+                  onClick={() => setCrewSlotRole(null)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </span>
+            </div>
+          )}
+
+          {!crewSlotRole && (
+            <div className="flex items-center justify-center py-1.5 row-divider">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-9 px-3 text-xs text-primary"
+                onClick={() => setCrewSlotRole("Relief Pilot")}
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Add Crew
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* TIME Section */}
@@ -2235,37 +2294,22 @@ export function FlightForm({
             }}
           />
 
-          {/* The native select covers the WHOLE row, invisibly, so a tap
-              anywhere on it opens the platform's own picker. As a bare select
-              it was the width of "PIC" — about 25px, with no chevron and a
-              label that did nothing when tapped. */}
-          <div className="relative flex items-center justify-between py-3.5 px-4 row-divider focus-within:outline-2 focus-within:outline-ring focus-within:-outline-offset-2">
+          {/* The whole row opens the app's own menu. Named by the logbook
+              rules. "Examiner" used to be offered too; it is not a role the
+              record can hold, so choosing it filed the hours under nothing. */}
+          <ChoicePicker
+            label="Pilot role"
+            value={formPilotRole}
+            options={PILOT_ROLE_OPTIONS(authority)}
+            onValueChange={(role) => updateField("pilotRole", role)}
+            className="row-divider flex w-full items-center justify-between px-4 py-3.5 text-left outline-none focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
+          >
             <span className="text-foreground">Pilot Role</span>
             <span className="flex items-center gap-1 text-foreground">
               {roleLabel(formPilotRole, authority)}
-              <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden />
+              <ChevronsUpDown className="h-4 w-4 text-muted-foreground" aria-hidden />
             </span>
-            <select
-              aria-label="Pilot role"
-              value={formPilotRole}
-              onChange={(e) =>
-                updateField(
-                  "pilotRole",
-                  e.target.value as FlightLog["pilotRole"]
-                )
-              }
-              className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
-            >
-              {/* Named by the logbook rules. "Examiner" used to be offered
-                  too; it is not a role the record can hold, so choosing it
-                  filed the flight's hours under nothing. */}
-              {PILOT_ROLES.map((role) => (
-                <option key={role} value={role}>
-                  {roleLabel(role, authority)}
-                </option>
-              ))}
-            </select>
-          </div>
+          </ChoicePicker>
         </div>
 
         {/* LANDINGS Section */}
@@ -2333,24 +2377,17 @@ export function FlightForm({
               className="flex items-center justify-between py-3 px-4 border-b border-border"
             >
               <div className="flex items-center gap-2 flex-1">
-                <select
-                  aria-label="Approach type"
+                <ChoicePicker
+                  label="Approach type"
                   value={approach.type}
-                  onChange={(e) =>
-                    updateApproach(approach.id, { type: e.target.value as Approach["type"] })
-                  }
-                  className="bg-transparent text-foreground outline-none text-sm"
+                  options={approachTypeOptions(approach.type)}
+                  onValueChange={(type) => updateApproach(approach.id, { type: type as Approach["type"] })}
+                  align="start"
+                  className="-my-1.5 flex h-9 items-center gap-1 rounded-md text-sm text-foreground outline-none focus-visible:outline-2 focus-visible:outline-ring"
                 >
-                  <option value="ILS">ILS</option>
-                  <option value="LOC">LOC</option>
-                  <option value="VOR">VOR</option>
-                  <option value="NDB">NDB</option>
-                  <option value="RNAV">RNAV</option>
-                  <option value="RNP">RNP</option>
-                  <option value="GLS">GLS</option>
-                  <option value="Visual">Visual</option>
-                  <option value="Circling">Circling</option>
-                </select>
+                  {approach.type}
+                  <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+                </ChoicePicker>
                 <span className="text-xs text-muted-foreground px-2 py-0.5 rounded bg-muted/50">
                   {approach.category === "precision"
                     ? "Precision"

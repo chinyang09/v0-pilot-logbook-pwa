@@ -914,9 +914,14 @@ The breakdown shows every category that HOLDS time (a hand-logged IFR hour
 used to vanish when its Auto-fill switch was off). The role picker no longer
 offers "Examiner": it was never a role a flight can hold.
 
-**More than two crew.** `additionalCrew` (any number) is added from the crew
-picker (`field=additionalCrew`, `withAdditionalCrew` — never the same person
-twice) with a role per member; "Relief Pilot" is the augmented-crew role and
+**More than two crew.** `additionalCrew` (any number) is added as a ROW first:
+"Add Crew" opens an empty row whose role can be chosen (the in-app menu) and
+whose "Select crew" opens the crew picker to fill it, the role travelling with
+the pick (`field=additionalCrew:<role>`). The empty row is the form's own state
+— `crewSlot` remembers the crew count it was opened at, so it is DERIVED away
+when the pick lands, and an abandoned row writes nothing. It used to be the
+crew picker first and a native select on the row afterwards. Never the same
+person twice (`withAdditionalCrew`), a role per member; "Relief Pilot" is the augmented-crew role and
 makes a flight multi-pilot by itself. `assignCrewToFlight` is the one way a
 picker puts a crew card on a flight — choosing an existing card, or creating
 one in the picker (which used to save the card and assign nobody). An eCrew
@@ -1675,14 +1680,24 @@ left action group into the centred nav pill; per-PANE captions were the same
 mistake at a smaller scale — with two panes that is two captions saying half a
 thing each. One header row also keeps single and dual the same HEIGHT for free.
 
-**The month/year picker REPLACES the grid in the same box.** The selector stays
-where it is (its chevron flips — it is the control that opens and closes the
-picker), the day grid stays in FLOW but hidden, and the picker is laid over it
-and FILLS it: 4×3 months, their rows sharing the grid's height. It used to hide
-the selector, which shrank the panel by a row, and in dual mode drew a second
-day grid beside the months that no longer fitted — its last week was cut off.
-A month is the same control as a day: a capsule, the selected one(s) solid
-accent, the current one ringed like today.
+**The month/year picker is two WHEELS, inside the day grid's own box.** Month
+and year, the app's wheel (`@ncdai/react-wheel-picker`, as the date and time
+pickers) on a capsule strip of `--on-glass-fill` (`wheel-fill-glass`) — what
+iOS's inline date picker turns its grid into when its month is tapped. It
+replaced a 4×3 grid of month capsules under a year stepper, which the owner
+rejected twice: a year away was a tap per year, and it read as a web form.
+
+- It is LIVE: each settled spin moves the calendar (and the logbook's list)
+  through `onMonthSelect`, and the picker stays open. The date selector, its
+  chevron flipped, is what closes it.
+- On a phone it replaces the grid (in FLOW but hidden, so the box keeps its
+  height). In the DUAL layout it takes the RIGHT pane and the left pane keeps
+  drawing the month being chosen — the owner's layout, now without the clip:
+  the wheel's rows (`WHEEL_ITEM_PX` 34 → ~218px) are what keep it inside a
+  dual pane's ~255px grid. Measured at 1180: wheels 106–324 inside a panel of
+  52–342.
+- The years run 70 back and 5 ahead of today and the viewed year.
+- It mounts only while open: a wheel is ninety rows of 3D-transformed text.
 
 **The header steps aside for a floating panel hanging from it**
 (`useFloatingPanelUnderHeader`, `lib/layout/panel-mode.ts`). The calendar and
@@ -1802,7 +1817,7 @@ or a dialog over the list.
 | Page | Main panel | Detail panel |
 |---|---|---|
 | logbook, aircraft, airports, crew | the list | the record |
-| roster, currencies | month + agenda / the list | the duty / currency form (`DetailFormPanel`) |
+| roster, currencies | month + agenda / the list | the duty / currency form (`DetailFormPanel`); a roster FLIGHT (`FlightForm`) |
 | discrepancies | comparisons, notes | a comparison's FLIGHT (`FlightForm`); a note and its Resolve (`DiscrepancyDetailPanel`) |
 | recently deleted | the bin | what the item was, how long it is kept, Restore / Delete forever |
 | FDP | the timeline chart, at FULL width | the Quick Check, only while it is open |
@@ -2793,11 +2808,20 @@ identical:
   was recomputed and sent back over on the next OUT/IN edit.
 - **Remarks is an inline auto-growing textarea**, not a `prompt()` — a native
   prompt is a one-line box with no preview of what is already there.
-- **The Pilot Role row is the native select, laid over the whole row** at
-  opacity 0, so the whole row is the target and the platform's own picker
-  opens — and so is every `SelectRow` (Settings, the duty and currency
-  forms). Their Radix Select was a floating web dropdown in a corner of the
-  row; the platform's picker is the wheel on iOS and the sheet on Android.
+- **A choice among a few is the app's own MENU** (`ChoicePicker` +
+  `OptionMenu`, `components/ui/option-menu.tsx`) — every `SelectRow`
+  (Settings, the duty and currency forms), the flight form's Pilot Role, an
+  approach's type, an additional crew member's role, the signer. A native
+  `<select>` laid over the row opened a different control on every device
+  (the wheel on iOS, a sheet on Android, a plain list on a desktop) and like
+  nothing else in the app; a Radix Select before that was a web dropdown in a
+  corner. The menu hangs off its control on the glass face (`.menu-surface`),
+  one 44px row per option with a check on the chosen one, flips upward when
+  there is no room below, takes the dismissing tap on a scrim, closes on
+  back/Escape (`useBackDismiss`) and applies the choice as the dismissal's
+  follow-up. The trigger is the WHOLE row, and its accessible name carries the
+  value ("Pilot role: P2"). A record holding a value the list lacks (LogTen's
+  "VISUAL" approach) keeps it as an option rather than showing nothing.
 - **The camera button opens the OS photo sheet directly** — one image input
   with no `capture`, which iOS and Android already present as Take Photo /
   Photo Library. An in-app dropdown offering the same two choices was a web
@@ -2816,7 +2840,9 @@ identical:
   boxed "mm/dd/yyyy" in the browser's locale beside lists reading "Mar 14,
   2027". The picker's years span the window around today AND the year being
   edited (`pastYears`/`futureYears`); a fixed ±5 had no row for a migrated
-  2011 flight or a 2034 passport.
+  2011 flight or a 2034 passport. Back, the default is a whole career (70
+  years) — a pilot back-filling a paper logbook could not enter a flight from
+  twenty years ago at all.
 - **A flight field is named through `flightFieldLabel`** (`lib/utils/field-labels.ts`)
   wherever a pilot reads it — the resolve sheet, the comparison cards, the
   import card (hour categories ask `TIME_CATEGORIES` first). Each surface kept
@@ -3467,8 +3493,10 @@ opened for, sat at the far end of the history.
 
 - Each cell names what the day IS (`SBY1`, `OFF`, `TR602`, `SIM`) — two labels
   and a count. A dot only said "busy" and had to be tapped to be read.
-- It shows the logbook's FLIGHTS beside the roster's own duties, read-only
-  (tapping one opens it in the logbook). That is a READ join in
+- It shows the logbook's FLIGHTS beside the roster's own duties, and tapping
+  one opens the flight (`FlightForm`) in the ROSTER's detail panel, as
+  `flight:<id>` (the duties use their own ids). It used to be a link into the
+  logbook, so Back from the flight left the roster for the logbook. That is a READ join in
   `lib/utils/roster/roster-days.ts`, not a second copy — `scheduleEntries`
   still holds non-flight duties only (below).
 - An item sits on the day its START falls on in the DISPLAY clock (Zulu → the
@@ -3478,6 +3506,13 @@ opened for, sat at the far end of the history.
 - The header's Add duty pre-fills the selected day, and an empty day's own
   "Add duty" pre-fills THAT day (`onAddDuty(dayKey)` — it used to add to the
   selected day whichever empty day was tapped).
+- The agenda runs to the end of the roster (no fixed day count) and is
+  VIRTUALIZED (`RosterAgenda`, `@tanstack/react-virtual`) on the page's own
+  scroller, with the logbook's rules: every row kind has a FIXED height
+  (`HEADER_H` 36, `ITEM_H` 64 — a 58px card and its gap), nothing is measured,
+  rows are keyed by id, and `scrollMargin` (the month and the nav above the
+  list) is taken in a ResizeObserver callback. Measured: 240 rows, ~20 in the
+  DOM.
 
 #### The roster holds NON-FLIGHT duties only
 
@@ -4791,6 +4826,11 @@ When making changes, be aware of these high-impact files:
 - Do not let a panel's title scroll away with nothing in its place — a panel with a large title publishes it through `useCollapsingTitle` (`PageContainer` and `DetailFormPanel` already do), and the header carries it. And never place a header title absolutely over the row: it is the middle cell of a `.header-bar-grid`, which gives the buttons their width first, so it can neither cover a button nor be covered by one
 - Do not write to ANOTHER record from a form control before Save — the crew card's "This is Me" switch un-flagged the current self card in the database the moment it moved, untouched by Cancel, so a stray flip left the logbook with no self card. The form changes; `handleSave` clears the other flags when it commits
 - Do not let a select show blank for a stored value it has no option for — the currency Type row read empty for any company code an import brought in. Offer the record's own value as an option (`typeOptions`); mapping it to "Custom" would rewrite the stored code on the next save
+- Do not use a native `<select>` (laid over a row or bare) or a Radix Select for a choice — it is `ChoicePicker`/`OptionMenu`, the app's own menu on the glass face. The platform's control is a different thing on every device and like nothing else in the app. And give the trigger the whole row, never a corner of it
+- Do not link a roster flight into the logbook — it opens in the ROSTER's detail panel (`flight:<id>`), so Back returns to the roster. And do not let the roster agenda's rows vary in height or be measured: it is virtualized like the logbook (`HEADER_H` / `ITEM_H`), for the same momentum-scroll reason
+- Do not bring back the month-capsule grid or a year stepper in the calendar's month/year picker — it is two wheels, live, closed by the date selector; and in the dual layout it takes the RIGHT pane with the month being chosen still drawn on the left. Keep `WHEEL_ITEM_PX` small enough that the wheel fits a dual pane's grid, or the panel grows (or clips) when it opens
+- Do not cap a date wheel's past at a few years — a pilot back-filling a paper logbook enters flights from decades ago; the default is 70
+- Do not make "Add Crew" open the crew picker directly — it adds an empty ROW first (role, then "Select crew"), and the role rides the pick as `additionalCrew:<role>`
 - Do not put a segmented choice back as a pair of filled rectangles — it is `SegmentedTabs` (glass, a sliding indicator, `h-9` segments), as in the import dialogs and the Quick Check. And measure its segments from ONE ResizeObserver: reading `offsetLeft` in a ref callback that is rebuilt on every selection forced a layout per tap and attached a new observer to every segment each time, never disconnecting the old ones
 - Do not put an action back on the card surface (`bg-secondary`, `bg-card`, `bg-muted`) or give it a rectangle's corners — a thing you press is a CAPSULE or circle on `.control-surface`, a thing you read is a rounded rectangle. On the card surface the context preview's action row read as more card. And do not use the REAL glass (`GlassContainer`) for an action that sits over a scrim, a row or a panel: the painted surface is the same look with no `backdrop-filter`, and these pop in on exactly the frames a readback would cost most
 - Do not group header controls page by page — a header is VIEW (search, calendar, period) → TOOLS (import, Quick Check, alerts, read-from-photo) → CREATE (+, alone and last), one capsule per role, with a page switch first and detail commits (Cancel / Save / Edit, Back) one capsule each (`glass-icon-button.tsx`). And do not add a Refresh button: every list follows every write and every sync, so it re-reads the same rows, and it reads as "sync" — which is the cloud in the nav

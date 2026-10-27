@@ -4,14 +4,8 @@ import { useRef, useState, useEffect, useCallback, useId } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Trash2, Check, PenLine, UserCheck } from "lucide-react";
+import { ChoicePicker } from "@/components/ui/option-menu";
+import { Trash2, Check, PenLine, UserCheck, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type {
   SignaturePoint,
@@ -529,30 +523,32 @@ export function SignatureCanvas({
       >
         <div className="space-y-1.5">
           <Label
-            htmlFor={`${fieldId}-signer`}
+            id={`${fieldId}-signer-label`}
             className="text-xs font-medium text-muted-foreground uppercase tracking-wide"
           >
             Signing Crew Member
           </Label>
-          <Select
+          <ChoicePicker
+            label="Signing crew member"
             value={selectedCrewId}
+            options={flightCrew.map((crew) => ({ value: crew.id, label: crew.name, hint: crew.role.toUpperCase() }))}
             onValueChange={handleCrewChange}
             disabled={disabled}
+            align="start"
+            className="control-surface flex h-10 w-full items-center justify-between gap-2 rounded-full px-4 text-left text-sm outline-none focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
           >
-            <SelectTrigger id={`${fieldId}-signer`} className="w-full bg-background">
-              <SelectValue placeholder="Select who is signing..." />
-            </SelectTrigger>
-            <SelectContent>
-              {flightCrew.map((crew) => (
-                <SelectItem key={crew.id} value={crew.id}>
-                  <span className="font-medium">{crew.name}</span>
-                  <span className="ml-2 text-muted-foreground">
-                    ({crew.role.toUpperCase()})
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <span id={`${fieldId}-signer`} className={cn("min-w-0 truncate", !selectedCrew && "text-muted-foreground")}>
+              {selectedCrew ? (
+                <>
+                  <span className="font-medium">{selectedCrew.name}</span>
+                  <span className="ml-2 text-muted-foreground">({selectedCrew.role.toUpperCase()})</span>
+                </>
+              ) : (
+                "Select who is signing…"
+              )}
+            </span>
+            <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+          </ChoicePicker>
         </div>
 
         {/* License field - only show when crew is selected */}
