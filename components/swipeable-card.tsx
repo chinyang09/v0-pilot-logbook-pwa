@@ -29,6 +29,8 @@ const SWIPE_CLOSE_EVENT = "swipe-card-close-others"
 
 /** Width of each revealed action button (px) */
 const BUTTON_WIDTH = 64
+/** How far a press must travel sideways before it is a swipe and arms the row. */
+const ARM_SLOP = 6
 /** Gap between adjacent action buttons (px, matches gap-2) */
 const GAP = 8
 /** Gap between the card and the buttons, on the leading (left) side only —
@@ -281,6 +283,52 @@ export function SwipeableCard({
     },
     [armed, hasActions]
   )
+
+  /**
+   * A pointer arms the row only once it MOVES SIDEWAYS past `ARM_SLOP` — a tap
+   * never arms it, and neither does a scroll.
+   *
+   * Arming mounts framer's drag feature, and drag brings a layout-projection
+   * node with it: every later commit that re-renders the row then runs
+   * framer's `willUpdate`, which reads the document's scroll and so forces a
+   * layout of the whole app mid-commit. Armed on pointerdown, the tap that
+   * opened a flight paid that (`measureScroll`, ~210ms at 4×), and a flight
+   * form row tapped to open its picker stayed armed — so every keystroke in
+   * the form paid it again. The first sideways move is handed to the drag
+   * controls, so the swipe still starts from the same touch.
+   */
+  const pressRef = useRef<{ id: number; x: number; y: number } | null>(null)
+  const onArmDown = useCallback(
+    (e: React.PointerEvent) => {
+      pressRef.current = armed || !hasActions ? null : { id: e.pointerId, x: e.clientX, y: e.clientY }
+    },
+    [armed, hasActions]
+  )
+  const onArmMove = useCallback(
+    (e: React.PointerEvent) => {
+      const press = pressRef.current
+      if (!press || press.id !== e.pointerId) return
+      const dx = Math.abs(e.clientX - press.x)
+      const dy = Math.abs(e.clientY - press.y)
+      if (dx < ARM_SLOP && dy < ARM_SLOP) return
+      pressRef.current = null
+      if (dx > dy) arm(e) // a vertical move is the scroller's
+    },
+    [arm]
+  )
+  const onArmEnd = useCallback(() => {
+    pressRef.current = null
+  }, [])
+
+  // And DISARMED again once the row has settled shut — the projection node
+  // would otherwise stay for the life of the row (see above). Not while focus
+  // is inside it: a keyboard user's focus is on the action buttons, which
+  // only exist while armed.
+  const disarm = useCallback(() => {
+    const root = containerRef.current
+    if (root && typeof document !== "undefined" && root.contains(document.activeElement)) return
+    setArmed(false)
+  }, [containerRef])
   useLayoutEffect(() => {
     if (!armed || !armingPointer.current) return
     dragControls.start(armingPointer.current)
@@ -338,11 +386,14 @@ export function SwipeableCard({
         ...SPRING,
         velocity,
         onComplete: () => {
-          if (target === 0) setActive(false)
+          if (target === 0) {
+            setActive(false)
+            disarm()
+          }
         },
       })
     },
-    [x]
+    [x, disarm]
   )
 
   const close = useCallback(() => settle(0), [settle])
@@ -384,12 +435,18 @@ export function SwipeableCard({
   useEffect(() => {
     const handler = (e: Event) => {
       if ((e as CustomEvent).detail?.id !== cardId.current) {
-        animate(x, 0, { ...SPRING, onComplete: () => setActive(false) })
+        animate(x, 0, {
+          ...SPRING,
+          onComplete: () => {
+            setActive(false)
+            disarm()
+          },
+        })
       }
     }
     window.addEventListener(SWIPE_CLOSE_EVENT, handler)
     return () => window.removeEventListener(SWIPE_CLOSE_EVENT, handler)
-  }, [x])
+  }, [x, disarm])
 
   // Tapping a confirm action ARMS it: the action is scheduled in the registry
   // (so it outlives this row), the panel closes and the overlay goes up.
@@ -526,11 +583,20 @@ export function SwipeableCard({
       // the compositor. Untouchable and still scrollable is exactly the state
       // the menu wants everything behind it to be in.
       style={menuOpen ? { pointerEvents: "none" } : undefined}
-      onPointerDownCapture={arm}
+      onPointerDownCapture={onArmDown}
+      onPointerMoveCapture={onArmMove}
+      onPointerUpCapture={onArmEnd}
+      onPointerCancelCapture={onArmEnd}
       onFocusCapture={(e) => {
         // Read HERE, not in the stand-in's own onFocus: arming commits during
         // the capture phase and removes the stand-in, so its handler never runs.
-        if ((e.target as HTMLElement).dataset?.swipeStandIn !== undefined) focusActionsOnArm.current = true
+        //
+        // ONLY the stand-in arms. Any other focus inside the row is a field
+        // being typed into (a tap on the row focuses its input), and an armed
+        // row costs every later render of it a forced layout (see `onArmMove`)
+        // — which, in the flight form, was every keystroke in Remarks.
+        if ((e.target as HTMLElement).dataset?.swipeStandIn === undefined) return
+        focusActionsOnArm.current = true
         arm()
       }}
       onPointerDown={onPointerDown}

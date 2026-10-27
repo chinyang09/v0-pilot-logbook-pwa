@@ -4,7 +4,7 @@ import { CODE_INPUT_PROPS } from "@/lib/utils/input-props";
 import type React from "react";
 import { ScrollIndicator } from "@/components/ui/scroll-indicator";
 
-import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, useId } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, useId, startTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { userDb } from "@/lib/db/user-db";
@@ -201,30 +201,101 @@ function AdditionalCrewRow({
   );
 }
 
-/** Size a textarea to its content (no `field-sizing`: one engine lacks it). */
-function fitTextarea(el: HTMLTextAreaElement) {
-  el.style.height = "auto";
-  el.style.height = `${el.scrollHeight}px`;
-}
 /**
- * Stable, so it runs on mount rather than on every render of the form.
+ * A text field that answers the KEY, not the form.
  *
- * The first fit waits for a ResizeObserver callback. Reading `scrollHeight`
- * straight from the ref ran in the middle of React's commit, so it forced a
- * synchronous layout of the whole app for one textarea (~90ms of the tap that
- * opens a flight, at a 4× CPU throttle) — and the rest of the commit then
- * dirtied it again. An observer fires after the browser's own layout and
- * before paint, so the read is free and the fitted height still lands in the
- * first frame.
+ * Each keystroke used to set the whole form's state, so the field could only
+ * show the new character once all ~50 rows had re-rendered — ~140ms of main
+ * thread per key at a 4× throttle, i.e. typing that visibly trailed the finger.
+ * The field now shows its own draft at once and hands the value to the form
+ * inside a TRANSITION, which React renders interruptibly: a quick run of keys
+ * is one form render, not one per key.
+ *
+ * While focused the draft is what is shown; unfocused, the form's value (so a
+ * clear, an OCR fill or a pulled edit lands as before). Between the two, the
+ * draft holds until the form has caught up with it, or a blur straight after
+ * the last key would flash the value from before it. The unmount flush saves
+ * the COMMITTED form state, and a transition commits within a frame or two of
+ * the key — long before a tap on Back.
  */
-const fitTextareaRef = (el: HTMLTextAreaElement | null) => {
-  if (!el) return;
-  const ro = new ResizeObserver(() => {
-    ro.disconnect();
-    fitTextarea(el);
-  });
-  ro.observe(el);
-};
+function useDraftText(value: string, commit: (next: string) => void) {
+  const [draft, setDraft] = useState(value);
+  const [focused, setFocused] = useState(false);
+  const [awaiting, setAwaiting] = useState(false);
+  if (awaiting && value === draft) setAwaiting(false);
+  return {
+    value: focused || awaiting ? draft : value,
+    onFocus: () => {
+      if (!awaiting) setDraft(value);
+      setFocused(true);
+    },
+    onBlur: () => setFocused(false),
+    change: (next: string) => {
+      setDraft(next);
+      setAwaiting(true);
+      startTransition(() => commit(next));
+    },
+  };
+}
+
+/** A single-line text input on `useDraftText`. `transform` shapes what is typed (upper case). */
+function DraftInput({
+  value,
+  onCommit,
+  transform,
+  ...props
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange"> & {
+  value: string;
+  onCommit: (next: string) => void;
+  transform?: (raw: string) => string;
+}) {
+  const draft = useDraftText(value, onCommit);
+  return (
+    <input
+      {...props}
+      value={draft.value}
+      onFocus={draft.onFocus}
+      onBlur={draft.onBlur}
+      onChange={(e) => draft.change(transform ? transform(e.target.value) : e.target.value)}
+    />
+  );
+}
+
+/**
+ * Remarks: multi-line, growing with what is written — and sized by CSS, not
+ * by script. A hidden copy of the text shares the textarea's grid cell, so the
+ * cell is as tall as the text and the textarea stretches to it. The old
+ * `height = auto; height = scrollHeight` fit was a forced layout of the whole
+ * app on every keystroke (`field-sizing: content` would do it in one line, but
+ * one engine lacks it, and the look must not depend on the engine).
+ */
+function RemarksField({ value, onCommit }: { value: string; onCommit: (next: string) => void }) {
+  const draft = useDraftText(value, onCommit);
+  const text = "block w-full text-base leading-snug [grid-area:1/1] whitespace-pre-wrap break-words";
+  return (
+    <div className="grid">
+      {/* The trailing space gives a final empty line its height. */}
+      <div aria-hidden className={cn(text, "invisible min-h-[2lh]")}>
+        {draft.value + " "}
+      </div>
+      <textarea
+        aria-label="Remarks"
+        placeholder="Add a remark"
+        rows={2}
+        value={draft.value}
+        onFocus={draft.onFocus}
+        onBlur={draft.onBlur}
+        onChange={(e) => draft.change(e.target.value)}
+        className={cn(
+          text,
+          "h-full resize-none overflow-hidden bg-transparent text-foreground outline-none placeholder:text-muted-foreground",
+        )}
+      />
+    </div>
+  );
+}
+
+const toUpper = (raw: string) => raw.toUpperCase();
 
 /** Fields only ever written straight to the database, by the pickers. */
 /** The seat a pilot can log, named by the logbook rules they log under. */
@@ -1226,6 +1297,9 @@ export function FlightForm({
     []
   );
 
+  const commitRemarks = useCallback((v: string) => updateField("remarks", v), [updateField]);
+  const commitFlightNumber = useCallback((v: string) => updateField("flightNumber", v), [updateField]);
+
   // Handle OCR data extraction and populate form
   const handleOCRDataExtracted = useCallback((data: ExtractedFlightData) => {
     // Update form fields with extracted data
@@ -1910,14 +1984,15 @@ export function FlightForm({
 
           <SwipeableRow onClear={() => clearField("flightNumber")}>
             <SettingsRow label="Flight #">
-              <input
+              <DraftInput
                 type="text"
                 className="text-right bg-transparent outline-none text-foreground w-32 placeholder:text-muted-foreground"
                 placeholder="-"
                 aria-label="Flight number"
                 {...CODE_INPUT_PROPS}
                 value={formData.flightNumber || ""}
-                onChange={(e) => updateField("flightNumber", e.target.value.toUpperCase())}
+                transform={toUpper}
+                onCommit={commitFlightNumber}
               />
             </SettingsRow>
           </SwipeableRow>
@@ -2397,14 +2472,11 @@ export function FlightForm({
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <input
+                <DraftInput
                   type="text"
                   value={approach.runway || ""}
-                  onChange={(e) =>
-                    updateApproach(approach.id, {
-                      runway: e.target.value.toUpperCase(),
-                    })
-                  }
+                  transform={toUpper}
+                  onCommit={(runway) => updateApproach(approach.id, { runway })}
                   placeholder="RWY"
                   aria-label="Runway"
                   {...CODE_INPUT_PROPS}
@@ -2461,18 +2533,7 @@ export function FlightForm({
               what happened on the flight. */}
           <SwipeableRow onClear={() => clearField("remarks")}>
             <div className="px-4 py-3 row-divider">
-              <textarea
-                aria-label="Remarks"
-                placeholder="Add a remark"
-                rows={2}
-                value={formData.remarks || ""}
-                onChange={(e) => {
-                  updateField("remarks", e.target.value);
-                  fitTextarea(e.currentTarget);
-                }}
-                ref={fitTextareaRef}
-                className="block w-full resize-none bg-transparent text-base leading-snug text-foreground outline-none placeholder:text-muted-foreground"
-              />
+              <RemarksField value={formData.remarks || ""} onCommit={commitRemarks} />
             </div>
           </SwipeableRow>
         </div>
