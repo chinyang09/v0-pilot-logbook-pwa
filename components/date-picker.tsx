@@ -45,7 +45,7 @@ export function DatePicker({
   onSelect,
   onClose,
   label,
-  pastYears = 5,
+  pastYears = 70,
   futureYears = 4,
 }: DatePickerProps) {
   const [day, setDay] = useState(1)
@@ -55,7 +55,9 @@ export function DatePicker({
   // The wheel spans the window around THIS year AND the year being edited. A
   // fixed five-back/four-ahead window had no row for a migrated 2011 flight's
   // year (the wheel could not show the date it was opened on) or for a
-  // passport expiring in 2034.
+  // passport expiring in 2034. Back, it reaches a whole career (70 years):
+  // a pilot back-filling a paper logbook enters flights from decades ago, and
+  // five years left them no way to type one in at all.
   const currentYear = new Date().getFullYear()
   const initialYear = Number.parseInt(initialDate.slice(0, 4), 10)
   const years = useMemo(() => {

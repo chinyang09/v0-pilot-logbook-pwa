@@ -95,6 +95,27 @@ interface FDPTimelineChartProps {
  */
 const TOOL_HIT = "relative after:absolute after:-inset-y-2.5 after:-inset-x-0.5 after:content-['']"
 
+
+const FALLBACK_CHART_COLORS = { text: "#999", border: "#444", card: "#1a1a1a", fg: "#ccc" }
+type ChartColors = typeof FALLBACK_CHART_COLORS
+
+/**
+ * The probe's last answer, for the theme it was taken under. The FDP page is
+ * not kept alive, so the chart remounts on every visit — and starting from the
+ * fallbacks meant the probe's answer re-rendered the WHOLE chart a second time
+ * on each one. The key is the mode class plus the applied palette, the two
+ * things the probed colours follow; reading them touches no style or layout.
+ */
+let chartColorCache: { key: string; colors: ChartColors } | null = null
+function chartColorKey(): string {
+  if (typeof document === "undefined") return ""
+  const palette = document.getElementById("oooi-palette")?.textContent ?? ""
+  return `${document.documentElement.className}|${palette.length}|${palette.slice(0, 64)}`
+}
+function cachedChartColors(): ChartColors | null {
+  return chartColorCache && chartColorCache.key === chartColorKey() ? chartColorCache.colors : null
+}
+
 export function FDPTimelineChart({
   timelineData,
   limits,
@@ -163,7 +184,7 @@ export function FDPTimelineChart({
   // A hidden probe div carries the Tailwind classes; getComputedStyle returns rgb.
   // Uses inline visibility:hidden instead of sr-only (clip-path:inset breaks iOS Safari).
   const probeRef = useRef<HTMLDivElement>(null)
-  const [cc, setCc] = useState({ text: "#999", border: "#444", card: "#1a1a1a", fg: "#ccc" })
+  const [cc, setCc] = useState(() => cachedChartColors() ?? FALLBACK_CHART_COLORS)
   useEffect(() => {
     // Validate that a computed-style string is a valid SVG color (rgb/rgba/hex/named).
     // An empty string or a stray oklch() would crash Recharts SVG rendering.
@@ -194,7 +215,15 @@ export function FDPTimelineChart({
           fg: isValidSvgColor(s.outlineColor) ? s.outlineColor : "#ccc",
         }
         console.log("[FDP-chart] ③ probe resolved", { raw, resolved: next })
-        setCc(next)
+        chartColorCache = { key: chartColorKey(), colors: next }
+        // Unchanged is the common case on every visit after the first (the
+        // initial state came from the cache) — and a new object here would
+        // re-render the whole chart for nothing.
+        setCc((prev) =>
+          prev.text === next.text && prev.border === next.border && prev.card === next.card && prev.fg === next.fg
+            ? prev
+            : next,
+        )
       } catch (err) {
         // Keep fallback values on any error (e.g., detached node during unmount)
         console.error("[FDP-chart] ③ probe error", err)
@@ -896,7 +925,7 @@ export function FDPTimelineChart({
                   <div className="flex items-center gap-1 mt-0.5 w-full">
                     <div className="h-1 rounded-full flex-1 bg-muted">
                       <div
-                        className={cn("h-full rounded-full transition-all", barColor)}
+                        className={cn("h-full rounded-full transition-[width,background-color]", barColor)}
                         style={{ width: `${Math.min(pct, 100)}%` }}
                       />
                     </div>
@@ -987,7 +1016,14 @@ export function FDPTimelineChart({
               onTouchStart={handleChartTouchStart}
               onTouchMove={handleGestureMove}
               onTouchEnd={handleGestureEnd}
-              className="touch-none relative"
+              // The series do NOT animate (`isAnimationActive={false}`).
+              // Recharts animates them with a JS rAF loop that commits through
+              // React every frame — measured at ~120 commits of 430–520
+              // components over the page's first 2.9s at a 4× throttle, and
+              // again on every zoom and pan step, i.e. through a pinch. The
+              // chart arrives with an opacity fade instead, which the
+              // compositor runs.
+              className="touch-none relative animate-in fade-in duration-300"
             >
               <ResponsiveContainer width="100%" height={320}>
                 <ComposedChart
@@ -1133,6 +1169,7 @@ export function FDPTimelineChart({
                       dot={false}
                       activeDot={{ r: 4, fill: cc.card, stroke: view.color, strokeWidth: 2 }}
                       name={view.rollingLabel}
+                      isAnimationActive={false}
                     />
                   ))}
 
@@ -1151,6 +1188,7 @@ export function FDPTimelineChart({
                       activeDot={false}
                       connectNulls={false}
                       name="Scenario change"
+                      isAnimationActive={false}
                     />
                   ))}
 
@@ -1165,6 +1203,7 @@ export function FDPTimelineChart({
                         radius={[2, 2, 0, 0]}
                         maxBarSize={uniqueBarKeys.length > 1 ? 12 : 16}
                         name={barView.barLabel}
+                        isAnimationActive={false}
                       >
                         {slicedData.map((entry, index) => {
                           const isModified = hasScenario && scenarioModifiedDates?.has(entry.date)

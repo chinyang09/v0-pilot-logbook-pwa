@@ -15,11 +15,14 @@ import { FlightForm } from "@/components/flight-form"
 import { syncService } from "@/lib/sync"
 
 import { usePageActive } from "@/hooks/use-page-active"
+import { whenIdle } from "@/lib/utils/idle"
 import { useDashboardView } from "@/hooks/use-dashboard-view"
 import { DashboardActions } from "@/components/dashboard/dashboard-actions"
 import { DashboardCalendarPanel, DashboardCalendarSpacer } from "@/components/dashboard/dashboard-calendar-panel"
 import { LegalDashboard } from "@/components/dashboard/legal-dashboard"
 import { SummaryDashboard } from "@/components/dashboard/summary-dashboard"
+
+const refreshAllDataWhenIdle = () => whenIdle(() => void refreshAllData())
 
 /**
  * The dashboard, as two pages behind one toggle.
@@ -47,8 +50,9 @@ export default function Dashboard() {
   // the whole refresh twice per sync cycle.
 
   // Keep-alive: only the active tab owns the header actions, and re-activation
-  // refreshes data so the retained page never shows stale numbers.
-  const isActive = usePageActive("/", refreshAllData)
+  // refreshes data so the retained page never shows stale numbers — at idle,
+  // not in the tab switch (see whenIdle).
+  const isActive = usePageActive("/", refreshAllDataWhenIdle)
 
   const dashboardActions = useMemo(() => <DashboardActions />, [])
   useRegisterMainActions(dashboardActions, isActive)

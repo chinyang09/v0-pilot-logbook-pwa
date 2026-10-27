@@ -1,3 +1,5 @@
+import { elementScroll, type Virtualizer } from "@tanstack/react-virtual"
+
 /**
  * Scroll a dynamically-measured virtual list so a given row sits at the top of
  * the visible area — below the floating header, not behind it.
@@ -88,3 +90,85 @@ export function scrollToTop(virtualizer: ScrollableVirtualizer): void {
   const el = virtualizer.scrollElement
   if (el instanceof HTMLElement) el.scrollTo({ top: 0, behavior: "auto" })
 }
+
+type RectInstance = { scrollElement: Element | Window | null }
+
+const attached = new WeakSet<object>()
+
+/**
+ * `scrollToFn` for a list whose virtualizer is created in the SAME component
+ * as its scroller (so the scroller is always new when the virtualizer attaches).
+ *
+ * On attach, TanStack scrolls the element to its remembered offset — 0 for a
+ * new list, which a new scroller is already at. `scrollTo` forces a layout,
+ * and attaching happens in the layout phase of the commit that mounts the
+ * page: 98ms at 4× on the first visit to Airports, to move nothing. The first
+ * call per instance is skipped when it targets 0; every later one (and a
+ * re-attach to another element, which restores a real offset) goes through.
+ * Not for a list on a scroller it does not own — the roster agenda's is the
+ * page's, which may already be scrolled.
+ */
+export function scrollAfterAttach<T extends Element>(
+  offset: number,
+  options: Parameters<typeof elementScroll>[1],
+  instance: Virtualizer<T, Element>,
+): void {
+  if (!attached.has(instance)) {
+    attached.add(instance)
+    if (offset + (options.adjustments ?? 0) === 0) return
+  }
+  elementScroll(offset, options, instance)
+}
+
+/**
+ * The scroller's size for `useVirtualizer`, taken ONLY from a ResizeObserver.
+ *
+ * TanStack's default (`observeElementRect`) reads `offsetWidth`/`offsetHeight`
+ * synchronously when the virtualizer first attaches — inside React's layout
+ * phase, on the commit that mounts the list, while the whole new page is still
+ * dirty. That read is a forced layout of the app: ~240ms of the first visit to
+ * Crew at a 4× throttle, and the same on every other virtualised list. The
+ * observer's first callback reports the same box after the browser's own
+ * layout, for free; until then `VIEWPORT_RECT` stands in.
+ */
+export function observeRectAfterLayout(
+  instance: RectInstance,
+  cb: (rect: { width: number; height: number }) => void,
+): (() => void) | undefined {
+  const el = instance.scrollElement
+  if (!(el instanceof Element) || typeof ResizeObserver === "undefined") return
+  const ro = new ResizeObserver(([entry]) => {
+    const box = entry?.borderBoxSize?.[0]
+    const width = box ? box.inlineSize : entry.contentRect.width
+    const height = box ? box.blockSize : entry.contentRect.height
+    cb({ width: Math.round(width), height: Math.round(height) })
+  })
+  ro.observe(el, { box: "border-box" })
+  return () => ro.disconnect()
+}
+
+/**
+ * The first-paint stand-in for the scroller's size: the viewport, which every
+ * one of these lists' scrollers fills (or nearly). Too large costs a few extra
+ * rows on the first frame; zero would render none until the observer reports.
+ */
+export function viewportRect(): { width: number; height: number } {
+  if (typeof window === "undefined") return { width: 0, height: 0 }
+  // CACHED, and refreshed from a resize listener. `innerWidth`/`innerHeight`
+  // force a layout when the page is dirty, and this is evaluated on EVERY
+  // render of every virtualised list (it is an argument expression), i.e. in
+  // the middle of commits that have just changed the DOM — 111ms at 4× on the
+  // tap that opens the FDP page, for a value the virtualizer reads only once.
+  if (!cachedViewport) {
+    cachedViewport = { width: window.innerWidth, height: window.innerHeight }
+    window.addEventListener(
+      "resize",
+      () => {
+        cachedViewport = { width: window.innerWidth, height: window.innerHeight }
+      },
+      { passive: true },
+    )
+  }
+  return cachedViewport
+}
+let cachedViewport: { width: number; height: number } | null = null

@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, memo } from "react"
 import { createPortal } from "react-dom"
 import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
@@ -22,7 +22,7 @@ import {
 import { cn } from "@/lib/utils"
 import { MODAL_SCRIM } from "@/components/ui/chrome-overlays"
 import { OVERSHOOT_BEZIER, SETTLE_BEZIER, MORPH_EASE } from "@/lib/motion"
-import { GlassContainer } from "@/components/ui/glass-container"
+import { GlassContainer, glassSpotlight } from "@/components/ui/glass-container"
 import { useDesktopPill, useHydrated } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import { SIDEBAR_WIDTH_PX } from "@/lib/layout/panel-widths"
@@ -134,6 +134,8 @@ const MOBILE_PILL_HEIGHT = 56
  * capsule.
  */
 const MOBILE_PILL_RADIUS = MOBILE_PILL_HEIGHT / 2
+/** The bottom bar's width: the screen less the panel gutter each side, as a flight card. */
+const MOBILE_PILL_WIDTH = "calc(100% - 2 * var(--panel-gutter))"
 const PILL_TOP = SIDEBAR_MARGIN // top offset — aligns pill center with header center
 
 // ─── Morph timing ────────────────────────────────────────────
@@ -389,6 +391,8 @@ function GravityIndicator({
   const travelRef = useRef<Animation | null>(null)
   const shapeRef = useRef<Animation | null>(null)
   const animatedToRef = useRef<{ left: number; top: number } | null>(null)
+  /** The running move's own terms, so where the blob IS can be computed. */
+  const flightRef = useRef<{ fromLeft: number; fromTop: number; dx: number; dy: number; xs: number[] } | null>(null)
 
   useEffect(() => {
     const shape = blobRef.current
@@ -413,12 +417,23 @@ function GravityIndicator({
     // the previous tab before setting off again. Read BEFORE cancelling: once
     // cancelled the computed value reverts to the inline style, which is
     // already the new target.
+    //
+    // Computed from the move's own spring track and the animation's clock, NOT
+    // read back with `getComputedStyle(box).transform`. This effect runs on
+    // the commit a navigation lands in, with the arriving page's DOM still
+    // dirty, so that read forced a style recalculation of the whole page —
+    // measured at 312ms (4× throttle) on a sidebar tap to the FDP page.
     let fromLeft = prev.left
     let fromTop = prev.top
-    if (travelRef.current?.playState === "running") {
-      const m = new DOMMatrixReadOnly(getComputedStyle(box).transform)
-      fromLeft = m.m41
-      fromTop = m.m42
+    const flight = flightRef.current
+    const running = travelRef.current
+    if (flight && running?.playState === "running") {
+      const p = Math.min(1, Math.max(0, Number(running.currentTime ?? 0) / GRAVITY_SPRING_MS))
+      const at = p * (flight.xs.length - 1)
+      const i = Math.floor(at)
+      const x = flight.xs[i] + (flight.xs[Math.min(i + 1, flight.xs.length - 1)] - flight.xs[i]) * (at - i)
+      fromLeft = flight.fromLeft + flight.dx * x
+      fromTop = flight.fromTop + flight.dy * x
     }
     travelRef.current?.cancel()
     shapeRef.current?.cancel()
@@ -428,6 +443,7 @@ function GravityIndicator({
     animatedToRef.current = { left: t.left, top: t.top }
 
     const { xs, ss } = springTrack()
+    flightRef.current = { fromLeft, fromTop, dx, dy, xs }
     const along = Math.abs(dx) >= Math.abs(dy)
 
     // Travel: the spring's displacement, from where it was to where it goes.
@@ -572,7 +588,9 @@ const LENS_SQUASH = 0.84
  * Desktop: tabs render as text labels
  * Mobile: tabs render as icon + tiny label
  */
-function PillBarContent({
+// Memoised: the morph around it re-renders on every phase, and the bar's own
+// props (tabs, route, a stable toggle) do not change with it.
+const PillBarContent = memo(function PillBarContent({
   tabs,
   pathname,
   mode,
@@ -804,9 +822,10 @@ function PillBarContent({
 
     // The pill's spotlight follows the finger too — written here rather than in
     // its own helper so it shares this pass's single rect read.
-    if (gr && grRect) {
-      gr.style.setProperty("--press-x", `${clientX - grRect.left}px`)
-      gr.style.setProperty("--press-y", `${clientY - grRect.top}px`)
+    const spot = glassSpotlight(gr)
+    if (spot && grRect) {
+      spot.style.setProperty("--press-x", `${clientX - grRect.left}px`)
+      spot.style.setProperty("--press-y", `${clientY - grRect.top}px`)
     }
   }, [squishX, squishY, nudgeX])
 
@@ -871,7 +890,7 @@ function PillBarContent({
       drag.active = true
       setLensPhase("drag")
       // Take over the pill's spotlight — its own move handler is about to stop.
-      glassRootRef.current?.style.setProperty("--glass-press", "1")
+      glassSpotlight(glassRootRef.current)?.style.setProperty("--glass-press", "1")
       try {
         tabsRef.current?.setPointerCapture(e.pointerId)
       } catch {
@@ -893,7 +912,7 @@ function PillBarContent({
     }
     // Fade the pill spotlight back out. Kill the horizontal strain INSTANTLY
     // (jump, not set) so releasing never springs the lens left/right.
-    glassRootRef.current?.style.setProperty("--glass-press", "0")
+    glassSpotlight(glassRootRef.current)?.style.setProperty("--glass-press", "0")
     nudgeX.jump(0)
     if (!drag?.active) return
     // Swallow the click synthesised at the end of the drag; the timeout clears
@@ -1062,7 +1081,11 @@ function PillBarContent({
                 <span
                   data-grav-item
                   className={cn(
-                    "inline-flex flex-col items-center justify-center gap-0.5 h-12 px-3 rounded-full transition-colors",
+                    // The padding gives way below ~346px (an iPad window in
+                    // Split View is 320): at a fixed 12px the bar was 330px
+                    // wide and ran off both edges of a 320px screen. Above
+                    // that it is 12px, so every phone gets the same bar.
+                    "inline-flex flex-col items-center justify-center gap-0.5 h-12 px-[clamp(6px,calc((100vw-250px)/8),12px)] rounded-full transition-colors",
                     highlighted
                       ? "text-[var(--on-glass-active-fg)]"
                       : "text-foreground"
@@ -1118,7 +1141,7 @@ function PillBarContent({
       <SyncIconButton />
     </div>
   )
-}
+})
 
 // ─── Shared sidebar nav content ──────────────────────────────
 
@@ -1176,7 +1199,9 @@ function SidebarTopStrip({ onToggle }: { onToggle: () => void }) {
   )
 }
 
-function SidebarNav({
+// Memoised, with its items: its props are a route and two constants, and the
+// morph re-renders the panel around it on every phase — eleven links each time.
+const SidebarNav = memo(function SidebarNav({
   pathname,
   className,
   topInset = 0,
@@ -1306,9 +1331,9 @@ function SidebarNav({
       </nav>
     </div>
   )
-}
+})
 
-function SidebarNavItem({
+const SidebarNavItem = memo(function SidebarNavItem({
   href,
   icon,
   label,
@@ -1330,7 +1355,7 @@ function SidebarNavItem({
       draggable={false}
       onContextMenu={suppressLinkMenu}
       className={cn(
-        "relative z-[1] flex items-center gap-3 px-3 py-2 rounded-full text-sm transition-all duration-150",
+        "relative z-[1] flex items-center gap-3 px-3 py-2 rounded-full text-sm transition-[background-color,color,scale] duration-150",
         "active:scale-[0.98]",
         isActive
           ? "text-[var(--on-glass-active-fg)] font-medium"
@@ -1347,7 +1372,7 @@ function SidebarNavItem({
       <span className="min-w-0 truncate whitespace-nowrap">{label}</span>
     </Link>
   )
-}
+})
 
 // ─── Viewport measurement hook ───────────────────────────────
 
@@ -1427,7 +1452,13 @@ function prefetchNavRoutesWhenIdle(prefetch: (href: string) => void) {
   window.setTimeout(() => idle(next), 4000)
 }
 
-export function NavPill() {
+/**
+ * Memoised: it takes no props, and the shell around it re-renders on every
+ * selection change (its detail panel and `?selected=` live there) — four times
+ * on the tap that adds a flight, each one re-rendering every tab and sidebar
+ * item for nothing. It still follows its own route, sidebar and preferences.
+ */
+export const NavPill = memo(function NavPill() {
   const router = useRouter()
   useEffect(() => {
     prefetchNavRoutesWhenIdle((href) => router.prefetch(href))
@@ -1473,7 +1504,7 @@ export function NavPill() {
   }
 
   return canPush ? desktopPill : mobilePill
-}
+})
 
 // ─── Morph phase state machine (shared) ──────────────────────
 
@@ -1691,14 +1722,12 @@ function DesktopPillMorph({
         >
           {/* Pill bar — always visible */}
           <div
-            className="flex-shrink-0"
+            className={cn("flex-shrink-0", phase !== "pill" && "nav-stowed")}
             style={{
               // Only show the (horizontal) pill content once fully settled as a
               // pill — mid-morph the container is the wrong shape so the tabs look
               // squished. Collapsed to 0 height + non-interactive otherwise.
               opacity: phase === "pill" ? 1 : 0,
-              visibility: phase === "pill" ? "visible" : "hidden",
-              pointerEvents: phase === "pill" ? "auto" : "none",
               height: phase === "pill" ? PILL_HEIGHT : 0,
               transition: "opacity 0.2s ease",
             }}
@@ -1713,7 +1742,7 @@ function DesktopPillMorph({
 
           {/* Sidebar header + nav — visible when expanded */}
           <div
-            className="flex flex-col flex-1 min-h-0"
+            className={cn("flex flex-col flex-1 min-h-0", !isSidebarShape && "nav-stowed")}
             style={{
               // The vertical sidebar list isn't "squished" mid-morph (it's just
               // clipped by the growing height, like a drawer), so keep it visible
@@ -1721,8 +1750,6 @@ function DesktopPillMorph({
               // phase left a brief dead window that dropped sidebar taps. Its
               // opacity is timed to the height so reveal + growth are one motion.
               opacity: isSidebarShape ? 1 : 0,
-              visibility: isSidebarShape ? "visible" : "hidden",
-              pointerEvents: isSidebarShape ? "auto" : "none",
               transition: contentTransition,
             }}
           >
@@ -1759,6 +1786,7 @@ function MobilePillMorph({
   const ref = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const openSidebar = useCallback(() => setSidebarOpen(true), [])
   const DUR = prefersReducedMotion ? 0 : MORPH_DUR
   const LEAD = prefersReducedMotion ? 0 : MORPH_LEAD
   const TOTAL = DUR + LEAD
@@ -1831,10 +1859,6 @@ function MobilePillMorph({
     [phase, advancePhase],
   )
 
-  // A px endpoint for the pill so `width` actually interpolates alongside
-  // `left`/`transform` instead of snapping (see usePillWidth).
-  const pillWidth = usePillWidth(ref, tabs.join(","), phase === "pill")
-
   // Mobile morph — always bottom-anchored. pill: bottom-centre, measured pill
   // width, pill height. opening/closing: height and position+width morph in a sequenced
   // overlap (bottom-anchored, so it grows upward). On CLOSE the height collapses
@@ -1863,7 +1887,15 @@ function MobilePillMorph({
       // a while and wanted to go somewhere else — and it came back on a scroll
       // UP, so getting it required a gesture that also moved the content.
       : "translateX(-50%)",
-    width: isSidebarShape ? SIDEBAR_INNER_WIDTH : (pillWidth ?? "auto"),
+    // The bottom bar spans the screen the way a flight card does — the
+    // viewport less the panel gutter either side — so it is the same SHARE of
+    // the screen on every phone, its tabs spread evenly across it. It used to
+    // shrink to its content (330px everywhere), which is a different
+    // proportion of every screen: most of a 375px window, less of a 412px one.
+    // A `calc()` is a length CSS can interpolate against the sidebar's px
+    // width, so the morph still moves width with position — only `auto` could
+    // not (see usePillWidth, which the desktop pill still needs).
+    width: isSidebarShape ? SIDEBAR_INNER_WIDTH : MOBILE_PILL_WIDTH,
     height: isSidebarShape ? EXPANDED_HEIGHT : MOBILE_PILL_HEIGHT,
     transition,
   }
@@ -1914,14 +1946,12 @@ function MobilePillMorph({
         >
           {/* Pill bar — visible when collapsed */}
           <div
-            className="flex-shrink-0"
+            className={cn("flex-shrink-0", phase !== "pill" && "nav-stowed")}
             style={{
               // Only show the (horizontal) pill content once fully settled as a
               // pill — mid-morph the container is the wrong shape so the tabs look
               // squished. Collapsed to 0 height + non-interactive otherwise.
               opacity: phase === "pill" ? 1 : 0,
-              visibility: phase === "pill" ? "visible" : "hidden",
-              pointerEvents: phase === "pill" ? "auto" : "none",
               height: phase === "pill" ? MOBILE_PILL_HEIGHT : 0,
               transition: "opacity 0.2s ease",
             }}
@@ -1930,13 +1960,13 @@ function MobilePillMorph({
               tabs={tabs}
               pathname={pathname}
               mode="mobile"
-              onToggleSidebar={() => setSidebarOpen(true)}
+              onToggleSidebar={openSidebar}
             />
           </div>
 
           {/* Sidebar header + nav — visible when expanded */}
           <div
-            className="flex flex-col flex-1 min-h-0"
+            className={cn("flex flex-col flex-1 min-h-0", !isSidebarShape && "nav-stowed")}
             style={{
               // The vertical sidebar list isn't "squished" mid-morph (it's just
               // clipped by the growing height, like a drawer), so keep it visible
@@ -1944,8 +1974,6 @@ function MobilePillMorph({
               // phase left a brief dead window that dropped sidebar taps. Its
               // opacity is timed to the height so reveal + growth are one motion.
               opacity: isSidebarShape ? 1 : 0,
-              visibility: isSidebarShape ? "visible" : "hidden",
-              pointerEvents: isSidebarShape ? "auto" : "none",
               transition: contentTransition,
             }}
           >

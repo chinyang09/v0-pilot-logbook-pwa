@@ -7,7 +7,9 @@ import { Check, TriangleAlert, OctagonAlert, ArrowUpRight, Info } from "lucide-r
 
 import { usePilotStatus } from "@/hooks/data/use-pilot-status"
 import { usePageActive } from "@/hooks/use-page-active"
-import { useDashboardAggregates } from "@/hooks/data/use-dashboard-aggregates"
+import { useFlights } from "@/hooks/data/use-flights"
+import { useDayKey } from "@/hooks/use-day-key"
+import { ninetyDayRecency } from "@/lib/utils/dashboard-aggregate"
 import { formatDutyClock, type SectorLeg } from "@/lib/utils/dashboard/duty-status"
 import { ANNUNCIATOR_WORD, type AnnunciatorState } from "@/lib/utils/dashboard/pilot-status"
 import type { PilotStatus } from "@/lib/utils/dashboard/pilot-status"
@@ -155,15 +157,18 @@ export function LegalDashboard({ className }: { className?: string }) {
   const now = useTick(isActive)
   const { preferences } = usePreferences()
 
-  // Recency comes off the dashboard aggregate rather than a second walk of the
-  // flight history. The range is irrelevant to it — recency is always computed
-  // over the full history.
-  const { aggregates, isLoading: aggLoading } = useDashboardAggregates({
-    fromIso: "1970-01-01",
-    toIso: "9999-12-31",
-  })
+  // Recency on its own — not the whole period aggregate, which built a totals
+  // breakdown and a detail row for every flight ever logged to read this one
+  // figure. Keyed on the day too: recency is measured against TODAY.
+  const { flights, isLoading: aggLoading } = useFlights()
+  const dayKey = useDayKey()
+  const recency = React.useMemo(
+    () => ninetyDayRecency(flights),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dayKey is the "now" input
+    [flights, dayKey],
+  )
   const { status, isLoading: statusLoading } = usePilotStatus(
-    aggregates.ninetyDayCurrency,
+    recency,
     now,
     preferences?.display,
   )

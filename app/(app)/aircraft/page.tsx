@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react"
 import type React from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useVirtualizer } from "@tanstack/react-virtual"
+import { useCalibratedRowHeight, useRemeasureOnCalibration } from "@/hooks/use-calibrated-row"
 import { Plane, Loader2, Star, Plus, Trash2, ChevronRight } from "lucide-react"
 import { EmptyState } from "@/components/ui/empty-state"
 import { useDebounce } from "@/hooks/use-debounce"
@@ -26,7 +27,7 @@ import { syncService } from "@/lib/sync"
 import { Button } from "@/components/ui/button"
 import { PageContainer } from "@/components/page-container"
 import { FastScroll, generateAlphabetItemsFromList, FAST_SCROLL_TOP_KEY } from "@/components/ui/fast-scroll"
-import { scrollToIndexSettled, scrollToTop } from "@/lib/utils/virtual-scroll"
+import { scrollToIndexSettled, scrollToTop, observeRectAfterLayout, scrollAfterAttach, viewportRect } from "@/lib/utils/virtual-scroll"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { AircraftDetailPanel } from "@/components/aircraft-detail-panel"
@@ -93,7 +94,7 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
           }
         }}
         className={cn(
-          "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-all hover:bg-accent",
+          "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-colors hover:bg-accent",
           isRecent &&
             "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20 hover:bg-transparent",
           isSelected && "bg-primary/20 border-primary hover:bg-primary/20"
@@ -101,13 +102,15 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
       >
         <div className="flex items-center justify-between gap-2">
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="font-semibold text-foreground">{aircraft.registration || aircraft.icao24}</span>
+            {/* One line, whatever the description says — a wrapped row would
+                make this card taller than the rest of the virtualised list. */}
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="font-semibold text-foreground flex-shrink-0">{aircraft.registration || aircraft.icao24}</span>
               {aircraft.typecode && (
-                <span className="text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded">{aircraft.typecode}</span>
+                <span className="text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded flex-shrink-0">{aircraft.typecode}</span>
               )}
               {aircraft.shortDescription && (
-                <span className="text-xs text-muted-foreground ">{aircraft.shortDescription}</span>
+                <span className="text-xs text-muted-foreground truncate min-w-0">{aircraft.shortDescription}</span>
               )}
             </div>
             <div className="text-sm text-muted-foreground truncate mt-0.5">
@@ -382,14 +385,31 @@ export default function AircraftPage() {
     return () => observer.disconnect()
   }, [debouncedSearchQuery, allAircraft, recentlyUsed])
 
+  // Every card is two truncated lines, so ONE measured row is exact for all
+  // of them — per-row measuring corrects the scroll offset and kills a fling
+  // (see useCalibratedRowHeight).
+  const { rowHeight, measureRow, estimateSize } = useCalibratedRowHeight("aircraft", 60)
+
   // Virtual list
+  // STABLE: the virtualizer rebuilds every row's measurement whenever
+  // `getItemKey` changes identity, and an inline arrow is a new one each
+  // render — a full pass over the whole list per scroll-driven render.
+  const getAircraftKey = useCallback((i: number) => displayAircraft[i]?.registration || displayAircraft[i]?.icao24 || i, [displayAircraft])
   const rowVirtualizer = useVirtualizer({
     count: displayAircraft.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 60,
+    // Sized from a ResizeObserver, not a synchronous read mid-commit (see
+    // `observeRectAfterLayout`).
+    observeElementRect: observeRectAfterLayout,
+    scrollToFn: scrollAfterAttach,
+    initialRect: viewportRect(),
+    estimateSize,
+    getItemKey: getAircraftKey,
     overscan: 10,
     scrollMargin,
   })
+
+  useRemeasureOnCalibration(rowHeight, rowVirtualizer)
 
   const virtualItems = rowVirtualizer.getVirtualItems()
 
@@ -819,7 +839,7 @@ export default function AircraftPage() {
                           onKeyDown={(e: React.KeyboardEvent) => {
                             if (e.key === "Enter" || e.key === " ") handleSelectFr24(record)
                           }}
-                          className="w-full text-left rounded-lg py-2 pl-3 pr-6 transition-all cursor-pointer bg-card border border-border hover:bg-accent"
+                          className="w-full text-left rounded-lg py-2 pl-3 pr-6 transition-colors cursor-pointer bg-card border border-border hover:bg-accent"
                         >
                           <div className="flex items-center gap-2">
                             <span className="font-semibold text-foreground">{record.registration || record.icao24}</span>
@@ -876,8 +896,10 @@ export default function AircraftPage() {
                         width: "100%",
                         transform: `translateY(${virtualRow.start - rowVirtualizer.options.scrollMargin}px)`,
                       }}
+                      // What the fast-scroll rail finds the row by (`scrollToIndexSettled`)
+                      // — an attribute only; nothing measures it.
                       data-index={virtualRow.index}
-                      ref={rowVirtualizer.measureElement}
+                      ref={measureRow}
                     >
                       <div className="pt-1">
                         <SwipeableAircraftCard

@@ -294,7 +294,7 @@ export function FastScroll({
             className={cn(
               "flex items-center justify-center",
               "w-5 h-5 text-xs font-medium",
-              "transition-all duration-100",
+              "transition-[color,scale] duration-100",
               item.key === currentKey
                 ? "text-primary scale-125 font-bold"
                 : "text-muted-foreground hover:text-foreground"

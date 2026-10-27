@@ -180,6 +180,12 @@ export function GlassContainer({
   // navigates, ~36ms of a tab switch at a 4× CPU throttle.
   const lastRectRef = useRef<DOMRect | null>(null)
 
+  // The spotlight's OWN element carries its position and its on/off, never
+  // the root: custom properties inherit, so writing them on the root restyled
+  // the glass's whole subtree — the entire nav, ~170 elements, 45–60ms at a 4×
+  // throttle — on every tap and on every frame a finger moved over it.
+  const spotRef = useRef<HTMLSpanElement>(null)
+
   const applyPoint = () => {
     trackRafRef.current = 0
     const point = pointRef.current
@@ -187,8 +193,8 @@ export function GlassContainer({
     if (!point || !el) return
     const rect = el.getBoundingClientRect()
     lastRectRef.current = rect
-    el.style.setProperty("--press-x", `${point.x - rect.left}px`)
-    el.style.setProperty("--press-y", `${point.y - rect.top}px`)
+    spotRef.current?.style.setProperty("--press-x", `${point.x - rect.left}px`)
+    spotRef.current?.style.setProperty("--press-y", `${point.y - rect.top}px`)
     if (!interactive) return
     const dx = point.x - (rect.left + rect.width / 2)
     const dy = point.y - (rect.top + rect.height / 2)
@@ -215,7 +221,7 @@ export function GlassContainer({
    * on the glass.
    */
   const setGlow = (on: boolean) => {
-    rootRef.current?.style.setProperty("--glass-press", on ? "1" : "0")
+    spotRef.current?.style.setProperty("--glass-press", on ? "1" : "0")
   }
 
   /** Move handler: record the point, let the frame do the work. */
@@ -356,7 +362,6 @@ export function GlassContainer({
       data-quiet={quiet ? "true" : undefined}
       style={{
         "--corner-radius": `${cornerRadius}px`,
-        "--glass-press": 0,
         ...(interactive
           ? { x: txS, y: tyS, scaleX: sxS, scaleY: syS }
           : null),
@@ -379,6 +384,10 @@ export function GlassContainer({
           />
         )}
         {children}
+        {/* The touch spotlight: last, so it paints over the content (the press
+            lightens the label too), and EMPTY, so the properties written to
+            it per frame restyle nothing else. */}
+        {spotlightOn && <span ref={spotRef} aria-hidden className="GlassSpotlight" />}
       </div>
 
       {/* Release ripple — the light rides outward from where the finger left
@@ -409,4 +418,13 @@ export function GlassContainer({
       </div>
     </motion.div>
   )
+}
+
+/**
+ * The spotlight element of the glass rooted at `root`, for a caller that drives
+ * it from outside (the nav pill's drag lens). Its properties go on IT — see
+ * `spotRef` above for why never on the root.
+ */
+export function glassSpotlight(root: Element | null): HTMLElement | null {
+  return root?.querySelector<HTMLElement>(":scope > .GlassContent > .GlassSpotlight") ?? null
 }

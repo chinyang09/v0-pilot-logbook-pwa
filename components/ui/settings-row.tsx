@@ -5,7 +5,8 @@ import type React from "react"
 import { useRef } from "react"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
-import { ChevronDown } from "lucide-react"
+import { ChevronsUpDown } from "lucide-react"
+import { ChoicePicker, type MenuOption } from "@/components/ui/option-menu"
 import { SwipeableCard } from "@/components/swipeable-card"
 import { cn } from "@/lib/utils"
 
@@ -166,14 +167,13 @@ export function ToggleRow({
 }
 
 /**
- * A row displaying a label and a choice — the PLATFORM's picker.
+ * A row displaying a label and a choice — the app's own picker.
  *
- * A native `<select>` is laid over the whole row at opacity 0 (the flight
- * form's Pilot Role does the same), so a tap anywhere on the row opens the
- * operating system's own control: the wheel on iOS, the sheet on Android, a
- * menu on a desktop. It was a Radix Select, whose floating list beside the
- * trigger is a web page's dropdown on every platform — and on a phone, a
- * small target in a corner of the row.
+ * The whole row is the control (`ChoicePicker`), and it opens the app's menu
+ * (`OptionMenu`) hung off the row's trailing edge. It used to lay a native
+ * `<select>` over the row, which opened a different control on every platform
+ * — the wheel on iOS, a sheet on Android, a plain list on a desktop — and like
+ * nothing else in the app.
  */
 export function SelectRow<T extends string>({
   label,
@@ -188,31 +188,25 @@ export function SelectRow<T extends string>({
   description?: string
   value: T
   onValueChange: (value: T) => void
-  options: Array<{ value: T; label: string }>
+  options: Array<MenuOption<T>>
   disabled?: boolean
 }) {
   const selected = options.find((o) => o.value === value)
   return (
-    <div className="relative flex items-center justify-between px-4 py-3.5 row-divider focus-within:outline-2 focus-within:outline-ring focus-within:-outline-offset-2">
+    <ChoicePicker
+      label={label}
+      value={value}
+      options={options}
+      onValueChange={onValueChange}
+      disabled={disabled}
+      className="row-divider relative flex w-full items-center justify-between px-4 py-3.5 text-left outline-none focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2 disabled:cursor-default"
+    >
       <RowLabel label={label} description={description} disabled={disabled} />
       <span className="flex min-w-0 max-w-[55%] shrink items-center gap-1 text-muted-foreground">
         <span className="truncate">{selected?.label ?? ""}</span>
-        <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
+        <ChevronsUpDown className="h-4 w-4 shrink-0" aria-hidden />
       </span>
-      <select
-        aria-label={label}
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onValueChange(e.target.value as T)}
-        className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0 disabled:cursor-default"
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </div>
+    </ChoicePicker>
   )
 }
 

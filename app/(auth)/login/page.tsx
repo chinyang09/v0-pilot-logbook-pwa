@@ -652,7 +652,7 @@ export default function LoginPage() {
                   {passkeySupported && (
                     <Button
                       variant="ghost"
-                      className="w-full h-12 text-base bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[1.03]"
+                      className="w-full h-12 text-base bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-[background-color,color,scale] active:scale-[1.03]"
                       onClick={attemptPasskeyLogin}
                       disabled={isLoading || isOffline}
                     >
@@ -672,7 +672,7 @@ export default function LoginPage() {
 
                   <Button
                     variant="ghost"
-                    className="w-full h-12 text-base bg-transparent text-white/80 border border-white/20 hover:bg-white/10 hover:text-white transition-all active:scale-[1.03]"
+                    className="w-full h-12 text-base bg-transparent text-white/80 border border-white/20 hover:bg-white/10 hover:text-white transition-[background-color,color,scale] active:scale-[1.03]"
                     onClick={() => {
                       setError("")
                       setStep("recovery")
@@ -845,7 +845,7 @@ export default function LoginPage() {
 
                   <Button
                     variant="ghost"
-                    className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[1.03]"
+                    className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-[background-color,color,scale] active:scale-[1.03]"
                     onClick={startRegistration}
                     disabled={isLoading || !callsign.trim()}
                   >
@@ -930,7 +930,7 @@ export default function LoginPage() {
                     </p>
                     <Button
                       variant="ghost"
-                      className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[1.03]"
+                      className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-[background-color,color,scale] active:scale-[1.03]"
                       onClick={registerPasskey}
                       disabled={isLoading}
                     >
@@ -1046,7 +1046,7 @@ export default function LoginPage() {
                   )}
                   <Button
                     variant="ghost"
-                    className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-all active:scale-[1.03]"
+                    className="w-full h-12 bg-white/15 hover:bg-white/25 text-white border border-white/20 backdrop-blur-sm transition-[background-color,color,scale] active:scale-[1.03]"
                     onClick={registerAdditionalPasskey}
                     disabled={isLoading}
                   >

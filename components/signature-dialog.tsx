@@ -86,8 +86,9 @@ export function SignatureDialog({
   if (!open || typeof document === "undefined") return null;
 
   // z-[110]: above the app chrome (header z-99, nav pill z-100) and BELOW
-  // Radix's popper layer (z-150). At z-[200] the crew `Select` opened *behind*
-  // the dialog, which is why picking a signer looked broken and intermittent;
+  // the floating layers — Radix's poppers (z-150) and the option menu
+  // (z-200), which the signer picker opens. Above those, the picker opened
+  // *behind* the dialog, which is why picking a signer looked broken;
   // at z-[65] — written when the nav pill was 60 — the pill and the header
   // drew over the dialog on a phone and hid its Save button.
   return createPortal(

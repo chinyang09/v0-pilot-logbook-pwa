@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
 import type React from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { useCalibratedRowHeight, useRemeasureOnCalibration } from "@/hooks/use-calibrated-row";
 import { PageContainer } from "@/components/page-container";
 import { useAirportDatabase, useAirportSeedProgress, useFlights } from "@/hooks/data";
 import {
@@ -22,7 +23,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { FastScroll, generateAlphabetItemsFromList, FAST_SCROLL_TOP_KEY } from "@/components/ui/fast-scroll";
-import { scrollToIndexSettled, scrollToTop } from "@/lib/utils/virtual-scroll";
+import { scrollToIndexSettled, scrollToTop, observeRectAfterLayout, scrollAfterAttach, viewportRect } from "@/lib/utils/virtual-scroll";
 import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { AirportDetailPanel } from "@/components/airport-detail-panel";
@@ -66,7 +67,7 @@ const AirportCard = memo(function AirportCard({
         // OVER bg-card. The old ternary dropped bg-card for recent rows, so
         // the gradient sat on the darker page background and recent airports
         // rendered a different shade from recent aircraft/crew.
-        "w-full text-left rounded-lg py-2 pl-3 pr-6 transition-all cursor-pointer bg-card border border-border hover:bg-accent",
+        "w-full text-left rounded-lg py-2 pl-3 pr-6 transition-colors cursor-pointer bg-card border border-border hover:bg-accent",
         isRecent &&
           "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20 hover:bg-transparent",
         isSelected && "bg-primary/20 border-primary hover:bg-primary/20"
@@ -124,7 +125,6 @@ export default function AirportsPage() {
   // A new install writes ~29k airports before the first one can be listed
   // (~20s on a fresh device); the page stood empty for all of it.
   const waitingForTable = isLoading && airports.length === 0;
-  const seedProgress = useAirportSeedProgress(waitingForTable);
   const { flights } = useFlights();
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
   const isFastScrollingRef = useRef(false);
@@ -160,6 +160,10 @@ export default function AirportsPage() {
   // Only sync detail panel when this page is active — prevents hidden pages from
   // overwriting the active page's detail content when shared selectedId changes.
   const isActive = usePageActive("/airports")
+  // Only while it is on screen: the page is kept alive, and a seed it started
+  // runs on while the pilot is elsewhere — each chunk re-rendered the hidden
+  // page (~290 components, ~116 times over a new install's seed).
+  const seedProgress = useAirportSeedProgress(waitingForTable && isActive);
 
   // Sort all airports: favorites first, then alphabetical by ICAO
   const allSortedAirports = useMemo(() => {
@@ -317,20 +321,40 @@ export default function AirportsPage() {
       setScrollMargin(margin);
     };
 
-    updateMargin();
+    // No synchronous first call: this runs in the commit that mounted the
+    // page, so a rect read here is a forced layout of it (~94ms at 4× on the
+    // first Airports visit). The observer's first callback lands after the
+    // browser's own layout with the same answer.
     const observer = new ResizeObserver(updateMargin);
     observer.observe(el);
     return () => observer.disconnect();
   }, [debouncedSearchQuery, airports, recentAirports]);
 
+  // Every card is two truncated lines, so ONE measured row is exact for all
+  // of them — per-row measuring corrects the scroll offset and kills a fling
+  // (see useCalibratedRowHeight).
+  const { rowHeight, measureRow, estimateSize } = useCalibratedRowHeight("airports", 60);
+
   // Virtual list
+  // STABLE: the virtualizer rebuilds every row's measurement whenever
+  // `getItemKey` changes identity, and an inline arrow is a new one each
+  // render — a full pass over the whole list per scroll-driven render.
+  const getAirportKey = useCallback((i: number) => displayAirports[i]?.icao ?? i, [displayAirports]);
   const rowVirtualizer = useVirtualizer({
     count: displayAirports.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 60, // Compact airport card height (py-2 + 2 lines + pb-1 gap)
+    // Sized from a ResizeObserver, not a synchronous read mid-commit (see
+    // `observeRectAfterLayout`).
+    observeElementRect: observeRectAfterLayout,
+    scrollToFn: scrollAfterAttach,
+    initialRect: viewportRect(),
+    estimateSize,
+    getItemKey: getAirportKey,
     overscan: 10,
     scrollMargin,
   });
+
+  useRemeasureOnCalibration(rowHeight, rowVirtualizer);
 
   const virtualItems = rowVirtualizer.getVirtualItems();
 
@@ -754,7 +778,7 @@ export default function AirportsPage() {
                       onKeyDown={(e: React.KeyboardEvent) => {
                         if (e.key === "Enter" || e.key === " ") handleSelectFr24Airport(fr24Result);
                       }}
-                      className="w-full text-left rounded-lg py-2 pl-3 pr-6 transition-all cursor-pointer bg-card border border-border hover:bg-accent"
+                      className="w-full text-left rounded-lg py-2 pl-3 pr-6 transition-colors cursor-pointer bg-card border border-border hover:bg-accent"
                     >
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-foreground">{fr24Result.icao}</span>
@@ -810,8 +834,10 @@ export default function AirportsPage() {
                       width: "100%",
                       transform: `translateY(${virtualRow.start - rowVirtualizer.options.scrollMargin}px)`,
                     }}
+                    // What the fast-scroll rail finds the row by (`scrollToIndexSettled`)
+                    // — an attribute only; nothing measures it.
                     data-index={virtualRow.index}
-                    ref={rowVirtualizer.measureElement}
+                    ref={measureRow}
                   >
                     <div className="pt-1">
                       <AirportCard

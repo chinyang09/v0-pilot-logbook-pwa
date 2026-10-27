@@ -13,6 +13,7 @@ import {
   memo,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { observeRectAfterLayout, scrollAfterAttach, viewportRect } from "@/lib/utils/virtual-scroll";
 import type { FlightLog } from "@/lib/db";
 import { deleteFlight, restoreFlight } from "@/lib/db";
 import { showUndoToast } from "@/lib/utils/undo-toast";
@@ -43,6 +44,7 @@ import {
 } from "@/components/flight-context-preview";
 import { deriveFlight, type DeriveKind } from "@/lib/utils/derive-flight";
 import { insertFlightSorted } from "@/lib/utils/flight-sort";
+import { useCalibratedRowHeight, useRemeasureOnCalibration } from "@/hooks/use-calibrated-row";
 
 export interface FlightListRef {
   scrollToFlight: (flightId: string, instant?: boolean) => void;
@@ -366,87 +368,36 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     const fastScrollItems = useMemo(() => generateFlightYearItems(flights), [flights]);
     const hasYearRail = fastScrollItems.length > 1;
 
-    // The row height, calibrated from the first card actually laid out.
-    //
-    // This matters more than it looks. When a measured row turns out taller or
-    // shorter than the estimate, the virtualizer keeps the view stable by
-    // programmatically scrolling by the difference — and a programmatic scroll
-    // CANCELS an in-progress momentum scroll on touch. Scrolling up through
-    // rows that had never been measured (after jumping into the middle of the
-    // list) therefore killed the fling on almost every row: the list stopped
-    // dead and needed another swipe, over and over.
-    //
-    // Every flight card is the same height by construction (the two optional
-    // rows in flight-card-body reserve their line), so ONE measurement is the
-    // right answer for all of them. Calibrate from it and the correction never
-    // fires. 104 is only the opening guess, used for the first paint.
-    const [rowHeight, setRowHeight] = useState(0); // 0 = not calibrated yet
-    const rowHeightRef = useRef(110); // opening guess (a phone's measured row), for the first paint only
-    const calibratedRef = useRef(false);
+    // ONE row height, calibrated from the first card that lays out — every
+    // flight card is the same height by construction (the two optional rows in
+    // flight-card-body reserve their line), so nothing is measured after it.
+    // See `useCalibratedRowHeight` for why per-row measuring kills a fling.
+    const { rowHeight, measureRow, estimateSize } = useCalibratedRowHeight("logbook", 110);
 
     // Create virtualizer instance
+    // STABLE: the virtualizer rebuilds every row's measurement whenever
+    // `getItemKey` changes identity, and an inline arrow is a new one each
+    // render — a full pass over the whole list per scroll-driven render.
+    const getFlightKey = useCallback((index: number) => flights[index]?.id ?? `row-${index}`, [flights]);
     const rowVirtualizer = useVirtualizer({
       count: flights.length,
       getScrollElement: () => scrollContainerRef.current,
-      estimateSize: () => rowHeightRef.current,
+      // Sized from a ResizeObserver, not a synchronous read mid-commit (see
+      // `observeRectAfterLayout`).
+      observeElementRect: observeRectAfterLayout,
+      scrollToFn: scrollAfterAttach,
+      initialRect: viewportRect(),
+      estimateSize,
       // Enough that a fast flick doesn't outrun the rendered window. Cheap now
       // that the rows aren't measured individually.
       overscan: 8,
       // Sizes are keyed per FLIGHT, not per index. Keyed by index they get
       // misattributed the moment the list changes — a delete or a re-sort
       // hands row N the height that belonged to whatever used to be there.
-      getItemKey: (index) => flights[index]?.id ?? `row-${index}`,
+      getItemKey: getFlightKey,
     });
 
-    // Calibrate ONCE off the first card that lays out, then never measure again.
-    //
-    // Not measuring is the point. Every card is the same height by
-    // construction, so one number is exact for all of them — and with no
-    // per-row measurement the virtualizer can never discover a size it didn't
-    // expect, which means it can never correct the scroll offset. That is what
-    // makes the momentum scroll survive anywhere in the list, including
-    // upwards through rows that have never been on screen.
-    //
-    // It is also strictly one-shot on purpose. Feeding every row's measurement
-    // back into the estimate is a setState in a ref callback: two rows that
-    // disagree by a fraction of a pixel (subpixel layout, a device's font
-    // scaling) ping-pong it and React tears the page down with "maximum update
-    // depth exceeded".
-    //
-    // Read from a ResizeObserver, not in the ref callback. A ref callback runs
-    // in the middle of React's commit, so `getBoundingClientRect` there forced
-    // a layout of the whole app on every cold start — ~230ms at a 4× throttle,
-    // the single biggest native cost before the first card painted — which
-    // the rest of the commit then dirtied again. The observer reports after
-    // the browser's own layout, at no extra cost.
-    const calibrationRef = useRef<ResizeObserver | null>(null);
-    const measureRow = useCallback((el: HTMLElement | null) => {
-      if (!el || calibratedRef.current || calibrationRef.current) return;
-      const observer = new ResizeObserver(([entry]) => {
-        const h = Math.round(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height);
-        if (h <= 0) return;
-        observer.disconnect();
-        calibrationRef.current = null;
-        calibratedRef.current = true;
-        rowHeightRef.current = h;
-        setRowHeight(h);
-      });
-      calibrationRef.current = observer;
-      observer.observe(el);
-      // The row unmounted before it laid out: let the next row calibrate.
-      return () => {
-        if (calibrationRef.current !== observer) return;
-        observer.disconnect();
-        calibrationRef.current = null;
-      };
-    }, []);
-
-    // Rebuild every row's position from the calibrated height. `estimateSize`
-    // is read through a ref, which the virtualizer does not watch — this is
-    // what tells it to look again.
-    useEffect(() => {
-      if (rowHeight > 0) rowVirtualizer.measure();
-    }, [rowHeight, rowVirtualizer]);
+    useRemeasureOnCalibration(rowHeight, rowVirtualizer);
 
     // Get virtual items
     const virtualItems = rowVirtualizer.getVirtualItems();

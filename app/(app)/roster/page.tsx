@@ -10,20 +10,26 @@
  * a roster is opened for — sat at the far end of the history.
  *
  * The roster shows the logbook's flights alongside its own duties: a roster
- * without its flights is half a roster. They stay the logbook's (read-only
- * here; tapping one opens it there) — `scheduleEntries` still holds non-flight
- * duties only.
+ * without its flights is half a roster. They stay the logbook's —
+ * `scheduleEntries` still holds non-flight duties only — but a tapped flight
+ * opens in THIS page's detail panel (`flight:<id>`), so Back returns to the
+ * roster. It used to be a link into the logbook, and Back went there instead.
  */
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react"
+import { usePathname } from "next/navigation"
+import { mutate } from "swr"
 import Link from "next/link"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { useSessionState } from "@/hooks/use-session-state"
 import { GlassButtonGroup, GlassIconButton } from "@/components/ui/glass-icon-button"
 import { Plus, Shield, AlertCircle, TrendingUp } from "lucide-react"
-import { useScheduleEntries, useDiscrepancyCounts, useFlights, refreshAllData } from "@/hooks/data"
+import { useScheduleEntries, useDiscrepancyCounts, useFlights, refreshAllData, CACHE_KEYS } from "@/hooks/data"
+import { FlightForm } from "@/components/flight-form"
+import { syncService } from "@/lib/sync"
 import { usePageActive } from "@/hooks/use-page-active"
+import { whenIdle } from "@/lib/utils/idle"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { parseYMDLocal, formatLocalYMD } from "@/lib/utils/date"
 import { UnifiedImportButton } from "@/components/import/unified-import-button"
@@ -41,6 +47,8 @@ import type { ScheduleEntry } from "@/types/entities/roster.types"
 
 /** The phone's "a new one is open" selection — never stored (see use-detail-panel). */
 const NEW_SENTINEL = "__new__"
+/** A logbook flight opened from the agenda — namespaced, as a duty id could collide. */
+const FLIGHT_PREFIX = "flight:"
 
 const QUICK_LINK =
   "flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-xs font-medium transition-colors hover:bg-secondary active:bg-secondary"
@@ -63,7 +71,11 @@ export default function RosterPage() {
   const selectedKey = storedSelection ?? todayKey
 
   const days = useMemo(() => buildRosterDays(scheduleEntries, flights, { zulu }), [scheduleEntries, flights, zulu])
-  const agenda = useMemo(() => agendaFrom(days, selectedKey), [days, selectedKey])
+  // Every rostered day from the selected one on — the list is virtualised, so
+  // there is no reason left to stop at a month.
+  const agenda = useMemo(() => agendaFrom(days, selectedKey, Infinity), [days, selectedKey])
+  // The page's scroller, which the virtualised agenda shares with the month.
+  const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null)
 
   // A duty opens in the DETAIL panel — beside the month on a tablet, the
   // full-screen overlay on a phone — the way a flight opens in the logbook.
@@ -75,6 +87,7 @@ export default function RosterPage() {
   )
 
   const openEditDuty = useCallback((entry: ScheduleEntry) => setSelectedId(entry.id), [setSelectedId])
+  const openFlight = useCallback((flightId: string) => setSelectedId(`${FLIGHT_PREFIX}${flightId}`), [setSelectedId])
 
   const handleDeleteDuty = useCallback(
     async (entry: ScheduleEntry) => {
@@ -134,9 +147,12 @@ export default function RosterPage() {
   // refreshes the schedule and moves "today" on.
   const onActivated = useCallback(() => {
     setNow(Date.now())
-    refreshEntries()
+    whenIdle(refreshEntries)
   }, [refreshEntries])
   const isActive = usePageActive("/roster", onActivated)
+  // The pathname moves in the same render as a selection, the active-route
+  // store a commit later — gate the panel on both (the dashboard's rule).
+  const onRoster = usePathname() === "/roster"
 
   // While a NEW duty's form is open, data-driven re-syncs must not replace it
   // — but the user choosing another duty ends it (the crew page's rule).
@@ -145,10 +161,28 @@ export default function RosterPage() {
   // Keep-alive: only the ACTIVE roster may write the shared detail panel, or a
   // hidden roster would overwrite the page in front of it.
   const syncDetailPanel = useCallback(() => {
-    if (!isActive) return
+    if (!isActive || !onRoster) return
     if (creatingRef.current) {
       if (selectedId === NEW_SENTINEL || selectedId === creatingRef.current.sel) return
       creatingRef.current = false
+    }
+    if (selectedId?.startsWith(FLIGHT_PREFIX)) {
+      const flightId = selectedId.slice(FLIGHT_PREFIX.length)
+      setDetailContent(
+        <div className="h-full overflow-hidden bg-background">
+          <FlightForm
+            key={flightId}
+            flightId={flightId}
+            isDesktop={isDesktop}
+            onFlightAdded={() => {
+              mutate(CACHE_KEYS.flights)
+              if (navigator.onLine) syncService.fullSync()
+            }}
+            onClose={() => setSelectedId(null)}
+          />
+        </div>
+      )
+      return
     }
     if (entriesLoading && scheduleEntries.length === 0) {
       setDetailContent(<PanelLoading />)
@@ -159,7 +193,7 @@ export default function RosterPage() {
         <DutyDetailPanel key={selectedEntry.id} entry={selectedEntry} onSaved={handleDutySaved} />
       ) : null
     )
-  }, [isActive, selectedId, selectedEntry, entriesLoading, scheduleEntries.length, handleDutySaved, setDetailContent])
+  }, [isActive, onRoster, selectedId, selectedEntry, entriesLoading, scheduleEntries.length, handleDutySaved, isDesktop, setDetailContent, setSelectedId])
 
   useEffect(() => {
     syncDetailPanel()
@@ -223,7 +257,7 @@ export default function RosterPage() {
 
   return (
     <>
-      <PageContainer title="Roster">
+      <PageContainer title="Roster" mainRef={setScrollEl}>
         <div className="mx-auto max-w-2xl space-y-4 px-panel pt-4">
           <RosterMonth
             selectedKey={selectedKey}
@@ -240,19 +274,7 @@ export default function RosterPage() {
             </p>
           )}
 
-          <RosterAgenda
-            agenda={agenda}
-            todayKey={todayKey}
-            display={display}
-            activations={activations}
-            // Lit only where the panel beside the roster shows it.
-            selectedId={isDesktop ? selectedId : null}
-            onEditDuty={openEditDuty}
-            onDeleteDuty={handleDeleteDuty}
-            onAddDuty={addDutyOn}
-          />
-
-          <nav aria-label="Related" className="flex flex-wrap gap-2 pt-2">
+          <nav aria-label="Related" className="flex flex-wrap gap-2 ">
             <Link href="/currencies" className={QUICK_LINK}>
               <Shield className="h-4 w-4 shrink-0 text-muted-foreground" />
               <span>Currencies</span>
@@ -271,6 +293,21 @@ export default function RosterPage() {
               <span>FDP</span>
             </Link>
           </nav>
+
+          <RosterAgenda
+            agenda={agenda}
+            todayKey={todayKey}
+            display={display}
+            activations={activations}
+            scrollElement={scrollEl}
+            onOpenFlight={openFlight}
+            // Lit only where the panel beside the roster shows it.
+            selectedId={isDesktop ? selectedId : null}
+            onEditDuty={openEditDuty}
+            onDeleteDuty={handleDeleteDuty}
+            onAddDuty={addDutyOn}
+          />
+
         </div>
       </PageContainer>
 

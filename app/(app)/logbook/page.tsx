@@ -28,6 +28,7 @@ import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { useSearchParams } from "next/navigation"
 import { usePageActive } from "@/hooks/use-page-active"
+import { whenIdle } from "@/lib/utils/idle"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassButtonGroup, GlassGroupButton, GlassIconButton } from "@/components/ui/glass-icon-button"
 
@@ -104,8 +105,10 @@ export default function LogbookPage() {
     setSelectedId: setSelectedFlightId,
   } = useDetailPanel()
 
-  // Refresh flight data when this keep-alive page becomes active again
-  const isActive = usePageActive("/logbook", refreshFlights)
+  // Refresh flight data when this keep-alive page becomes active again — at
+  // idle, not in the tab switch (see whenIdle).
+  const refreshFlightsWhenIdle = useCallback(() => whenIdle(refreshFlights), [refreshFlights])
+  const isActive = usePageActive("/logbook", refreshFlightsWhenIdle)
   // The open panel hangs from the bar: the header's tap band and fade tail
   // step aside for it (released once its collapse has run).
   useFloatingPanelUnderHeader(isActive && (showSearch || showCalendar), PANEL_MS)
@@ -695,17 +698,12 @@ export default function LogbookPage() {
           monthYearView={showMonthPicker}
           onHeaderPress={() => setShowMonthPicker((v) => !v)}
           onMonthSelect={(year, month) => {
+            // Live: the wheels move the calendar and the list as they settle,
+            // and the date selector closes the picker.
             setSelectedMonth({ year, month })
             selectedMonthRef.current = { year, month }
             syncSourceRef.current = "calendar"
             handleCalendarMonthChange(year, month)
-            setShowMonthPicker(false)
-          }}
-          onYearChange={(newYear) => {
-            setSelectedMonth({ year: newYear, month: selectedMonth.month })
-            selectedMonthRef.current = { year: newYear, month: selectedMonth.month }
-            syncSourceRef.current = "calendar"
-            handleCalendarMonthChange(newYear, selectedMonth.month)
           }}
         />
       </div>

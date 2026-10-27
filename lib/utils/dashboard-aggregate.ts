@@ -232,6 +232,78 @@ function engineFromDescription(
   return null
 }
 
+/**
+ * 90-day recency — three takeoffs and three landings — over the FULL flown
+ * history, and the day it lapses.
+ *
+ * Its own function because the legal page needs it and nothing else from the
+ * period aggregate: computing the whole aggregate over every flight ever
+ * logged, a detail row per flight included, to read this one figure was most
+ * of the dashboard's aggregate cost on its first open.
+ */
+export function ninetyDayRecency(
+  flights: FlightLog[],
+  now: Date = new Date(),
+): NinetyDayCurrency {
+  const recency: NinetyDayCurrency = { takeoffs: 0, landings: 0, current: false, lapseIso: null }
+  // In UTC, because `flight.date` is the UTC date of OUT and `legality.ts`
+  // reads the lapse against the UTC date too — a local "90 days ago" moved the
+  // window a day either side of the lapse it is compared with. And EXCLUSIVE of
+  // the day exactly 90 days back: `lapseIso` (below) is the first day the
+  // pilot is NOT current, D + 90, so on that day flight D must already be out
+  // of the window. Counting it as well made the window 91 days and left the
+  // pilot current on the very day the panel says they lapse.
+  const ninetyAgoIso = isoPlusDays(
+    `${now.getUTCFullYear()}-${(now.getUTCMonth() + 1).toString().padStart(2, "0")}-${now
+      .getUTCDate()
+      .toString()
+      .padStart(2, "0")}`,
+    -RECENCY_DAYS,
+  )
+
+  // Newest first, so the walk below meets the third event in recency order.
+  const recentEvents: Array<{ date: string; takeoffs: number; landings: number }> = []
+  for (const flight of flights) {
+    if (!flight.date || flight.date <= ninetyAgoIso) continue
+    if (!isFlownFlight(flight)) continue
+    const to = (flight.dayTakeoffs || 0) + (flight.nightTakeoffs || 0)
+    const ldg = (flight.dayLandings || 0) + (flight.nightLandings || 0)
+    if (to === 0 && ldg === 0) continue
+    recentEvents.push({ date: flight.date, takeoffs: to, landings: ldg })
+    recency.takeoffs += to
+    recency.landings += ldg
+  }
+  recentEvents.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+
+  recency.current =
+    recency.takeoffs >= RECENCY_REQUIRED &&
+    recency.landings >= RECENCY_REQUIRED
+
+  // When the count is met, the flight that supplies the THIRD event is what
+  // holds it up — recency lapses 90 days after that flight's date, not after
+  // the most recent one. Takeoffs and landings lapse independently; the earlier
+  // of the two is when the pilot stops being current.
+  if (recency.current) {
+    const bindingDate = (pick: (e: (typeof recentEvents)[number]) => number): string | null => {
+      let count = 0
+      for (const e of recentEvents) {
+        count += pick(e)
+        if (count >= RECENCY_REQUIRED) return e.date
+      }
+      return null
+    }
+    const toDate = bindingDate((e) => e.takeoffs)
+    const ldgDate = bindingDate((e) => e.landings)
+    const earliest =
+      toDate && ldgDate ? (toDate < ldgDate ? toDate : ldgDate) : (toDate ?? ldgDate)
+    recency.lapseIso = earliest
+      ? isoPlusDays(earliest, RECENCY_DAYS)
+      : null
+  }
+
+  return recency
+}
+
 export function aggregateDashboard({
   flights,
   aircraft,
@@ -278,61 +350,7 @@ export function aggregateDashboard({
 
   // Recency is computed against the full flown history, independent of the
   // period filter — a 7-day period does not make a pilot un-current.
-  //
-  // In UTC, because `flight.date` is the UTC date of OUT and `legality.ts`
-  // reads the lapse against the UTC date too — a local "90 days ago" moved the
-  // window a day either side of the lapse it is compared with. And EXCLUSIVE of
-  // the day exactly 90 days back: `lapseIso` (below) is the first day the
-  // pilot is NOT current, D + 90, so on that day flight D must already be out
-  // of the window. Counting it as well made the window 91 days and left the
-  // pilot current on the very day the panel says they lapse.
-  const ninetyAgoIso = isoPlusDays(
-    `${now.getUTCFullYear()}-${(now.getUTCMonth() + 1).toString().padStart(2, "0")}-${now
-      .getUTCDate()
-      .toString()
-      .padStart(2, "0")}`,
-    -RECENCY_DAYS,
-  )
-
-  // Newest first, so the walk below meets the third event in recency order.
-  const recentEvents: Array<{ date: string; takeoffs: number; landings: number }> = []
-  for (const flight of flights) {
-    if (!flight.date || flight.date <= ninetyAgoIso) continue
-    if (!isFlownFlight(flight)) continue
-    const to = (flight.dayTakeoffs || 0) + (flight.nightTakeoffs || 0)
-    const ldg = (flight.dayLandings || 0) + (flight.nightLandings || 0)
-    if (to === 0 && ldg === 0) continue
-    recentEvents.push({ date: flight.date, takeoffs: to, landings: ldg })
-    result.ninetyDayCurrency.takeoffs += to
-    result.ninetyDayCurrency.landings += ldg
-  }
-  recentEvents.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
-
-  result.ninetyDayCurrency.current =
-    result.ninetyDayCurrency.takeoffs >= RECENCY_REQUIRED &&
-    result.ninetyDayCurrency.landings >= RECENCY_REQUIRED
-
-  // When the count is met, the flight that supplies the THIRD event is what
-  // holds it up — recency lapses 90 days after that flight's date, not after
-  // the most recent one. Takeoffs and landings lapse independently; the earlier
-  // of the two is when the pilot stops being current.
-  if (result.ninetyDayCurrency.current) {
-    const bindingDate = (pick: (e: (typeof recentEvents)[number]) => number): string | null => {
-      let count = 0
-      for (const e of recentEvents) {
-        count += pick(e)
-        if (count >= RECENCY_REQUIRED) return e.date
-      }
-      return null
-    }
-    const toDate = bindingDate((e) => e.takeoffs)
-    const ldgDate = bindingDate((e) => e.landings)
-    const earliest =
-      toDate && ldgDate ? (toDate < ldgDate ? toDate : ldgDate) : (toDate ?? ldgDate)
-    result.ninetyDayCurrency.lapseIso = earliest
-      ? isoPlusDays(earliest, RECENCY_DAYS)
-      : null
-  }
+  result.ninetyDayCurrency = ninetyDayRecency(flights, now)
 
   const typeMinutes = new Map<string, number>()
 

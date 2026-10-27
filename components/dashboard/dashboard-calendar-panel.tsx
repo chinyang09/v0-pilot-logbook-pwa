@@ -114,13 +114,7 @@ export function DashboardCalendarPanel({
         splitLayout={isSplitLayout}
         monthYearView={monthYearView}
         onHeaderPress={() => setMonthYearView(!monthYearView)}
-        onMonthSelect={(year, month) => {
-          setSelectedMonth({ year, month })
-          setMonthYearView(false)
-        }}
-        onYearChange={(year) =>
-          setSelectedMonth({ year, month: selectedMonth.month })
-        }
+        onMonthSelect={(year, month) => setSelectedMonth({ year, month })}
       />
     </div>
   )

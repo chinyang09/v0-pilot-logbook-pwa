@@ -4,13 +4,14 @@ import { CODE_INPUT_PROPS } from "@/lib/utils/input-props";
 import type React from "react";
 import { ScrollIndicator } from "@/components/ui/scroll-indicator";
 
-import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, useId } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, useId, startTransition, memo } from "react";
 import { useRouter } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { userDb } from "@/lib/db/user-db";
 import {
   ChevronDown,
   ChevronRight,
+  ChevronsUpDown,
   Plane,
   PlaneTakeoff,
   PlaneLanding,
@@ -39,7 +40,6 @@ import {
   isLiveFlight,
   getAirportTimeInfo,
 } from "@/lib/db";
-import { useDebounce } from "@/hooks/use-debounce";
 import { formPatch, rebaseForm } from "@/lib/utils/form-patch";
 import { insertFlightSorted } from "@/lib/utils/flight-sort";
 import { pickSelfCard } from "@/lib/utils/self-card";
@@ -89,7 +89,8 @@ import {
   positioningPatch,
   withoutSimulatorPins,
 } from "@/lib/utils/entry-type";
-import { ADDITIONAL_CREW_ROLES, additionalCrewRoleLabel, requiresTwoPilots } from "@/lib/utils/crew-complement";
+import { ADDITIONAL_CREW_ROLES, additionalCrewField, additionalCrewRoleLabel, requiresTwoPilots } from "@/lib/utils/crew-complement";
+import { ChoicePicker, type MenuOption } from "@/components/ui/option-menu";
 import type { EntryType } from "@/types/entities/flight.types";
 import type { DisplayPreferences } from "@/types/db/stores.types";
 import type { ExtractedFlightData } from "@/lib/ocr";
@@ -154,32 +155,164 @@ function SettingsRow({
   );
 }
 
-/** Size a textarea to its content (no `field-sizing`: one engine lacks it). */
-function fitTextarea(el: HTMLTextAreaElement) {
-  el.style.height = "auto";
-  el.style.height = `${el.scrollHeight}px`;
-}
 /**
- * Stable, so it runs on mount rather than on every render of the form.
- *
- * The first fit waits for a ResizeObserver callback. Reading `scrollHeight`
- * straight from the ref ran in the middle of React's commit, so it forced a
- * synchronous layout of the whole app for one textarea (~90ms of the tap that
- * opens a flight, at a 4× CPU throttle) — and the rest of the commit then
- * dirtied it again. An observer fires after the browser's own layout and
- * before paint, so the read is free and the fitted height still lands in the
- * first frame.
+ * An additional crew member, in the seat rows' structure: the ROLE on the
+ * left, where a seat row has its label, and the NAME on the right with the
+ * person icon and chevron a seat row's value has. Both are their own targets
+ * — the role opens the role menu, the name the crew picker — so the row has
+ * no tap of its own.
  */
-const fitTextareaRef = (el: HTMLTextAreaElement | null) => {
-  if (!el) return;
-  const ro = new ResizeObserver(() => {
-    ro.disconnect();
-    fitTextarea(el);
-  });
-  ro.observe(el);
-};
+function AdditionalCrewRow({
+  role,
+  name,
+  onRoleChange,
+  onPickCrew,
+}: {
+  role: AdditionalCrew["role"];
+  name?: string;
+  onRoleChange: (role: AdditionalCrew["role"]) => void;
+  onPickCrew: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-1 row-divider">
+      <ChoicePicker
+        label="Crew role"
+        value={role}
+        options={ADDITIONAL_CREW_ROLES}
+        onValueChange={onRoleChange}
+        align="start"
+        className="-ml-2 flex h-11 min-w-0 shrink-0 items-center gap-1 rounded-lg px-2 text-left text-foreground outline-none focus-visible:outline-2 focus-visible:outline-ring"
+      >
+        {additionalCrewRoleLabel(role)}
+        <ChevronsUpDown className="h-4 w-4 text-muted-foreground" aria-hidden />
+      </ChoicePicker>
+      <button
+        type="button"
+        onClick={onPickCrew}
+        aria-label={`Crew member: ${name ?? "not set"}`}
+        className="-mr-2 flex h-11 min-w-0 items-center justify-end gap-2 rounded-lg px-2 outline-none focus-visible:outline-2 focus-visible:outline-ring"
+      >
+        <span className={cn("truncate", name ? "text-foreground" : "text-muted-foreground")}>{name ?? "Select"}</span>
+        <User className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+        <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/50" aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * A text field that answers the KEY, not the form.
+ *
+ * Each keystroke used to set the whole form's state, so the field could only
+ * show the new character once all ~50 rows had re-rendered — ~140ms of main
+ * thread per key at a 4× throttle, i.e. typing that visibly trailed the finger.
+ * The field now shows its own draft at once and hands the value to the form
+ * inside a TRANSITION, which React renders interruptibly: a quick run of keys
+ * is one form render, not one per key.
+ *
+ * While focused the draft is what is shown; unfocused, the form's value (so a
+ * clear, an OCR fill or a pulled edit lands as before). Between the two, the
+ * draft holds until the form has caught up with it, or a blur straight after
+ * the last key would flash the value from before it. The unmount flush saves
+ * the COMMITTED form state, and a transition commits within a frame or two of
+ * the key — long before a tap on Back.
+ */
+function useDraftText(value: string, commit: (next: string) => void) {
+  const [draft, setDraft] = useState(value);
+  const [focused, setFocused] = useState(false);
+  const [awaiting, setAwaiting] = useState(false);
+  if (awaiting && value === draft) setAwaiting(false);
+  return {
+    value: focused || awaiting ? draft : value,
+    onFocus: () => {
+      if (!awaiting) setDraft(value);
+      setFocused(true);
+    },
+    onBlur: () => setFocused(false),
+    change: (next: string) => {
+      setDraft(next);
+      setAwaiting(true);
+      startTransition(() => commit(next));
+    },
+  };
+}
+
+/** A single-line text input on `useDraftText`. `transform` shapes what is typed (upper case). */
+function DraftInput({
+  value,
+  onCommit,
+  transform,
+  ...props
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange"> & {
+  value: string;
+  onCommit: (next: string) => void;
+  transform?: (raw: string) => string;
+}) {
+  const draft = useDraftText(value, onCommit);
+  return (
+    <input
+      {...props}
+      value={draft.value}
+      onFocus={draft.onFocus}
+      onBlur={draft.onBlur}
+      onChange={(e) => draft.change(transform ? transform(e.target.value) : e.target.value)}
+    />
+  );
+}
+
+/**
+ * Remarks: multi-line, growing with what is written — and sized by CSS, not
+ * by script. A hidden copy of the text shares the textarea's grid cell, so the
+ * cell is as tall as the text and the textarea stretches to it. The old
+ * `height = auto; height = scrollHeight` fit was a forced layout of the whole
+ * app on every keystroke (`field-sizing: content` would do it in one line, but
+ * one engine lacks it, and the look must not depend on the engine).
+ */
+function RemarksField({ value, onCommit }: { value: string; onCommit: (next: string) => void }) {
+  const draft = useDraftText(value, onCommit);
+  const text = "block w-full text-base leading-snug [grid-area:1/1] whitespace-pre-wrap break-words";
+  return (
+    <div className="grid">
+      {/* The trailing space gives a final empty line its height. */}
+      <div aria-hidden className={cn(text, "invisible min-h-[2lh]")}>
+        {draft.value + " "}
+      </div>
+      <textarea
+        aria-label="Remarks"
+        placeholder="Add a remark"
+        rows={2}
+        value={draft.value}
+        onFocus={draft.onFocus}
+        onBlur={draft.onBlur}
+        onChange={(e) => draft.change(e.target.value)}
+        className={cn(
+          text,
+          "h-full resize-none overflow-hidden bg-transparent text-foreground outline-none placeholder:text-muted-foreground",
+        )}
+      />
+    </div>
+  );
+}
+
+const toUpper = (raw: string) => raw.toUpperCase();
 
 /** Fields only ever written straight to the database, by the pickers. */
+/** The seat a pilot can log, named by the logbook rules they log under. */
+const PILOT_ROLE_OPTIONS = (authority: Parameters<typeof roleLabel>[1]): Array<MenuOption<FlightLog["pilotRole"]>> =>
+  PILOT_ROLES.map((role) => ({ value: role, label: roleLabel(role, authority) }));
+
+const APPROACH_TYPES = ["ILS", "LOC", "VOR", "NDB", "RNAV", "RNP", "GLS", "Visual", "Circling"];
+
+/**
+ * The approach types offered — plus the record's own, when an import wrote one
+ * the list does not carry (LogTen writes "VISUAL"). Left out, the picker would
+ * show nothing chosen, and the first tap would rewrite the stored type.
+ */
+function approachTypeOptions(current: string): Array<MenuOption<string>> {
+  const types = APPROACH_TYPES.includes(current) || !current ? APPROACH_TYPES : [...APPROACH_TYPES, current];
+  return types.map((t) => ({ value: t, label: t }));
+}
+
 const PICKER_FIELDS: ReadonlySet<string> = new Set([
   "aircraftReg", "aircraftType",
   "departureIcao", "departureIata", "arrivalIcao", "arrivalIata",
@@ -500,9 +633,18 @@ interface FlightFormProps {
   isDesktop?: boolean;
 }
 
-export function FlightForm({
-  onFlightAdded,
-  onClose,
+/**
+ * Memoised on what the form actually reads. Every caller hands it inline
+ * `onFlightAdded`/`onClose` arrows, which the form does not call, so each
+ * re-render of the panel around it — two of them in the first second of every
+ * open — re-rendered all ~300 of the form's components for nothing.
+ */
+export const FlightForm = memo(
+  FlightFormImpl,
+  (a, b) => a.flightId === b.flightId && a.isDesktop === b.isDesktop && a.editingFlight === b.editingFlight,
+);
+
+function FlightFormImpl({
   editingFlight,
   flightId: flightIdProp,
   isDesktop = false,
@@ -558,6 +700,14 @@ export function FlightForm({
     }
     return createEmptyFlightLog();
   });
+  // An additional-crew row the pilot has added but not yet filled: its role,
+  // and how many crew the flight had when it was added. It is DERIVED away
+  // once the pick lands (the list has grown), with no effect to clear it.
+  const [crewSlot, setCrewSlot] = useState<{ role: AdditionalCrew["role"]; count: number } | null>(null);
+  const crewCount = formData.additionalCrew?.length ?? 0;
+  const crewSlotRole = crewSlot && crewSlot.count === crewCount ? crewSlot.role : null;
+  const setCrewSlotRole = (role: AdditionalCrew["role"] | null) =>
+    setCrewSlot(role ? { role, count: crewCount } : null);
   // The signature section starts open on a signed flight, as the accordion did.
   const [signatureSectionOpen, setSignatureSectionOpen] = useState(() => !!formData.signature);
   const signatureSectionId = useId();
@@ -1020,9 +1170,6 @@ export function FlightForm({
     });
   }, [calculatedFields, manualOverrides]);
 
-  // Debounce form data for auto-save
-  const debouncedFormData = useDebounce(formData, 500);
-
   // Track the last saved state to avoid unnecessary saves
   const lastSavedStateRef = useRef<string | null>(null);
   // The form as it stood when it last agreed with the database: what a save
@@ -1098,54 +1245,50 @@ export function FlightForm({
     );
   }, []);
 
-  // Auto-save to IndexedDB for existing flights (drafts or otherwise)
-  // This replaces sessionStorage draft management
+  // Auto-save to IndexedDB, 500ms after the form stops changing.
+  //
+  // A TIMER, not a debounced copy of the form in state (`useDebounce`): that
+  // state change re-rendered the whole form — ~300 fibers — half a second after
+  // it opened and after every pause in typing, to hand this effect a value it
+  // could read off its own closure. The timer is reset by every change, so when
+  // it fires the closure IS the latest form.
   useEffect(() => {
-    const autoSave = async () => {
-      // Only auto-save if we have an existing flight with an ID
-      const effectiveId = resolvedFlight?.id || flightIdProp;
-      if (!debouncedFormData?.id || !effectiveId) return;
-      // Guard: don't auto-save if the flight has been deleted from Dexie.
-      // Without this, auto-save would re-create the deleted record via updateFlight,
-      // causing useLiveQuery to fire and driving a render/re-save cycle (Error #185).
-      if (!resolvedFlight) return;
+    const effectiveId = resolvedFlight?.id || flightIdProp;
+    // Only auto-save an existing flight. Guard on the live row too: auto-saving
+    // a deleted flight would re-create it via updateFlight, and useLiveQuery
+    // would then drive a render/re-save cycle (Error #185).
+    const id = formData?.id;
+    if (!id || !effectiveId || !resolvedFlight) return;
 
-      // Create a serializable state to compare
-      const currentState = JSON.stringify({
-        ...debouncedFormData,
-        manualOverrides,
-      });
+    const timer = setTimeout(async () => {
+      const currentState = JSON.stringify({ ...formData, manualOverrides });
 
-      // If this is a new flight (ID changed), capture baseline from first debounced state
-      // This ensures we capture the state AFTER calculations have run
-      if (baselineFlightIdRef.current !== debouncedFormData.id) {
-        baselineFlightIdRef.current = debouncedFormData.id;
+      // A new flight: capture the baseline from its first SETTLED state — after
+      // the form's own calculations have run — and save nothing.
+      if (baselineFlightIdRef.current !== id) {
+        baselineFlightIdRef.current = id;
         lastSavedStateRef.current = currentState;
-        baselineRef.current = { ...debouncedFormData };
+        baselineRef.current = { ...formData };
         baselineOverridesRef.current = manualOverrides;
-        return; // Don't save on initial load, just capture baseline
-      }
-
-      // Skip save if nothing actually changed from baseline
-      if (lastSavedStateRef.current === currentState) {
         return;
       }
 
+      if (lastSavedStateRef.current === currentState) return;
+
       try {
-        const written = await persistFlight(debouncedFormData, manualOverrides);
+        const written = await persistFlight(formData, manualOverrides);
         if (!written) return;
         lastSavedStateRef.current = currentState;
         refreshSavedFlight(written);
       } catch (error) {
         console.error("Auto-save failed:", error);
       }
-    };
-
-    autoSave();
-    // Keyed on the debounced form data + flight identity. Depending on the full
-    // resolvedFlight would retrigger auto-save on every reactive DB write.
+    }, 500);
+    return () => clearTimeout(timer);
+    // Keyed on the form + flight identity. Depending on the full resolvedFlight
+    // would restart the timer on every reactive DB write.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedFormData, resolvedFlight?.id, flightIdProp, manualOverrides]);
+  }, [formData, resolvedFlight?.id, flightIdProp, manualOverrides]);
 
   // Update field helper
   const updateField = useCallback(
@@ -1154,6 +1297,9 @@ export function FlightForm({
     },
     []
   );
+
+  const commitRemarks = useCallback((v: string) => updateField("remarks", v), [updateField]);
+  const commitFlightNumber = useCallback((v: string) => updateField("flightNumber", v), [updateField]);
 
   // Handle OCR data extraction and populate form
   const handleOCRDataExtracted = useCallback((data: ExtractedFlightData) => {
@@ -1514,7 +1660,7 @@ export function FlightForm({
     router.push(`/aircraft?${params.toString()}`);
   };
 
-  const openCrewPicker = async (field: "picId" | "sicId" | "additionalCrew") => {
+  const openCrewPicker = async (field: string) => {
     if (!formData.id) return;
     saveScrollPosition();
     await forceSave();
@@ -1558,23 +1704,25 @@ export function FlightForm({
   );
 
 
-  // Additional crew management (members are added through the crew picker)
+  // Additional crew management, by ROW (members are added through the crew
+  // picker). By index, not id: an imported member may carry no crew-card id,
+  // and such a row could be neither re-roled nor removed.
   const updateAdditionalCrew = useCallback(
-    (id: string, updates: Partial<AdditionalCrew>) => {
+    (at: number, updates: Partial<AdditionalCrew>) => {
       setFormData((prev) => ({
         ...prev,
-        additionalCrew: (prev.additionalCrew || []).map((c) =>
-          c.id === id ? { ...c, ...updates } : c
+        additionalCrew: (prev.additionalCrew || []).map((c, i) =>
+          i === at ? { ...c, ...updates } : c
         ),
       }));
     },
     []
   );
 
-  const removeAdditionalCrew = useCallback((id: string) => {
+  const removeAdditionalCrew = useCallback((at: number) => {
     setFormData((prev) => ({
       ...prev,
-      additionalCrew: (prev.additionalCrew || []).filter((c) => c.id !== id),
+      additionalCrew: (prev.additionalCrew || []).filter((_, i) => i !== at),
     }));
   }, []);
 
@@ -1837,14 +1985,15 @@ export function FlightForm({
 
           <SwipeableRow onClear={() => clearField("flightNumber")}>
             <SettingsRow label="Flight #">
-              <input
+              <DraftInput
                 type="text"
                 className="text-right bg-transparent outline-none text-foreground w-32 placeholder:text-muted-foreground"
                 placeholder="-"
                 aria-label="Flight number"
                 {...CODE_INPUT_PROPS}
                 value={formData.flightNumber || ""}
-                onChange={(e) => updateField("flightNumber", e.target.value.toUpperCase())}
+                transform={toUpper}
+                onCommit={commitFlightNumber}
               />
             </SettingsRow>
           </SwipeableRow>
@@ -2006,7 +2155,7 @@ export function FlightForm({
             />
           </SwipeableRow>
 
-          <div className="flex items-center justify-center py-2 border-b border-border">
+          <div className="flex items-center justify-center py-2 row-divider">
             <Button
               variant="outline"
               size="sm"
@@ -2035,61 +2184,49 @@ export function FlightForm({
           </SwipeableRow>
 
           {/* Crew beyond the two seats — a relief pilot on an augmented crew,
-              a check pilot, an instructor. The role is the native select laid
-              over the role text, as the Pilot Role row does it. */}
+              a check pilot, an instructor. Each is a row in the PIC/SIC rows'
+              own structure: the ROLE is the label on the left and opens the
+              role menu; the NAME is the value on the right and opens the crew
+              picker for THIS row (`additionalCrewField(role, i)` — the pick
+              replaces it, in its role). Swipe clears it, as it does a seat. */}
           {(formData.additionalCrew ?? []).map((member, i) => (
-            <div
-              key={member.id ?? `${member.name}-${i}`}
-              className="flex items-center justify-between gap-2 py-1.5 pl-4 pr-2 row-divider"
-            >
-              <span className="flex min-w-0 items-center gap-2 text-foreground">
-                <User className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="truncate">{member.name || "Unnamed"}</span>
-              </span>
-              <span className="flex shrink-0 items-center">
-                <span className="relative flex h-9 items-center gap-1 px-2 text-muted-foreground focus-within:outline-2 focus-within:outline-ring">
-                  {additionalCrewRoleLabel(member.role)}
-                  <ChevronDown className="h-4 w-4" aria-hidden />
-                  <select
-                    aria-label={`Role of ${member.name || "crew member"}`}
-                    value={member.role}
-                    onChange={(e) =>
-                      member.id &&
-                      updateAdditionalCrew(member.id, { role: e.target.value as AdditionalCrew["role"] })
-                    }
-                    className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
-                  >
-                    {ADDITIONAL_CREW_ROLES.map((r) => (
-                      <option key={r.value} value={r.value}>
-                        {r.label}
-                      </option>
-                    ))}
-                  </select>
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9 text-muted-foreground"
-                  aria-label={`Remove ${member.name || "crew member"}`}
-                  onClick={() => member.id && removeAdditionalCrew(member.id)}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </span>
-            </div>
+            <SwipeableRow key={member.id ?? `${member.name}-${i}`} onClear={() => removeAdditionalCrew(i)}>
+              <AdditionalCrewRow
+                role={member.role}
+                name={member.name || "Unnamed"}
+                onRoleChange={(role) => updateAdditionalCrew(i, { role })}
+                onPickCrew={() => openCrewPicker(additionalCrewField(member.role, i))}
+              />
+            </SwipeableRow>
           ))}
 
-          <div className="flex items-center justify-center py-1.5 row-divider">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-9 px-3 text-xs text-primary"
-              onClick={() => openCrewPicker("additionalCrew")}
-            >
-              <Plus className="h-3.5 w-3.5 mr-1" />
-              Add Crew
-            </Button>
-          </div>
+          {/* "Add Crew" makes the ROW first — its role chosen on the left, its
+              name picked on the right, as on a filled row. It is the form's
+              own state until the pick lands (`crewSlot` is DERIVED away once
+              the list grows), so an abandoned row writes nothing. */}
+          {crewSlotRole && (
+            <SwipeableRow onClear={() => setCrewSlotRole(null)}>
+              <AdditionalCrewRow
+                role={crewSlotRole}
+                onRoleChange={setCrewSlotRole}
+                onPickCrew={() => openCrewPicker(additionalCrewField(crewSlotRole))}
+              />
+            </SwipeableRow>
+          )}
+
+          {!crewSlotRole && (
+            <div className="flex items-center justify-center py-1.5 row-divider">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-9 px-3 text-xs text-primary"
+                onClick={() => setCrewSlotRole("Relief Pilot")}
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Add Crew
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* TIME Section */}
@@ -2235,37 +2372,22 @@ export function FlightForm({
             }}
           />
 
-          {/* The native select covers the WHOLE row, invisibly, so a tap
-              anywhere on it opens the platform's own picker. As a bare select
-              it was the width of "PIC" — about 25px, with no chevron and a
-              label that did nothing when tapped. */}
-          <div className="relative flex items-center justify-between py-3.5 px-4 row-divider focus-within:outline-2 focus-within:outline-ring focus-within:-outline-offset-2">
+          {/* The whole row opens the app's own menu. Named by the logbook
+              rules. "Examiner" used to be offered too; it is not a role the
+              record can hold, so choosing it filed the hours under nothing. */}
+          <ChoicePicker
+            label="Pilot role"
+            value={formPilotRole}
+            options={PILOT_ROLE_OPTIONS(authority)}
+            onValueChange={(role) => updateField("pilotRole", role)}
+            className="row-divider flex w-full items-center justify-between px-4 py-3.5 text-left outline-none focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
+          >
             <span className="text-foreground">Pilot Role</span>
             <span className="flex items-center gap-1 text-foreground">
               {roleLabel(formPilotRole, authority)}
-              <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden />
+              <ChevronsUpDown className="h-4 w-4 text-muted-foreground" aria-hidden />
             </span>
-            <select
-              aria-label="Pilot role"
-              value={formPilotRole}
-              onChange={(e) =>
-                updateField(
-                  "pilotRole",
-                  e.target.value as FlightLog["pilotRole"]
-                )
-              }
-              className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
-            >
-              {/* Named by the logbook rules. "Examiner" used to be offered
-                  too; it is not a role the record can hold, so choosing it
-                  filed the flight's hours under nothing. */}
-              {PILOT_ROLES.map((role) => (
-                <option key={role} value={role}>
-                  {roleLabel(role, authority)}
-                </option>
-              ))}
-            </select>
-          </div>
+          </ChoicePicker>
         </div>
 
         {/* LANDINGS Section */}
@@ -2330,27 +2452,20 @@ export function FlightForm({
           {(formData.approaches || []).map((approach, index) => (
             <div
               key={approach.id}
-              className="flex items-center justify-between py-3 px-4 border-b border-border"
+              className="flex items-center justify-between py-3 px-4 row-divider"
             >
               <div className="flex items-center gap-2 flex-1">
-                <select
-                  aria-label="Approach type"
+                <ChoicePicker
+                  label="Approach type"
                   value={approach.type}
-                  onChange={(e) =>
-                    updateApproach(approach.id, { type: e.target.value as Approach["type"] })
-                  }
-                  className="bg-transparent text-foreground outline-none text-sm"
+                  options={approachTypeOptions(approach.type)}
+                  onValueChange={(type) => updateApproach(approach.id, { type: type as Approach["type"] })}
+                  align="start"
+                  className="-my-1.5 flex h-9 items-center gap-1 rounded-md text-sm text-foreground outline-none focus-visible:outline-2 focus-visible:outline-ring"
                 >
-                  <option value="ILS">ILS</option>
-                  <option value="LOC">LOC</option>
-                  <option value="VOR">VOR</option>
-                  <option value="NDB">NDB</option>
-                  <option value="RNAV">RNAV</option>
-                  <option value="RNP">RNP</option>
-                  <option value="GLS">GLS</option>
-                  <option value="Visual">Visual</option>
-                  <option value="Circling">Circling</option>
-                </select>
+                  {approach.type}
+                  <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+                </ChoicePicker>
                 <span className="text-xs text-muted-foreground px-2 py-0.5 rounded bg-muted/50">
                   {approach.category === "precision"
                     ? "Precision"
@@ -2358,14 +2473,11 @@ export function FlightForm({
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <input
+                <DraftInput
                   type="text"
                   value={approach.runway || ""}
-                  onChange={(e) =>
-                    updateApproach(approach.id, {
-                      runway: e.target.value.toUpperCase(),
-                    })
-                  }
+                  transform={toUpper}
+                  onCommit={(runway) => updateApproach(approach.id, { runway })}
                   placeholder="RWY"
                   aria-label="Runway"
                   {...CODE_INPUT_PROPS}
@@ -2422,18 +2534,7 @@ export function FlightForm({
               what happened on the flight. */}
           <SwipeableRow onClear={() => clearField("remarks")}>
             <div className="px-4 py-3 row-divider">
-              <textarea
-                aria-label="Remarks"
-                placeholder="Add a remark"
-                rows={2}
-                value={formData.remarks || ""}
-                onChange={(e) => {
-                  updateField("remarks", e.target.value);
-                  fitTextarea(e.currentTarget);
-                }}
-                ref={fitTextareaRef}
-                className="block w-full resize-none bg-transparent text-base leading-snug text-foreground outline-none placeholder:text-muted-foreground"
-              />
+              <RemarksField value={formData.remarks || ""} onCommit={commitRemarks} />
             </div>
           </SwipeableRow>
         </div>

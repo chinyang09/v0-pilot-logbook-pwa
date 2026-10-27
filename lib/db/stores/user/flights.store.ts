@@ -23,7 +23,7 @@ import { isSimulatorEntry, simulatorRepairPatch } from "@/lib/utils/entry-type"
 import { timezoneRepairPatch } from "@/lib/utils/flight-timezone"
 import { blockFollowersPatch, flightTimeRepairPatch } from "@/lib/utils/flight-calculations"
 import { inferMultiPilotTime, inferPilotFlying, inferPilotRole } from "@/lib/utils/flight-evidence"
-import { withAdditionalCrew } from "@/lib/utils/crew-complement"
+import { parseAdditionalCrewField, withAdditionalCrew } from "@/lib/utils/crew-complement"
 import { getAirportByIcao, getAirportTimeInfo, isAirportTableSeeded } from "../reference/airports.store"
 
 /**
@@ -217,7 +217,8 @@ export async function getFlightById(id: string): Promise<FlightLog | undefined> 
 
 /**
  * Put a crew member on a flight from the crew picker: into the PIC or SIC seat
- * (`picId`/`sicId`), or appended to the additional crew. "Self" is how the
+ * (`picId`/`sicId`), or into the additional crew — appended, or in place of a
+ * row (`additionalCrewField`), in the role the row carries. "Self" is how the
  * pilot's own card is written into a seat. One function for both ways a
  * picker ends — choosing an existing card, or creating one there and then.
  */
@@ -231,9 +232,11 @@ export async function assignCrewToFlight(
     await updateFlight(flightId, { picId: crew.id, picName: name })
   } else if (field === "sicId" || field === "sic") {
     await updateFlight(flightId, { sicId: crew.id, sicName: name })
-  } else if (field === "additionalCrew") {
+  } else {
+    const slot = parseAdditionalCrewField(field)
+    if (!slot) return
     const flight = await getFlightById(flightId)
-    const additionalCrew = flight ? withAdditionalCrew(flight, { id: crew.id, name }) : null
+    const additionalCrew = flight ? withAdditionalCrew(flight, { id: crew.id, name }, slot.role, slot.at) : null
     if (additionalCrew) await updateFlight(flightId, { additionalCrew })
   }
 }

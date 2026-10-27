@@ -470,7 +470,10 @@ cycle ran the entire cache refresh three times over, which is three full reads
 of every table plus the re-renders each one triggers. A page that needs its own
 data back after a background pull gets it from the shared refresh; a page that
 needs it on RE-ACTIVATION uses `usePageActive`'s callback, which is a different
-trigger.
+trigger — and runs the re-read through `whenIdle` (`lib/utils/idle.ts`), never
+inside the tab switch: the logbook's was a read of every flight, a deep compare
+and a render on the frame the page was meant to appear in, and the dashboard's
+was `refreshAllData`, i.e. every table.
 
 `refreshAllData` (`hooks/data/use-db.ts`) also **coalesces**: concurrent callers
 share one in-flight pass, so a provider refresh landing on the same tick as a
@@ -914,9 +917,18 @@ The breakdown shows every category that HOLDS time (a hand-logged IFR hour
 used to vanish when its Auto-fill switch was off). The role picker no longer
 offers "Examiner": it was never a role a flight can hold.
 
-**More than two crew.** `additionalCrew` (any number) is added from the crew
-picker (`field=additionalCrew`, `withAdditionalCrew` — never the same person
-twice) with a role per member; "Relief Pilot" is the augmented-crew role and
+**More than two crew.** `additionalCrew` (any number) is shown in the SEAT
+rows' own structure (`AdditionalCrewRow`): the ROLE is the label on the left
+and opens the role menu, the NAME is the value on the right (person icon,
+chevron) and opens the crew picker for THAT row, and a swipe clears it. Both
+halves are editable on a filled row as on an empty one. "Add Crew" adds the
+row first; the role travels with the pick (`additionalCrewField(role, at?)` —
+`additionalCrew:<role>` appends, `additionalCrew:<role>:<index>` replaces that
+row). The empty row is the form's own state — `crewSlot` remembers the crew
+count it was opened at, so it is DERIVED away when the pick lands, and an
+abandoned row writes nothing. Rows are addressed by INDEX, not crew-card id:
+an imported member may carry no id, and such a row could be neither re-roled
+nor removed. Never the same person twice (`withAdditionalCrew`), a role per member; "Relief Pilot" is the augmented-crew role and
 makes a flight multi-pilot by itself. `assignCrewToFlight` is the one way a
 picker puts a crew card on a flight — choosing an existing card, or creating
 one in the picker (which used to save the card and assign nobody). An eCrew
@@ -1474,6 +1486,68 @@ A second round measured the interactions the first one had not:
   with `getBoundingClientRect` in a layout effect. The signature section is a
   plain disclosure (a grid-rows transition, nothing to measure).
 
+A third round counted COMMITS per navigation (a commit hook that only descends
+into subtrees whose children changed — a bailed-out fiber keeps the flags of
+the last commit that rendered it, so counting flags alone over-reports), which
+found the work that RECURS rather than the work that is merely large:
+
+| | Before | After |
+|---|---|---|
+| FDP page, first 3s | ~120 commits, one per frame, 430–520 components each | ~37, none per frame |
+| a sidebar tap that lands on a page mid-move | 312ms forced style recalc in the blob's effect | none |
+| Dashboard first open (same machine, A/B) | 1734ms of long tasks | 1141ms |
+| Airports first open (A/B) | 2306ms | 1795ms |
+| a hidden airports page during a new install's seed | a re-render per 250-row chunk | none |
+
+- **Recharts does not animate** the FDP chart's series (`isAnimationActive={false}`):
+  its animation is a JS rAF loop committing through React every frame, on
+  mount and on every zoom or pan step. The chart fades in on the compositor.
+- **The gravity blob never reads style back** — an interrupted move's position
+  is computed from its own spring track and the animation's `currentTime`.
+- **The legal page reads recency with `ninetyDayRecency`**, not the period
+  aggregate, which built a totals breakdown and a detail row per flight ever
+  logged to supply that one figure. `usePilotStatus` memoises the duty and
+  legality halves SEPARATELY, so currencies landing do not rebuild the duty model.
+- **A calibrated row height is remembered per list** (`useCalibratedRowHeight`'s
+  key, localStorage), so a visit after the first needs no re-measure — on the
+  airports list that is a pass over ~29k rows.
+
+A fourth round traced STYLE work (Chrome's invalidation tracking says WHY each
+element was restyled) and the forced layouts hidden in libraries:
+
+| | Before | After |
+|---|---|---|
+| a tap on a nav tab | ~170-element restyle ×2 (45–60ms each at 4×), INP 160–200ms | none, INP 56–88ms |
+| a kept-alive tab switch | ~1,400-element restyle (155–171ms) | only the arriving page's |
+| opening the sidebar | 239–408ms of long tasks | 118–188ms |
+| opening a flight | 1533ms busy (210ms of it framer's `measureScroll`) | 1090ms |
+| a key in the flight form | ~140ms per key, a forced layout per key | INP 56–104ms |
+
+- **Glass writes its press properties on the SPOTLIGHT, not the root**
+  (`.GlassSpotlight`, `glassSpotlight()`). Custom properties inherit: written on
+  the root, each tap and each frame of a finger moving over the glass restyled
+  the whole nav.
+- **Kept-alive pages are `content-visibility: hidden` when hidden**, as well as
+  `visibility: hidden`. `visibility` is inherited, so flipping it restyled both
+  pages' entire subtrees; a skipped subtree is not restyled at all, and its
+  scroll offsets are kept (measured: the logbook returns at the same
+  `scrollTop` with the same rows).
+- **No `transition-all` anywhere.** It includes `visibility`, so every element
+  carrying it inside a kept-alive page started a transition — and was
+  restyled every frame — on each tab switch; it also makes every style change
+  check every animatable property, Tailwind's ~87 registered ones included.
+- **A swipe row arms on a sideways move**, not on pointerdown or on focus, and
+  disarms once settled shut (`SwipeableCard`). Armed, it carries framer's drag
+  feature and the projection node that comes with it, whose every render reads
+  the document's scroll.
+- **Virtualisers size themselves from a ResizeObserver**
+  (`observeRectAfterLayout`, `viewportRect`): TanStack's default reads
+  `offsetWidth`/`offsetHeight` in the layout phase of the commit that mounts the
+  list.
+- **The flight form's text fields answer the key** (`useDraftText`,
+  `DraftInput`, `RemarksField`): a local draft, committed to the form in a
+  transition. Remarks grow by a CSS mirror, not a `scrollHeight` read.
+
 Still open, measured: opening a flight still runs ~400ms of long tasks at 4×,
 but in yielding slices after the tap has painted. The rest is the form's ~300
 fibers mounting, mostly framer `motion` and Radix. The first Dashboard visit
@@ -1520,6 +1594,21 @@ Three things keep the delta at zero:
 
 Measured after the fix: jumping to the middle and scrolling up 40 steps
 produces **zero** scroll corrections.
+
+**The airports, aircraft, crew and roster lists follow the same rules**, through
+ONE hook — `useCalibratedRowHeight` (`hooks/use-calibrated-row.ts`), which the
+logbook uses too. The three reference lists measured every row
+(`ref={virtualizer.measureElement}`), and on the airports list (~29k rows) a
+four-flick fling spent ~370ms at 4× in the virtualizer: each new size rebuilds
+the measurement cache for EVERY row. Their cards are two truncated lines — the
+crew card's second line is a no-break space when empty, the aircraft card's
+description truncates instead of wrapping — so one measurement is exact.
+
+**`getItemKey` must be a STABLE function** (`useCallback` on the list). The
+virtualizer memoises its measurements on `getItemKey`'s identity, so an inline
+arrow is a full pass over the list on every render — and the page re-renders
+on every scroll-driven range change. Measured on the airports fling: the page's
+render 108ms → 15ms inclusive.
 
 ### ONE Calendar Panel (`components/calendar-panel.tsx`)
 
@@ -1675,14 +1764,24 @@ left action group into the centred nav pill; per-PANE captions were the same
 mistake at a smaller scale — with two panes that is two captions saying half a
 thing each. One header row also keeps single and dual the same HEIGHT for free.
 
-**The month/year picker REPLACES the grid in the same box.** The selector stays
-where it is (its chevron flips — it is the control that opens and closes the
-picker), the day grid stays in FLOW but hidden, and the picker is laid over it
-and FILLS it: 4×3 months, their rows sharing the grid's height. It used to hide
-the selector, which shrank the panel by a row, and in dual mode drew a second
-day grid beside the months that no longer fitted — its last week was cut off.
-A month is the same control as a day: a capsule, the selected one(s) solid
-accent, the current one ringed like today.
+**The month/year picker is two WHEELS, inside the day grid's own box.** Month
+and year, the app's wheel (`@ncdai/react-wheel-picker`, as the date and time
+pickers) on a capsule strip of `--on-glass-fill` (`wheel-fill-glass`) — what
+iOS's inline date picker turns its grid into when its month is tapped. It
+replaced a 4×3 grid of month capsules under a year stepper, which the owner
+rejected twice: a year away was a tap per year, and it read as a web form.
+
+- It is LIVE: each settled spin moves the calendar (and the logbook's list)
+  through `onMonthSelect`, and the picker stays open. The date selector, its
+  chevron flipped, is what closes it.
+- On a phone it replaces the grid (in FLOW but hidden, so the box keeps its
+  height). In the DUAL layout it takes the RIGHT pane and the left pane keeps
+  drawing the month being chosen — the owner's layout, now without the clip:
+  the wheel's rows (`WHEEL_ITEM_PX` 34 → ~218px) are what keep it inside a
+  dual pane's ~255px grid. Measured at 1180: wheels 106–324 inside a panel of
+  52–342.
+- The years run 70 back and 5 ahead of today and the viewed year.
+- It mounts only while open: a wheel is ninety rows of 3D-transformed text.
 
 **The header steps aside for a floating panel hanging from it**
 (`useFloatingPanelUnderHeader`, `lib/layout/panel-mode.ts`). The calendar and
@@ -1802,7 +1901,7 @@ or a dialog over the list.
 | Page | Main panel | Detail panel |
 |---|---|---|
 | logbook, aircraft, airports, crew | the list | the record |
-| roster, currencies | month + agenda / the list | the duty / currency form (`DetailFormPanel`) |
+| roster, currencies | month + agenda / the list | the duty / currency form (`DetailFormPanel`); a roster FLIGHT (`FlightForm`) |
 | discrepancies | comparisons, notes | a comparison's FLIGHT (`FlightForm`); a note and its Resolve (`DiscrepancyDetailPanel`) |
 | recently deleted | the bin | what the item was, how long it is kept, Restore / Delete forever |
 | FDP | the timeline chart, at FULL width | the Quick Check, only while it is open |
@@ -2470,7 +2569,13 @@ re-renders).
   active transition. Desktop has no backdrop at all — its sidebar sits
   alongside the content rather than over it.
 
-  **The pill's width is MEASURED (`usePillWidth`), never `auto`.** `width` rides
+  **The phone's bottom bar spans the screen, as a flight card does** —
+  `MOBILE_PILL_WIDTH`, `calc(100% - 2 * var(--panel-gutter))`, so it keeps one
+  proportion to the screen on every phone (it used to hug its tabs, ~330px
+  whatever the width). A `calc` interpolates against the sidebar's px width,
+  so the morph needs no measurement there.
+
+  **The DESKTOP pill's width is MEASURED (`usePillWidth`), never `auto`.** `width` rides
   in the position group so the pill resizes *while* it moves, and CSS cannot
   interpolate a length to `auto` — with `width: auto` as the pill endpoint the
   width snapped on the morph's first frame, so the pill visibly resized to its
@@ -2793,11 +2898,20 @@ identical:
   was recomputed and sent back over on the next OUT/IN edit.
 - **Remarks is an inline auto-growing textarea**, not a `prompt()` — a native
   prompt is a one-line box with no preview of what is already there.
-- **The Pilot Role row is the native select, laid over the whole row** at
-  opacity 0, so the whole row is the target and the platform's own picker
-  opens — and so is every `SelectRow` (Settings, the duty and currency
-  forms). Their Radix Select was a floating web dropdown in a corner of the
-  row; the platform's picker is the wheel on iOS and the sheet on Android.
+- **A choice among a few is the app's own MENU** (`ChoicePicker` +
+  `OptionMenu`, `components/ui/option-menu.tsx`) — every `SelectRow`
+  (Settings, the duty and currency forms), the flight form's Pilot Role, an
+  approach's type, an additional crew member's role, the signer. A native
+  `<select>` laid over the row opened a different control on every device
+  (the wheel on iOS, a sheet on Android, a plain list on a desktop) and like
+  nothing else in the app; a Radix Select before that was a web dropdown in a
+  corner. The menu hangs off its control on the glass face (`.menu-surface`),
+  one 44px row per option with a check on the chosen one, flips upward when
+  there is no room below, takes the dismissing tap on a scrim, closes on
+  back/Escape (`useBackDismiss`) and applies the choice as the dismissal's
+  follow-up. The trigger is the WHOLE row, and its accessible name carries the
+  value ("Pilot role: P2"). A record holding a value the list lacks (LogTen's
+  "VISUAL" approach) keeps it as an option rather than showing nothing.
 - **The camera button opens the OS photo sheet directly** — one image input
   with no `capture`, which iOS and Android already present as Take Photo /
   Photo Library. An in-app dropdown offering the same two choices was a web
@@ -2816,7 +2930,9 @@ identical:
   boxed "mm/dd/yyyy" in the browser's locale beside lists reading "Mar 14,
   2027". The picker's years span the window around today AND the year being
   edited (`pastYears`/`futureYears`); a fixed ±5 had no row for a migrated
-  2011 flight or a 2034 passport.
+  2011 flight or a 2034 passport. Back, the default is a whole career (70
+  years) — a pilot back-filling a paper logbook could not enter a flight from
+  twenty years ago at all.
 - **A flight field is named through `flightFieldLabel`** (`lib/utils/field-labels.ts`)
   wherever a pilot reads it — the resolve sheet, the comparison cards, the
   import card (hour categories ask `TIME_CATEGORIES` first). Each surface kept
@@ -3467,8 +3583,10 @@ opened for, sat at the far end of the history.
 
 - Each cell names what the day IS (`SBY1`, `OFF`, `TR602`, `SIM`) — two labels
   and a count. A dot only said "busy" and had to be tapped to be read.
-- It shows the logbook's FLIGHTS beside the roster's own duties, read-only
-  (tapping one opens it in the logbook). That is a READ join in
+- It shows the logbook's FLIGHTS beside the roster's own duties, and tapping
+  one opens the flight (`FlightForm`) in the ROSTER's detail panel, as
+  `flight:<id>` (the duties use their own ids). It used to be a link into the
+  logbook, so Back from the flight left the roster for the logbook. That is a READ join in
   `lib/utils/roster/roster-days.ts`, not a second copy — `scheduleEntries`
   still holds non-flight duties only (below).
 - An item sits on the day its START falls on in the DISPLAY clock (Zulu → the
@@ -3478,6 +3596,13 @@ opened for, sat at the far end of the history.
 - The header's Add duty pre-fills the selected day, and an empty day's own
   "Add duty" pre-fills THAT day (`onAddDuty(dayKey)` — it used to add to the
   selected day whichever empty day was tapped).
+- The agenda runs to the end of the roster (no fixed day count) and is
+  VIRTUALIZED (`RosterAgenda`, `@tanstack/react-virtual`) on the page's own
+  scroller, with the logbook's rules: every row kind has a FIXED height
+  (`HEADER_H` 36, `ITEM_H` 64 — a 58px card and its gap), nothing is measured,
+  rows are keyed by id, and `scrollMargin` (the month and the nav above the
+  list) is taken in a ResizeObserver callback. Measured: 240 rows, ~20 in the
+  DOM.
 
 #### The roster holds NON-FLIGHT duties only
 
@@ -3773,9 +3898,9 @@ alone on purpose. The reason is recorded so the next pass doesn't re-derive it
   5 minutes past the server's for the tiebreak; a slow one simply loses ties.
   The losing value is in `syncConflicts` but nothing in the UI shows it yet.
 - **The flight form can lose an edit made in its first half-second.** Its
-  auto-save takes its "nothing changed" baseline from the FIRST debounced form
-  state (`components/flight-form.tsx`, `baselineFlightIdRef`), so an edit
-  typed before that debounce fires — or while `resolvedFlight` is still
+  auto-save takes its "nothing changed" baseline from the FIRST settled form
+  state, 500ms after it stops changing (`components/flight-form.tsx`, `baselineFlightIdRef`), so an edit
+  typed before that timer fires — or while `resolvedFlight` is still
   loading — becomes the baseline and is never saved. Hard to hit with a fast
   IndexedDB; easy while one was stalled (see the airport seed). Fixing it means
   taking the baseline from the loaded flight AFTER the form's own calculations,
@@ -4695,6 +4820,11 @@ When making changes, be aware of these high-impact files:
 - Do not collapse `FADE_TAIL` and `--chrome-clear` into one number — the first is how far the DARKENING reaches (41px, i.e. 45 below the buttons), the second is where the quick-scroll rail PARKS a row (60 below, ~15px clear of the band). Equalising them is wrong in both directions: the band ends up far down the screen, or the scrolled-to row ends up inside the treatment
 - Do not put the drag-lens (`.PillDragLens`) release settle back on JS (framer `animate()`) or on layout properties — it must stay CSS `translate` + `scale`, which run on the compositor, because the release also fires `router.push` and a main-thread landing stalls against the route mount. Keep the two easings split (position no overshoot, scale overshoot = the splat), keep `--settle` dropping the glass's `backdrop-filter`, and keep the refract clone effect gated on `lensPhase === "drag"` so a deep clone of the pill never runs on the landing's first frame. Keep it clamped to the tab strip (edge overshoot → the liquid bounce) and keep the handoff timer longer than the rebound (or the last wobble is cut)
 - Do not re-gate the dashboard's meters / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so they can animate freely
+- Do not turn Recharts' series animation back on (`isAnimationActive` defaults to TRUE on every `Area`/`Bar`/`Line`) — it is a JS rAF loop that commits the whole chart through React every frame: ~120 commits of 430–520 components in the FDP page's first 3s at 4×, and the same again on every zoom and pan step, i.e. through a pinch. A new series takes `isAnimationActive={false}`; the chart's arrival is a compositor fade
+- Do not read computed style or layout in an effect that runs on a navigation's commit (`getComputedStyle(x).transform`, a rect) — the arriving page's DOM is still dirty, so the read is a style recalculation of the whole page. The gravity blob's interrupted-move position came from `getComputedStyle` and cost 312ms at 4× on a sidebar tap to FDP; it is computed from the move's own spring track and `currentTime` now
+- Do not let a keep-alive page listen to a background process's progress while it is hidden — the airports page re-rendered on every 250-row chunk of the seed it had started, while the pilot was on another page. Gate the listener on `usePageActive` as well as on there being something to wait for
+- Do not compute the whole period aggregate (`aggregateDashboard`) to read one figure off it — the legal page needs only recency, which is `ninetyDayRecency`. And keep `usePilotStatus`'s duty and legality halves in separate memos: one memo rebuilt the duty model (a pass over every duty window) each time an input it never reads landed
+- Do not let a chart restart from fallback colours on each mount when the theme has not changed — `FDPTimelineChart` probes its SVG colours once and the answer is cached per mode + palette, so a remount does not render the whole chart twice
 - Do not reintroduce a second typeface — Inter is the single app font (`--font-sans` and `--font-mono` both resolve to Inter); use `tabular-nums` for aligned numbers, never a `font-mono` class or a new Google-Fonts `<link>`
 - Do not give `register/complete`, `add-passkey`, the callsign change, or the TOTP-reveal routes a path that skips `verifyAuthenticationResponse`/`verifyStepUpAssertion` — the TOTP seed must never be revealed without a fresh passkey step-up
 - Do not give `SwipeableCard` action panels horizontal padding — the panel must collapse to 0 width when closed (the left gap comes from `openWidth`/`justify-end`), otherwise a sliver of the action button peeks at the card edge
@@ -4791,6 +4921,15 @@ When making changes, be aware of these high-impact files:
 - Do not let a panel's title scroll away with nothing in its place — a panel with a large title publishes it through `useCollapsingTitle` (`PageContainer` and `DetailFormPanel` already do), and the header carries it. And never place a header title absolutely over the row: it is the middle cell of a `.header-bar-grid`, which gives the buttons their width first, so it can neither cover a button nor be covered by one
 - Do not write to ANOTHER record from a form control before Save — the crew card's "This is Me" switch un-flagged the current self card in the database the moment it moved, untouched by Cancel, so a stray flip left the logbook with no self card. The form changes; `handleSave` clears the other flags when it commits
 - Do not let a select show blank for a stored value it has no option for — the currency Type row read empty for any company code an import brought in. Offer the record's own value as an option (`typeOptions`); mapping it to "Custom" would rewrite the stored code on the next save
+- Do not use a native `<select>` (laid over a row or bare) or a Radix Select for a choice — it is `ChoicePicker`/`OptionMenu`, the app's own menu on the glass face. The platform's control is a different thing on every device and like nothing else in the app. And give the trigger the whole row, never a corner of it
+- Do not link a roster flight into the logbook — it opens in the ROSTER's detail panel (`flight:<id>`), so Back returns to the roster. And do not let the roster agenda's rows vary in height or be measured: it is virtualized like the logbook (`HEADER_H` / `ITEM_H`), for the same momentum-scroll reason
+- Do not bring back the month-capsule grid or a year stepper in the calendar's month/year picker — it is two wheels, live, closed by the date selector; and in the dual layout it takes the RIGHT pane with the month being chosen still drawn on the left. Keep `WHEEL_ITEM_PX` small enough that the wheel fits a dual pane's grid, or the panel grows (or clips) when it opens
+- Do not cap a date wheel's past at a few years — a pilot back-filling a paper logbook enters flights from decades ago; the default is 70
+- Do not make "Add Crew" open the crew picker directly, and do not lay an additional crew member out differently from the PIC/SIC rows — role on the LEFT (the menu), name on the RIGHT (the picker, for THAT row), a swipe to clear. The pick carries the row's role and index (`additionalCrewField`); address rows by index, never by crew-card id
+- Do not size the phone's bottom bar to its tabs — it is `MOBILE_PILL_WIDTH`, the screen less the panel gutter each side, the same edges as a flight card, so it is the same proportion of every phone. The tab padding still gives way below ~346px (`clamp(6px, (100vw − 250px)/8, 12px)`) so five tabs fit an iPad Split View window of 320. The bar's HEIGHT is not scaled: an iPad window at "iPhone size" draws CSS px at ~132 px/inch against a phone's ~150–160, so everything there is physically ~20% larger — that is the device, and sizing per platform would break the one-look rule
+- Do not put per-row `measureElement` on ANY virtualised list of same-height rows (airports, aircraft, crew, logbook) — calibrate once with `useCalibratedRowHeight`, and keep the card one height by construction (truncate, reserve empty lines). And never pass `useVirtualizer` an inline `getItemKey`: its measurements are memoised on that function's identity, so a new arrow per render rebuilds every row's position on every scroll-driven render (29k rows on the airports list)
+- Do not hand-roll a suggestion list under a field — `AircraftTypeSuggestions` is the one (an inset well, 44px rows, inset dividers); the aircraft form, panel and page each carried a bordered `hover:bg-accent` web dropdown
+- Do not hand the year wheel a new options array per render — `yearOptions` keeps the SAME array while the range holds, and the range is anchored on TODAY (widened only when the viewed year falls outside). Anchored on the viewed year, every year spun rebuilt ~75 rows
 - Do not put a segmented choice back as a pair of filled rectangles — it is `SegmentedTabs` (glass, a sliding indicator, `h-9` segments), as in the import dialogs and the Quick Check. And measure its segments from ONE ResizeObserver: reading `offsetLeft` in a ref callback that is rebuilt on every selection forced a layout per tap and attached a new observer to every segment each time, never disconnecting the old ones
 - Do not put an action back on the card surface (`bg-secondary`, `bg-card`, `bg-muted`) or give it a rectangle's corners — a thing you press is a CAPSULE or circle on `.control-surface`, a thing you read is a rounded rectangle. On the card surface the context preview's action row read as more card. And do not use the REAL glass (`GlassContainer`) for an action that sits over a scrim, a row or a panel: the painted surface is the same look with no `backdrop-filter`, and these pop in on exactly the frames a readback would cost most
 - Do not group header controls page by page — a header is VIEW (search, calendar, period) → TOOLS (import, Quick Check, alerts, read-from-photo) → CREATE (+, alone and last), one capsule per role, with a page switch first and detail commits (Cancel / Save / Edit, Back) one capsule each (`glass-icon-button.tsx`). And do not add a Refresh button: every list follows every write and every sync, so it re-reads the same rows, and it reads as "sync" — which is the cloud in the nav
@@ -4801,6 +4940,17 @@ When making changes, be aware of these high-impact files:
 - **Blur animation rules, app-wide.** Never ANIMATE `backdrop-filter`, `filter`, `mask-image`, `height` or `top` — they are layout- or paint-bound and re-rasterise every frame. Animate `opacity` and `transform` only. Where a progressive blur has to appear or disappear, fade the layers' OPACITY on a SHORT clock of their own (~160ms) rather than the surrounding motion's, so the blur settles before the thing it sits behind has finished moving and the rest of the animation composites a texture that no longer changes. And keep the stack to THREE layers on a full-viewport effect: each layer samples the output of the one below, so it is a chain rather than a sum, and the fourth link is the one a weak mobile GPU shows. `RadialBlurBackdrop` and `SIDEBAR_BACKDROP_BLUR` both follow this; `ChromeFade` is static and does not animate at all
 - Do not fade a `backdrop-filter` layer by fading an ANCESTOR — an element with `opacity` below 1 (or `will-change: opacity`, a mask, or a filter) is a **backdrop root**, so its descendants' `backdrop-filter` can only sample inside it. The context preview's `RadialBlurBackdrop` used to sit inside the scrim that fades: for the whole morph the layers blurred nothing, then the full stack snapped on the instant the scrim hit exactly 1 — a hitch at the end of the animation, and the part of that overlay most likely to be felt on a phone. Fade each LAYER's own opacity instead (an element's own opacity is fine — the root is an ancestor boundary), which is how `SIDEBAR_BACKDROP_BLUR` has always done it. A CSS transition there also needs the layers to MOUNT at 0, or there is no previous value to run from
 - Do not put a `layout`/`layoutId` prop on a flight card in the LIST to morph the context preview out of it — the rows are VIRTUALISED, and that hands framer every rendered row to measure on every layout change. The preview is a FLIP, but only the OVERLAY carries the projection: the collapsed box is stated outright from the anchor we already measure when the hold fires, so the list is never involved. Anchor it to the card (`[data-slot="card"]`), not the row wrapper — the wrapper carries the per-row top gap and 4px out is a visible jump on the first frame
+- Do not use `transition-all` (or `transition: all`) anywhere — name the properties (`transition-colors`, `transition-[background-color,color,scale]`). It includes `visibility`, which is how the kept-alive stack hides pages, so every element carrying it there started a visibility transition — and was restyled every frame — on each tab switch, and it makes each style change compare every animatable property, Tailwind's ~87 registered custom properties included. Tailwind's plain `transition` does not include `visibility` and is fine
+- Do not write a custom property on a CONTAINER per frame or per tap — it inherits, so the write restyles the container's whole subtree. The glass's spotlight properties go on its own empty element (`.GlassSpotlight`, reached from outside with `glassSpotlight(root)`); written on the glass root they restyled the entire nav (~170 elements, 45–60ms at 4×) on every tap and every frame a finger moved over it
+- Do not drop `content-visibility: hidden` from a hidden kept-alive page. `visibility` alone is inherited, so the tab switch restyled BOTH pages' whole subtrees (~1,400 elements, 155–171ms at 4×); `content-visibility` skips the hidden one entirely and keeps its scroll offsets. `visibility` stays beside it for an engine without `content-visibility` — the result on screen is the same either way
+- Do not arm a `SwipeableCard` row on pointerdown or on an ordinary focus, and do not leave it armed — it arms on a sideways move past `ARM_SLOP` (the move starts the drag), on focus of its keyboard stand-in only, and disarms once it has settled shut. An armed row carries framer's drag feature AND the layout-projection node drag brings; every render of it then reads the document's scroll, a forced layout of the app — ~210ms of the tap that opened a flight, and once per keystroke in a flight-form row that had been tapped
+- Do not let a `useVirtualizer` measure its scroller with TanStack's default `observeElementRect` — pass `observeElementRect: observeRectAfterLayout` and `initialRect: viewportRect()` (`lib/utils/virtual-scroll.ts`). The default reads `offsetWidth`/`offsetHeight` in the layout phase of the commit that mounts the list, a forced layout of the arriving page (~240ms of the first Crew visit at 4×). And keep `data-index` on every row even where nothing measures: `scrollToIndexSettled` finds the row by it, and without it the A–Z rail's correction never lands (the row stops under the header)
+- Do not refresh a kept-alive page's data synchronously in its `usePageActive` callback — wrap the re-read in `whenIdle`. Every write path already updates the shared cache, so the re-read is a safety net, and inside the callback it ran in the tab switch itself. Detail-panel re-syncs and clock updates (`setNow`) stay immediate; only the data re-read waits
+- Do not hide a nav layer (the pill's tab row in sidebar shape, the sidebar list in pill shape) with inline `visibility`/`pointer-events` — both INHERIT, so each flip restyled the layer's whole subtree (~170 elements, 53–93ms at 4× on every sidebar open AND close). It takes `.nav-stowed` (`content-visibility: hidden`, with a `visibility` fallback under `@supports not`), which is skipped: not restyled, painted, hit-tested or focusable. Opening still styles the list it reveals; closing costs nothing
+- Do not read `window.innerWidth`/`innerHeight` in a render or a mount effect — it forces a layout of a dirty page. `viewportRect()` is CACHED (refreshed on resize) for that reason: as a `useVirtualizer` argument it was evaluated on every render of every list, 111ms at 4× on the tap that opened FDP. And let TanStack's attach-time `scrollTo(0)` go (`scrollToFn: scrollAfterAttach`) on a list that owns its scroller: a new scroller is already at 0, and the call was a 98ms forced layout on the first Airports visit. Not on the roster agenda — its scroller is the page's and may already be scrolled. Likewise a scroll-margin measurement takes its first reading from its ResizeObserver, never a synchronous call in the mount effect
+- Do not let the nav re-render with the shell — `NavPill`, `SidebarNav`, `SidebarNavItem` and `PillBarContent` are `memo`ized, and the props handed to them must stay stable (the mobile morph's open-sidebar callback is a `useCallback`). The shell re-renders on every selection change and the morph on every phase; unmemoised, opening the sidebar re-rendered all eleven sidebar links per phase (measured: 48 fibers for the whole open, from several hundred)
+- Do not feed the flight form's auto-save from a debounced copy of the form held in STATE (`useDebounce`) — that state change re-rendered the whole form (~300 fibers) half a second after every open and after every pause in typing, to hand the effect a value its own closure already had. It is a timer in an effect keyed on the form, reset by every change, so the closure is the latest form when it fires. And keep `FlightForm` `memo`ized on `flightId`/`isDesktop`/`editingFlight`: every caller passes inline `onFlightAdded`/`onClose` arrows the form never calls, which re-rendered it twice more on each open
+- Do not bind a flight-form text input straight to `updateField` — use `DraftInput` / `RemarksField` (`useDraftText`): the field shows its own draft and commits to the form in a transition, so a key does not wait for ~50 rows to re-render. And do not size a growing textarea by `height = auto; height = scrollHeight` — that is a forced layout per key; `RemarksField` grows by a CSS mirror in the same grid cell
 - Do not put `transition-all` on a flight card — its visibility is toggled by the context preview, and `transition-all` animates `visibility`. Measured: hidden→visible still computes `hidden` for the FIRST FRAME, so the overlay unmounts and the row is blank for a frame (the flash on collapse); visible→hidden holds `visible` for the whole 150ms, so the source row shows through the opening morph as a second copy of the same flight. `transition-colors` is what the hover/selected states actually wanted
 - Do not let the flight card's press-and-hold fire on a row whose SWIPE PANEL is open — the actions are showing and the card has been pushed aside to reveal them, so a press there is aimed at a button, not at holding the card. `SwipeableCard` publishes `data-swipe-open` for exactly this (unconditional, unlike `data-swipe-active`, which is scoped to `separated` rows because it drives their divider morph)
 - Do not tear the context preview down on the dismissing tap — the morph runs BOTH ways, so closing collapses it back onto the row first. And keep the source row `invisible` while it is up, or the copy opening on top of it shows the same flight twice through the scrim
