@@ -13,7 +13,7 @@ import {
   memo,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { observeRectAfterLayout, viewportRect } from "@/lib/utils/virtual-scroll";
+import { observeRectAfterLayout, scrollAfterAttach, viewportRect } from "@/lib/utils/virtual-scroll";
 import type { FlightLog } from "@/lib/db";
 import { deleteFlight, restoreFlight } from "@/lib/db";
 import { showUndoToast } from "@/lib/utils/undo-toast";
@@ -385,6 +385,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       // Sized from a ResizeObserver, not a synchronous read mid-commit (see
       // `observeRectAfterLayout`).
       observeElementRect: observeRectAfterLayout,
+      scrollToFn: scrollAfterAttach,
       initialRect: viewportRect(),
       estimateSize,
       // Enough that a fast flick doesn't outrun the rendered window. Cheap now

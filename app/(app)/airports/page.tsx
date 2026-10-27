@@ -23,7 +23,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { FastScroll, generateAlphabetItemsFromList, FAST_SCROLL_TOP_KEY } from "@/components/ui/fast-scroll";
-import { scrollToIndexSettled, scrollToTop, observeRectAfterLayout, viewportRect } from "@/lib/utils/virtual-scroll";
+import { scrollToIndexSettled, scrollToTop, observeRectAfterLayout, scrollAfterAttach, viewportRect } from "@/lib/utils/virtual-scroll";
 import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { AirportDetailPanel } from "@/components/airport-detail-panel";
@@ -321,7 +321,10 @@ export default function AirportsPage() {
       setScrollMargin(margin);
     };
 
-    updateMargin();
+    // No synchronous first call: this runs in the commit that mounted the
+    // page, so a rect read here is a forced layout of it (~94ms at 4× on the
+    // first Airports visit). The observer's first callback lands after the
+    // browser's own layout with the same answer.
     const observer = new ResizeObserver(updateMargin);
     observer.observe(el);
     return () => observer.disconnect();
@@ -343,6 +346,7 @@ export default function AirportsPage() {
     // Sized from a ResizeObserver, not a synchronous read mid-commit (see
     // `observeRectAfterLayout`).
     observeElementRect: observeRectAfterLayout,
+    scrollToFn: scrollAfterAttach,
     initialRect: viewportRect(),
     estimateSize,
     getItemKey: getAirportKey,

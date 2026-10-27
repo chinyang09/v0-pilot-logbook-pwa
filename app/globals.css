@@ -977,6 +977,25 @@ textarea:focus-within {
   }
 }
 
+/* A nav layer that is stowed while the other shape shows — the pill's tab
+   row while it is a sidebar, the sidebar's list while it is a pill.
+
+   `content-visibility: hidden`, not `visibility: hidden` + `pointer-events:
+   none`. Both of those INHERIT, so flipping them inline restyled the layer's
+   whole subtree on every open and close (~170 elements, 53–93ms at a 4×
+   throttle) for a layer that was about to be invisible anyway. A skipped
+   subtree is not restyled, hit-tested or focusable. The fallback is for an
+   engine without it, and hides the layer just the same. */
+.nav-stowed {
+  content-visibility: hidden;
+}
+@supports not (content-visibility: hidden) {
+  .nav-stowed {
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
 /* The sidebar's top band: whatever scrolls under the drawer/sync icons is
    frosted, strongest at the very top and clear by the bottom of the band, so
    the list reads as emerging rather than being cut off at a line.

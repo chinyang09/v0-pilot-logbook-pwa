@@ -1722,14 +1722,12 @@ function DesktopPillMorph({
         >
           {/* Pill bar — always visible */}
           <div
-            className="flex-shrink-0"
+            className={cn("flex-shrink-0", phase !== "pill" && "nav-stowed")}
             style={{
               // Only show the (horizontal) pill content once fully settled as a
               // pill — mid-morph the container is the wrong shape so the tabs look
               // squished. Collapsed to 0 height + non-interactive otherwise.
               opacity: phase === "pill" ? 1 : 0,
-              visibility: phase === "pill" ? "visible" : "hidden",
-              pointerEvents: phase === "pill" ? "auto" : "none",
               height: phase === "pill" ? PILL_HEIGHT : 0,
               transition: "opacity 0.2s ease",
             }}
@@ -1744,7 +1742,7 @@ function DesktopPillMorph({
 
           {/* Sidebar header + nav — visible when expanded */}
           <div
-            className="flex flex-col flex-1 min-h-0"
+            className={cn("flex flex-col flex-1 min-h-0", !isSidebarShape && "nav-stowed")}
             style={{
               // The vertical sidebar list isn't "squished" mid-morph (it's just
               // clipped by the growing height, like a drawer), so keep it visible
@@ -1752,8 +1750,6 @@ function DesktopPillMorph({
               // phase left a brief dead window that dropped sidebar taps. Its
               // opacity is timed to the height so reveal + growth are one motion.
               opacity: isSidebarShape ? 1 : 0,
-              visibility: isSidebarShape ? "visible" : "hidden",
-              pointerEvents: isSidebarShape ? "auto" : "none",
               transition: contentTransition,
             }}
           >
@@ -1950,14 +1946,12 @@ function MobilePillMorph({
         >
           {/* Pill bar — visible when collapsed */}
           <div
-            className="flex-shrink-0"
+            className={cn("flex-shrink-0", phase !== "pill" && "nav-stowed")}
             style={{
               // Only show the (horizontal) pill content once fully settled as a
               // pill — mid-morph the container is the wrong shape so the tabs look
               // squished. Collapsed to 0 height + non-interactive otherwise.
               opacity: phase === "pill" ? 1 : 0,
-              visibility: phase === "pill" ? "visible" : "hidden",
-              pointerEvents: phase === "pill" ? "auto" : "none",
               height: phase === "pill" ? MOBILE_PILL_HEIGHT : 0,
               transition: "opacity 0.2s ease",
             }}
@@ -1972,7 +1966,7 @@ function MobilePillMorph({
 
           {/* Sidebar header + nav — visible when expanded */}
           <div
-            className="flex flex-col flex-1 min-h-0"
+            className={cn("flex flex-col flex-1 min-h-0", !isSidebarShape && "nav-stowed")}
             style={{
               // The vertical sidebar list isn't "squished" mid-morph (it's just
               // clipped by the growing height, like a drawer), so keep it visible
@@ -1980,8 +1974,6 @@ function MobilePillMorph({
               // phase left a brief dead window that dropped sidebar taps. Its
               // opacity is timed to the height so reveal + growth are one motion.
               opacity: isSidebarShape ? 1 : 0,
-              visibility: isSidebarShape ? "visible" : "hidden",
-              pointerEvents: isSidebarShape ? "auto" : "none",
               transition: contentTransition,
             }}
           >

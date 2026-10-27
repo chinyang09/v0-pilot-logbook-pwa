@@ -27,7 +27,7 @@ import { syncService } from "@/lib/sync"
 import { Button } from "@/components/ui/button"
 import { PageContainer } from "@/components/page-container"
 import { FastScroll, generateAlphabetItemsFromList, FAST_SCROLL_TOP_KEY } from "@/components/ui/fast-scroll"
-import { scrollToIndexSettled, scrollToTop, observeRectAfterLayout, viewportRect } from "@/lib/utils/virtual-scroll"
+import { scrollToIndexSettled, scrollToTop, observeRectAfterLayout, scrollAfterAttach, viewportRect } from "@/lib/utils/virtual-scroll"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { AircraftDetailPanel } from "@/components/aircraft-detail-panel"
@@ -401,6 +401,7 @@ export default function AircraftPage() {
     // Sized from a ResizeObserver, not a synchronous read mid-commit (see
     // `observeRectAfterLayout`).
     observeElementRect: observeRectAfterLayout,
+    scrollToFn: scrollAfterAttach,
     initialRect: viewportRect(),
     estimateSize,
     getItemKey: getAircraftKey,
