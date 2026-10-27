@@ -78,6 +78,25 @@ const WHEEL_ITEM_PX = 34;
 /** A career back, a roster ahead. The year being viewed is always offered. */
 const PICKER_PAST_YEARS = 70;
 const PICKER_FUTURE_YEARS = 5;
+/**
+ * The year wheel's rows, the SAME array while the range holds. The range is
+ * anchored on TODAY and only widens when the viewed year falls outside it:
+ * anchored on the viewed year as well, every year spun shifted the range and
+ * handed the wheel a new list of ~75 rows to rebuild (measured at a 4×
+ * throttle: ~165ms of main thread per settled step).
+ */
+let yearOptionsCache: { key: string; options: { value: number; label: string }[] } | null = null;
+function yearOptions(from: number, to: number) {
+  const key = `${from}-${to}`;
+  if (yearOptionsCache?.key !== key) {
+    yearOptionsCache = {
+      key,
+      options: Array.from({ length: to - from + 1 }, (_, i) => ({ value: from + i, label: String(from + i) })),
+    };
+  }
+  return yearOptionsCache.options;
+}
+
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /** Single ↔ dual month slide. Same 300ms as the panels it opens beside. */
@@ -427,11 +446,10 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     // so the pilot sees the month they are choosing as they choose it. Either
     // way it sits inside the day grid's own box, so the panel's height never
     // moves (WHEEL_ITEM_PX is what keeps the wheel inside a dual pane).
-    const pickerYears = (() => {
-      const from = Math.min(nowYear, selectedMonth.year) - PICKER_PAST_YEARS;
-      const to = Math.max(nowYear, selectedMonth.year) + PICKER_FUTURE_YEARS;
-      return Array.from({ length: to - from + 1 }, (_, i) => ({ value: from + i, label: String(from + i) }));
-    })();
+    const pickerYears = yearOptions(
+      Math.min(nowYear - PICKER_PAST_YEARS, selectedMonth.year),
+      Math.max(nowYear + PICKER_FUTURE_YEARS, selectedMonth.year)
+    );
     const monthYearContent = (
       <div
         className="mx-auto flex h-full w-full items-center px-3"

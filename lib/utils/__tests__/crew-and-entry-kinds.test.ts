@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from "vitest"
-import { minimumPilots, requiresTwoPilots, withAdditionalCrew } from "../crew-complement"
+import { additionalCrewField, minimumPilots, parseAdditionalCrewField, requiresTwoPilots, withAdditionalCrew } from "../crew-complement"
 import { isSoloFlight, soloConflict } from "../flight-evidence"
 import { entryDuration, gateSpan, positioningPatch } from "../entry-type"
 import { recalculateFlightFields } from "../flight-calculations"
@@ -154,5 +154,27 @@ describe("withAdditionalCrew", () => {
     expect(withAdditionalCrew(flight, { id: "rp", name: "Relief" })).toBeNull()
     expect(withAdditionalCrew(flight, { id: "cpt", name: "Captain" })).toBeNull()
     expect(withAdditionalCrew(flight, { id: "me", name: "Self" })).toBeNull()
+  })
+
+  it("puts the pick in place of the row whose name was tapped, in that row's role", () => {
+    expect(withAdditionalCrew(flight, { id: "obs", name: "Tan" }, "Observer", 0)).toEqual([
+      { id: "obs", name: "Tan", role: "Observer" },
+    ])
+    // the same person picked for their own row is not a duplicate
+    expect(withAdditionalCrew(flight, { id: "rp", name: "Relief" }, "Check Airman", 0)).toEqual([
+      { id: "rp", name: "Relief", role: "Check Airman" },
+    ])
+    // an index past the list appends
+    expect(withAdditionalCrew(flight, { id: "obs", name: "Tan" }, "Observer", 5)).toHaveLength(2)
+  })
+})
+
+describe("additionalCrewField", () => {
+  it("round-trips the role and the row", () => {
+    expect(parseAdditionalCrewField(additionalCrewField("Check Airman"))).toEqual({ role: "Check Airman", at: undefined })
+    expect(parseAdditionalCrewField(additionalCrewField("Observer", 2))).toEqual({ role: "Observer", at: 2 })
+    expect(parseAdditionalCrewField("additionalCrew")).toEqual({ role: "Relief Pilot" })
+    expect(parseAdditionalCrewField("additionalCrew:Bogus")).toEqual({ role: "Relief Pilot", at: undefined })
+    expect(parseAdditionalCrewField("picId")).toBeNull()
   })
 })

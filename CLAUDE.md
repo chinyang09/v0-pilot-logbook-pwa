@@ -914,14 +914,18 @@ The breakdown shows every category that HOLDS time (a hand-logged IFR hour
 used to vanish when its Auto-fill switch was off). The role picker no longer
 offers "Examiner": it was never a role a flight can hold.
 
-**More than two crew.** `additionalCrew` (any number) is added as a ROW first:
-"Add Crew" opens an empty row whose role can be chosen (the in-app menu) and
-whose "Select crew" opens the crew picker to fill it, the role travelling with
-the pick (`field=additionalCrew:<role>`). The empty row is the form's own state
-— `crewSlot` remembers the crew count it was opened at, so it is DERIVED away
-when the pick lands, and an abandoned row writes nothing. It used to be the
-crew picker first and a native select on the row afterwards. Never the same
-person twice (`withAdditionalCrew`), a role per member; "Relief Pilot" is the augmented-crew role and
+**More than two crew.** `additionalCrew` (any number) is shown in the SEAT
+rows' own structure (`AdditionalCrewRow`): the ROLE is the label on the left
+and opens the role menu, the NAME is the value on the right (person icon,
+chevron) and opens the crew picker for THAT row, and a swipe clears it. Both
+halves are editable on a filled row as on an empty one. "Add Crew" adds the
+row first; the role travels with the pick (`additionalCrewField(role, at?)` —
+`additionalCrew:<role>` appends, `additionalCrew:<role>:<index>` replaces that
+row). The empty row is the form's own state — `crewSlot` remembers the crew
+count it was opened at, so it is DERIVED away when the pick lands, and an
+abandoned row writes nothing. Rows are addressed by INDEX, not crew-card id:
+an imported member may carry no id, and such a row could be neither re-roled
+nor removed. Never the same person twice (`withAdditionalCrew`), a role per member; "Relief Pilot" is the augmented-crew role and
 makes a flight multi-pilot by itself. `assignCrewToFlight` is the one way a
 picker puts a crew card on a flight — choosing an existing card, or creating
 one in the picker (which used to save the card and assign nobody). An eCrew
@@ -4830,7 +4834,10 @@ When making changes, be aware of these high-impact files:
 - Do not link a roster flight into the logbook — it opens in the ROSTER's detail panel (`flight:<id>`), so Back returns to the roster. And do not let the roster agenda's rows vary in height or be measured: it is virtualized like the logbook (`HEADER_H` / `ITEM_H`), for the same momentum-scroll reason
 - Do not bring back the month-capsule grid or a year stepper in the calendar's month/year picker — it is two wheels, live, closed by the date selector; and in the dual layout it takes the RIGHT pane with the month being chosen still drawn on the left. Keep `WHEEL_ITEM_PX` small enough that the wheel fits a dual pane's grid, or the panel grows (or clips) when it opens
 - Do not cap a date wheel's past at a few years — a pilot back-filling a paper logbook enters flights from decades ago; the default is 70
-- Do not make "Add Crew" open the crew picker directly — it adds an empty ROW first (role, then "Select crew"), and the role rides the pick as `additionalCrew:<role>`
+- Do not make "Add Crew" open the crew picker directly, and do not lay an additional crew member out differently from the PIC/SIC rows — role on the LEFT (the menu), name on the RIGHT (the picker, for THAT row), a swipe to clear. The pick carries the row's role and index (`additionalCrewField`); address rows by index, never by crew-card id
+- Do not let the bottom pill run off a narrow window. It is a fixed 330×56 CSS px on every phone, but an iPad window in Split View is 320, so the tab padding gives way below ~346px (`clamp(6px, (100vw − 250px)/8, 12px)`). It does NOT scale with the screen otherwise — an iPad window resized to "iPhone size" still draws CSS px at the iPad's ~132 px/inch against a phone's ~150–160, so everything there is physically ~20% larger; that is the device, not a difference in the bar, and sizing it per platform would break the one-look rule
+- Do not hand-roll a suggestion list under a field — `AircraftTypeSuggestions` is the one (an inset well, 44px rows, inset dividers); the aircraft form, panel and page each carried a bordered `hover:bg-accent` web dropdown
+- Do not hand the year wheel a new options array per render — `yearOptions` keeps the SAME array while the range holds, and the range is anchored on TODAY (widened only when the viewed year falls outside). Anchored on the viewed year, every year spun rebuilt ~75 rows
 - Do not put a segmented choice back as a pair of filled rectangles — it is `SegmentedTabs` (glass, a sliding indicator, `h-9` segments), as in the import dialogs and the Quick Check. And measure its segments from ONE ResizeObserver: reading `offsetLeft` in a ref callback that is rebuilt on every selection forced a layout per tap and attached a new observer to every segment each time, never disconnecting the old ones
 - Do not put an action back on the card surface (`bg-secondary`, `bg-card`, `bg-muted`) or give it a rectangle's corners — a thing you press is a CAPSULE or circle on `.control-surface`, a thing you read is a rounded rectangle. On the card surface the context preview's action row read as more card. And do not use the REAL glass (`GlassContainer`) for an action that sits over a scrim, a row or a panel: the painted surface is the same look with no `backdrop-filter`, and these pop in on exactly the frames a readback would cost most
 - Do not group header controls page by page — a header is VIEW (search, calendar, period) → TOOLS (import, Quick Check, alerts, read-from-photo) → CREATE (+, alone and last), one capsule per role, with a page switch first and detail commits (Cancel / Save / Edit, Back) one capsule each (`glass-icon-button.tsx`). And do not add a Refresh button: every list follows every write and every sync, so it re-reads the same rows, and it reads as "sync" — which is the cloud in the nav

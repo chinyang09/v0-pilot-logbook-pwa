@@ -1,5 +1,6 @@
 "use client"
 
+import { AircraftTypeSuggestions } from "@/components/aircraft-type-suggestions"
 import { CODE_INPUT_PROPS } from "@/lib/utils/input-props"
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { ScrollIndicator } from "@/components/ui/scroll-indicator"
@@ -16,7 +17,6 @@ import { Loader2 } from "lucide-react"
 import { submitAircraftToServer } from "@/lib/submissions/submit"
 import { getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
 import type { AircraftType } from "@/types/entities/aircraft-type.types"
-import { formatAircraftType } from "@/lib/utils/aircraft-type-utils"
 import { useAircraftTypeSearch } from "@/hooks/use-aircraft-type-search"
 
 interface AircraftDetailPanelProps {
@@ -212,25 +212,8 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
                     className="text-right border-0 bg-transparent dark:bg-transparent shadow-none rounded-none md:text-base h-auto p-0 w-auto max-w-[150px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0 uppercase"
                   />
                 </div>
-                {showTypeSearch && typeSearchResults.length > 0 && (
-                  <div className="mt-2 max-h-48 overflow-y-auto rounded-lg border border-border bg-background">
-                    {typeSearchResults.map((type) => (
-                      <button
-                        key={type.designator}
-                        type="button"
-                        onClick={() => onSelectType(type)}
-                        className="w-full text-left px-3 py-2 hover:bg-accent border-b border-border last:border-b-0 transition-colors"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-sm text-foreground">{type.designator}</span>
-                          <span className="text-xs text-primary bg-primary/10 px-1.5 py-0.5 rounded">{type.description}</span>
-                          {type.wtc && <span className="text-xs text-muted-foreground">WTC:{type.wtc}</span>}
-                          {type.wtg && <span className="text-xs text-muted-foreground">WTG:{type.wtg}</span>}
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-0.5">{formatAircraftType(type)}</div>
-                      </button>
-                    ))}
-                  </div>
+                {showTypeSearch && (
+                  <AircraftTypeSuggestions results={typeSearchResults} onSelect={onSelectType} />
                 )}
               </div>
             ) : (

@@ -90,7 +90,7 @@ import {
   positioningPatch,
   withoutSimulatorPins,
 } from "@/lib/utils/entry-type";
-import { ADDITIONAL_CREW_ROLES, additionalCrewRoleLabel, requiresTwoPilots } from "@/lib/utils/crew-complement";
+import { ADDITIONAL_CREW_ROLES, additionalCrewField, additionalCrewRoleLabel, requiresTwoPilots } from "@/lib/utils/crew-complement";
 import { ChoicePicker, type MenuOption } from "@/components/ui/option-menu";
 import type { EntryType } from "@/types/entities/flight.types";
 import type { DisplayPreferences } from "@/types/db/stores.types";
@@ -152,6 +152,51 @@ function SettingsRow({
           <ChevronRight className="h-5 w-5 text-muted-foreground/50" />
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * An additional crew member, in the seat rows' structure: the ROLE on the
+ * left, where a seat row has its label, and the NAME on the right with the
+ * person icon and chevron a seat row's value has. Both are their own targets
+ * — the role opens the role menu, the name the crew picker — so the row has
+ * no tap of its own.
+ */
+function AdditionalCrewRow({
+  role,
+  name,
+  onRoleChange,
+  onPickCrew,
+}: {
+  role: AdditionalCrew["role"];
+  name?: string;
+  onRoleChange: (role: AdditionalCrew["role"]) => void;
+  onPickCrew: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-1 row-divider">
+      <ChoicePicker
+        label="Crew role"
+        value={role}
+        options={ADDITIONAL_CREW_ROLES}
+        onValueChange={onRoleChange}
+        align="start"
+        className="-ml-2 flex h-11 min-w-0 shrink-0 items-center gap-1 rounded-lg px-2 text-left text-foreground outline-none focus-visible:outline-2 focus-visible:outline-ring"
+      >
+        {additionalCrewRoleLabel(role)}
+        <ChevronsUpDown className="h-4 w-4 text-muted-foreground" aria-hidden />
+      </ChoicePicker>
+      <button
+        type="button"
+        onClick={onPickCrew}
+        aria-label={`Crew member: ${name ?? "not set"}`}
+        className="-mr-2 flex h-11 min-w-0 items-center justify-end gap-2 rounded-lg px-2 outline-none focus-visible:outline-2 focus-visible:outline-ring"
+      >
+        <span className={cn("truncate", name ? "text-foreground" : "text-muted-foreground")}>{name ?? "Select"}</span>
+        <User className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+        <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/50" aria-hidden />
+      </button>
     </div>
   );
 }
@@ -1540,7 +1585,7 @@ export function FlightForm({
     router.push(`/aircraft?${params.toString()}`);
   };
 
-  const openCrewPicker = async (field: "picId" | "sicId" | `additionalCrew:${AdditionalCrew["role"]}`) => {
+  const openCrewPicker = async (field: string) => {
     if (!formData.id) return;
     saveScrollPosition();
     await forceSave();
@@ -1584,23 +1629,25 @@ export function FlightForm({
   );
 
 
-  // Additional crew management (members are added through the crew picker)
+  // Additional crew management, by ROW (members are added through the crew
+  // picker). By index, not id: an imported member may carry no crew-card id,
+  // and such a row could be neither re-roled nor removed.
   const updateAdditionalCrew = useCallback(
-    (id: string, updates: Partial<AdditionalCrew>) => {
+    (at: number, updates: Partial<AdditionalCrew>) => {
       setFormData((prev) => ({
         ...prev,
-        additionalCrew: (prev.additionalCrew || []).map((c) =>
-          c.id === id ? { ...c, ...updates } : c
+        additionalCrew: (prev.additionalCrew || []).map((c, i) =>
+          i === at ? { ...c, ...updates } : c
         ),
       }));
     },
     []
   );
 
-  const removeAdditionalCrew = useCallback((id: string) => {
+  const removeAdditionalCrew = useCallback((at: number) => {
     setFormData((prev) => ({
       ...prev,
-      additionalCrew: (prev.additionalCrew || []).filter((c) => c.id !== id),
+      additionalCrew: (prev.additionalCrew || []).filter((_, i) => i !== at),
     }));
   }, []);
 
@@ -2032,7 +2079,7 @@ export function FlightForm({
             />
           </SwipeableRow>
 
-          <div className="flex items-center justify-center py-2 border-b border-border">
+          <div className="flex items-center justify-center py-2 row-divider">
             <Button
               variant="outline"
               size="sm"
@@ -2061,79 +2108,34 @@ export function FlightForm({
           </SwipeableRow>
 
           {/* Crew beyond the two seats — a relief pilot on an augmented crew,
-              a check pilot, an instructor. Each is a ROW with two things to
-              choose, who and as what, and the role opens the app's menu. */}
+              a check pilot, an instructor. Each is a row in the PIC/SIC rows'
+              own structure: the ROLE is the label on the left and opens the
+              role menu; the NAME is the value on the right and opens the crew
+              picker for THIS row (`additionalCrewField(role, i)` — the pick
+              replaces it, in its role). Swipe clears it, as it does a seat. */}
           {(formData.additionalCrew ?? []).map((member, i) => (
-            <div
-              key={member.id ?? `${member.name}-${i}`}
-              className="flex items-center justify-between gap-2 py-1.5 pl-4 pr-2 row-divider"
-            >
-              <span className="flex min-w-0 items-center gap-2 text-foreground">
-                <User className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="truncate">{member.name || "Unnamed"}</span>
-              </span>
-              <span className="flex shrink-0 items-center">
-                <ChoicePicker
-                  label={`Role of ${member.name || "crew member"}`}
-                  value={member.role}
-                  options={ADDITIONAL_CREW_ROLES}
-                  onValueChange={(role) => member.id && updateAdditionalCrew(member.id, { role })}
-                  className="flex h-9 items-center gap-1 rounded-md px-2 text-muted-foreground outline-none focus-visible:outline-2 focus-visible:outline-ring"
-                >
-                  {additionalCrewRoleLabel(member.role)}
-                  <ChevronsUpDown className="h-4 w-4" aria-hidden />
-                </ChoicePicker>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9 text-muted-foreground"
-                  aria-label={`Remove ${member.name || "crew member"}`}
-                  onClick={() => member.id && removeAdditionalCrew(member.id)}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </span>
-            </div>
+            <SwipeableRow key={member.id ?? `${member.name}-${i}`} onClear={() => removeAdditionalCrew(i)}>
+              <AdditionalCrewRow
+                role={member.role}
+                name={member.name || "Unnamed"}
+                onRoleChange={(role) => updateAdditionalCrew(i, { role })}
+                onPickCrew={() => openCrewPicker(additionalCrewField(member.role, i))}
+              />
+            </SwipeableRow>
           ))}
 
-          {/* "Add Crew" makes the ROW first: an empty slot whose role can be
-              set before anyone is in it, and whose name opens the crew picker
-              to fill it — the role travels with the pick
-              (\`additionalCrew:<role>\`). It is the form's own state until the
-              pick lands, so an abandoned slot leaves nothing on the flight. */}
+          {/* "Add Crew" makes the ROW first — its role chosen on the left, its
+              name picked on the right, as on a filled row. It is the form's
+              own state until the pick lands (`crewSlot` is DERIVED away once
+              the list grows), so an abandoned row writes nothing. */}
           {crewSlotRole && (
-            <div className="flex items-center justify-between gap-2 py-1.5 pl-4 pr-2 row-divider">
-              <button
-                type="button"
-                onClick={() => openCrewPicker(`additionalCrew:${crewSlotRole}`)}
-                className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md text-left outline-none focus-visible:outline-2 focus-visible:outline-ring"
-              >
-                <User className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="truncate text-primary">Select crew</span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-              </button>
-              <span className="flex shrink-0 items-center">
-                <ChoicePicker
-                  label="Role of the new crew member"
-                  value={crewSlotRole}
-                  options={ADDITIONAL_CREW_ROLES}
-                  onValueChange={setCrewSlotRole}
-                  className="flex h-9 items-center gap-1 rounded-md px-2 text-muted-foreground outline-none focus-visible:outline-2 focus-visible:outline-ring"
-                >
-                  {additionalCrewRoleLabel(crewSlotRole)}
-                  <ChevronsUpDown className="h-4 w-4" aria-hidden />
-                </ChoicePicker>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9 text-muted-foreground"
-                  aria-label="Remove the empty crew row"
-                  onClick={() => setCrewSlotRole(null)}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </span>
-            </div>
+            <SwipeableRow onClear={() => setCrewSlotRole(null)}>
+              <AdditionalCrewRow
+                role={crewSlotRole}
+                onRoleChange={setCrewSlotRole}
+                onPickCrew={() => openCrewPicker(additionalCrewField(crewSlotRole))}
+              />
+            </SwipeableRow>
           )}
 
           {!crewSlotRole && (
@@ -2374,7 +2376,7 @@ export function FlightForm({
           {(formData.approaches || []).map((approach, index) => (
             <div
               key={approach.id}
-              className="flex items-center justify-between py-3 px-4 border-b border-border"
+              className="flex items-center justify-between py-3 px-4 row-divider"
             >
               <div className="flex items-center gap-2 flex-1">
                 <ChoicePicker

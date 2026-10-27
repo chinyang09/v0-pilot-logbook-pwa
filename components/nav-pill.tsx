@@ -1062,7 +1062,11 @@ function PillBarContent({
                 <span
                   data-grav-item
                   className={cn(
-                    "inline-flex flex-col items-center justify-center gap-0.5 h-12 px-3 rounded-full transition-colors",
+                    // The padding gives way below ~346px (an iPad window in
+                    // Split View is 320): at a fixed 12px the bar was 330px
+                    // wide and ran off both edges of a 320px screen. Above
+                    // that it is 12px, so every phone gets the same bar.
+                    "inline-flex flex-col items-center justify-center gap-0.5 h-12 px-[clamp(6px,calc((100vw-250px)/8),12px)] rounded-full transition-colors",
                     highlighted
                       ? "text-[var(--on-glass-active-fg)]"
                       : "text-foreground"

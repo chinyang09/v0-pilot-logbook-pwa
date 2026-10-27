@@ -71,18 +71,44 @@ export function additionalCrewRoleLabel(role: AdditionalCrew["role"]): string {
 }
 
 /**
- * The flight's additional crew with `member` added — or `null` when they are
- * already aboard, in either seat or the list, so picking someone twice cannot
- * put them on the flight twice. The crew card's id is the entry's id (the
- * signature step looks the licence up by it).
+ * The flight's additional crew with `member` added — or, given `at`, put in
+ * place of the entry at that index (the row whose name was tapped). `null`
+ * when they are already aboard, in either seat or another row, so picking
+ * someone twice cannot put them on the flight twice. The crew card's id is the
+ * entry's id (the signature step looks the licence up by it).
  */
 export function withAdditionalCrew(
   flight: Pick<FlightLog, "picId" | "sicId" | "additionalCrew">,
   member: { id: string; name: string },
-  role: AdditionalCrew["role"] = "Relief Pilot"
+  role: AdditionalCrew["role"] = "Relief Pilot",
+  at?: number
 ): AdditionalCrew[] | null {
   const current = flight.additionalCrew ?? []
+  const replacing = at !== undefined && at >= 0 && at < current.length
   if (member.id === flight.picId || member.id === flight.sicId) return null
-  if (current.some((c) => c.id === member.id)) return null
-  return [...current, { id: member.id, name: member.name, role }]
+  if (current.some((c, i) => c.id === member.id && !(replacing && i === at))) return null
+  const entry = { id: member.id, name: member.name, role }
+  return replacing ? current.map((c, i) => (i === at ? entry : c)) : [...current, entry]
+}
+
+/**
+ * The crew picker's `field` for an additional crew row: `additionalCrew:<role>`
+ * appends someone in that role, `additionalCrew:<role>:<index>` puts them in
+ * place of that row. The role travels with the pick because the row's role is
+ * chosen before (or kept while) the person is.
+ */
+export function additionalCrewField(role: AdditionalCrew["role"], at?: number): string {
+  return at === undefined ? `additionalCrew:${role}` : `additionalCrew:${role}:${at}`
+}
+
+/** The inverse of `additionalCrewField`; `null` for any other field. */
+export function parseAdditionalCrewField(
+  field: string
+): { role: AdditionalCrew["role"]; at?: number } | null {
+  if (field === "additionalCrew") return { role: "Relief Pilot" }
+  const [head, asked, index] = field.split(":")
+  if (head !== "additionalCrew") return null
+  const role = ADDITIONAL_CREW_ROLES.find((r) => r.value === asked)?.value ?? "Relief Pilot"
+  const at = index !== undefined && /^\d+$/.test(index) ? Number(index) : undefined
+  return { role, at }
 }
