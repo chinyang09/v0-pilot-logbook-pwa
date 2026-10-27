@@ -21,6 +21,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
+import { observeRectAfterLayout, viewportRect } from "@/lib/utils/virtual-scroll"
 import { Plane, MonitorPlay, Trash2, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { parseYMDLocal } from "@/lib/utils/date"
@@ -137,6 +138,10 @@ export const RosterAgenda = memo(function RosterAgenda({
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollElement,
+    // Sized from a ResizeObserver, not a synchronous read mid-commit (see
+    // `observeRectAfterLayout`).
+    observeElementRect: observeRectAfterLayout,
+    initialRect: viewportRect(),
     estimateSize: (i) => (rows[i].kind === "header" ? HEADER_H : ITEM_H),
     getItemKey,
     overscan: 8,

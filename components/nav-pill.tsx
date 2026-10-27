@@ -22,7 +22,7 @@ import {
 import { cn } from "@/lib/utils"
 import { MODAL_SCRIM } from "@/components/ui/chrome-overlays"
 import { OVERSHOOT_BEZIER, SETTLE_BEZIER, MORPH_EASE } from "@/lib/motion"
-import { GlassContainer } from "@/components/ui/glass-container"
+import { GlassContainer, glassSpotlight } from "@/components/ui/glass-container"
 import { useDesktopPill, useHydrated } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import { SIDEBAR_WIDTH_PX } from "@/lib/layout/panel-widths"
@@ -820,9 +820,10 @@ function PillBarContent({
 
     // The pill's spotlight follows the finger too — written here rather than in
     // its own helper so it shares this pass's single rect read.
-    if (gr && grRect) {
-      gr.style.setProperty("--press-x", `${clientX - grRect.left}px`)
-      gr.style.setProperty("--press-y", `${clientY - grRect.top}px`)
+    const spot = glassSpotlight(gr)
+    if (spot && grRect) {
+      spot.style.setProperty("--press-x", `${clientX - grRect.left}px`)
+      spot.style.setProperty("--press-y", `${clientY - grRect.top}px`)
     }
   }, [squishX, squishY, nudgeX])
 
@@ -887,7 +888,7 @@ function PillBarContent({
       drag.active = true
       setLensPhase("drag")
       // Take over the pill's spotlight — its own move handler is about to stop.
-      glassRootRef.current?.style.setProperty("--glass-press", "1")
+      glassSpotlight(glassRootRef.current)?.style.setProperty("--glass-press", "1")
       try {
         tabsRef.current?.setPointerCapture(e.pointerId)
       } catch {
@@ -909,7 +910,7 @@ function PillBarContent({
     }
     // Fade the pill spotlight back out. Kill the horizontal strain INSTANTLY
     // (jump, not set) so releasing never springs the lens left/right.
-    glassRootRef.current?.style.setProperty("--glass-press", "0")
+    glassSpotlight(glassRootRef.current)?.style.setProperty("--glass-press", "0")
     nudgeX.jump(0)
     if (!drag?.active) return
     // Swallow the click synthesised at the end of the drag; the timeout clears
@@ -1350,7 +1351,7 @@ function SidebarNavItem({
       draggable={false}
       onContextMenu={suppressLinkMenu}
       className={cn(
-        "relative z-[1] flex items-center gap-3 px-3 py-2 rounded-full text-sm transition-all duration-150",
+        "relative z-[1] flex items-center gap-3 px-3 py-2 rounded-full text-sm transition-[background-color,color,scale] duration-150",
         "active:scale-[0.98]",
         isActive
           ? "text-[var(--on-glass-active-fg)] font-medium"

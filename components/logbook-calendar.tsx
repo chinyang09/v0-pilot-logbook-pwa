@@ -559,7 +559,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
               >
                 <div
                   className={cn(
-                    "w-full aspect-square flex items-center justify-center text-lg rounded-full transition-all",
+                    "w-full aspect-square flex items-center justify-center text-lg rounded-full transition-[background-color,color,box-shadow]",
                     isCurrentMonth
                       ? "text-foreground"
                       : "text-[var(--on-glass-faint)]",

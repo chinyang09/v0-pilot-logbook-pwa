@@ -909,12 +909,13 @@ textarea:focus-within {
 }
 
 /* Touch spotlight — a soft glow anchored to the FINGER (GlassContainer sets
-   --press-x/--press-y imperatively on pointer down/move, and animates
-   --glass-press 0→1 via whileTap), so the light tracks a hold-and-drag
-   across the surface like Apple's controls. Paints over the content on
-   purpose: the press lightens the label too. */
-.GlassContent::after {
-  content: "";
+   --press-x/--press-y imperatively on pointer down/move, and --glass-press
+   0→1), so the light tracks a hold-and-drag across the surface like Apple's
+   controls. Paints over the content on purpose: the press lightens the label
+   too. Its own EMPTY element, not GlassContent::after: a pseudo-element can
+   only inherit those properties from GlassContent, which hands them to every
+   child too — so each write restyled the glass's whole subtree. */
+.GlassSpotlight {
   position: absolute;
   inset: 0;
   z-index: 1;

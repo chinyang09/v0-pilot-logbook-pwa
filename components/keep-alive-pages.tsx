@@ -288,6 +288,15 @@ export function KeepAlivePages({ children }: { children: ReactNode }) {
               className="absolute inset-0 flex flex-col bg-background"
               style={{
                 visibility: isActive ? "visible" : "hidden",
+                // The hidden page's subtree is SKIPPED — no style, layout or
+                // paint — and its rendering state (scroll offsets included) is
+                // kept for when it is shown. `visibility` alone is inherited, so
+                // flipping it restyled BOTH pages' whole subtrees on every tab
+                // switch: ~1,400 elements, 155–171ms at a 4× throttle, the
+                // biggest single task of a switch. `visibility` stays as well,
+                // for an engine without `content-visibility` — the page is
+                // hidden either way, only the cost differs.
+                contentVisibility: isActive ? "visible" : "hidden",
                 pointerEvents: isActive ? "auto" : "none",
                 zIndex: isActive ? 1 : 0,
               }}

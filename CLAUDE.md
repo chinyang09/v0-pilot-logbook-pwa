@@ -1509,6 +1509,42 @@ found the work that RECURS rather than the work that is merely large:
   key, localStorage), so a visit after the first needs no re-measure — on the
   airports list that is a pass over ~29k rows.
 
+A fourth round traced STYLE work (Chrome's invalidation tracking says WHY each
+element was restyled) and the forced layouts hidden in libraries:
+
+| | Before | After |
+|---|---|---|
+| a tap on a nav tab | ~170-element restyle ×2 (45–60ms each at 4×), INP 160–200ms | none, INP 56–88ms |
+| a kept-alive tab switch | ~1,400-element restyle (155–171ms) | only the arriving page's |
+| opening the sidebar | 239–408ms of long tasks | 118–188ms |
+| opening a flight | 1533ms busy (210ms of it framer's `measureScroll`) | 1090ms |
+| a key in the flight form | ~140ms per key, a forced layout per key | INP 56–104ms |
+
+- **Glass writes its press properties on the SPOTLIGHT, not the root**
+  (`.GlassSpotlight`, `glassSpotlight()`). Custom properties inherit: written on
+  the root, each tap and each frame of a finger moving over the glass restyled
+  the whole nav.
+- **Kept-alive pages are `content-visibility: hidden` when hidden**, as well as
+  `visibility: hidden`. `visibility` is inherited, so flipping it restyled both
+  pages' entire subtrees; a skipped subtree is not restyled at all, and its
+  scroll offsets are kept (measured: the logbook returns at the same
+  `scrollTop` with the same rows).
+- **No `transition-all` anywhere.** It includes `visibility`, so every element
+  carrying it inside a kept-alive page started a transition — and was
+  restyled every frame — on each tab switch; it also makes every style change
+  check every animatable property, Tailwind's ~87 registered ones included.
+- **A swipe row arms on a sideways move**, not on pointerdown or on focus, and
+  disarms once settled shut (`SwipeableCard`). Armed, it carries framer's drag
+  feature and the projection node that comes with it, whose every render reads
+  the document's scroll.
+- **Virtualisers size themselves from a ResizeObserver**
+  (`observeRectAfterLayout`, `viewportRect`): TanStack's default reads
+  `offsetWidth`/`offsetHeight` in the layout phase of the commit that mounts the
+  list.
+- **The flight form's text fields answer the key** (`useDraftText`,
+  `DraftInput`, `RemarksField`): a local draft, committed to the form in a
+  transition. Remarks grow by a CSS mirror, not a `scrollHeight` read.
+
 Still open, measured: opening a flight still runs ~400ms of long tasks at 4×,
 but in yielding slices after the tap has painted. The rest is the form's ~300
 fibers mounting, mostly framer `motion` and Radix. The first Dashboard visit
@@ -4901,6 +4937,12 @@ When making changes, be aware of these high-impact files:
 - **Blur animation rules, app-wide.** Never ANIMATE `backdrop-filter`, `filter`, `mask-image`, `height` or `top` — they are layout- or paint-bound and re-rasterise every frame. Animate `opacity` and `transform` only. Where a progressive blur has to appear or disappear, fade the layers' OPACITY on a SHORT clock of their own (~160ms) rather than the surrounding motion's, so the blur settles before the thing it sits behind has finished moving and the rest of the animation composites a texture that no longer changes. And keep the stack to THREE layers on a full-viewport effect: each layer samples the output of the one below, so it is a chain rather than a sum, and the fourth link is the one a weak mobile GPU shows. `RadialBlurBackdrop` and `SIDEBAR_BACKDROP_BLUR` both follow this; `ChromeFade` is static and does not animate at all
 - Do not fade a `backdrop-filter` layer by fading an ANCESTOR — an element with `opacity` below 1 (or `will-change: opacity`, a mask, or a filter) is a **backdrop root**, so its descendants' `backdrop-filter` can only sample inside it. The context preview's `RadialBlurBackdrop` used to sit inside the scrim that fades: for the whole morph the layers blurred nothing, then the full stack snapped on the instant the scrim hit exactly 1 — a hitch at the end of the animation, and the part of that overlay most likely to be felt on a phone. Fade each LAYER's own opacity instead (an element's own opacity is fine — the root is an ancestor boundary), which is how `SIDEBAR_BACKDROP_BLUR` has always done it. A CSS transition there also needs the layers to MOUNT at 0, or there is no previous value to run from
 - Do not put a `layout`/`layoutId` prop on a flight card in the LIST to morph the context preview out of it — the rows are VIRTUALISED, and that hands framer every rendered row to measure on every layout change. The preview is a FLIP, but only the OVERLAY carries the projection: the collapsed box is stated outright from the anchor we already measure when the hold fires, so the list is never involved. Anchor it to the card (`[data-slot="card"]`), not the row wrapper — the wrapper carries the per-row top gap and 4px out is a visible jump on the first frame
+- Do not use `transition-all` (or `transition: all`) anywhere — name the properties (`transition-colors`, `transition-[background-color,color,scale]`). It includes `visibility`, which is how the kept-alive stack hides pages, so every element carrying it there started a visibility transition — and was restyled every frame — on each tab switch, and it makes each style change compare every animatable property, Tailwind's ~87 registered custom properties included. Tailwind's plain `transition` does not include `visibility` and is fine
+- Do not write a custom property on a CONTAINER per frame or per tap — it inherits, so the write restyles the container's whole subtree. The glass's spotlight properties go on its own empty element (`.GlassSpotlight`, reached from outside with `glassSpotlight(root)`); written on the glass root they restyled the entire nav (~170 elements, 45–60ms at 4×) on every tap and every frame a finger moved over it
+- Do not drop `content-visibility: hidden` from a hidden kept-alive page. `visibility` alone is inherited, so the tab switch restyled BOTH pages' whole subtrees (~1,400 elements, 155–171ms at 4×); `content-visibility` skips the hidden one entirely and keeps its scroll offsets. `visibility` stays beside it for an engine without `content-visibility` — the result on screen is the same either way
+- Do not arm a `SwipeableCard` row on pointerdown or on an ordinary focus, and do not leave it armed — it arms on a sideways move past `ARM_SLOP` (the move starts the drag), on focus of its keyboard stand-in only, and disarms once it has settled shut. An armed row carries framer's drag feature AND the layout-projection node drag brings; every render of it then reads the document's scroll, a forced layout of the app — ~210ms of the tap that opened a flight, and once per keystroke in a flight-form row that had been tapped
+- Do not let a `useVirtualizer` measure its scroller with TanStack's default `observeElementRect` — pass `observeElementRect: observeRectAfterLayout` and `initialRect: viewportRect()` (`lib/utils/virtual-scroll.ts`). The default reads `offsetWidth`/`offsetHeight` in the layout phase of the commit that mounts the list, a forced layout of the arriving page (~240ms of the first Crew visit at 4×). And keep `data-index` on every row even where nothing measures: `scrollToIndexSettled` finds the row by it, and without it the A–Z rail's correction never lands (the row stops under the header)
+- Do not bind a flight-form text input straight to `updateField` — use `DraftInput` / `RemarksField` (`useDraftText`): the field shows its own draft and commits to the form in a transition, so a key does not wait for ~50 rows to re-render. And do not size a growing textarea by `height = auto; height = scrollHeight` — that is a forced layout per key; `RemarksField` grows by a CSS mirror in the same grid cell
 - Do not put `transition-all` on a flight card — its visibility is toggled by the context preview, and `transition-all` animates `visibility`. Measured: hidden→visible still computes `hidden` for the FIRST FRAME, so the overlay unmounts and the row is blank for a frame (the flash on collapse); visible→hidden holds `visible` for the whole 150ms, so the source row shows through the opening morph as a second copy of the same flight. `transition-colors` is what the hover/selected states actually wanted
 - Do not let the flight card's press-and-hold fire on a row whose SWIPE PANEL is open — the actions are showing and the card has been pushed aside to reveal them, so a press there is aimed at a button, not at holding the card. `SwipeableCard` publishes `data-swipe-open` for exactly this (unconditional, unlike `data-swipe-active`, which is scoped to `separated` rows because it drives their divider morph)
 - Do not tear the context preview down on the dismissing tap — the morph runs BOTH ways, so closing collapses it back onto the row first. And keep the source row `invisible` while it is up, or the copy opening on top of it shows the same flight twice through the scrim

@@ -23,7 +23,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { FastScroll, generateAlphabetItemsFromList, FAST_SCROLL_TOP_KEY } from "@/components/ui/fast-scroll";
-import { scrollToIndexSettled, scrollToTop } from "@/lib/utils/virtual-scroll";
+import { scrollToIndexSettled, scrollToTop, observeRectAfterLayout, viewportRect } from "@/lib/utils/virtual-scroll";
 import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { AirportDetailPanel } from "@/components/airport-detail-panel";
@@ -67,7 +67,7 @@ const AirportCard = memo(function AirportCard({
         // OVER bg-card. The old ternary dropped bg-card for recent rows, so
         // the gradient sat on the darker page background and recent airports
         // rendered a different shade from recent aircraft/crew.
-        "w-full text-left rounded-lg py-2 pl-3 pr-6 transition-all cursor-pointer bg-card border border-border hover:bg-accent",
+        "w-full text-left rounded-lg py-2 pl-3 pr-6 transition-colors cursor-pointer bg-card border border-border hover:bg-accent",
         isRecent &&
           "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20 hover:bg-transparent",
         isSelected && "bg-primary/20 border-primary hover:bg-primary/20"
@@ -340,6 +340,10 @@ export default function AirportsPage() {
   const rowVirtualizer = useVirtualizer({
     count: displayAirports.length,
     getScrollElement: () => scrollContainerRef.current,
+    // Sized from a ResizeObserver, not a synchronous read mid-commit (see
+    // `observeRectAfterLayout`).
+    observeElementRect: observeRectAfterLayout,
+    initialRect: viewportRect(),
     estimateSize,
     getItemKey: getAirportKey,
     overscan: 10,
@@ -770,7 +774,7 @@ export default function AirportsPage() {
                       onKeyDown={(e: React.KeyboardEvent) => {
                         if (e.key === "Enter" || e.key === " ") handleSelectFr24Airport(fr24Result);
                       }}
-                      className="w-full text-left rounded-lg py-2 pl-3 pr-6 transition-all cursor-pointer bg-card border border-border hover:bg-accent"
+                      className="w-full text-left rounded-lg py-2 pl-3 pr-6 transition-colors cursor-pointer bg-card border border-border hover:bg-accent"
                     >
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-foreground">{fr24Result.icao}</span>
@@ -826,6 +830,9 @@ export default function AirportsPage() {
                       width: "100%",
                       transform: `translateY(${virtualRow.start - rowVirtualizer.options.scrollMargin}px)`,
                     }}
+                    // What the fast-scroll rail finds the row by (`scrollToIndexSettled`)
+                    // — an attribute only; nothing measures it.
+                    data-index={virtualRow.index}
                     ref={measureRow}
                   >
                     <div className="pt-1">

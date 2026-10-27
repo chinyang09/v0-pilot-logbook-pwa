@@ -26,7 +26,7 @@ import { mutate } from "swr";
 import { CACHE_KEYS } from "@/hooks/data";
 import { SwipeableCard } from "@/components/swipeable-card";
 import { FastScroll, generateAlphabetItemsFromList, FAST_SCROLL_TOP_KEY } from "@/components/ui/fast-scroll";
-import { scrollToIndexSettled, scrollToTop } from "@/lib/utils/virtual-scroll";
+import { scrollToIndexSettled, scrollToTop, observeRectAfterLayout, viewportRect } from "@/lib/utils/virtual-scroll";
 import { useDetailPanel } from "@/hooks/use-detail-panel";
 import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { CrewDetailPanel } from "@/components/crew-detail-panel";
@@ -99,7 +99,7 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
           }
         }}
         className={cn(
-          "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-all hover:bg-accent",
+          "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-colors hover:bg-accent",
           isRecent &&
             "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20 hover:bg-transparent",
           isSelected && "bg-primary/20 border-primary hover:bg-primary/20"
@@ -335,6 +335,10 @@ export default function CrewPage() {
   const rowVirtualizer = useVirtualizer({
     count: displayPersonnel.length,
     getScrollElement: () => scrollContainerRef.current,
+    // Sized from a ResizeObserver, not a synchronous read mid-commit (see
+    // `observeRectAfterLayout`).
+    observeElementRect: observeRectAfterLayout,
+    initialRect: viewportRect(),
     estimateSize,
     getItemKey: getCrewKey,
     overscan: 10,
@@ -737,6 +741,9 @@ export default function CrewPage() {
                         width: "100%",
                         transform: `translateY(${virtualRow.start - rowVirtualizer.options.scrollMargin}px)`,
                       }}
+                      // What the fast-scroll rail finds the row by (`scrollToIndexSettled`)
+                      // — an attribute only; nothing measures it.
+                      data-index={virtualRow.index}
                       ref={measureRow}
                     >
                       <div className="pt-1">

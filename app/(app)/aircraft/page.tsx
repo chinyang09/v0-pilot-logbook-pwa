@@ -27,7 +27,7 @@ import { syncService } from "@/lib/sync"
 import { Button } from "@/components/ui/button"
 import { PageContainer } from "@/components/page-container"
 import { FastScroll, generateAlphabetItemsFromList, FAST_SCROLL_TOP_KEY } from "@/components/ui/fast-scroll"
-import { scrollToIndexSettled, scrollToTop } from "@/lib/utils/virtual-scroll"
+import { scrollToIndexSettled, scrollToTop, observeRectAfterLayout, viewportRect } from "@/lib/utils/virtual-scroll"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { AircraftDetailPanel } from "@/components/aircraft-detail-panel"
@@ -94,7 +94,7 @@ const SwipeableAircraftCard = memo(function SwipeableAircraftCard({
           }
         }}
         className={cn(
-          "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-all hover:bg-accent",
+          "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-colors hover:bg-accent",
           isRecent &&
             "bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20 hover:bg-transparent",
           isSelected && "bg-primary/20 border-primary hover:bg-primary/20"
@@ -398,6 +398,10 @@ export default function AircraftPage() {
   const rowVirtualizer = useVirtualizer({
     count: displayAircraft.length,
     getScrollElement: () => scrollContainerRef.current,
+    // Sized from a ResizeObserver, not a synchronous read mid-commit (see
+    // `observeRectAfterLayout`).
+    observeElementRect: observeRectAfterLayout,
+    initialRect: viewportRect(),
     estimateSize,
     getItemKey: getAircraftKey,
     overscan: 10,
@@ -834,7 +838,7 @@ export default function AircraftPage() {
                           onKeyDown={(e: React.KeyboardEvent) => {
                             if (e.key === "Enter" || e.key === " ") handleSelectFr24(record)
                           }}
-                          className="w-full text-left rounded-lg py-2 pl-3 pr-6 transition-all cursor-pointer bg-card border border-border hover:bg-accent"
+                          className="w-full text-left rounded-lg py-2 pl-3 pr-6 transition-colors cursor-pointer bg-card border border-border hover:bg-accent"
                         >
                           <div className="flex items-center gap-2">
                             <span className="font-semibold text-foreground">{record.registration || record.icao24}</span>
@@ -891,6 +895,9 @@ export default function AircraftPage() {
                         width: "100%",
                         transform: `translateY(${virtualRow.start - rowVirtualizer.options.scrollMargin}px)`,
                       }}
+                      // What the fast-scroll rail finds the row by (`scrollToIndexSettled`)
+                      // — an attribute only; nothing measures it.
+                      data-index={virtualRow.index}
                       ref={measureRow}
                     >
                       <div className="pt-1">

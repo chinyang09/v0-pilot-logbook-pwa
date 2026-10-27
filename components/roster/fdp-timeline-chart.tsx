@@ -925,7 +925,7 @@ export function FDPTimelineChart({
                   <div className="flex items-center gap-1 mt-0.5 w-full">
                     <div className="h-1 rounded-full flex-1 bg-muted">
                       <div
-                        className={cn("h-full rounded-full transition-all", barColor)}
+                        className={cn("h-full rounded-full transition-[width,background-color]", barColor)}
                         style={{ width: `${Math.min(pct, 100)}%` }}
                       />
                     </div>

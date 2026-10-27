@@ -88,3 +88,42 @@ export function scrollToTop(virtualizer: ScrollableVirtualizer): void {
   const el = virtualizer.scrollElement
   if (el instanceof HTMLElement) el.scrollTo({ top: 0, behavior: "auto" })
 }
+
+type RectInstance = { scrollElement: Element | Window | null }
+
+/**
+ * The scroller's size for `useVirtualizer`, taken ONLY from a ResizeObserver.
+ *
+ * TanStack's default (`observeElementRect`) reads `offsetWidth`/`offsetHeight`
+ * synchronously when the virtualizer first attaches — inside React's layout
+ * phase, on the commit that mounts the list, while the whole new page is still
+ * dirty. That read is a forced layout of the app: ~240ms of the first visit to
+ * Crew at a 4× throttle, and the same on every other virtualised list. The
+ * observer's first callback reports the same box after the browser's own
+ * layout, for free; until then `VIEWPORT_RECT` stands in.
+ */
+export function observeRectAfterLayout(
+  instance: RectInstance,
+  cb: (rect: { width: number; height: number }) => void,
+): (() => void) | undefined {
+  const el = instance.scrollElement
+  if (!(el instanceof Element) || typeof ResizeObserver === "undefined") return
+  const ro = new ResizeObserver(([entry]) => {
+    const box = entry?.borderBoxSize?.[0]
+    const width = box ? box.inlineSize : entry.contentRect.width
+    const height = box ? box.blockSize : entry.contentRect.height
+    cb({ width: Math.round(width), height: Math.round(height) })
+  })
+  ro.observe(el, { box: "border-box" })
+  return () => ro.disconnect()
+}
+
+/**
+ * The first-paint stand-in for the scroller's size: the viewport, which every
+ * one of these lists' scrollers fills (or nearly). Too large costs a few extra
+ * rows on the first frame; zero would render none until the observer reports.
+ */
+export function viewportRect(): { width: number; height: number } {
+  if (typeof window === "undefined") return { width: 0, height: 0 }
+  return { width: window.innerWidth, height: window.innerHeight }
+}
