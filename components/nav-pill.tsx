@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, memo } from "react"
 import { createPortal } from "react-dom"
 import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
@@ -588,7 +588,9 @@ const LENS_SQUASH = 0.84
  * Desktop: tabs render as text labels
  * Mobile: tabs render as icon + tiny label
  */
-function PillBarContent({
+// Memoised: the morph around it re-renders on every phase, and the bar's own
+// props (tabs, route, a stable toggle) do not change with it.
+const PillBarContent = memo(function PillBarContent({
   tabs,
   pathname,
   mode,
@@ -1139,7 +1141,7 @@ function PillBarContent({
       <SyncIconButton />
     </div>
   )
-}
+})
 
 // ─── Shared sidebar nav content ──────────────────────────────
 
@@ -1197,7 +1199,9 @@ function SidebarTopStrip({ onToggle }: { onToggle: () => void }) {
   )
 }
 
-function SidebarNav({
+// Memoised, with its items: its props are a route and two constants, and the
+// morph re-renders the panel around it on every phase — eleven links each time.
+const SidebarNav = memo(function SidebarNav({
   pathname,
   className,
   topInset = 0,
@@ -1327,9 +1331,9 @@ function SidebarNav({
       </nav>
     </div>
   )
-}
+})
 
-function SidebarNavItem({
+const SidebarNavItem = memo(function SidebarNavItem({
   href,
   icon,
   label,
@@ -1368,7 +1372,7 @@ function SidebarNavItem({
       <span className="min-w-0 truncate whitespace-nowrap">{label}</span>
     </Link>
   )
-}
+})
 
 // ─── Viewport measurement hook ───────────────────────────────
 
@@ -1448,7 +1452,13 @@ function prefetchNavRoutesWhenIdle(prefetch: (href: string) => void) {
   window.setTimeout(() => idle(next), 4000)
 }
 
-export function NavPill() {
+/**
+ * Memoised: it takes no props, and the shell around it re-renders on every
+ * selection change (its detail panel and `?selected=` live there) — four times
+ * on the tap that adds a flight, each one re-rendering every tab and sidebar
+ * item for nothing. It still follows its own route, sidebar and preferences.
+ */
+export const NavPill = memo(function NavPill() {
   const router = useRouter()
   useEffect(() => {
     prefetchNavRoutesWhenIdle((href) => router.prefetch(href))
@@ -1494,7 +1504,7 @@ export function NavPill() {
   }
 
   return canPush ? desktopPill : mobilePill
-}
+})
 
 // ─── Morph phase state machine (shared) ──────────────────────
 
@@ -1780,6 +1790,7 @@ function MobilePillMorph({
   const ref = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const openSidebar = useCallback(() => setSidebarOpen(true), [])
   const DUR = prefersReducedMotion ? 0 : MORPH_DUR
   const LEAD = prefersReducedMotion ? 0 : MORPH_LEAD
   const TOTAL = DUR + LEAD
@@ -1955,7 +1966,7 @@ function MobilePillMorph({
               tabs={tabs}
               pathname={pathname}
               mode="mobile"
-              onToggleSidebar={() => setSidebarOpen(true)}
+              onToggleSidebar={openSidebar}
             />
           </div>
 
