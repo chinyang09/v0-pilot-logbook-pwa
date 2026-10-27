@@ -19,7 +19,7 @@
  * ResizeObserver callback (never mid-commit).
  */
 
-import { memo, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { Plane, MonitorPlay, Trash2, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -128,6 +128,9 @@ export const RosterAgenda = memo(function RosterAgenda({
     return () => ro.disconnect()
   }, [scrollElement])
 
+  // Stable, or the virtualizer rebuilds every row's measurement on each render.
+  const getItemKey = useCallback((i: number) => rows[i].key, [rows])
+
   // TanStack Virtual returns a mutable instance the React Compiler cannot
   // reason about; that is the library's shape, not something to fix here.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -135,7 +138,7 @@ export const RosterAgenda = memo(function RosterAgenda({
     count: rows.length,
     getScrollElement: () => scrollElement,
     estimateSize: (i) => (rows[i].kind === "header" ? HEADER_H : ITEM_H),
-    getItemKey: (i) => rows[i].key,
+    getItemKey,
     overscan: 8,
     scrollMargin,
   })

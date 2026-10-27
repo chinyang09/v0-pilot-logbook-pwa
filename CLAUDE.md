@@ -1530,6 +1530,21 @@ Three things keep the delta at zero:
 Measured after the fix: jumping to the middle and scrolling up 40 steps
 produces **zero** scroll corrections.
 
+**The airports, aircraft, crew and roster lists follow the same rules**, through
+ONE hook — `useCalibratedRowHeight` (`hooks/use-calibrated-row.ts`), which the
+logbook uses too. The three reference lists measured every row
+(`ref={virtualizer.measureElement}`), and on the airports list (~29k rows) a
+four-flick fling spent ~370ms at 4× in the virtualizer: each new size rebuilds
+the measurement cache for EVERY row. Their cards are two truncated lines — the
+crew card's second line is a no-break space when empty, the aircraft card's
+description truncates instead of wrapping — so one measurement is exact.
+
+**`getItemKey` must be a STABLE function** (`useCallback` on the list). The
+virtualizer memoises its measurements on `getItemKey`'s identity, so an inline
+arrow is a full pass over the list on every render — and the page re-renders
+on every scroll-driven range change. Measured on the airports fling: the page's
+render 108ms → 15ms inclusive.
+
 ### ONE Calendar Panel (`components/calendar-panel.tsx`)
 
 The logbook and the dashboard were already rendering the same
@@ -2489,7 +2504,13 @@ re-renders).
   active transition. Desktop has no backdrop at all — its sidebar sits
   alongside the content rather than over it.
 
-  **The pill's width is MEASURED (`usePillWidth`), never `auto`.** `width` rides
+  **The phone's bottom bar spans the screen, as a flight card does** —
+  `MOBILE_PILL_WIDTH`, `calc(100% - 2 * var(--panel-gutter))`, so it keeps one
+  proportion to the screen on every phone (it used to hug its tabs, ~330px
+  whatever the width). A `calc` interpolates against the sidebar's px width,
+  so the morph needs no measurement there.
+
+  **The DESKTOP pill's width is MEASURED (`usePillWidth`), never `auto`.** `width` rides
   in the position group so the pill resizes *while* it moves, and CSS cannot
   interpolate a length to `auto` — with `width: auto` as the pill endpoint the
   width snapped on the morph's first frame, so the pill visibly resized to its
@@ -4835,7 +4856,8 @@ When making changes, be aware of these high-impact files:
 - Do not bring back the month-capsule grid or a year stepper in the calendar's month/year picker — it is two wheels, live, closed by the date selector; and in the dual layout it takes the RIGHT pane with the month being chosen still drawn on the left. Keep `WHEEL_ITEM_PX` small enough that the wheel fits a dual pane's grid, or the panel grows (or clips) when it opens
 - Do not cap a date wheel's past at a few years — a pilot back-filling a paper logbook enters flights from decades ago; the default is 70
 - Do not make "Add Crew" open the crew picker directly, and do not lay an additional crew member out differently from the PIC/SIC rows — role on the LEFT (the menu), name on the RIGHT (the picker, for THAT row), a swipe to clear. The pick carries the row's role and index (`additionalCrewField`); address rows by index, never by crew-card id
-- Do not let the bottom pill run off a narrow window. It is a fixed 330×56 CSS px on every phone, but an iPad window in Split View is 320, so the tab padding gives way below ~346px (`clamp(6px, (100vw − 250px)/8, 12px)`). It does NOT scale with the screen otherwise — an iPad window resized to "iPhone size" still draws CSS px at the iPad's ~132 px/inch against a phone's ~150–160, so everything there is physically ~20% larger; that is the device, not a difference in the bar, and sizing it per platform would break the one-look rule
+- Do not size the phone's bottom bar to its tabs — it is `MOBILE_PILL_WIDTH`, the screen less the panel gutter each side, the same edges as a flight card, so it is the same proportion of every phone. The tab padding still gives way below ~346px (`clamp(6px, (100vw − 250px)/8, 12px)`) so five tabs fit an iPad Split View window of 320. The bar's HEIGHT is not scaled: an iPad window at "iPhone size" draws CSS px at ~132 px/inch against a phone's ~150–160, so everything there is physically ~20% larger — that is the device, and sizing per platform would break the one-look rule
+- Do not put per-row `measureElement` on ANY virtualised list of same-height rows (airports, aircraft, crew, logbook) — calibrate once with `useCalibratedRowHeight`, and keep the card one height by construction (truncate, reserve empty lines). And never pass `useVirtualizer` an inline `getItemKey`: its measurements are memoised on that function's identity, so a new arrow per render rebuilds every row's position on every scroll-driven render (29k rows on the airports list)
 - Do not hand-roll a suggestion list under a field — `AircraftTypeSuggestions` is the one (an inset well, 44px rows, inset dividers); the aircraft form, panel and page each carried a bordered `hover:bg-accent` web dropdown
 - Do not hand the year wheel a new options array per render — `yearOptions` keeps the SAME array while the range holds, and the range is anchored on TODAY (widened only when the viewed year falls outside). Anchored on the viewed year, every year spun rebuilt ~75 rows
 - Do not put a segmented choice back as a pair of filled rectangles — it is `SegmentedTabs` (glass, a sliding indicator, `h-9` segments), as in the import dialogs and the Quick Check. And measure its segments from ONE ResizeObserver: reading `offsetLeft` in a ref callback that is rebuilt on every selection forced a layout per tap and attached a new observer to every segment each time, never disconnecting the old ones

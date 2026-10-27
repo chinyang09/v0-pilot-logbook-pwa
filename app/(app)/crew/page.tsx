@@ -3,6 +3,7 @@
 import type React from "react";
 import { useState, useMemo, useRef, useEffect, useCallback, memo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { useCalibratedRowHeight, useRemeasureOnCalibration } from "@/hooks/use-calibrated-row";
 import { PageContainer } from "@/components/page-container";
 import { useDebounce } from "@/hooks/use-debounce";
 import { Button } from "@/components/ui/button";
@@ -116,11 +117,11 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
                 </span>
               )}
             </div>
-            {secondaryParts.length > 0 && (
-              <div className="text-sm text-muted-foreground truncate mt-0.5">
-                {secondaryParts.join(" · ")}
-              </div>
-            )}
+            {/* Always present (a no-break space when empty): every card in the
+                virtualised list must be one height. */}
+            <div className="text-sm text-muted-foreground truncate mt-0.5">
+              {secondaryParts.join(" · ") || "\u00A0"}
+            </div>
           </div>
           {onToggleFavorite ? (
             <Button
@@ -321,14 +322,26 @@ export default function CrewPage() {
     return () => observer.disconnect();
   }, [debouncedSearchQuery, personnel, recentlyUsedCrew]);
 
+  // Every card is two truncated lines, so ONE measured row is exact for all
+  // of them — per-row measuring corrects the scroll offset and kills a fling
+  // (see useCalibratedRowHeight).
+  const { rowHeight, measureRow, estimateSize } = useCalibratedRowHeight(60);
+
   // Virtual list
+  // STABLE: the virtualizer rebuilds every row's measurement whenever
+  // `getItemKey` changes identity, and an inline arrow is a new one each
+  // render — a full pass over the whole list per scroll-driven render.
+  const getCrewKey = useCallback((i: number) => displayPersonnel[i]?.id ?? i, [displayPersonnel]);
   const rowVirtualizer = useVirtualizer({
     count: displayPersonnel.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 60, // Uniform 2-row card height (py-2 + 2 lines + pb-1 gap)
+    estimateSize,
+    getItemKey: getCrewKey,
     overscan: 10,
     scrollMargin,
   });
+
+  useRemeasureOnCalibration(rowHeight, rowVirtualizer);
 
   const virtualItems = rowVirtualizer.getVirtualItems();
 
@@ -724,8 +737,7 @@ export default function CrewPage() {
                         width: "100%",
                         transform: `translateY(${virtualRow.start - rowVirtualizer.options.scrollMargin}px)`,
                       }}
-                      data-index={virtualRow.index}
-                      ref={rowVirtualizer.measureElement}
+                      ref={measureRow}
                     >
                       <div className="pt-1">
                         <SwipeableCrewCard

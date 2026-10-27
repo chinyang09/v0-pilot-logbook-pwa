@@ -134,6 +134,8 @@ const MOBILE_PILL_HEIGHT = 56
  * capsule.
  */
 const MOBILE_PILL_RADIUS = MOBILE_PILL_HEIGHT / 2
+/** The bottom bar's width: the screen less the panel gutter each side, as a flight card. */
+const MOBILE_PILL_WIDTH = "calc(100% - 2 * var(--panel-gutter))"
 const PILL_TOP = SIDEBAR_MARGIN // top offset — aligns pill center with header center
 
 // ─── Morph timing ────────────────────────────────────────────
@@ -1835,10 +1837,6 @@ function MobilePillMorph({
     [phase, advancePhase],
   )
 
-  // A px endpoint for the pill so `width` actually interpolates alongside
-  // `left`/`transform` instead of snapping (see usePillWidth).
-  const pillWidth = usePillWidth(ref, tabs.join(","), phase === "pill")
-
   // Mobile morph — always bottom-anchored. pill: bottom-centre, measured pill
   // width, pill height. opening/closing: height and position+width morph in a sequenced
   // overlap (bottom-anchored, so it grows upward). On CLOSE the height collapses
@@ -1867,7 +1865,15 @@ function MobilePillMorph({
       // a while and wanted to go somewhere else — and it came back on a scroll
       // UP, so getting it required a gesture that also moved the content.
       : "translateX(-50%)",
-    width: isSidebarShape ? SIDEBAR_INNER_WIDTH : (pillWidth ?? "auto"),
+    // The bottom bar spans the screen the way a flight card does — the
+    // viewport less the panel gutter either side — so it is the same SHARE of
+    // the screen on every phone, its tabs spread evenly across it. It used to
+    // shrink to its content (330px everywhere), which is a different
+    // proportion of every screen: most of a 375px window, less of a 412px one.
+    // A `calc()` is a length CSS can interpolate against the sidebar's px
+    // width, so the morph still moves width with position — only `auto` could
+    // not (see usePillWidth, which the desktop pill still needs).
+    width: isSidebarShape ? SIDEBAR_INNER_WIDTH : MOBILE_PILL_WIDTH,
     height: isSidebarShape ? EXPANDED_HEIGHT : MOBILE_PILL_HEIGHT,
     transition,
   }

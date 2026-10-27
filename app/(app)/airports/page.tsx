@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
 import type React from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { useCalibratedRowHeight, useRemeasureOnCalibration } from "@/hooks/use-calibrated-row";
 import { PageContainer } from "@/components/page-container";
 import { useAirportDatabase, useAirportSeedProgress, useFlights } from "@/hooks/data";
 import {
@@ -323,14 +324,26 @@ export default function AirportsPage() {
     return () => observer.disconnect();
   }, [debouncedSearchQuery, airports, recentAirports]);
 
+  // Every card is two truncated lines, so ONE measured row is exact for all
+  // of them — per-row measuring corrects the scroll offset and kills a fling
+  // (see useCalibratedRowHeight).
+  const { rowHeight, measureRow, estimateSize } = useCalibratedRowHeight(60);
+
   // Virtual list
+  // STABLE: the virtualizer rebuilds every row's measurement whenever
+  // `getItemKey` changes identity, and an inline arrow is a new one each
+  // render — a full pass over the whole list per scroll-driven render.
+  const getAirportKey = useCallback((i: number) => displayAirports[i]?.icao ?? i, [displayAirports]);
   const rowVirtualizer = useVirtualizer({
     count: displayAirports.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 60, // Compact airport card height (py-2 + 2 lines + pb-1 gap)
+    estimateSize,
+    getItemKey: getAirportKey,
     overscan: 10,
     scrollMargin,
   });
+
+  useRemeasureOnCalibration(rowHeight, rowVirtualizer);
 
   const virtualItems = rowVirtualizer.getVirtualItems();
 
@@ -810,8 +823,7 @@ export default function AirportsPage() {
                       width: "100%",
                       transform: `translateY(${virtualRow.start - rowVirtualizer.options.scrollMargin}px)`,
                     }}
-                    data-index={virtualRow.index}
-                    ref={rowVirtualizer.measureElement}
+                    ref={measureRow}
                   >
                     <div className="pt-1">
                       <AirportCard
