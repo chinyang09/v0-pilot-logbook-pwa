@@ -29,6 +29,7 @@ import { useScheduleEntries, useDiscrepancyCounts, useFlights, refreshAllData, C
 import { FlightForm } from "@/components/flight-form"
 import { syncService } from "@/lib/sync"
 import { usePageActive } from "@/hooks/use-page-active"
+import { whenIdle } from "@/lib/utils/idle"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { parseYMDLocal, formatLocalYMD } from "@/lib/utils/date"
 import { UnifiedImportButton } from "@/components/import/unified-import-button"
@@ -146,7 +147,7 @@ export default function RosterPage() {
   // refreshes the schedule and moves "today" on.
   const onActivated = useCallback(() => {
     setNow(Date.now())
-    refreshEntries()
+    whenIdle(refreshEntries)
   }, [refreshEntries])
   const isActive = usePageActive("/roster", onActivated)
   // The pathname moves in the same render as a selection, the active-route
