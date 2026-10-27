@@ -164,7 +164,12 @@ export function useAirportSeedProgress(active: boolean): number | null {
   const [fraction, setFraction] = useState<number | null>(null)
   useEffect(() => {
     if (!active) return
-    return onAirportSeedProgress((done) => setFraction(done))
+    // Whole percent: that is all the screen prints, and a report per 250-row
+    // chunk is a re-render per chunk otherwise.
+    return onAirportSeedProgress((done) => {
+      const pct = Math.round(done * 100) / 100
+      setFraction((prev) => (prev === pct ? prev : pct))
+    })
   }, [active])
   return active ? fraction : null
 }

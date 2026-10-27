@@ -104,54 +104,55 @@ export function usePilotStatus(
     [display, zone],
   )
 
-  const status = useMemo(() => {
-    const at = new Date(nowMinute * 60_000)
-    // Rest belongs to the DUTY state, not the currency grid — it is a property
-    // of the duty just flown rather than a standing qualification.
-    const rest = restUntilLegal
-      ? {
-          isLegalNow: restUntilLegal.isLegalNow,
-          elapsedMinutes: restUntilLegal.restElapsedMinutes,
-          requiredMinutes: restUntilLegal.requiredRestMinutes,
-          legalAtUtc: restUntilLegal.legalAtUtc,
-        }
-      : null
+  // Rest belongs to the DUTY state, not the currency grid — it is a property
+  // of the duty just flown rather than a standing qualification.
+  const rest = useMemo(
+    () =>
+      restUntilLegal
+        ? {
+            isLegalNow: restUntilLegal.isLegalNow,
+            elapsedMinutes: restUntilLegal.restElapsedMinutes,
+            requiredMinutes: restUntilLegal.requiredRestMinutes,
+            legalAtUtc: restUntilLegal.legalAtUtc,
+          }
+        : null,
+    [restUntilLegal],
+  )
 
-    return buildPilotStatus({
-      legality: buildLegalityModel({
+  // The two halves are memoised SEPARATELY. They share only the clock, and
+  // the duty half is the expensive one (a pass over every duty window): as one
+  // memo, each input landing on the first open — currencies, then the
+  // reference data — rebuilt the duty model for an input it never reads.
+  const duty = useMemo(
+    () => deriveDutyStatus(allDutyPeriods, new Date(nowMinute * 60_000), rest, flightArrivals, planDuties),
+    [nowMinute, allDutyPeriods, rest, flightArrivals, planDuties],
+  )
+
+  const legality = useMemo(
+    () =>
+      buildLegalityModel({
         recency,
         capacity,
         forecastBreaches,
         currencies,
         logbookEmpty,
         unavailable,
-        now: at,
+        now: new Date(nowMinute * 60_000),
       }),
-      duty: deriveDutyStatus(
-        allDutyPeriods,
-        at,
-        rest,
-        flightArrivals,
-        planDuties,
-      ),
-      formatClock,
-      logbookEmpty,
-      now: at,
-    })
-  }, [
-    nowMinute,
-    formatClock,
-    restUntilLegal,
-    recency,
-    capacity,
-    forecastBreaches,
-    currencies,
-    allDutyPeriods,
-    planDuties,
-    flightArrivals,
-    logbookEmpty,
-    unavailable,
-  ])
+    [nowMinute, recency, capacity, forecastBreaches, currencies, logbookEmpty, unavailable],
+  )
+
+  const status = useMemo(
+    () =>
+      buildPilotStatus({
+        legality,
+        duty,
+        formatClock,
+        logbookEmpty,
+        now: new Date(nowMinute * 60_000),
+      }),
+    [nowMinute, legality, duty, formatClock, logbookEmpty],
+  )
 
   return { status, isLoading: fdpLoading || currenciesLoading }
 }

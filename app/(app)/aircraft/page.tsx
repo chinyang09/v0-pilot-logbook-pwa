@@ -388,7 +388,7 @@ export default function AircraftPage() {
   // Every card is two truncated lines, so ONE measured row is exact for all
   // of them — per-row measuring corrects the scroll offset and kills a fling
   // (see useCalibratedRowHeight).
-  const { rowHeight, measureRow, estimateSize } = useCalibratedRowHeight(60)
+  const { rowHeight, measureRow, estimateSize } = useCalibratedRowHeight("aircraft", 60)
 
   // Virtual list
   // STABLE: the virtualizer rebuilds every row's measurement whenever

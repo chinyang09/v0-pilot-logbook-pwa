@@ -125,7 +125,6 @@ export default function AirportsPage() {
   // A new install writes ~29k airports before the first one can be listed
   // (~20s on a fresh device); the page stood empty for all of it.
   const waitingForTable = isLoading && airports.length === 0;
-  const seedProgress = useAirportSeedProgress(waitingForTable);
   const { flights } = useFlights();
   const [activeLetterKey, setActiveLetterKey] = useState<string | undefined>(undefined);
   const isFastScrollingRef = useRef(false);
@@ -161,6 +160,10 @@ export default function AirportsPage() {
   // Only sync detail panel when this page is active — prevents hidden pages from
   // overwriting the active page's detail content when shared selectedId changes.
   const isActive = usePageActive("/airports")
+  // Only while it is on screen: the page is kept alive, and a seed it started
+  // runs on while the pilot is elsewhere — each chunk re-rendered the hidden
+  // page (~290 components, ~116 times over a new install's seed).
+  const seedProgress = useAirportSeedProgress(waitingForTable && isActive);
 
   // Sort all airports: favorites first, then alphabetical by ICAO
   const allSortedAirports = useMemo(() => {
@@ -327,7 +330,7 @@ export default function AirportsPage() {
   // Every card is two truncated lines, so ONE measured row is exact for all
   // of them — per-row measuring corrects the scroll offset and kills a fling
   // (see useCalibratedRowHeight).
-  const { rowHeight, measureRow, estimateSize } = useCalibratedRowHeight(60);
+  const { rowHeight, measureRow, estimateSize } = useCalibratedRowHeight("airports", 60);
 
   // Virtual list
   // STABLE: the virtualizer rebuilds every row's measurement whenever

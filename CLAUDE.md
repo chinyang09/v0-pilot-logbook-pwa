@@ -1483,6 +1483,32 @@ A second round measured the interactions the first one had not:
   with `getBoundingClientRect` in a layout effect. The signature section is a
   plain disclosure (a grid-rows transition, nothing to measure).
 
+A third round counted COMMITS per navigation (a commit hook that only descends
+into subtrees whose children changed — a bailed-out fiber keeps the flags of
+the last commit that rendered it, so counting flags alone over-reports), which
+found the work that RECURS rather than the work that is merely large:
+
+| | Before | After |
+|---|---|---|
+| FDP page, first 3s | ~120 commits, one per frame, 430–520 components each | ~37, none per frame |
+| a sidebar tap that lands on a page mid-move | 312ms forced style recalc in the blob's effect | none |
+| Dashboard first open (same machine, A/B) | 1734ms of long tasks | 1141ms |
+| Airports first open (A/B) | 2306ms | 1795ms |
+| a hidden airports page during a new install's seed | a re-render per 250-row chunk | none |
+
+- **Recharts does not animate** the FDP chart's series (`isAnimationActive={false}`):
+  its animation is a JS rAF loop committing through React every frame, on
+  mount and on every zoom or pan step. The chart fades in on the compositor.
+- **The gravity blob never reads style back** — an interrupted move's position
+  is computed from its own spring track and the animation's `currentTime`.
+- **The legal page reads recency with `ninetyDayRecency`**, not the period
+  aggregate, which built a totals breakdown and a detail row per flight ever
+  logged to supply that one figure. `usePilotStatus` memoises the duty and
+  legality halves SEPARATELY, so currencies landing do not rebuild the duty model.
+- **A calibrated row height is remembered per list** (`useCalibratedRowHeight`'s
+  key, localStorage), so a visit after the first needs no re-measure — on the
+  airports list that is a pass over ~29k rows.
+
 Still open, measured: opening a flight still runs ~400ms of long tasks at 4×,
 but in yielding slices after the tap has painted. The rest is the form's ~300
 fibers mounting, mostly framer `motion` and Radix. The first Dashboard visit
@@ -4755,6 +4781,11 @@ When making changes, be aware of these high-impact files:
 - Do not collapse `FADE_TAIL` and `--chrome-clear` into one number — the first is how far the DARKENING reaches (41px, i.e. 45 below the buttons), the second is where the quick-scroll rail PARKS a row (60 below, ~15px clear of the band). Equalising them is wrong in both directions: the band ends up far down the screen, or the scrolled-to row ends up inside the treatment
 - Do not put the drag-lens (`.PillDragLens`) release settle back on JS (framer `animate()`) or on layout properties — it must stay CSS `translate` + `scale`, which run on the compositor, because the release also fires `router.push` and a main-thread landing stalls against the route mount. Keep the two easings split (position no overshoot, scale overshoot = the splat), keep `--settle` dropping the glass's `backdrop-filter`, and keep the refract clone effect gated on `lensPhase === "drag"` so a deep clone of the pill never runs on the landing's first frame. Keep it clamped to the tab strip (edge overshoot → the liquid bounce) and keep the handoff timer longer than the rebound (or the last wobble is cut)
 - Do not re-gate the dashboard's meters / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so they can animate freely
+- Do not turn Recharts' series animation back on (`isAnimationActive` defaults to TRUE on every `Area`/`Bar`/`Line`) — it is a JS rAF loop that commits the whole chart through React every frame: ~120 commits of 430–520 components in the FDP page's first 3s at 4×, and the same again on every zoom and pan step, i.e. through a pinch. A new series takes `isAnimationActive={false}`; the chart's arrival is a compositor fade
+- Do not read computed style or layout in an effect that runs on a navigation's commit (`getComputedStyle(x).transform`, a rect) — the arriving page's DOM is still dirty, so the read is a style recalculation of the whole page. The gravity blob's interrupted-move position came from `getComputedStyle` and cost 312ms at 4× on a sidebar tap to FDP; it is computed from the move's own spring track and `currentTime` now
+- Do not let a keep-alive page listen to a background process's progress while it is hidden — the airports page re-rendered on every 250-row chunk of the seed it had started, while the pilot was on another page. Gate the listener on `usePageActive` as well as on there being something to wait for
+- Do not compute the whole period aggregate (`aggregateDashboard`) to read one figure off it — the legal page needs only recency, which is `ninetyDayRecency`. And keep `usePilotStatus`'s duty and legality halves in separate memos: one memo rebuilt the duty model (a pass over every duty window) each time an input it never reads landed
+- Do not let a chart restart from fallback colours on each mount when the theme has not changed — `FDPTimelineChart` probes its SVG colours once and the answer is cached per mode + palette, so a remount does not render the whole chart twice
 - Do not reintroduce a second typeface — Inter is the single app font (`--font-sans` and `--font-mono` both resolve to Inter); use `tabular-nums` for aligned numbers, never a `font-mono` class or a new Google-Fonts `<link>`
 - Do not give `register/complete`, `add-passkey`, the callsign change, or the TOTP-reveal routes a path that skips `verifyAuthenticationResponse`/`verifyStepUpAssertion` — the TOTP seed must never be revealed without a fresh passkey step-up
 - Do not give `SwipeableCard` action panels horizontal padding — the panel must collapse to 0 width when closed (the left gap comes from `openWidth`/`justify-end`), otherwise a sliver of the action button peeks at the card edge

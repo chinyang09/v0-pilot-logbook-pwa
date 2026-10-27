@@ -371,7 +371,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     // flight card is the same height by construction (the two optional rows in
     // flight-card-body reserve their line), so nothing is measured after it.
     // See `useCalibratedRowHeight` for why per-row measuring kills a fling.
-    const { rowHeight, measureRow, estimateSize } = useCalibratedRowHeight(110);
+    const { rowHeight, measureRow, estimateSize } = useCalibratedRowHeight("logbook", 110);
 
     // Create virtualizer instance
     // STABLE: the virtualizer rebuilds every row's measurement whenever

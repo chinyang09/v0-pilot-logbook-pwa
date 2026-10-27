@@ -391,6 +391,8 @@ function GravityIndicator({
   const travelRef = useRef<Animation | null>(null)
   const shapeRef = useRef<Animation | null>(null)
   const animatedToRef = useRef<{ left: number; top: number } | null>(null)
+  /** The running move's own terms, so where the blob IS can be computed. */
+  const flightRef = useRef<{ fromLeft: number; fromTop: number; dx: number; dy: number; xs: number[] } | null>(null)
 
   useEffect(() => {
     const shape = blobRef.current
@@ -415,12 +417,23 @@ function GravityIndicator({
     // the previous tab before setting off again. Read BEFORE cancelling: once
     // cancelled the computed value reverts to the inline style, which is
     // already the new target.
+    //
+    // Computed from the move's own spring track and the animation's clock, NOT
+    // read back with `getComputedStyle(box).transform`. This effect runs on
+    // the commit a navigation lands in, with the arriving page's DOM still
+    // dirty, so that read forced a style recalculation of the whole page —
+    // measured at 312ms (4× throttle) on a sidebar tap to the FDP page.
     let fromLeft = prev.left
     let fromTop = prev.top
-    if (travelRef.current?.playState === "running") {
-      const m = new DOMMatrixReadOnly(getComputedStyle(box).transform)
-      fromLeft = m.m41
-      fromTop = m.m42
+    const flight = flightRef.current
+    const running = travelRef.current
+    if (flight && running?.playState === "running") {
+      const p = Math.min(1, Math.max(0, Number(running.currentTime ?? 0) / GRAVITY_SPRING_MS))
+      const at = p * (flight.xs.length - 1)
+      const i = Math.floor(at)
+      const x = flight.xs[i] + (flight.xs[Math.min(i + 1, flight.xs.length - 1)] - flight.xs[i]) * (at - i)
+      fromLeft = flight.fromLeft + flight.dx * x
+      fromTop = flight.fromTop + flight.dy * x
     }
     travelRef.current?.cancel()
     shapeRef.current?.cancel()
@@ -430,6 +443,7 @@ function GravityIndicator({
     animatedToRef.current = { left: t.left, top: t.top }
 
     const { xs, ss } = springTrack()
+    flightRef.current = { fromLeft, fromTop, dx, dy, xs }
     const along = Math.abs(dx) >= Math.abs(dy)
 
     // Travel: the spring's displacement, from where it was to where it goes.

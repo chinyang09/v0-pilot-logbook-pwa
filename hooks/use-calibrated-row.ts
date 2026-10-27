@@ -29,9 +29,14 @@ import type { Virtualizer } from "@tanstack/react-virtual"
  * Read from a ResizeObserver, never in the ref callback — a ref callback runs
  * mid-commit, so a rect read there forces a layout of the whole app.
  */
-export function useCalibratedRowHeight(guess: number) {
+export function useCalibratedRowHeight(listKey: string, guess: number) {
   const [rowHeight, setRowHeight] = useState(0) // 0 = not calibrated yet
-  const rowHeightRef = useRef(guess) // the opening guess, for the first paint only
+  // The opening guess, for the first paint only: the height this list
+  // measured LAST time, else the caller's. A guess that turns out right needs
+  // no re-measure at all, and on the airports list a re-measure is a pass over
+  // ~29k rows.
+  const rowHeightRef = useRef<number | null>(null)
+  if (rowHeightRef.current === null) rowHeightRef.current = readStoredHeight(listKey) ?? guess
   const calibratedRef = useRef(false)
   const observerRef = useRef<ResizeObserver | null>(null)
 
@@ -45,6 +50,8 @@ export function useCalibratedRowHeight(guess: number) {
       observer.disconnect()
       observerRef.current = null
       calibratedRef.current = true
+      storeHeight(listKey, h)
+      if (Math.abs(h - (rowHeightRef.current ?? 0)) < 0.01) return // the guess was exact
       rowHeightRef.current = h
       setRowHeight(h)
     })
@@ -56,11 +63,32 @@ export function useCalibratedRowHeight(guess: number) {
       observer.disconnect()
       observerRef.current = null
     }
-  }, [])
+  }, [listKey])
 
-  const estimateSize = useCallback(() => rowHeightRef.current, [])
+  const estimateSize = useCallback(() => rowHeightRef.current ?? guess, [guess])
 
   return { rowHeight, measureRow, estimateSize }
+}
+
+const STORAGE_PREFIX = "oooi:row-height:"
+
+/** Storage can be unavailable (private mode, blocked site data) — a miss is a guess. */
+function readStoredHeight(listKey: string): number | null {
+  try {
+    if (typeof window === "undefined") return null
+    const v = Number(window.localStorage.getItem(STORAGE_PREFIX + listKey))
+    return Number.isFinite(v) && v > 0 ? v : null
+  } catch {
+    return null
+  }
+}
+
+function storeHeight(listKey: string, h: number) {
+  try {
+    window.localStorage.setItem(STORAGE_PREFIX + listKey, String(h))
+  } catch {
+    /* a convenience, not state */
+  }
 }
 
 /**
