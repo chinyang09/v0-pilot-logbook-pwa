@@ -4,7 +4,7 @@ import { CODE_INPUT_PROPS } from "@/lib/utils/input-props";
 import type React from "react";
 import { ScrollIndicator } from "@/components/ui/scroll-indicator";
 
-import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, useId, startTransition } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, useId, startTransition, memo } from "react";
 import { useRouter } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { userDb } from "@/lib/db/user-db";
@@ -40,7 +40,6 @@ import {
   isLiveFlight,
   getAirportTimeInfo,
 } from "@/lib/db";
-import { useDebounce } from "@/hooks/use-debounce";
 import { formPatch, rebaseForm } from "@/lib/utils/form-patch";
 import { insertFlightSorted } from "@/lib/utils/flight-sort";
 import { pickSelfCard } from "@/lib/utils/self-card";
@@ -634,9 +633,18 @@ interface FlightFormProps {
   isDesktop?: boolean;
 }
 
-export function FlightForm({
-  onFlightAdded,
-  onClose,
+/**
+ * Memoised on what the form actually reads. Every caller hands it inline
+ * `onFlightAdded`/`onClose` arrows, which the form does not call, so each
+ * re-render of the panel around it — two of them in the first second of every
+ * open — re-rendered all ~300 of the form's components for nothing.
+ */
+export const FlightForm = memo(
+  FlightFormImpl,
+  (a, b) => a.flightId === b.flightId && a.isDesktop === b.isDesktop && a.editingFlight === b.editingFlight,
+);
+
+function FlightFormImpl({
   editingFlight,
   flightId: flightIdProp,
   isDesktop = false,
@@ -1162,9 +1170,6 @@ export function FlightForm({
     });
   }, [calculatedFields, manualOverrides]);
 
-  // Debounce form data for auto-save
-  const debouncedFormData = useDebounce(formData, 500);
-
   // Track the last saved state to avoid unnecessary saves
   const lastSavedStateRef = useRef<string | null>(null);
   // The form as it stood when it last agreed with the database: what a save
@@ -1240,54 +1245,50 @@ export function FlightForm({
     );
   }, []);
 
-  // Auto-save to IndexedDB for existing flights (drafts or otherwise)
-  // This replaces sessionStorage draft management
+  // Auto-save to IndexedDB, 500ms after the form stops changing.
+  //
+  // A TIMER, not a debounced copy of the form in state (`useDebounce`): that
+  // state change re-rendered the whole form — ~300 fibers — half a second after
+  // it opened and after every pause in typing, to hand this effect a value it
+  // could read off its own closure. The timer is reset by every change, so when
+  // it fires the closure IS the latest form.
   useEffect(() => {
-    const autoSave = async () => {
-      // Only auto-save if we have an existing flight with an ID
-      const effectiveId = resolvedFlight?.id || flightIdProp;
-      if (!debouncedFormData?.id || !effectiveId) return;
-      // Guard: don't auto-save if the flight has been deleted from Dexie.
-      // Without this, auto-save would re-create the deleted record via updateFlight,
-      // causing useLiveQuery to fire and driving a render/re-save cycle (Error #185).
-      if (!resolvedFlight) return;
+    const effectiveId = resolvedFlight?.id || flightIdProp;
+    // Only auto-save an existing flight. Guard on the live row too: auto-saving
+    // a deleted flight would re-create it via updateFlight, and useLiveQuery
+    // would then drive a render/re-save cycle (Error #185).
+    const id = formData?.id;
+    if (!id || !effectiveId || !resolvedFlight) return;
 
-      // Create a serializable state to compare
-      const currentState = JSON.stringify({
-        ...debouncedFormData,
-        manualOverrides,
-      });
+    const timer = setTimeout(async () => {
+      const currentState = JSON.stringify({ ...formData, manualOverrides });
 
-      // If this is a new flight (ID changed), capture baseline from first debounced state
-      // This ensures we capture the state AFTER calculations have run
-      if (baselineFlightIdRef.current !== debouncedFormData.id) {
-        baselineFlightIdRef.current = debouncedFormData.id;
+      // A new flight: capture the baseline from its first SETTLED state — after
+      // the form's own calculations have run — and save nothing.
+      if (baselineFlightIdRef.current !== id) {
+        baselineFlightIdRef.current = id;
         lastSavedStateRef.current = currentState;
-        baselineRef.current = { ...debouncedFormData };
+        baselineRef.current = { ...formData };
         baselineOverridesRef.current = manualOverrides;
-        return; // Don't save on initial load, just capture baseline
-      }
-
-      // Skip save if nothing actually changed from baseline
-      if (lastSavedStateRef.current === currentState) {
         return;
       }
 
+      if (lastSavedStateRef.current === currentState) return;
+
       try {
-        const written = await persistFlight(debouncedFormData, manualOverrides);
+        const written = await persistFlight(formData, manualOverrides);
         if (!written) return;
         lastSavedStateRef.current = currentState;
         refreshSavedFlight(written);
       } catch (error) {
         console.error("Auto-save failed:", error);
       }
-    };
-
-    autoSave();
-    // Keyed on the debounced form data + flight identity. Depending on the full
-    // resolvedFlight would retrigger auto-save on every reactive DB write.
+    }, 500);
+    return () => clearTimeout(timer);
+    // Keyed on the form + flight identity. Depending on the full resolvedFlight
+    // would restart the timer on every reactive DB write.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedFormData, resolvedFlight?.id, flightIdProp, manualOverrides]);
+  }, [formData, resolvedFlight?.id, flightIdProp, manualOverrides]);
 
   // Update field helper
   const updateField = useCallback(
