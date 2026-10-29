@@ -157,9 +157,22 @@ const nextConfig = {
       "node_modules/.pnpm/@gutenye+ocr-models@*/node_modules/@gutenye/ocr-models/assets/ppocr_keys_v1.txt",
       "node_modules/.pnpm/onnxruntime-node@*/node_modules/onnxruntime-node/bin/napi-v*/linux/x64/**/*",
     ],
+    // geo-tz `require`s its index but OPENS its polygons (`*.geo.dat`) with fs
+    // at a path built from `__dirname`. Bundled, that path pointed into the
+    // chunk directory and the file was never traced: a point the index alone
+    // answers (India) found its zone, one that needs the polygons (Kuching)
+    // threw — and every caller catches that as "no zone", so the airport was
+    // stored as UTC. External (below) keeps the real `__dirname`; these ship
+    // the file. `find` is the 1970 dataset.
+    ...Object.fromEntries(
+      ["/api/search/airport", "/api/timezone", "/api/submissions/airport", "/api/enrichment/batch"].map((route) => [
+        route,
+        ["node_modules/.pnpm/geo-tz@*/node_modules/geo-tz/data/timezones-1970.geojson.*"],
+      ])
+    ),
   },
   // Native modules and runtime-resolved model paths: loaded by Node, not bundled.
-  serverExternalPackages: ["@gutenye/ocr-models", "onnxruntime-node", "sharp"],
+  serverExternalPackages: ["@gutenye/ocr-models", "onnxruntime-node", "sharp", "geo-tz"],
 };
 
 export default nextConfig;
