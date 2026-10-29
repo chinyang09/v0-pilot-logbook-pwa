@@ -3,6 +3,7 @@
  * asked first, a zone the source did not carry is derived from the
  * coordinates (the client stores a blank one as UTC), and a Worker deployment
  * that predates `/airport` falls back to the legacy traffic-stats passthrough.
+ * When FR24 gives nothing, the open-data tier answers.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -11,6 +12,11 @@ vi.mock("@/lib/mongodb", () => ({
   getMongoClient: async () => {
     throw new Error("no database in tests")
   },
+}))
+
+const openData = vi.hoisted(() => ({ answer: null as unknown }))
+vi.mock("@/lib/airports/open-data", () => ({
+  findOpenDataAirport: async () => openData.answer,
 }))
 
 import { GET } from "../route"
@@ -38,6 +44,7 @@ describe("GET /api/search/airport via the Worker", () => {
 
   beforeEach(() => {
     calls.length = 0
+    openData.answer = null
     vi.stubEnv("FR24_PROXY_URL", "https://gw.test/")
     vi.stubEnv("FR24_PROXY_SECRET", "s")
     vi.stubGlobal(
@@ -69,6 +76,15 @@ describe("GET /api/search/airport via the Worker", () => {
     const body = await get("ZZZZ")
     expect(body.result).toBeNull()
     expect(calls).toHaveLength(1)
+  })
+
+  it("answers from open data when FR24 found nothing, deriving the zone", async () => {
+    answer = () => json({ ok: false, error: "Upstream failed: Cloudflare challenge", attempts: [] }, 502)
+    const { timezoneOffsetSeconds: _o, ...seletar } = SELETAR
+    openData.answer = seletar
+    const body = await (await GET(new Request("https://app.test/api/search/airport?q=WSSL"))).json()
+    expect(body.source).toBe("open-data")
+    expect(body.result).toMatchObject({ icao: "WSSL", timezone: "Asia/Singapore" })
   })
 
   it("falls back to traffic-stats on a Worker that predates /airport", async () => {

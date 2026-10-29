@@ -57,7 +57,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 | `lib/settings/__tests__/` | per-user settings — flat sparse fields, only moved keys written, the legacy carry-up seeding only non-default choices the account lacks, theme kept off the record |
 | `lib/theme/__tests__/` | the palette generator — contrast and gamut for every preset in both modes and a sweep of custom seeds, and that globals.css carries the default palette exactly |
 | `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, the 90-day window, the recycle bin, sync compaction, conflict resolution, the canonical document shape + write modes, push batching, the sync triggers |
-| `cloudflare-worker/__tests__/` | the FR24 gateway Worker — its normalizers (FR24 shapes → the app's), each lookup chain against stand-in upstreams (which source answers when another is challenged, 404 vs 502, failures never cached, `/raw` kept to FR24 hosts), and the legacy passthroughs; `app/api/search/airport/__tests__/` pins the route over it (a blank timezone derived, an older Worker's fallback) |
+| `cloudflare-worker/__tests__/` | the FR24 gateway Worker — its normalizers (FR24 shapes → the app's), each lookup chain against stand-in upstreams (which source answers when another is challenged, 404 vs 502, failures never cached, `/raw` kept to FR24 hosts), and the legacy passthroughs; `app/api/search/airport/__tests__/` pins the route over it (a blank timezone derived, an older Worker's fallback, the open-data tier); `lib/airports/__tests__/` the OurAirports CSV parse and code ranking |
 | `lib/sync/server/__tests__/` | the server engine end to end — two devices pushing and pulling, deletions, stale pushes, paging, the migration — against an in-memory Mongo stand-in (`fake-mongo.ts`; it implements only the operators the engine sends) |
 
 Tests that touch a parser must mock `@/lib/db` and
@@ -548,7 +548,7 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
 
   | Worker route | Chain |
   |---|---|
-  | `/airport` | `airport.json` + `traffic-stats` (carry the timezone) → `_json/airports.php` + search (position only) |
+  | `/airport` | search → `airport.json` → `traffic-stats` → `_json/airports.php`, ONE AT A TIME (search is the endpoint FR24 challenges least) |
   | `/aircraft` | search → the registration's flight history → live feed |
   | `/aircraft/flights`, `/flight` | `common/v1/flight/list.json` by registration / flight number |
   | `/airport/details`, `/airport/schedule` | `airport.json` plugins (runways, weather, boards) |
@@ -559,7 +559,12 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
   **As of 29 Oct 2026 every FR24 JSON endpoint challenges the Worker too**
   (search, airport.json, flight/list, the lists, `/api/v1/airports/{id}`);
   only the `data-cloud` live feed answers, so `/aircraft` finds an aircraft
-  only while it is flying and `/airport` finds nothing. The keyed official API
+  only while it is flying and `/airport` finds nothing. The challenge is
+  decided PER REQUEST: search still gets through now and then (Worker logs,
+  29 Oct: the same `9V-OFH` search 502 at DFW and 200 at ARN seconds apart),
+  which is all "the aircraft lookup still works" means — that route makes up
+  to three search attempts. The airport route therefore ends in OurAirports
+  open data (`lib/airports/open-data.ts`), which has no bot wall. The keyed official API
   (`fr24api.flightradar24.com`) is the legitimate route back; do not work
   round the challenge (impersonated clients, FR24's web gRPC headers). The
   Worker's secret binding is `PROXY_SECRET` — the dashboard one was
@@ -583,7 +588,11 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
 **Lookup Chain (airport):**
 1. Local IndexedDB (`referenceDb.airports`) — includes static + custom airports
 2. FR24 live search (`/api/search/airport`) — server-side proxy for airport details
-3. Manual entry (user types ICAO + details)
+3. OurAirports open data (same route, `source: "open-data"`) — the public-domain
+   CSV (~86k places, daily), downloaded and indexed once per warm instance; no
+   timezone, so the route derives it. Closed airports are never answered, and an
+   airport's own `icao_code` outranks another place's GPS code or ident
+4. Manual entry (user types ICAO + details)
 
 **Enrichment Pipeline:**
 - Custom aircraft/airports are submitted fire-and-forget to `/api/submissions/aircraft` or `/api/submissions/airport`
@@ -3301,7 +3310,7 @@ Notable route groups:
 |---|---|---|---|
 | `/api/search/aircraft?q=` | GET | No | FR24 aircraft search proxy |
 | `/api/search/aircraft/batch` | POST | No | Batch lookup from enriched MongoDB |
-| `/api/search/airport?q=` | GET | No | FR24 airport lookup proxy (the Worker's `/airport` chain; a blank timezone is derived from the coordinates with geo-tz) |
+| `/api/search/airport?q=` | GET | No | Airport lookup: MongoDB cache → the Worker's `/airport` chain → OurAirports open data; a blank timezone is derived from the coordinates with geo-tz |
 | `/api/fr24/<route>` | GET | Yes | The FR24 gateway Worker's normalized routes (`lib/fr24/client.ts`) |
 | `/api/submissions/aircraft` | POST | Yes | Submit custom aircraft for enrichment |
 | `/api/submissions/airport` | POST | Yes | Submit custom airport for enrichment |

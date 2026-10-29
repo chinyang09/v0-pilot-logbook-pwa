@@ -83,6 +83,8 @@ describe("normalizers", () => {
   it("maps an aircraft search hit the way the app always has (owner → operator)", () => {
     const hit = { id: "9V-TNL", label: "9V-TNL", detail: { owner: "Scoot", equip: "a320", hex: "76cf4c" }, type: "aircraft" }
     expect(w.normalizeAircraftHit(hit)).toMatchObject({ registration: "9V-TNL", icao24: "76CF4C", typecode: "A320", operator: "Scoot" })
+    // In practice `owner` is the airline's ICAO code — what the preview returned for 9V-TNL.
+    expect(w.normalizeAircraftHit({ ...hit, detail: { ...hit.detail, owner: "TGW" } })).toMatchObject({ operator: "TGW", operatorIcao: "TGW" })
     expect(w.normalizeAircraftHit({ ...hit, type: "airport" })).toBeNull()
   })
 
@@ -271,6 +273,58 @@ describe("routes", () => {
     const again = await call("/airport?code=WSSS")
     expect(again.status).toBe(200)
     expect(again.cache).toBe("HIT")
+  })
+
+  it("asks search FIRST and ALONE for an airport — one request when it answers", async () => {
+    const calls: string[] = []
+    upstream = (url) => {
+      calls.push(url)
+      return url.includes("search/web/find")
+        ? json({
+            results: [{ id: "VGA", label: "Vijayawada Airport (VGA / VOBZ)", detail: { lat: 16.53, lon: 80.8, size: 30 }, type: "airport", match: "icao" }],
+            stats: { count: { airport: 1 } },
+          })
+        : challenge()
+    }
+    const { status, body } = await call("/airport?code=VOBZ")
+    expect(status).toBe(200)
+    expect(body.source).toBe("search")
+    expect(body.data).toMatchObject({ icao: "VOBZ", iata: "VGA", latitude: 16.53, timezone: "" })
+    expect(calls).toHaveLength(1)
+  })
+
+  it("then tries the timezone-carrying sources one at a time, never together", async () => {
+    const order: string[] = []
+    let inFlight = 0
+    let maxInFlight = 0
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        inFlight++
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        await new Promise((r) => setTimeout(r, 1))
+        inFlight--
+        order.push(url.includes("search") ? "search" : url.includes("airport.json") ? "airport.json" : url.includes("traffic-stats") ? "traffic-stats" : "other")
+        return url.includes("traffic-stats") ? json({ details: { ...CHANGI_DETAILS, code: { iata: "VTZ", icao: "VOVZ" } } }) : challenge()
+      })
+    )
+    const { status, body } = await call("/airport?code=VOVZ")
+    expect(status).toBe(200)
+    expect(body.source).toBe("traffic-stats")
+    expect(order).toEqual(["search", "airport.json", "traffic-stats"])
+    expect(maxInFlight).toBe(1)
+  })
+
+  it("reads the ICAO from a search hit's id when the label carries no codes", () => {
+    const hit = { id: "VOBZ", label: "Vijayawada Airport", detail: { lat: 16.53, lon: 80.8 }, type: "airport", match: "icao" }
+    expect(w.airportFromSearchHit(hit)).toMatchObject({ icao: "VOBZ", iata: "", name: "Vijayawada Airport" })
+  })
+
+  it("says 502, not 404, when only the live feed answered an aircraft lookup", async () => {
+    upstream = (url) => (url.includes("feed.js") ? json({ full_count: 1, version: 4 }) : challenge())
+    const { status } = await call("/aircraft?reg=9V-ZZZ")
+    expect(status).toBe(502)
   })
 
   it("finds an aircraft in its flight history when search misses it", async () => {
