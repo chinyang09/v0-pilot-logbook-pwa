@@ -1,38 +1,44 @@
 # FR24 Gateway — Cloudflare Worker
 
 One Worker (`worker.js`, plain JS) that answers every FlightRadar24 lookup the
-app uses, in the APP's shapes. Server-side fetch from Node and Vercel Edge is
-403'd by Cloudflare's "Just a moment..." challenge; a Worker's fetch runs on
-Cloudflare's own network with a different TLS fingerprint, and gets through
-where they do not.
+app uses, in the APP's shapes.
+
+**FR24 judges whoever CALLS the Worker, not the Worker.** FR24 sits behind
+Cloudflare, and for a Worker's subrequest into another Cloudflare site
+Cloudflare carries the original caller's bot signals through ("Bot Management
+fields … represent the eyeball (end-user) connection"). So the same Worker,
+headers and endpoints answer or are challenged depending on who called it:
+
+| Caller | Measured 29 Oct 2026 |
+|---|---|
+| a pilot's browser opening the Worker URL | every route answers (`/aircraft`, `/airport/details`, `traffic-stats`, `/probe`) |
+| a Vercel route on the **Edge** runtime | every call answered — search, `/aircraft`, `/airport` (VOBZ, WBGG, VTZ; ZZZQ a genuine 404) |
+| a Vercel route on the **Node** runtime | every call challenged (403 → the Worker's 502), on every endpoint |
+| a server or CI job calling it with curl | challenged almost every time |
+
+That is why every app route that calls this Worker runs on Edge. The same
+search call was challenged at one data centre and answered at another seconds
+later, but the clean split in the logs is the CALLER, not the data centre.
 
 FR24 changes what it challenges without notice (the airport lookup,
 `/airports/traffic-stats/`, stopped answering this way), so every lookup the
 app depends on is a **chain of independent sources**, and `GET /probe` says
 which of them answer from the Worker right now.
 
-## Status — probed 29 Oct 2026 (deployed version `afa3e9cd`)
+## `/probe` measures its caller
 
-From the Worker, **every FR24 JSON endpoint now answers Cloudflare's "Just a
-moment..." challenge (403)** — `v1/search/web/find`, `traffic-stats`,
-`_json/airports.php` + `airlines.php`, `common/v1/airport.json` and
-`flight/list.json`, `data-live …/clickhandler`, `webapi/v1/…`, and
-`/api/v1/airports/{id}`. A Worker's fetch no longer gets past FR24's bot
-management; the old Worker was getting the same 403 on search and
-traffic-stats before this one was deployed. The routes that depend on them
-answer 502 with their `attempts`.
+`/probe` asks every upstream once, and FR24 scores those calls by whoever
+called `/probe`. Run from a browser it reports what a browser gets; run from a
+server or CI it reports that server, which is challenged on nearly everything.
+An earlier version of this file concluded from a server-side `/probe` that
+"every FR24 JSON endpoint challenges the Worker". That was wrong: it measured
+the caller.
 
-What still answers without a challenge:
-
-| | Host | Notes |
-|---|---|---|
-| live positions | `data-cloud.flightradar24.com/zones/fcgi/feed.js` | `/live`, and `/aircraft`'s last tier — only for an aircraft flying now |
-| airline logos | `cdn.flightradar24.com/assets/airlines/logotypes/…` | not used by the app |
-| the OFFICIAL API | `fr24api.flightradar24.com/api/…` | answers 401 "No API key" — a paid, keyed API; airports, airlines, live positions, flight summaries (takeoff/landing times) |
-
-FR24's web-client gRPC API (`data-feed.flightradar24.com`) also answered, but
-only when called with FR24's own web-client headers. It is not used, because
-that is a way round the protection FR24 put in front of everything else.
+Independent of the caller: the official API (`fr24api.flightradar24.com`)
+answers 401 "No API key". It is FR24's paid, keyed API, and the one route that
+does not depend on how FR24 scores a caller. FR24's web-client gRPC API
+(`data-feed.flightradar24.com`) is not used: it answered only with FR24's own
+web-client headers, which is a way round the protection.
 
 ## Routes
 
@@ -54,7 +60,7 @@ Add `debug=1` to any route to see each upstream attempt.
 | `/probe` | every upstream once, from here (`code=`, `reg=`, `flight=` set the samples) | — |
 | `/aircraft?reg=9V-TNL` | aircraft by registration | search → the registration's flight history → live feed |
 | `/aircraft/flights?reg=9V-TNL&page=1&limit=25` | the airframe + the flights it has flown | `common/v1/flight/list.json?fetchBy=reg` |
-| `/airport?code=WSSS` | airport by ICAO or IATA | `airport.json` + `traffic-stats` (both carry the timezone) → `_json/airports.php` + search (position only; `timezone` is `""`) |
+| `/airport?code=WSSS` | airport by ICAO or IATA | `airport.json` + `traffic-stats` (both carry the timezone) → `_json/airports.php` + search (position only; `timezone` is `""`, which the app derives from the coordinates) |
 | `/airport/details?code=WSSS` | details, runways, weather | `airport.json` plugins |
 | `/airport/schedule?code=WSSS&mode=departures&page=1&limit=50&timestamp=` | departures or arrivals board | `airport.json` schedule plugin |
 | `/airports` | every airport | `_json/airports.php` |
@@ -79,8 +85,8 @@ minutes, boards 2 minutes. Only a found answer is cached — never a failure.
 
 | Caller | Route |
 |---|---|
-| `app/api/search/airport` | `/airport` (falls back to the legacy passthrough on an older Worker), deriving a missing timezone from the coordinates with geo-tz |
-| `app/api/search/aircraft` | the legacy search first (as always), then `/aircraft` when it finds nothing |
+| `app/api/search/airport` (Edge) | `/airport` (falls back to the legacy passthrough on an older Worker); the browser derives a missing timezone (`lib/airports/online-lookup.ts`) |
+| `app/api/search/aircraft` (Edge) | the legacy search first (as always), then `/aircraft` when it finds nothing |
 | `app/api/fr24/[...path]` | any normalized route, for signed-in users — the PWA's door (`lib/fr24/client.ts`) |
 
 The server side reads `FR24_PROXY_URL` + `FR24_PROXY_SECRET`
@@ -100,7 +106,9 @@ The server side reads `FR24_PROXY_URL` + `FR24_PROXY_SECRET`
    curl -s -H "x-proxy-secret: $SECRET" https://fr24-search-proxy.<subdomain>.workers.dev/probe | jq .summary
    ```
 
-   Every `FAIL` line is a source FR24 is challenging from Cloudflare today.
+   Every `FAIL` line is a source FR24 challenges **for that caller**. Run it
+   from a server and almost everything fails; that is the server being scored,
+   not the app (see "`/probe` measures its caller").
 
 ### Wrangler
 

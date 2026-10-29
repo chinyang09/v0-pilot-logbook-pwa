@@ -540,8 +540,9 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
 - **Airport Database**: Loaded from `public/airports.min.json` into IndexedDB
 - **ICAO DOC 8643 Aircraft Types**: Loaded from `public/aircraft-types.json` with memory + IndexedDB two-level caching
 - **FR24 APIs** (live), all through ONE Cloudflare Worker — the FR24 gateway
-  (`cloudflare-worker/worker.js`, README there). Node and Vercel Edge fetch are
-  403'd by FR24's Cloudflare challenge; a Worker's fetch gets through. It
+  (`cloudflare-worker/worker.js`, README there). Calling FR24 directly from Node or
+  Edge is 403'd by its Cloudflare challenge; through the Worker it depends on
+  who calls the Worker (below). It
   answers in the APP's shapes (`lib/fr24/types.ts`), and every lookup the app
   depends on is a CHAIN, because FR24 changes what it challenges without
   notice — `traffic-stats`, the airport source for months, stopped answering:
