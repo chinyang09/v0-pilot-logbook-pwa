@@ -11,6 +11,29 @@ FR24 changes what it challenges without notice (the airport lookup,
 app depends on is a **chain of independent sources**, and `GET /probe` says
 which of them answer from the Worker right now.
 
+## Status — probed 29 Oct 2026 (deployed version `afa3e9cd`)
+
+From the Worker, **every FR24 JSON endpoint now answers Cloudflare's "Just a
+moment..." challenge (403)** — `v1/search/web/find`, `traffic-stats`,
+`_json/airports.php` + `airlines.php`, `common/v1/airport.json` and
+`flight/list.json`, `data-live …/clickhandler`, `webapi/v1/…`, and
+`/api/v1/airports/{id}`. A Worker's fetch no longer gets past FR24's bot
+management; the old Worker was getting the same 403 on search and
+traffic-stats before this one was deployed. The routes that depend on them
+answer 502 with their `attempts`.
+
+What still answers without a challenge:
+
+| | Host | Notes |
+|---|---|---|
+| live positions | `data-cloud.flightradar24.com/zones/fcgi/feed.js` | `/live`, and `/aircraft`'s last tier — only for an aircraft flying now |
+| airline logos | `cdn.flightradar24.com/assets/airlines/logotypes/…` | not used by the app |
+| the OFFICIAL API | `fr24api.flightradar24.com/api/…` | answers 401 "No API key" — a paid, keyed API; airports, airlines, live positions, flight summaries (takeoff/landing times) |
+
+FR24's web-client gRPC API (`data-feed.flightradar24.com`) also answered, but
+only when called with FR24's own web-client headers. It is not used, because
+that is a way round the protection FR24 put in front of everything else.
+
 ## Routes
 
 All `GET`. With `PROXY_SECRET` set, every route but `/health` needs the

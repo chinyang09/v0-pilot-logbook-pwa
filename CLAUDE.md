@@ -556,6 +556,14 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
 
   `GET /probe` on the deployed Worker reports which upstreams answer from
   Cloudflare today — run it before concluding a lookup is broken in the app.
+  **As of 29 Oct 2026 every FR24 JSON endpoint challenges the Worker too**
+  (search, airport.json, flight/list, the lists, `/api/v1/airports/{id}`);
+  only the `data-cloud` live feed answers, so `/aircraft` finds an aircraft
+  only while it is flying and `/airport` finds nothing. The keyed official API
+  (`fr24api.flightradar24.com`) is the legitimate route back; do not work
+  round the challenge (impersonated clients, FR24's web gRPC headers). The
+  Worker's secret binding is `PROXY_SECRET` — the dashboard one was
+  `" PROXY_SECRET"` with a leading space, so the secret was never enforced
   404 means a source answered and has no such thing (manual entry); 502 means
   every source failed (try later) — callers must not treat them alike. The
   Worker's legacy passthroughs (`/v1/search/web/find`,
