@@ -17,6 +17,7 @@ import {
 } from "./airport-seed"
 import type { Airport } from "@/types/entities/airport.types"
 import { tzFormatter, tzOffsetName, offsetHoursFromName } from "@/lib/utils/tz-format"
+import { icaoForIataAt } from "@/lib/airports/code-changes"
 
 // ============================================
 // Types (re-export for convenience)
@@ -314,9 +315,16 @@ export async function getAirportByIcao(icao: string): Promise<Airport | undefine
 }
 
 /**
- * Get airport by IATA code
+ * Get airport by IATA code, as the code stood at `atMs` (epoch ms; now when
+ * omitted). A code that has moved between airports (`lib/airports/code-changes.ts`
+ * — VTZ, VOVZ → VOVI) is answered by the airport it meant THEN, and by nothing
+ * if that airport is not on the device: the other row still carrying the code
+ * is not an answer for that instant. Any other code is its one airport.
  */
-export async function getAirportByIata(iata: string): Promise<Airport | undefined> {
+export async function getAirportByIata(iata: string, atMs?: number): Promise<Airport | undefined> {
+  if (!iata) return undefined
+  const dated = icaoForIataAt(iata, atMs)
+  if (dated) return referenceDb.airports.get(dated)
   return referenceDb.airports.where("iata").equals(iata.toUpperCase()).first()
 }
 

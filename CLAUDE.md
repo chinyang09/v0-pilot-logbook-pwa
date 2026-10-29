@@ -51,6 +51,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 | `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp, and that the single-pass timeline sums and acclimatisation equal their per-item definitions |
 | `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation, and a REAL schedule PDF (`fixtures/schedule-oct-2026-local-base.pdf`) run through the actual extractor |
 | `lib/utils/parsers/shared/__tests__/pooled-map.test.ts` | the bounded fan-out both enrichment chains end in |
+| `lib/airports/__tests__/code-changes.test.ts`, `lib/utils/parsers/shared/__tests__/airport-enricher.test.ts` | codes that moved between airports (VTZ) — the date rule, each end at its own instant, which stored flights the repair corrects, both airports bundled in one zone; the chain resolving a moved code through its airports and flagging a pool that disagrees |
 | `lib/utils/__tests__/history-markers.test.ts` | overlay marker ordering — which dialog `history.back()` would actually take |
 | `lib/utils/parsers/logten/__tests__/` | the LogTen Pro migration, run against REAL exports in `fixtures/` — value coercion, the three parsers, UTC-vs-local detection + conversion, duplicate detection, and the cross-file pass |
 | `lib/ocr/__tests__/` | both OCR screenshot layouts from synthetic boxes, the engine's plumbing with stand-in models (boxes, CTC decode, the keypad never recognised), device-first routing with the server as the backstop, and SEVEN REAL MCDU PHOTOS (`fixtures/mcdu/`) — what the engine actually reads from each, on the server AND on the device, every slot checked; `OCR_ENGINE=1 pnpm test` runs the photos through the real server engine (`OCR_FIXTURE_WRITE=1` re-pins the reads) |
@@ -612,6 +613,25 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
    (`lib/airports/online-lookup.ts`), which also derives a blank timezone
    through `/api/timezone`
 4. Manual entry (user types ICAO + details)
+
+**An IATA code is not an airport for all time** (`lib/airports/code-changes.ts`).
+VTZ moved from Visakhapatnam's old airport (VOVZ) to Bhogapuram (VOVI) at 00:01
+IST on 17 Aug 2026, and the company reports name airports by IATA only, so the
+question is always "which airport was this code WHEN THE FLIGHT FLEW":
+
+| | Rule |
+|---|---|
+| the table | `IATA_REASSIGNMENTS` — code, from/to ICAO, the UTC instant, a source. A new move goes here AND its new airport into `airports.min.json` (bump `AIRPORT_DATA_VERSION`); the test checks both airports are bundled, in one zone |
+| lookup | `getAirportByIata(iata, atMs?)` answers a moved code with the airport it meant at `atMs` (now when omitted) — and with nothing if that airport is not on the device, never the other row carrying the code |
+| imports | all three resolve each END of a sector at its own instant (`flightInstantMs`, `pickAirportAt`); the enrichment chain fetches every airport a moved code has meant, never the bare code. Times are converted on the first answer, which is why both sides of a move must share a zone |
+| stored flights | `repairReassignedAirports` (each launch, in the background — after a data bump it waits for the reseed) moves a flight holding one of the code's airports, the wrong one for its date, through `updateFlight`, with that airport's offset and its night / day-night TO-LDG recalculated (pins respected). A SIGNED or LOCKED flight is never changed: it gets a Discrepancies note (`airport-code:<flight>:<side>`, once) that resolves itself when the flight is right |
+| an undated move | the chain asks the shared pool about every code it answered LOCALLY, in the same request, and a pool that gives another airport is an import WARNING (`codeConflicts`) — reported, never applied |
+
+Offsets are taken at the flight's instant everywhere a report is read (the
+eCrew executor and logbook parser, LogTen via `offsetAt`): today's offset
+converted a summer-time flight an hour out. The bundled file is fetched at
+`/airports.min.json?v=<version>` — the service worker serves the bare URL
+stale-while-revalidate, which stamped the new version on the OLD file.
 
 **Enrichment Pipeline:**
 - Custom aircraft/airports are submitted fire-and-forget to `/api/submissions/aircraft` or `/api/submissions/airport`
@@ -4739,6 +4759,8 @@ When making changes, be aware of these high-impact files:
 - Do not accept a TOTP code without the `auth.lastTotpCounter` replay check, and keep the OTP comparison constant-time (`verifyTOTPWithCounter`)
 - Do not verify a TOTP code with a bare `verifyTOTP` — that wrapper is GONE. It called `verifyTOTPWithCounter` and threw the counter away, which is the replay-protection signal, so an unused export sitting next to the correct one was a footgun with the more obvious name. `verifyTOTPWithCounter` is the only entry point
 - Do not reintroduce per-file registration normalizers — use the canonical `normalizeRegistration` in `lib/utils/string.ts` on both client and server
+- Do not resolve an IATA code without the flight's DATE where one is known — a code can move between airports (`IATA_REASSIGNMENTS`; VTZ went from VOVZ to VOVI on 17 Aug 2026), and the undated lookup took whichever row came first. Pass the instant to `getAirportByIata`, or pick from the enrichment map with `pickAirportAt`; resolve a stored flight by its ICAO first. And never correct a SIGNED or LOCKED flight's airport automatically — note it in Discrepancies
+- Do not take a UTC offset at "now" for a flight — `getAirportTimeInfo(tz, at)` at the flight's instant. A whole-career import read with today's offset is an hour out on every flight in the other half of the year
 - Do not re-add a bulk CDN aircraft download — the aircraft DB is populated from FR24, custom entries, and the MongoDB enriched pool only
 - Do not remove `"use client"` directives — server/client boundary is intentionally designed
 - Do not commit `.env` files or MongoDB credentials

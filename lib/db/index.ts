@@ -65,6 +65,7 @@ export {
   purgeExpiredDeletedFlights,
   repairSimulatorEntries,
   repairFlightTimezones,
+  repairReassignedAirports,
   repairMissingFlightTimes,
   getDeletedFlights,
   isLiveFlight,

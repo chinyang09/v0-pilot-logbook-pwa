@@ -76,6 +76,7 @@ import {
   wrappedSpan,
   type TimeReferenceSample,
 } from "./time-reference";
+import { flightInstantMs, pickAirportAt } from "@/lib/airports/code-changes";
 import type {
   LogtenFlightOperation,
   LogtenFlightPlan,
@@ -338,8 +339,15 @@ export interface ParseLogtenFlightsContext {
   existingFlights: FlightLog[];
   /** IATA/ICAO code → Airport, from the enrichment chain. */
   airports: Map<string, Airport>;
-  /** UTC-offset hours per resolved airport code. */
+  /** UTC-offset hours per resolved airport code — today's. */
   offsets: Map<string, number>;
+  /**
+   * The offset of a zone at an instant. With it, a flight's times are read on
+   * the offset in force WHEN it flew: a career spans years of summer and
+   * winter time, and today's offset converts half of a European logbook an
+   * hour out. Without it, `offsets`.
+   */
+  offsetAt?: (tz: string, at: Date) => number;
   /** Registration (normalized) → ICAO type, from the Aircraft export. */
   typeByRegistration?: Map<string, string>;
   /**
@@ -352,6 +360,20 @@ export interface ParseLogtenFlightsContext {
    * aircraft list shows the other reads as two different aeroplanes.
    */
   lookupByRegistration?: Map<string, ResolvedAircraft>;
+}
+
+/** UTC-offset hours at `code` on a flight's (local) date. */
+function offsetOn(ctx: ParseLogtenFlightsContext, code: string, date: string): number | undefined {
+  const airport = ctx.airports.get(code);
+  const at = flightInstantMs(date);
+  if (airport?.tz && ctx.offsetAt && at != null) {
+    try {
+      return ctx.offsetAt(airport.tz, new Date(at));
+    } catch {
+      // A malformed zone falls back to the resolved offset below.
+    }
+  }
+  return ctx.offsets.get(code);
 }
 
 /**
@@ -447,8 +469,8 @@ export function parseLogtenFlights(
   // ---- Time reference, decided across the whole file ----
   const samples: TimeReferenceSample[] = [];
   for (const raw of raws) {
-    const depOffset = ctx.offsets.get(raw.from);
-    const arrOffset = ctx.offsets.get(raw.to);
+    const depOffset = offsetOn(ctx, raw.from, raw.date);
+    const arrOffset = offsetOn(ctx, raw.to, raw.date);
     if (depOffset == null || arrOffset == null) continue;
     if (!raw.out || !raw.in || !raw.blockTime) continue;
     samples.push({
@@ -602,13 +624,8 @@ function buildFlight(
   crew: CrewState,
   preferFileType: boolean
 ): FlightLogCreate {
-  const depAirport = ctx.airports.get(raw.from);
-  const arrAirport = ctx.airports.get(raw.to);
-  if (raw.from && !depAirport) crew.unresolved.add(raw.from);
-  if (raw.to && !arrAirport) crew.unresolved.add(raw.to);
-
-  const depOffset = ctx.offsets.get(raw.from) ?? 0;
-  const arrOffset = ctx.offsets.get(raw.to) ?? 0;
+  const depOffset = offsetOn(ctx, raw.from, raw.date) ?? 0;
+  const arrOffset = offsetOn(ctx, raw.to, raw.date) ?? 0;
 
   // Departure-side times convert on the departure offset, arrival-side on the
   // arrival offset — and the date follows the OUT time, which is the one that
@@ -640,6 +657,18 @@ function buildFlight(
       scheduledIn = localToUtc(raw.date, scheduledIn, arrOffset).time;
     }
   }
+
+  // A code names the airport it meant WHEN the flight flew (VTZ moved from
+  // VOVZ to VOVI on 17 Aug 2026). The times above were converted on the first
+  // answer, which is safe: both sides of a move share a zone.
+  const depAirport = pickAirportAt(ctx.airports, raw.from, flightInstantMs(date, out || scheduledOut));
+  const arrAirport = pickAirportAt(
+    ctx.airports,
+    raw.to,
+    flightInstantMs(date, inTime || scheduledIn, out || scheduledOut)
+  );
+  if (raw.from && !depAirport) crew.unresolved.add(raw.from);
+  if (raw.to && !arrAirport) crew.unresolved.add(raw.to);
 
   // A block time that disagrees with out→in is worth saying out loud: it means
   // either the times or the total was hand-edited in LogTen, and the app

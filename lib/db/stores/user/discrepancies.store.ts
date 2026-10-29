@@ -55,6 +55,26 @@ export async function bulkAddDiscrepancies(
 }
 
 /**
+ * Add a note under a DERIVED id, once — for a note a repair raises about a
+ * flight, which must not be raised again on every launch. Returns whether it
+ * was added. A note already there, resolved or not, is left as it is: the
+ * pilot's "handled" stands.
+ */
+export async function ensureDiscrepancy(discrepancy: DiscrepancyCreate & { id: string }): Promise<boolean> {
+  if (await userDb.discrepancies.get(discrepancy.id)) return false
+  const row: Discrepancy = {
+    ...discrepancy,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    deviceId: await getDeviceId(),
+    syncStatus: "pending",
+  }
+  await userDb.discrepancies.put(row)
+  await addToSyncQueue("create", "discrepancies", row, { changedFields: [] })
+  return true
+}
+
+/**
  * Get discrepancy by ID
  */
 export async function getDiscrepancyById(id: string): Promise<Discrepancy | undefined> {
