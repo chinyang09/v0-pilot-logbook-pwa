@@ -7,8 +7,13 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const handoff = vi.hoisted(() => ({ answer: null as unknown }))
-vi.mock("@/lib/lookup/handoff", () => ({ lookupFromEdge: async () => handoff.answer }))
+const handoff = vi.hoisted(() => ({ answer: null as unknown, history: null as unknown, routes: [] as string[] }))
+vi.mock("@/lib/lookup/handoff", () => ({
+  lookupFromEdge: async (route: string) => {
+    handoff.routes.push(route)
+    return route === "aircraft/flights" ? handoff.history : handoff.answer
+  },
+}))
 vi.mock("@/lib/icao-types/icao-types-server", () => ({
   getICAOTypeByDesignator: (code: string) => (code === "A21N" ? { description: "L2J", wtc: "M", wtg: "", manufacturerCode: "AIRBUS" } : null),
 }))
@@ -22,12 +27,26 @@ const hit = (registration: string, typecode = "A21N") => ({
 describe("enrichAircraftFromFR24", () => {
   beforeEach(() => {
     handoff.answer = null
+    handoff.history = { ok: false, status: 404, error: "nothing" }
+    handoff.routes = []
   })
 
   it("takes the exact registration over the first hit, and hydrates the type", async () => {
     handoff.answer = { ok: true, status: 200, source: "search", data: [hit("9V-TNA"), hit("9V-TNL")] }
     const result = await enrichAircraftFromFR24("9vtnl")
     expect(result).toMatchObject({ status: "found", data: { registration: "9V-TNL", typecode: "A21N", shortDescription: "L2J" } })
+  })
+
+  it("never takes a near miss — the flight history is asked, and without it the aircraft is not found", async () => {
+    handoff.answer = { ok: true, status: 200, source: "search", data: [hit("9V-TNA"), hit("9V-TNB")] }
+    expect(await enrichAircraftFromFR24("9V-TNL")).toEqual({ status: "not_found" })
+    expect(handoff.routes).toEqual(["aircraft", "aircraft/flights"])
+
+    handoff.history = { ok: true, status: 200, source: "flight-list", data: { aircraft: hit("9V-TNL", "A320"), flights: [] } }
+    expect(await enrichAircraftFromFR24("9V-TNL")).toMatchObject({ status: "found", data: { registration: "9V-TNL", typecode: "A320" } })
+
+    handoff.history = { ok: false, status: 502, error: "Upstream failed" }
+    expect((await enrichAircraftFromFR24("9V-TNL")).status).toBe("unavailable")
   })
 
   it("is not_found only when a source answered and has no such aircraft", async () => {

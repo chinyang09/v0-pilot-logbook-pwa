@@ -51,6 +51,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 | `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp, and that the single-pass timeline sums and acclimatisation equal their per-item definitions |
 | `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation, and a REAL schedule PDF (`fixtures/schedule-oct-2026-local-base.pdf`) run through the actual extractor |
 | `lib/utils/parsers/shared/__tests__/pooled-map.test.ts` | the bounded fan-out both enrichment chains end in |
+| `lib/lookup/__tests__/search-candidates.test.ts`, `app/api/search/aircraft/__tests__/` | search candidates — airframe and live-flight hits, exact / begins / inside ranking, one row per tail, airport codes off the label; the route asking the flight history only for a whole registration search missed; enrichment never taking a near miss |
 | `lib/airports/__tests__/code-changes.test.ts`, `lib/utils/parsers/shared/__tests__/airport-enricher.test.ts` | codes that moved between airports (VTZ) — the date rule, each end at its own instant, which stored flights the repair corrects, both airports bundled in one zone; the chain resolving a moved code through its airports and flagging a pool that disagrees |
 | `lib/utils/__tests__/history-markers.test.ts` | overlay marker ordering — which dialog `history.back()` would actually take |
 | `lib/utils/parsers/logten/__tests__/` | the LogTen Pro migration, run against REAL exports in `fixtures/` — value coercion, the three parsers, UTC-vs-local detection + conversion, duplicate detection, and the cross-file pass |
@@ -597,11 +598,18 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
 **Lookup Chain (aircraft):**
 1. Local IndexedDB (`referenceDb.aircraftDatabase`) — FR24 + custom + MongoDB-synced records in one unified table
 2. Server batch lookup (`/api/search/aircraft/batch`) — checks enriched submissions from other users
-3. FR24 live search (`/api/search/aircraft`) — EDGE, ONE call to the Worker's
-   `/aircraft` chain (it replaced the legacy search passthrough, which answered
-   the same fields but could not tell a miss from a challenge and searched up
-   to three times on a miss). FR24's search matches WHOLE registrations, with
-   or without the dash — `9VOFH` finds 9V-OFH, the prefix `9VO` finds nothing
+3. FR24 live search (`/api/search/aircraft`) — EDGE. It answers EVERY aircraft
+   the text could be (`aircraftCandidates`, `lib/lookup/search-candidates.ts`),
+   off the Worker's `/search`: airframe hits AND live flights flying a matching
+   tail, exact first, then the registrations it begins, then those it is
+   inside, each marked `exact`. The Worker's `/aircraft` chain keeps only
+   `type: "aircraft"` hits, which is why "9VO" found nothing there while the
+   search route listed many. When nothing is exact and the text could be a
+   whole registration (5+ characters once the dash goes), the registration's
+   flight history (`aircraft/flights`) is asked as well — search does not index
+   every airframe. ONLY an exact candidate is ever taken without the pilot
+   choosing it: the add-aircraft form lists the rest, the import enricher and
+   the server enrichment take the exact one or nothing
 4. Manual entry (user types registration + type code)
 
 **Lookup Chain (airport):**
@@ -613,6 +621,11 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
    (`lib/airports/online-lookup.ts`), which also derives a blank timezone
    through `/api/timezone`
 4. Manual entry (user types ICAO + details)
+
+The add-airport form also LISTS what a partial code could be
+(`/api/search/airport/candidates`, EDGE, `airportCandidates` — the codes read
+off the search hit's label, name matched when the text is no code); choosing
+one looks it up in full like a typed code.
 
 **An IATA code is not an airport for all time** (`lib/airports/code-changes.ts`).
 VTZ moved from Visakhapatnam's old airport (VOVZ) to Bhogapuram (VOVI) at 00:01
@@ -3347,7 +3360,8 @@ Notable route groups:
 
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
-| `/api/search/aircraft?q=` | GET | No | Aircraft lookup — EDGE, the Worker's `/aircraft` chain |
+| `/api/search/aircraft?q=` | GET | No | Every aircraft the text could be, each marked `exact` — EDGE, the Worker's `/search`, then `aircraft/flights` for a whole registration search did not list |
+| `/api/search/airport/candidates?q=` | GET | No | Every airport a partial code (or a name) could be — EDGE, the Worker's `/search` |
 | `/api/search/aircraft/batch` | POST | No | Batch lookup from enriched MongoDB |
 | `/api/search/airport?q=` | GET | No | FR24 airport lookup proxy — EDGE, the Worker's `/airport` chain only; the timezone is passed through as the source gave it (blank on its position-only tiers) |
 | `/api/lookup/<route>` | GET | Yes (session or `x-lookup-secret`) | The gateway Worker's normalized routes, EDGE (`lib/lookup/client.ts`; Node code: `lookupFromEdge`) |
@@ -5013,7 +5027,8 @@ When making changes, be aware of these high-impact files:
 - Do not make "Add Crew" open the crew picker directly, and do not lay an additional crew member out differently from the PIC/SIC rows — role on the LEFT (the menu), name on the RIGHT (the picker, for THAT row), a swipe to clear. The pick carries the row's role and index (`additionalCrewField`); address rows by index, never by crew-card id
 - Do not size the phone's bottom bar to its tabs — it is `MOBILE_PILL_WIDTH`, the screen less the panel gutter each side, the same edges as a flight card, so it is the same proportion of every phone. The tab padding still gives way below ~346px (`clamp(6px, (100vw − 250px)/8, 12px)`) so five tabs fit an iPad Split View window of 320. The bar's HEIGHT is not scaled: an iPad window at "iPhone size" draws CSS px at ~132 px/inch against a phone's ~150–160, so everything there is physically ~20% larger — that is the device, and sizing per platform would break the one-look rule
 - Do not put per-row `measureElement` on ANY virtualised list of same-height rows (airports, aircraft, crew, logbook) — calibrate once with `useCalibratedRowHeight`, and keep the card one height by construction (truncate, reserve empty lines). And never pass `useVirtualizer` an inline `getItemKey`: its measurements are memoised on that function's identity, so a new arrow per render rebuilds every row's position on every scroll-driven render (29k rows on the airports list)
-- Do not hand-roll a suggestion list under a field — `AircraftTypeSuggestions` is the one (an inset well, 44px rows, inset dividers); the aircraft form, panel and page each carried a bordered `hover:bg-accent` web dropdown
+- Do not hand-roll a suggestion list under a field — `SuggestionList` (`components/ui/suggestion-list.tsx`) is the one (an inset well, 44px rows, inset dividers), and `AircraftTypeSuggestions` and the add-aircraft / add-airport candidate lists all render through it; the aircraft form, panel and page each carried a bordered `hover:bg-accent` web dropdown
+- Do not take the first result of an aircraft or airport search as THE answer — a partial registration ("9VB") is a question. Only a candidate marked `exact` fills a form, an import or a submission by itself; anything else is listed for the pilot to choose, or is no match
 - Do not hand the year wheel a new options array per render — `yearOptions` keeps the SAME array while the range holds, and the range is anchored on TODAY (widened only when the viewed year falls outside). Anchored on the viewed year, every year spun rebuilt ~75 rows
 - Do not put a segmented choice back as a pair of filled rectangles — it is `SegmentedTabs` (glass, a sliding indicator, `h-9` segments), as in the import dialogs and the Quick Check. And measure its segments from ONE ResizeObserver: reading `offsetLeft` in a ref callback that is rebuilt on every selection forced a layout per tap and attached a new observer to every segment each time, never disconnecting the old ones
 - Do not put an action back on the card surface (`bg-secondary`, `bg-card`, `bg-muted`) or give it a rectangle's corners — a thing you press is a CAPSULE or circle on `.control-surface`, a thing you read is a rounded rectangle. On the card surface the context preview's action row read as more card. And do not use the REAL glass (`GlassContainer`) for an action that sits over a scrim, a row or a panel: the painted surface is the same look with no `backdrop-filter`, and these pop in on exactly the frames a readback would cost most

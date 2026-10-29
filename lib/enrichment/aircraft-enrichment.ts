@@ -47,9 +47,18 @@ export async function enrichAircraftFromFR24(
     return answer.status === 404 ? { status: "not_found" } : { status: "unavailable", error: answer.error }
   }
 
-  // The chain lists exact matches first; prefer one, as the search route does.
+  // ONLY the registration asked for. The chain's search stage answers every
+  // hit when none is exact, and taking the first of those filed the
+  // submission as a different aeroplane. Search does not index every
+  // airframe, so a miss there is asked of the registration's flight history.
   const wanted = normalizeRegistration(registration)
-  const aircraft = answer.data.find((a) => normalizeRegistration(a.registration) === wanted) ?? answer.data[0]
+  let aircraft = answer.data.find((a) => normalizeRegistration(a.registration) === wanted)
+  if (!aircraft) {
+    const history = await lookupFromEdge("aircraft/flights", { reg: registration, limit: 1 }, { request })
+    if (!history.ok && history.status !== 404) return { status: "unavailable", error: history.error }
+    const info = history.ok ? history.data.aircraft : null
+    if (info && normalizeRegistration(info.registration) === wanted) aircraft = info
+  }
   if (!aircraft) return { status: "not_found" }
 
   const typecode = aircraft.typecode || ""

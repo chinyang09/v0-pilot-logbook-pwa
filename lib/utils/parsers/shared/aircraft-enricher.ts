@@ -156,8 +156,15 @@ export async function enrichAircraftBatch(
             return;
           }
 
+          // Only the registration asked for: the search answers every
+          // aircraft the text could mean, and a near miss filed as this tail
+          // would type the flight as another aeroplane.
           const data = await res.json();
-          const match = data?.results?.[0];
+          const wanted = normalizeRegistration(reg);
+          const match = (data?.results ?? []).find(
+            (r: { registration?: string; exact?: boolean }) =>
+              r.exact ?? normalizeRegistration(r.registration || "") === wanted
+          );
 
           if (!match || !match.registration) {
             failedRegs.push(reg);

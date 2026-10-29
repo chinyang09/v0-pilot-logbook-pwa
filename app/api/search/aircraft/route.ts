@@ -1,27 +1,33 @@
 /**
  * Server-side proxy for the aircraft lookup — EDGE runtime.
  *
- * GET /api/search/aircraft?q=9V-TNL
+ * GET /api/search/aircraft?q=9VB
  * GET /api/search/aircraft?q=9V-TNL&debug=1   ← surfaces the gateway's answer
  *
- * One call to the gateway Worker's `/aircraft` chain: search → the
- * registration's flight history → the live feed. It replaced the legacy
- * search passthrough (`/v1/search/web/find`), which answered the same search
- * with the same fields (checked side by side, 29 Oct 2026) but could not tell
- * "no such aircraft" from "the lookup was challenged", and on a miss the
- * route then made up to three near-identical searches.
+ * Answers EVERY aircraft the query could mean (`aircraftCandidates`): the
+ * Worker's `/search` (FR24's search, every kind of hit — an airframe, or a
+ * live flight flying it), exact first, then the registrations the query
+ * begins, then those it is inside. Each carries `exact`, and only an exact one
+ * may be taken without the pilot choosing it: "9VB" is a question, not an
+ * answer.
+ *
+ * Search does not index every airframe, so when nothing it returned IS the
+ * query and the query is long enough to be a whole registration, the
+ * registration's flight history is asked as well (`aircraft/flights`), which
+ * knows an aeroplane by its full mark. It replaced a single `/aircraft` call,
+ * which kept only `type: "aircraft"` hits and was read as one answer.
  *
  * WHY EDGE: the upstream scores whoever calls the Worker and challenges the
  * Node runtime (see `cloudflare-worker/README.md`).
  *
- * The search matches WHOLE registrations, with or without the dash (`9VOFH`
- * finds 9V-OFH) — not a prefix (`9VO` finds nothing).
- *
- * Answers `{ results }` in the shape the callers have always read.
+ * Answers `{ results }`, each in the shape the callers have always read plus
+ * `exact`.
  */
 
 import { NextResponse } from "next/server"
 import { callFr24Worker, fr24WorkerConfigured } from "@/lib/fr24/worker-client"
+import { aircraftCandidates, type AircraftCandidate } from "@/lib/lookup/search-candidates"
+import { normalizeRegistration } from "@/lib/utils/string"
 
 export const runtime = "edge"
 
@@ -30,13 +36,8 @@ export const dynamic = "force-dynamic"
 export const revalidate = 0
 export const fetchCache = "force-no-store"
 
-type AircraftHit = {
-  registration: string
-  icao24: string
-  typecode: string
-  operator: string
-  source: "fr24"
-}
+/** A whole registration is rarely under five characters once the dash goes. */
+const WHOLE_REGISTRATION = 5
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -49,21 +50,38 @@ export async function GET(request: Request) {
     return NextResponse.json({ results: [] })
   }
 
-  const answer = await callFr24Worker("aircraft", { reg: query }, 7000)
-  const results: AircraftHit[] = answer.ok
-    ? answer.data.map((a) => ({
-        registration: a.registration,
-        icao24: a.icao24,
-        typecode: a.typecode,
-        operator: a.operator,
-        source: "fr24" as const,
-      }))
-    : []
+  const search = await callFr24Worker("search", { q: query, limit: 30 }, 7000)
+  let results: AircraftCandidate[] = search.ok ? aircraftCandidates(search.data, query) : []
+
+  let history: { status: number; source?: string; error?: string } | undefined
+  const exact = results.some((r) => r.exact)
+  if (!exact && (normalizeRegistration(query).length >= WHOLE_REGISTRATION || results.length === 0)) {
+    const answer = await callFr24Worker("aircraft/flights", { reg: query, limit: 1 }, 7000)
+    history = { status: answer.status, source: answer.ok ? answer.source : undefined, error: answer.ok ? undefined : answer.error }
+    const aircraft = answer.ok ? answer.data.aircraft : null
+    if (aircraft && normalizeRegistration(aircraft.registration) === normalizeRegistration(query)) {
+      results = [
+        {
+          registration: aircraft.registration,
+          icao24: aircraft.icao24,
+          typecode: aircraft.typecode,
+          operator: aircraft.operator,
+          source: "fr24",
+          exact: true,
+        },
+        ...results,
+      ]
+    }
+  }
 
   if (debug) {
     return NextResponse.json({
       results,
-      debug: { query, status: answer.status, source: answer.ok ? answer.source : undefined, error: answer.ok ? undefined : answer.error },
+      debug: {
+        query,
+        search: { status: search.status, source: search.ok ? search.source : undefined, error: search.ok ? undefined : search.error },
+        history,
+      },
     })
   }
   return NextResponse.json({ results })
