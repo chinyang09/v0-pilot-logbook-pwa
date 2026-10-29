@@ -8,6 +8,7 @@
 
 import { NextResponse } from "next/server"
 import { fr24Find, type FR24Hit } from "@/lib/fr24/find"
+import { callFr24Worker, fr24WorkerConfigured } from "@/lib/fr24/worker-client"
 
 // Run on Vercel's Edge runtime. Edge fetch uses a different TLS stack than
 // Node, so its JA3/JA4 fingerprint differs — Cloudflare's bot-fight rules on
@@ -76,6 +77,23 @@ export async function GET(request: Request) {
     if (attempt.results.length > 0) {
       finalResults = attempt.results
       break
+    }
+  }
+
+  // Search found nothing → the Worker's own chain, which goes on to the
+  // registration's flight history and the live feed. A Worker that predates
+  // `/aircraft` answers 400, which is simply no result here.
+  if (finalResults.length === 0 && fr24WorkerConfigured()) {
+    const chain = await callFr24Worker("aircraft", { reg: query }, 7000)
+    attempts.push({ variant: query, via: "worker-chain", status: chain.status, ok: chain.ok, source: chain.ok ? chain.source : undefined, error: chain.ok ? undefined : chain.error })
+    if (chain.ok) {
+      finalResults = chain.data.map((a) => ({
+        registration: a.registration,
+        icao24: a.icao24,
+        typecode: a.typecode,
+        operator: a.operator,
+        source: "fr24" as const,
+      }))
     }
   }
 

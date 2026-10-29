@@ -121,7 +121,7 @@ export function AirportNewForm({
         try {
           const res = await fetch(
             `/api/search/airport?q=${encodeURIComponent(code)}`,
-            { signal: AbortSignal.timeout(5000) }
+            { signal: AbortSignal.timeout(12000) }
           )
           if (res.ok) {
             const data = await res.json()

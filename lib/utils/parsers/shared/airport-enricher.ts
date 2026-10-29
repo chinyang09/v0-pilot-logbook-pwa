@@ -172,7 +172,7 @@ export async function enrichAirportBatch(
         try {
           const res = await fetch(
             `/api/search/airport?q=${encodeURIComponent(code)}`,
-            { signal: AbortSignal.timeout(8000) }
+            { signal: AbortSignal.timeout(12000) }
           )
 
           if (!res.ok) {

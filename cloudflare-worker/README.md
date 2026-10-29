@@ -1,92 +1,101 @@
-# FR24 Search Proxy — Cloudflare Worker
+# FR24 Gateway — Cloudflare Worker
 
-A tiny Worker that proxies `flightradar24.com/v1/search/web/find` from
-Cloudflare's network. The Next.js app's server-side fetch (Node and Vercel
-Edge) both get 403'd by Cloudflare's "Just a moment..." JS challenge on this
-endpoint; this Worker is the next-cheapest hop to try because Worker fetch
-uses a different TLS stack and runs on Cloudflare's own network.
+One Worker (`worker.js`, plain JS) that answers every FlightRadar24 lookup the
+app uses, in the APP's shapes. Server-side fetch from Node and Vercel Edge is
+403'd by Cloudflare's "Just a moment..." challenge; a Worker's fetch runs on
+Cloudflare's own network with a different TLS fingerprint, and gets through
+where they do not.
 
-**No guarantee this passes the challenge** — if the Worker also gets 403,
-the next escalation is a paid scraping API (ScraperAPI / ZenRows / etc.).
+FR24 changes what it challenges without notice (the airport lookup,
+`/airports/traffic-stats/`, stopped answering this way), so every lookup the
+app depends on is a **chain of independent sources**, and `GET /probe` says
+which of them answer from the Worker right now.
 
-## One-time setup
+## Routes
 
-1. Create a free Cloudflare account at https://cloudflare.com (no credit
-   card required for Workers free tier — 100k requests/day).
+All `GET`. With `PROXY_SECRET` set, every route but `/health` needs the
+`x-proxy-secret` header. Normalized routes answer:
 
-2. Install wrangler locally (or use the dashboard, see "Dashboard deploy"
-   below):
+| Status | Body | Means |
+|---|---|---|
+| 200 | `{ ok: true, data, source }` | found — `source` names the tier that answered |
+| 400 | `{ ok: false, error }` | bad input |
+| 404 | `{ ok: false, error }` | a source answered and has no such thing → manual entry |
+| 502 | `{ ok: false, error, attempts }` | every source failed (challenge, timeout) → try later |
+
+Add `debug=1` to any route to see each upstream attempt.
+
+| Route | Answers | Chain |
+|---|---|---|
+| `/health` | liveness | — |
+| `/probe` | every upstream once, from here (`code=`, `reg=`, `flight=` set the samples) | — |
+| `/aircraft?reg=9V-TNL` | aircraft by registration | search → the registration's flight history → live feed |
+| `/aircraft/flights?reg=9V-TNL&page=1&limit=25` | the airframe + the flights it has flown | `common/v1/flight/list.json?fetchBy=reg` |
+| `/airport?code=WSSS` | airport by ICAO or IATA | `airport.json` + `traffic-stats` (both carry the timezone) → `_json/airports.php` + search (position only; `timezone` is `""`) |
+| `/airport/details?code=WSSS` | details, runways, weather | `airport.json` plugins |
+| `/airport/schedule?code=WSSS&mode=departures&page=1&limit=50&timestamp=` | departures or arrivals board | `airport.json` schedule plugin |
+| `/airports` | every airport | `_json/airports.php` |
+| `/airlines` | every airline | `_json/airlines.php` |
+| `/search?q=TR600&limit=20` | search, grouped by kind (aircraft, airport, operator, live, schedule) | `v1/search/web/find` |
+| `/flight?number=TR600&page=1&limit=25` | the flights a flight number has operated | `common/v1/flight/list.json?fetchBy=flight` |
+| `/flight/details?id=<fr24 id>` | one live flight, with its trail | `data-live …/clickhandler` |
+| `/live?reg=` / `airline=` / `type=` / `bounds=N,S,W,E` | live positions | `data-cloud …/zones/fcgi/feed.js` |
+| `/raw?url=https://api.flightradar24.com/...` | verbatim, FR24 hosts only — **off unless `PROXY_SECRET` is set** | — |
+| `/v1/search/web/find`, `/airports/traffic-stats/` | LEGACY verbatim passthroughs, for an app deployment that predates the routes above | — |
+
+Times are ISO-8601 UTC. FR24's "actual" times are its own observation, not the
+company's OOOI record.
+
+Answers are cached at the Worker (Cache API, per data centre): airports 7 days,
+the airport and airline lists a day, aircraft a day, flight histories 10
+minutes, boards 2 minutes. Only a found answer is cached — never a failure.
+(The Cache API is a no-op in the dashboard's preview, and may be on a bare
+`workers.dev` URL; it is an optimisation only.)
+
+## How the app uses it
+
+| Caller | Route |
+|---|---|
+| `app/api/search/airport` | `/airport` (falls back to the legacy passthrough on an older Worker), deriving a missing timezone from the coordinates with geo-tz |
+| `app/api/search/aircraft` | the legacy search first (as always), then `/aircraft` when it finds nothing |
+| `app/api/fr24/[...path]` | any normalized route, for signed-in users — the PWA's door (`lib/fr24/client.ts`) |
+
+The server side reads `FR24_PROXY_URL` + `FR24_PROXY_SECRET`
+(`lib/fr24/worker-client.ts`); the secret never reaches a browser.
+
+## Deploy
+
+### Dashboard (no CLI)
+
+1. Workers & Pages → `fr24-search-proxy` → Edit code.
+2. Replace the whole file with `worker.js`. Deploy.
+3. Settings → Variables and Secrets: keep (or add) the `PROXY_SECRET` secret.
+4. Open `https://fr24-search-proxy.<subdomain>.workers.dev/probe` with the
+   secret header, e.g.
 
    ```bash
-   npm install -g wrangler
-   wrangler login
+   curl -s -H "x-proxy-secret: $SECRET" https://fr24-search-proxy.<subdomain>.workers.dev/probe | jq .summary
    ```
 
-3. From this directory:
+   Every `FAIL` line is a source FR24 is challenging from Cloudflare today.
 
-   ```bash
-   cd cloudflare-worker
-   wrangler deploy
-   ```
+### Wrangler
 
-   This deploys the Worker to `https://fr24-search-proxy.<your-subdomain>.workers.dev`.
-   Copy that URL.
-
-4. Set a shared secret so the Worker isn't open to anyone hitting your URL
-   (and burning your free-tier quota):
-
-   ```bash
-   wrangler secret put PROXY_SECRET
-   # Paste any random string when prompted, e.g. `openssl rand -hex 32`
-   ```
-
-5. In your Vercel project's environment variables, add:
-   - `FR24_PROXY_URL` = the workers.dev URL from step 3
-   - `FR24_PROXY_SECRET` = the same secret from step 4
-
-   Redeploy Vercel (or trigger a new deploy) so the env vars apply.
-
-## Dashboard deploy (no CLI)
-
-If you'd rather not use wrangler:
-
-1. Cloudflare dashboard → Workers & Pages → Create application → Create Worker.
-2. Name it `fr24-search-proxy`.
-3. Edit the Worker, **delete the default code**, then paste the entire
-   contents of `worker.js` (plain JS — the dashboard's "Quick Edit"
-   reliably accepts JS but trips on TS type annotations). Save and deploy.
-   Make sure the Worker is using the **ES Module** format (the default
-   for new Workers — the file must start with `export default {`).
-4. Workers & Pages → your worker → Settings → Variables and Secrets →
-   Add Variable → Type: Secret → Name: `PROXY_SECRET`, Value: your random
-   string. Save.
-5. The Worker URL is shown at the top of the Worker page — copy it.
-6. Add `FR24_PROXY_URL` and `FR24_PROXY_SECRET` to Vercel env vars as above.
-
-## Verifying
-
-After deploy and Vercel env vars are set, hit:
-
+```bash
+cd cloudflare-worker
+wrangler deploy
+wrangler secret put PROXY_SECRET   # first time only
 ```
-https://<vercel-app>/api/search/aircraft?q=9V-TNL&debug=1
-```
 
-The `debug.attempts[0]` should now show:
+Vercel needs `FR24_PROXY_URL` (the workers.dev URL) and `FR24_PROXY_SECRET`
+(the same secret). The Worker can be deployed before or after the app: the
+legacy routes keep an older app working, and the app falls back to them on an
+older Worker.
 
-- `status: 200`
-- `contentType: application/json…`
-- `hits: 1`
+## Tests
 
-If you still see `status: 502` (Worker reached, but FR24 rejected) or
-`status: 401` (Worker rejected — secret mismatch), check the corresponding
-env var.
-
-## Notes
-
-- The Worker only allows `GET /v1/search/web/find` requests — anything
-  else returns 400. That's deliberate: keep the surface area tiny so the
-  Worker can't be used as an open FR24 proxy.
-- The `cf: { cacheTtl: 0 }` block disables Cloudflare's edge cache for
-  this fetch. Aircraft data changes infrequently but query patterns differ,
-  so caching at the Worker layer adds little value and would mask FR24's
-  real response during debugging.
+`__tests__/worker.test.ts` runs in the app's Vitest suite (`pnpm test`): the
+normalizers, and each chain against stand-in upstreams — which source answers
+when another is challenged, 404 vs 502, that a failure is never cached, and
+that `/raw` stays on FR24's hosts. `tsconfig.json` type-checks `worker.js`
+against `@cloudflare/workers-types` (`checkJs`).

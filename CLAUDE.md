@@ -57,6 +57,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 | `lib/settings/__tests__/` | per-user settings — flat sparse fields, only moved keys written, the legacy carry-up seeding only non-default choices the account lacks, theme kept off the record |
 | `lib/theme/__tests__/` | the palette generator — contrast and gamut for every preset in both modes and a sweep of custom seeds, and that globals.css carries the default palette exactly |
 | `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, the 90-day window, the recycle bin, sync compaction, conflict resolution, the canonical document shape + write modes, push batching, the sync triggers |
+| `cloudflare-worker/__tests__/` | the FR24 gateway Worker — its normalizers (FR24 shapes → the app's), each lookup chain against stand-in upstreams (which source answers when another is challenged, 404 vs 502, failures never cached, `/raw` kept to FR24 hosts), and the legacy passthroughs; `app/api/search/airport/__tests__/` pins the route over it (a blank timezone derived, an older Worker's fallback) |
 | `lib/sync/server/__tests__/` | the server engine end to end — two devices pushing and pulling, deletions, stale pushes, paging, the migration — against an in-memory Mongo stand-in (`fake-mongo.ts`; it implements only the operators the engine sends) |
 
 Tests that touch a parser must mock `@/lib/db` and
@@ -538,7 +539,31 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
 - **Aircraft Database** (IndexedDB `referenceDb.aircraftDatabase`): there is **no** bulk CDN download. The table is populated on demand from FR24 search results, custom user entries, and the shared MongoDB enriched pool synced via `/api/sync/aircraft-reference` (per-user cursor)
 - **Airport Database**: Loaded from `public/airports.min.json` into IndexedDB
 - **ICAO DOC 8643 Aircraft Types**: Loaded from `public/aircraft-types.json` with memory + IndexedDB two-level caching
-- **FR24 APIs** (live): Aircraft search via `/v1/search/web/find`, airport lookup via `/airports/traffic-stats/`
+- **FR24 APIs** (live), all through ONE Cloudflare Worker — the FR24 gateway
+  (`cloudflare-worker/worker.js`, README there). Node and Vercel Edge fetch are
+  403'd by FR24's Cloudflare challenge; a Worker's fetch gets through. It
+  answers in the APP's shapes (`lib/fr24/types.ts`), and every lookup the app
+  depends on is a CHAIN, because FR24 changes what it challenges without
+  notice — `traffic-stats`, the airport source for months, stopped answering:
+
+  | Worker route | Chain |
+  |---|---|
+  | `/airport` | `airport.json` + `traffic-stats` (carry the timezone) → `_json/airports.php` + search (position only) |
+  | `/aircraft` | search → the registration's flight history → live feed |
+  | `/aircraft/flights`, `/flight` | `common/v1/flight/list.json` by registration / flight number |
+  | `/airport/details`, `/airport/schedule` | `airport.json` plugins (runways, weather, boards) |
+  | `/airports`, `/airlines`, `/search`, `/live`, `/flight/details` | the lists, search grouped by kind, the live feed, one live flight |
+
+  `GET /probe` on the deployed Worker reports which upstreams answer from
+  Cloudflare today — run it before concluding a lookup is broken in the app.
+  404 means a source answered and has no such thing (manual entry); 502 means
+  every source failed (try later) — callers must not treat them alike. The
+  Worker's legacy passthroughs (`/v1/search/web/find`,
+  `/airports/traffic-stats/`) stay so the app and the Worker can deploy in
+  either order. Server code calls it through `callFr24Worker`
+  (`lib/fr24/worker-client.ts`, reads `FR24_PROXY_URL`/`FR24_PROXY_SECRET`);
+  the PWA through `/api/fr24/[...path]` (signed-in only; `lib/fr24/client.ts`),
+  which never exposes `/raw` or `/probe`
 - **Server Enrichment DB** (MongoDB): User-submitted aircraft/airports enriched and shared across users
 
 **Lookup Chain (aircraft):**
@@ -3268,7 +3293,8 @@ Notable route groups:
 |---|---|---|---|
 | `/api/search/aircraft?q=` | GET | No | FR24 aircraft search proxy |
 | `/api/search/aircraft/batch` | POST | No | Batch lookup from enriched MongoDB |
-| `/api/search/airport?q=` | GET | No | FR24 airport lookup proxy |
+| `/api/search/airport?q=` | GET | No | FR24 airport lookup proxy (the Worker's `/airport` chain; a blank timezone is derived from the coordinates with geo-tz) |
+| `/api/fr24/<route>` | GET | Yes | The FR24 gateway Worker's normalized routes (`lib/fr24/client.ts`) |
 | `/api/submissions/aircraft` | POST | Yes | Submit custom aircraft for enrichment |
 | `/api/submissions/airport` | POST | Yes | Submit custom airport for enrichment |
 | `/api/enrichment/batch` | POST | CRON_SECRET (required) | Background enrichment of pending submissions; fails closed if `CRON_SECRET` is unset |
@@ -4683,6 +4709,7 @@ When making changes, be aware of these high-impact files:
 - Do not use `npm install` or `npm add` — always use `pnpm` to keep `pnpm-lock.yaml` in sync (Vercel uses frozen-lockfile)
 - Do not expose FR24 as the data source in UI — the user explicitly requires online lookups to be transparent (no "Online Results" labels, no Globe icons, no "FlightRadar24" branding)
 - Do not add hexdb.io fallback for aircraft lookup — if FR24 fails, manual entry is the only option
+- Do not call FR24 from the app except through the gateway Worker (`callFr24Worker` on the server, `lib/fr24/client.ts` in the browser), and do not let an airport with a BLANK timezone reach the client — the Worker's position-only tiers return `""`, the route derives the zone from the coordinates, and the client would otherwise store it as UTC. Never hand the Worker's secret to a browser, and never expose its `/raw` (an FR24 passthrough) or `/probe` through the app
 - Do not bypass `recalculateFlightFields()` `manualOverrides` — users' manually entered field values must never be overwritten by enrichment
 - Do not let a hidden keep-alive page recompute on a data change — read data through the hooks that hold it (`useHeldWhileHidden`), and add a new list hook the same way. And never default SWR's `data` to a fresh `[]` per render: it breaks every downstream memo, and under the hold it loops
 - Do not put the active route back into context as a plain value, and do not render a keep-alive page's element inline in the stack — either one re-renders all six retained pages on every tab switch. The route is a store whose SNAPSHOT is the per-page boolean (`useSyncExternalStore`), and each page is `memo`ized on its route key
