@@ -5,8 +5,10 @@
  *   1. Local IndexedDB (getAirportByIcao/getAirportByIata) — fast
  *   2. Server batch (POST /api/search/airport/batch) — MongoDB cache,
  *      filtered by enrichedAt freshness (180 day TTL)
- *   3. FR24 live (GET /api/search/airport?q=CODE) — per-code fallback,
- *      which itself also checks the MongoDB cache before hitting FR24
+ *   3. FR24 live (GET /api/search/airport?q=CODE) — per-code fallback, on
+ *      the Edge runtime and FR24 only; a timezone it did not carry is
+ *      derived from the coordinates (`deriveTimezone`), or it would be
+ *      stored as "UTC"
  *
  * Results from steps 2 and 3 are written back to local IndexedDB as custom
  * airports, so the next import for the same code is fully local. FR24 hits
@@ -25,6 +27,7 @@ import {
 import { submitAirportToServer } from "@/lib/submissions/submit"
 import { createId } from "@/lib/auth/shared/cuid"
 import { pooledForEach } from "./pooled-map"
+import { deriveTimezone } from "@/lib/airports/online-lookup"
 import type { Airport } from "@/types/entities/airport.types"
 
 export interface EnrichAirportProgress {
@@ -182,7 +185,8 @@ export async function enrichAirportBatch(
           }
 
           const data = await res.json()
-          const match = data?.result as EnrichedAirportPayload | null
+          const found = data?.result as EnrichedAirportPayload | null
+          const match = found?.icao ? await deriveTimezone(found) : null
 
           if (!match || !match.icao) {
             failedCodes.push(code)
@@ -195,22 +199,18 @@ export async function enrichAirportBatch(
           stats.fr24Hits++
 
           // Fire-and-forget — hydrates MongoDB cache for other users.
-          // Skipped if the GET endpoint already came from cache (data.source
-          // === "cache") to avoid re-submitting unchanged records.
-          if (data?.source !== "cache") {
-            submitAirportToServer({
-              submissionId: airport.submissionId || createId(),
-              icao: match.icao,
-              iata: match.iata,
-              name: match.name,
-              city: match.city,
-              country: match.country,
-              timezone: match.timezone,
-              latitude: match.latitude,
-              longitude: match.longitude,
-              elevation: match.elevation,
-            })
-          }
+          submitAirportToServer({
+            submissionId: airport.submissionId || createId(),
+            icao: match.icao,
+            iata: match.iata,
+            name: match.name,
+            city: match.city,
+            country: match.country,
+            timezone: match.timezone,
+            latitude: match.latitude,
+            longitude: match.longitude,
+            elevation: match.elevation,
+          })
         } catch {
           failedCodes.push(code)
           stats.failed++

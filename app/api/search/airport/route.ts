@@ -1,86 +1,37 @@
 /**
- * Server-side proxy for FR24 airport lookup with MongoDB cache tier
- * Bypasses CORS restrictions on the unofficial FR24 API
+ * Server-side proxy for the FR24 airport lookup — EDGE runtime, FR24 only.
  *
  * GET /api/search/airport?q=WARR
  * GET /api/search/airport?q=WARR&debug=1   ← surfaces the upstream payload
  *
  * Lookup order:
- *   1. MongoDB cache (airportSubmissions, status=enriched, enrichedAt fresh)
- *   2. The FR24 gateway Worker's `/airport` (when FR24_PROXY_URL is set) — its
- *      own chain: airport.json + traffic-stats, then the airport list + search
- *   3. traffic-stats directly — no Worker configured, or a Worker deployment
+ *   1. The FR24 gateway Worker's `/airport` (when FR24_PROXY_URL is set)
+ *   2. traffic-stats directly — no Worker configured, or a Worker deployment
  *      that predates `/airport` (it answers that route 400)
  *
- * A source that gives coordinates but no timezone (the Worker's list and
- * search tiers) has its zone derived here with geo-tz. The client stores a
- * blank zone as "UTC", which would put every local time at that airport out.
+ * WHY EDGE: FR24 sits behind Cloudflare, and for a Worker's subrequest
+ * Cloudflare scores the ORIGINAL caller's connection, not the Worker's. The
+ * Worker's logs (29 Oct 2026) show calls from this runtime passing and calls
+ * from the Node runtime challenged on every endpoint — the same Worker, the
+ * same FR24 endpoints, the same region. This route was moved to Node on
+ * 2 Jun 2026 to read the MongoDB cache, and that is what broke it.
  *
- * Cache hits skip FR24 entirely. Stale records (enrichedAt older than
- * AIRPORT_CACHE_TTL_MS) are treated as misses so FR24 can refresh them.
- *
- * Switched from edge → nodejs runtime so we can use the MongoDB driver.
- * The Edge runtime previously helped slip past Cloudflare's bot challenge
- * via TLS fingerprint differences, but the Worker proxy now handles that
- * concern in production, so Node is fine here.
+ * So nothing Node-only belongs here. The shared MongoDB pool is
+ * `/api/search/airport/batch` (Node), asked FIRST by every caller through
+ * `lookupAirportOnline` (`lib/airports/online-lookup.ts`), and a timezone the
+ * source did not carry is derived there through `/api/timezone` (geo-tz).
  */
 
 import { NextResponse } from "next/server"
-import { find as findTimezones } from "geo-tz"
-import { getMongoClient } from "@/lib/mongodb"
 import { callFr24Worker, fr24WorkerConfigured } from "@/lib/fr24/worker-client"
-import { AIRPORT_CACHE_TTL_MS, type EnrichedAirport } from "./shared"
+import type { EnrichedAirport } from "./shared"
 
-export const runtime = "nodejs"
+export const runtime = "edge"
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 export const fetchCache = "force-no-store"
 
 type AirportResult = EnrichedAirport
-
-async function fetchFromCache(query: string): Promise<{
-  result: AirportResult | null
-  error?: string
-}> {
-  try {
-    const client = await getMongoClient()
-    const db = client.db("skylog")
-    const collection = db.collection("airportSubmissions")
-
-    const minEnrichedAt = Date.now() - AIRPORT_CACHE_TTL_MS
-    const code = query.toUpperCase().trim()
-
-    // Match either ICAO (typical 4-letter) or IATA (typical 3-letter).
-    // FR24 accepts both forms in the same query param, so we mirror that.
-    const doc = await collection.findOne({
-      status: "enriched",
-      enrichedAt: { $gte: minEnrichedAt },
-      $or: [{ icao: code }, { iata: code }],
-    })
-
-    if (!doc) return { result: null }
-
-    return {
-      result: {
-        icao: doc.icao || "",
-        iata: doc.iata || "",
-        name: doc.name || "",
-        city: doc.city || "",
-        country: doc.country || "",
-        countryCode: doc.country || "",
-        latitude: doc.latitude ?? 0,
-        longitude: doc.longitude ?? 0,
-        elevation: doc.elevation ?? 0,
-        timezone: doc.enrichedTimezone || doc.timezone || "",
-      },
-    }
-  } catch (err) {
-    return {
-      result: null,
-      error: `cache lookup failed: ${(err as Error).message}`,
-    }
-  }
-}
 
 /**
  * The Worker's normalized `/airport`. `legacy: true` when the deployed Worker
@@ -103,19 +54,6 @@ async function fetchViaWorker(query: string): Promise<{
     legacy: answer.status === 400 && /path not allowed/i.test(answer.error),
     status: answer.status,
     error: answer.error,
-  }
-}
-
-/** Fill a blank timezone from the coordinates. Never throws. */
-function withTimezone(airport: AirportResult): AirportResult {
-  if (airport.timezone) return airport
-  if (!Number.isFinite(airport.latitude) || !Number.isFinite(airport.longitude)) return airport
-  if (airport.latitude === 0 && airport.longitude === 0) return airport
-  try {
-    const zone = findTimezones(airport.latitude, airport.longitude)[0]
-    return zone ? { ...airport, timezone: zone } : airport
-  } catch {
-    return airport
   }
 }
 
@@ -252,28 +190,11 @@ export async function GET(request: Request) {
 
   const normalized = query.toUpperCase()
 
-  // 1. Try MongoDB cache first
-  const cached = await fetchFromCache(normalized)
-  if (cached.result) {
-    console.log(
-      "[Airport Search]",
-      JSON.stringify({ query, source: "cache", icao: cached.result.icao })
-    )
-    if (debug) {
-      return NextResponse.json({
-        result: cached.result,
-        source: "cache",
-        debug: { query, source: "cache" },
-      })
-    }
-    return NextResponse.json({ result: cached.result, source: "cache" })
-  }
-
-  // 2. Cache miss / stale → the Worker's chain
+  // 1. The Worker's chain
   if (fr24WorkerConfigured()) {
     const viaWorker = await fetchViaWorker(normalized)
     if (!viaWorker.legacy) {
-      const result = viaWorker.result ? withTimezone(viaWorker.result) : null
+      const result = viaWorker.result
       console.log(
         "[Airport Search]",
         JSON.stringify({
@@ -282,8 +203,6 @@ export async function GET(request: Request) {
           tier: viaWorker.source,
           status: viaWorker.status,
           hasResult: !!result,
-          derivedTimezone: !!result && !viaWorker.result?.timezone,
-          cacheError: cached.error,
           error: viaWorker.error,
         })
       )
@@ -298,9 +217,8 @@ export async function GET(request: Request) {
     }
   }
 
-  // 3. No Worker, or one without `/airport` → traffic-stats
+  // 2. No Worker, or one without `/airport` → traffic-stats
   const attempt = await fetchFr24Airport(normalized)
-  if (attempt.result) attempt.result = withTimezone(attempt.result)
 
   console.log(
     "[Airport Search]",
@@ -313,7 +231,6 @@ export async function GET(request: Request) {
       contentType: attempt.contentType,
       bodyLength: attempt.bodyLength,
       hasResult: !!attempt.result,
-      cacheError: cached.error,
       error: attempt.error,
     })
   )
@@ -330,8 +247,7 @@ export async function GET(request: Request) {
         contentType: attempt.contentType,
         bodyLength: attempt.bodyLength,
         bodySnippet: attempt.bodySnippet,
-        cacheError: cached.error,
-        error: attempt.error,
+          error: attempt.error,
       },
     })
   }

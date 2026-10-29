@@ -1,19 +1,14 @@
 /**
- * /api/search/airport against the FR24 gateway Worker: the Worker's chain is
- * asked first, a zone the source did not carry is derived from the
- * coordinates (the client stores a blank one as UTC), and a Worker deployment
- * that predates `/airport` falls back to the legacy traffic-stats passthrough.
+ * /api/search/airport against the FR24 gateway Worker: it runs on the EDGE
+ * runtime (FR24 challenges the Node runtime's calls), asks the Worker's chain
+ * and nothing else — no MongoDB, no timezone derivation; the browser helper
+ * does both — and a Worker deployment that predates `/airport` falls back to
+ * the legacy traffic-stats passthrough.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-vi.mock("@/lib/mongodb", () => ({
-  getMongoClient: async () => {
-    throw new Error("no database in tests")
-  },
-}))
-
-import { GET } from "../route"
+import { GET, runtime } from "../route"
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
@@ -56,11 +51,16 @@ describe("GET /api/search/airport via the Worker", () => {
 
   const get = async (q: string) => (await GET(new Request(`https://app.test/api/search/airport?q=${q}`))).json()
 
-  it("derives the timezone from the coordinates when the source had none", async () => {
+  it("runs on the Edge runtime", () => {
+    expect(runtime).toBe("edge")
+  })
+
+  it("asks only the Worker, and passes a blank timezone through for the caller to derive", async () => {
     answer = () => json({ ok: true, source: "airport-list", data: SELETAR })
     const body = await get("WSSL")
-    expect(calls[0]).toBe("https://gw.test/airport?code=WSSL")
-    expect(body.result).toMatchObject({ icao: "WSSL", timezone: "Asia/Singapore" })
+    expect(calls).toEqual(["https://gw.test/airport?code=WSSL"])
+    expect(body.source).toBe("fr24")
+    expect(body.result).toMatchObject({ icao: "WSSL", timezone: "" })
     expect(body.result).not.toHaveProperty("timezoneOffsetSeconds")
   })
 

@@ -57,7 +57,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 | `lib/settings/__tests__/` | per-user settings — flat sparse fields, only moved keys written, the legacy carry-up seeding only non-default choices the account lacks, theme kept off the record |
 | `lib/theme/__tests__/` | the palette generator — contrast and gamut for every preset in both modes and a sweep of custom seeds, and that globals.css carries the default palette exactly |
 | `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, the 90-day window, the recycle bin, sync compaction, conflict resolution, the canonical document shape + write modes, push batching, the sync triggers |
-| `cloudflare-worker/__tests__/` | the FR24 gateway Worker — its normalizers (FR24 shapes → the app's), each lookup chain against stand-in upstreams (which source answers when another is challenged, 404 vs 502, failures never cached, `/raw` kept to FR24 hosts), and the legacy passthroughs; `app/api/search/airport/__tests__/` pins the route over it (a blank timezone derived, an older Worker's fallback) |
+| `cloudflare-worker/__tests__/` | the FR24 gateway Worker — its normalizers (FR24 shapes → the app's), each lookup chain against stand-in upstreams (which source answers when another is challenged, 404 vs 502, failures never cached, `/raw` kept to FR24 hosts), and the legacy passthroughs; `app/api/search/airport/__tests__/` pins the route over it (Edge, Worker only, an older Worker's fallback); `lib/airports/__tests__/` the browser's online lookup (the shared pool asked before FR24, a blank timezone derived) |
 | `lib/sync/server/__tests__/` | the server engine end to end — two devices pushing and pulling, deletions, stale pushes, paging, the migration — against an in-memory Mongo stand-in (`fake-mongo.ts`; it implements only the operators the engine sends) |
 
 Tests that touch a parser must mock `@/lib/db` and
@@ -556,11 +556,21 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
 
   `GET /probe` on the deployed Worker reports which upstreams answer from
   Cloudflare today — run it before concluding a lookup is broken in the app.
-  **As of 29 Oct 2026 every FR24 JSON endpoint challenges the Worker too**
-  (search, airport.json, flight/list, the lists, `/api/v1/airports/{id}`);
-  only the `data-cloud` live feed answers, so `/aircraft` finds an aircraft
-  only while it is flying and `/airport` finds nothing. The keyed official API
-  (`fr24api.flightradar24.com`) is the legitimate route back; do not work
+  **FR24 scores whoever CALLS the Worker, not the Worker.** For a Worker's
+  subrequest Cloudflare carries the original caller's bot signals through,
+  so the same Worker, headers and endpoints pass from a pilot's browser and
+  from Vercel's EDGE runtime and are challenged from the NODE runtime
+  (measured 29 Oct 2026: every Edge call passed, every Node call failed,
+  same region). That is why every app route that calls the Worker must run
+  on Edge — `/api/search/airport` was moved to Node on 2 Jun 2026 to read
+  MongoDB and stopped finding airports. STILL ON NODE, so still challenged
+  (not yet moved): the server-side aircraft enrichment
+  (`/api/submissions/aircraft`, `/api/enrichment/batch` via `fr24Find`) and
+  `/api/fr24/[...path]` (Node for its session check; nothing in the app calls
+  it yet). A `/probe` run from a server
+  measures that server, not the app. The keyed official API
+  (`fr24api.flightradar24.com`) is the route that does not depend on how
+  FR24 scores a caller; do not work
   round the challenge (impersonated clients, FR24's web gRPC headers). The
   Worker's secret binding is `PROXY_SECRET` — the dashboard one was
   `" PROXY_SECRET"` with a leading space, so the secret was never enforced
@@ -582,8 +592,13 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
 
 **Lookup Chain (airport):**
 1. Local IndexedDB (`referenceDb.airports`) — includes static + custom airports
-2. FR24 live search (`/api/search/airport`) — server-side proxy for airport details
-3. Manual entry (user types ICAO + details)
+2. Shared pool (`/api/search/airport/batch`, MongoDB, Node) — airports other
+   users added; asked first, so they never cost an FR24 call
+3. FR24 live search (`/api/search/airport`) — EDGE, FR24 only. 2 and 3 are
+   one call from the browser, `lookupAirportOnline`
+   (`lib/airports/online-lookup.ts`), which also derives a blank timezone
+   through `/api/timezone`
+4. Manual entry (user types ICAO + details)
 
 **Enrichment Pipeline:**
 - Custom aircraft/airports are submitted fire-and-forget to `/api/submissions/aircraft` or `/api/submissions/airport`
@@ -3301,7 +3316,7 @@ Notable route groups:
 |---|---|---|---|
 | `/api/search/aircraft?q=` | GET | No | FR24 aircraft search proxy |
 | `/api/search/aircraft/batch` | POST | No | Batch lookup from enriched MongoDB |
-| `/api/search/airport?q=` | GET | No | FR24 airport lookup proxy (the Worker's `/airport` chain; a blank timezone is derived from the coordinates with geo-tz) |
+| `/api/search/airport?q=` | GET | No | FR24 airport lookup proxy — EDGE, the Worker's `/airport` chain only; the timezone is passed through as the source gave it (blank on its position-only tiers) |
 | `/api/fr24/<route>` | GET | Yes | The FR24 gateway Worker's normalized routes (`lib/fr24/client.ts`) |
 | `/api/submissions/aircraft` | POST | Yes | Submit custom aircraft for enrichment |
 | `/api/submissions/airport` | POST | Yes | Submit custom airport for enrichment |
@@ -4717,7 +4732,7 @@ When making changes, be aware of these high-impact files:
 - Do not use `npm install` or `npm add` — always use `pnpm` to keep `pnpm-lock.yaml` in sync (Vercel uses frozen-lockfile)
 - Do not expose FR24 as the data source in UI — the user explicitly requires online lookups to be transparent (no "Online Results" labels, no Globe icons, no "FlightRadar24" branding)
 - Do not add hexdb.io fallback for aircraft lookup — if FR24 fails, manual entry is the only option
-- Do not call FR24 from the app except through the gateway Worker (`callFr24Worker` on the server, `lib/fr24/client.ts` in the browser), and do not let an airport with a BLANK timezone reach the client — the Worker's position-only tiers return `""`, the route derives the zone from the coordinates, and the client would otherwise store it as UTC. Never hand the Worker's secret to a browser, and never expose its `/raw` (an FR24 passthrough) or `/probe` through the app
+- Do not call FR24 from the app except through the gateway Worker (`callFr24Worker` on the server, `lib/fr24/client.ts` in the browser), and do not let an airport with a BLANK timezone reach the client — the Worker's position-only tiers return `""`, `lookupAirportOnline` / `deriveTimezone` derive the zone from the coordinates, and the client would otherwise store it as UTC. And run every route that calls the Worker on the EDGE runtime: FR24 scores the Worker's caller, and challenges the Node runtime's calls on every endpoint. A route that needs MongoDB keeps that in a separate Node route, as the aircraft and airport `batch` routes do. Never hand the Worker's secret to a browser, and never expose its `/raw` (an FR24 passthrough) or `/probe` through the app
 - Do not bypass `recalculateFlightFields()` `manualOverrides` — users' manually entered field values must never be overwritten by enrichment
 - Do not let a hidden keep-alive page recompute on a data change — read data through the hooks that hold it (`useHeldWhileHidden`), and add a new list hook the same way. And never default SWR's `data` to a fresh `[]` per render: it breaks every downstream memo, and under the hold it loops
 - Do not put the active route back into context as a plain value, and do not render a keep-alive page's element inline in the stack — either one re-renders all six retained pages on every tab switch. The route is a store whose SNAPSHOT is the per-page boolean (`useSyncExternalStore`), and each page is `memo`ized on its route key

@@ -12,6 +12,7 @@ import { addCustomAirport, getAirportByIcao, updateFlight } from "@/lib/db"
 import { syncService } from "@/lib/sync"
 import { submitAirportToServer } from "@/lib/submissions/submit"
 import { useRegisterDetailActions, useRegisterMainActions } from "@/hooks/use-page-actions"
+import { lookupAirportOnline } from "@/lib/airports/online-lookup"
 
 export interface AirportNewFormProps {
   prefilledCode?: string
@@ -115,32 +116,23 @@ export function AirportNewForm({
         setIsDuplicateChecking(false)
       }
 
-      // 2. No duplicate found — search FR24 (only for 4-char ICAO codes)
+      // 2. Not on this device — the shared pool, then FR24 (only for 4-char ICAO codes)
       if (code.length >= 4) {
         setIsFr24Loading(true)
         try {
-          const res = await fetch(
-            `/api/search/airport?q=${encodeURIComponent(code)}`,
-            { signal: AbortSignal.timeout(12000) }
-          )
-          if (res.ok) {
-            const data = await res.json()
-            if (data.result) {
-              setFr24Data(data.result)
-              setFr24Found(true)
-              // Auto-populate all fields from FR24
-              if (data.result.iata) setIata(data.result.iata)
-              if (data.result.name) setName(data.result.name)
-              if (data.result.city) setCity(data.result.city)
-              if (data.result.country) setCountry(data.result.country)
-              if (data.result.latitude) setLatitude(String(data.result.latitude))
-              if (data.result.longitude) setLongitude(String(data.result.longitude))
-              if (data.result.elevation) setElevation(String(data.result.elevation))
-              if (data.result.timezone) setTimezone(data.result.timezone)
-            } else {
-              setFr24Data(null)
-              setFr24Found(false)
-            }
+          const data = await lookupAirportOnline(code)
+          if (data) {
+            setFr24Data(data.result)
+            setFr24Found(true)
+            // Auto-populate all fields from the lookup
+            if (data.result.iata) setIata(data.result.iata)
+            if (data.result.name) setName(data.result.name)
+            if (data.result.city) setCity(data.result.city)
+            if (data.result.country) setCountry(data.result.country)
+            if (data.result.latitude) setLatitude(String(data.result.latitude))
+            if (data.result.longitude) setLongitude(String(data.result.longitude))
+            if (data.result.elevation) setElevation(String(data.result.elevation))
+            if (data.result.timezone) setTimezone(data.result.timezone)
           } else {
             setFr24Data(null)
             setFr24Found(false)
