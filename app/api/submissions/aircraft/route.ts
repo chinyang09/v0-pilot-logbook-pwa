@@ -136,11 +136,14 @@ export async function POST(request: Request) {
     if (existing) canonicalId = existing.submissionId
   }
 
-  // Attempt real-time FR24 enrichment (includes ICAO type hydration)
-  const enriched = await enrichAircraftFromFR24(registration)
-  if (!enriched && canonicalId !== submissionId) {
+  // Attempt real-time enrichment (includes ICAO type hydration), handed to
+  // the Edge lookup route on this deployment with the user's cookies.
+  const lookup = await enrichAircraftFromFR24(registration, request)
+  const enriched = lookup.status === "found" ? lookup.data : null
+  if (lookup.status === "not_found" && canonicalId !== submissionId) {
     // A retry that found nothing still counts, so a registration FR24 does
-    // not know is not looked up on every submit.
+    // not know is not looked up on every submit. A lookup that could not be
+    // MADE (`unavailable`) is not a retry: it says nothing about the aircraft.
     await collection.updateOne(
       { registrationNormalized: regNormalized },
       { $set: { lastRetryAt: now }, $inc: { retryCount: 1 } }

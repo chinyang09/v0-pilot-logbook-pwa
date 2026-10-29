@@ -3,8 +3,11 @@
  *
  * Reads FR24_PROXY_URL / FR24_PROXY_SECRET, so it is server-only — the secret
  * must never reach a browser. The PWA reaches the same routes through
- * `/api/fr24/[...path]` (see `lib/fr24/client.ts`). Uses only fetch +
- * AbortSignal, so it runs in the Edge and Node runtimes alike.
+ * `/api/lookup/[...path]` (see `lib/lookup/client.ts`). Uses only fetch +
+ * AbortSignal, so it runs in the Edge and Node runtimes alike — but call it
+ * only from EDGE routes: the upstream scores whoever calls the Worker and
+ * challenges the Node runtime. Node code goes through `lookupFromEdge`
+ * (`lib/lookup/handoff.ts`).
  */
 
 import type { Fr24Result, Fr24Route, Fr24Routes } from "./types"

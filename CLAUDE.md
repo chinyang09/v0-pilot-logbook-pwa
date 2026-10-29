@@ -564,11 +564,15 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
   (measured 29 Oct 2026: every Edge call passed, every Node call failed,
   same region). That is why every app route that calls the Worker must run
   on Edge — `/api/search/airport` was moved to Node on 2 Jun 2026 to read
-  MongoDB and stopped finding airports. STILL ON NODE, so still challenged
-  (not yet moved): the server-side aircraft enrichment
-  (`/api/submissions/aircraft`, `/api/enrichment/batch` via `fr24Find`) and
-  `/api/fr24/[...path]` (Node for its session check; nothing in the app calls
-  it yet). A `/probe` run from a server
+  MongoDB and stopped finding airports. A NODE route that needs a lookup
+  (the aircraft enrichment on submit and the daily cron) HANDS IT to the Edge
+  door with `lookupFromEdge` (`lib/lookup/handoff.ts`): on the user's own
+  deployment with their cookies (which is what gets a preview's call past
+  Vercel's deployment protection), or on the production domain for the cron,
+  with `x-lookup-secret`. Enrichment has THREE outcomes (`found` /
+  `not_found` / `unavailable`) and only `not_found` costs a retry: counting
+  a challenged lookup as "unknown aircraft" is what marked submissions
+  `failed` while every Node lookup was challenged. A `/probe` run from a server
   measures that server, not the app. The keyed official API
   (`fr24api.flightradar24.com`) is the route that does not depend on how
   FR24 scores a caller; do not work
@@ -581,8 +585,12 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
   `/airports/traffic-stats/`) stay so the app and the Worker can deploy in
   either order. Server code calls it through `callFr24Worker`
   (`lib/fr24/worker-client.ts`, reads `FR24_PROXY_URL`/`FR24_PROXY_SECRET`);
-  the PWA through `/api/fr24/[...path]` (signed-in only; `lib/fr24/client.ts`),
-  which never exposes `/raw` or `/probe`
+  the PWA through `/api/lookup/[...path]` (EDGE; `lib/lookup/client.ts`),
+  which never exposes `/raw` or `/probe`. The door admits server code with
+  `x-lookup-secret` and a browser only with a session the Node
+  `/api/auth/session` confirms (Edge cannot read MongoDB, so it forwards the
+  cookies there; a failed check is a 503, not a sign-out). The path does not
+  name the source, on purpose
 - **Server Enrichment DB** (MongoDB): User-submitted aircraft/airports enriched and shared across users
 
 **Lookup Chain (aircraft):**
@@ -3318,7 +3326,7 @@ Notable route groups:
 | `/api/search/aircraft?q=` | GET | No | FR24 aircraft search proxy |
 | `/api/search/aircraft/batch` | POST | No | Batch lookup from enriched MongoDB |
 | `/api/search/airport?q=` | GET | No | FR24 airport lookup proxy — EDGE, the Worker's `/airport` chain only; the timezone is passed through as the source gave it (blank on its position-only tiers) |
-| `/api/fr24/<route>` | GET | Yes | The FR24 gateway Worker's normalized routes (`lib/fr24/client.ts`) |
+| `/api/lookup/<route>` | GET | Yes (session or `x-lookup-secret`) | The gateway Worker's normalized routes, EDGE (`lib/lookup/client.ts`; Node code: `lookupFromEdge`) |
 | `/api/submissions/aircraft` | POST | Yes | Submit custom aircraft for enrichment |
 | `/api/submissions/airport` | POST | Yes | Submit custom airport for enrichment |
 | `/api/enrichment/batch` | POST | CRON_SECRET (required) | Background enrichment of pending submissions; fails closed if `CRON_SECRET` is unset |
@@ -4733,7 +4741,7 @@ When making changes, be aware of these high-impact files:
 - Do not use `npm install` or `npm add` — always use `pnpm` to keep `pnpm-lock.yaml` in sync (Vercel uses frozen-lockfile)
 - Do not expose FR24 as the data source in UI — the user explicitly requires online lookups to be transparent (no "Online Results" labels, no Globe icons, no "FlightRadar24" branding)
 - Do not add hexdb.io fallback for aircraft lookup — if FR24 fails, manual entry is the only option
-- Do not call FR24 from the app except through the gateway Worker (`callFr24Worker` on the server, `lib/fr24/client.ts` in the browser), and do not let an airport with a BLANK timezone reach the client — the Worker's position-only tiers return `""`, `lookupAirportOnline` / `deriveTimezone` derive the zone from the coordinates, and the client would otherwise store it as UTC. And run every route that calls the Worker on the EDGE runtime: FR24 scores the Worker's caller, and challenges the Node runtime's calls on every endpoint. A route that needs MongoDB keeps that in a separate Node route, as the aircraft and airport `batch` routes do. Never hand the Worker's secret to a browser, and never expose its `/raw` (an FR24 passthrough) or `/probe` through the app
+- Do not call FR24 from the app except through the gateway Worker (`callFr24Worker` from an Edge route, `lookupFromEdge` from a Node one, `lib/lookup/client.ts` in the browser), and do not let an airport with a BLANK timezone reach the client — the Worker's position-only tiers return `""`, `lookupAirportOnline` / `deriveTimezone` derive the zone from the coordinates, and the client would otherwise store it as UTC. And run every route that calls the Worker on the EDGE runtime: FR24 scores the Worker's caller, and challenges the Node runtime's calls on every endpoint. A route that needs MongoDB keeps that in a separate Node route, as the aircraft and airport `batch` routes do. Never hand the Worker's secret to a browser, and never expose its `/raw` (an FR24 passthrough) or `/probe` through the app
 - Do not bypass `recalculateFlightFields()` `manualOverrides` — users' manually entered field values must never be overwritten by enrichment
 - Do not let a hidden keep-alive page recompute on a data change — read data through the hooks that hold it (`useHeldWhileHidden`), and add a new list hook the same way. And never default SWR's `data` to a fresh `[]` per render: it breaks every downstream memo, and under the hold it loops
 - Do not put the active route back into context as a plain value, and do not render a keep-alive page's element inline in the stack — either one re-renders all six retained pages on every tab switch. The route is a store whose SNAPSHOT is the per-page boolean (`useSyncExternalStore`), and each page is `memo`ized on its route key

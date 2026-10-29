@@ -1,8 +1,9 @@
 /**
- * Browser helpers for the FR24 gateway, through `/api/fr24/[...path]`
- * (signed-in only; the Worker's secret stays on the server).
+ * Browser helpers for the reference-lookup gateway, through
+ * `/api/lookup/[...path]` (signed-in only; the Worker's secret stays on the
+ * server).
  *
- *   const answer = await fr24.aircraftFlights("9V-TNL")
+ *   const answer = await lookup.aircraftFlights("9V-TNL")
  *   if (answer.ok) answer.data.flights
  *   else if (answer.status === 404) // nothing found → manual entry
  *   else                            // 502 / offline → try later
@@ -12,11 +13,11 @@
  * transparent to the pilot.
  */
 
-import type { Fr24Result, Fr24Route, Fr24Routes } from "./types"
+import type { Fr24Result, Fr24Route, Fr24Routes } from "@/lib/fr24/types"
 
 const CLIENT_TIMEOUT_MS = 15000
 
-export async function fr24Get<R extends Fr24Route>(
+export async function lookupGet<R extends Fr24Route>(
   route: R,
   params: Record<string, string | number | undefined> = {},
   signal?: AbortSignal
@@ -28,7 +29,7 @@ export async function fr24Get<R extends Fr24Route>(
   const qs = query.toString()
 
   try {
-    const response = await fetch(`/api/fr24/${route}${qs ? `?${qs}` : ""}`, {
+    const response = await fetch(`/api/lookup/${route}${qs ? `?${qs}` : ""}`, {
       signal: signal ?? AbortSignal.timeout(CLIENT_TIMEOUT_MS),
     })
     const body = (await response.json().catch(() => null)) as
@@ -43,32 +44,32 @@ export async function fr24Get<R extends Fr24Route>(
   }
 }
 
-export const fr24 = {
+export const lookup = {
   /** Aircraft by registration — every match, exact ones first. */
-  aircraft: (reg: string, signal?: AbortSignal) => fr24Get("aircraft", { reg }, signal),
+  aircraft: (reg: string, signal?: AbortSignal) => lookupGet("aircraft", { reg }, signal),
   /** The flights a registration has flown, newest first, with the airframe. */
   aircraftFlights: (reg: string, page = 1, limit = 25, signal?: AbortSignal) =>
-    fr24Get("aircraft/flights", { reg, page, limit }, signal),
+    lookupGet("aircraft/flights", { reg, page, limit }, signal),
   /** Airport by ICAO or IATA. `timezone` may be "" — derive it, never assume UTC. */
-  airport: (code: string, signal?: AbortSignal) => fr24Get("airport", { code }, signal),
+  airport: (code: string, signal?: AbortSignal) => lookupGet("airport", { code }, signal),
   /** Details plus runways and current weather. */
-  airportDetails: (code: string, signal?: AbortSignal) => fr24Get("airport/details", { code }, signal),
+  airportDetails: (code: string, signal?: AbortSignal) => lookupGet("airport/details", { code }, signal),
   /** An airport's departures or arrivals board; `timestamp` is epoch seconds. */
   airportSchedule: (
     code: string,
     mode: "arrivals" | "departures" = "departures",
     opts: { page?: number; limit?: number; timestamp?: number } = {},
     signal?: AbortSignal
-  ) => fr24Get("airport/schedule", { code, mode, ...opts }, signal),
-  airports: (signal?: AbortSignal) => fr24Get("airports", {}, signal),
-  airlines: (signal?: AbortSignal) => fr24Get("airlines", {}, signal),
-  search: (q: string, limit = 20, signal?: AbortSignal) => fr24Get("search", { q, limit }, signal),
+  ) => lookupGet("airport/schedule", { code, mode, ...opts }, signal),
+  airports: (signal?: AbortSignal) => lookupGet("airports", {}, signal),
+  airlines: (signal?: AbortSignal) => lookupGet("airlines", {}, signal),
+  search: (q: string, limit = 20, signal?: AbortSignal) => lookupGet("search", { q, limit }, signal),
   /** The flights a flight number has operated, newest first. */
   flightHistory: (number: string, page = 1, limit = 25, signal?: AbortSignal) =>
-    fr24Get("flight", { number, page, limit }, signal),
+    lookupGet("flight", { number, page, limit }, signal),
   /** One live flight by its id from `live`. */
-  liveFlight: (id: string, signal?: AbortSignal) => fr24Get("flight/details", { id }, signal),
+  liveFlight: (id: string, signal?: AbortSignal) => lookupGet("flight/details", { id }, signal),
   /** Live positions; give at least one filter. `bounds` is "N,S,W,E". */
   live: (filters: { reg?: string; airline?: string; type?: string; bounds?: string; limit?: number }, signal?: AbortSignal) =>
-    fr24Get("live", filters, signal),
+    lookupGet("live", filters, signal),
 }

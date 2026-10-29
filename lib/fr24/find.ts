@@ -1,10 +1,10 @@
 /**
- * Shared FR24 aircraft search client (server-only, runtime-agnostic).
+ * FR24 aircraft search through the gateway Worker's legacy passthrough
+ * (server-only). Used by the Edge search route (app/api/search/aircraft).
  *
- * Used by the Edge search proxy (app/api/search/aircraft) AND the Node
- * enrichment helper (lib/enrichment) so both honour the same Cloudflare-Worker
- * proxy (FR24_PROXY_URL / FR24_PROXY_SECRET). Uses only fetch + AbortSignal so
- * it is safe in both the Edge and Node runtimes.
+ * Call it from the EDGE runtime only: the upstream scores whoever calls the
+ * Worker and challenges the Node runtime. Node enrichment goes through
+ * `lookupFromEdge` (lib/lookup/handoff.ts) instead.
  */
 
 export type FR24Hit = {
