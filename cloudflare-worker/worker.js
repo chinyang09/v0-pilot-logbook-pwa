@@ -40,7 +40,7 @@
  *   /probe                 every upstream, once, from this Worker
  *   /aircraft?reg=         aircraft by registration  (search → flight list → live feed)
  *   /aircraft/flights?reg=&page=&limit=   flight history for a registration
- *   /airport?code=         airport by ICAO or IATA   (search → airport.json → traffic-stats → airport list, one at a time)
+ *   /airport?code=         airport by ICAO or IATA   (airport.json + traffic-stats → airport list + search)
  *   /airport/details?code= airport details + runways + weather
  *   /airport/schedule?code=&mode=arrivals|departures&page=&limit=&timestamp=
  *   /airports              every airport  (cached a day)
@@ -385,9 +385,7 @@ async function handleAircraft(url, log) {
     )
   }
 
-  // The live feed only knows aircraft flying now, so its silence proves
-  // nothing — only search or the flight history can say "no such aircraft".
-  return nothingOrFailed(log, `No aircraft found for ${reg}`, ["search", "flight-list"])
+  return nothingOrFailed(log, `No aircraft found for ${reg}`)
 }
 
 /** @type {Handler} */
@@ -439,22 +437,26 @@ async function handleAirport(url, log) {
   const code = cleanCode(url.searchParams.get("code") || url.searchParams.get("q"), 3, 4)
   if (!code) return bad("code= is required (an ICAO or IATA code)")
 
-  // The airport list, when this isolate already holds it, answers with no
-  // request at all.
-  const held = airportList && Date.now() - airportList.at < AIRPORT_LIST_MS ? findAirportRow(airportList.rows, code) : null
-  if (held) return found(held, "airport-list")
+  // Tier 1 — the two sources that carry the TIMEZONE, asked together.
+  const [detailed, traffic] = await Promise.all([
+    upstream("airport.json", airportJsonUrl(code, ["details"], 1, 1), log),
+    upstream("traffic-stats", `${WWW}/airports/traffic-stats/?airport=${encodeURIComponent(code)}`, log),
+  ])
+  const fromApi = matchingAirport(normalizeAirportDetails(detailed.data?.result?.response?.airport?.pluginData?.details), code)
+  if (fromApi) return found(fromApi, "airport.json")
+  const fromTraffic = matchingAirport(normalizeAirportDetails(traffic.data?.details), code)
+  if (fromTraffic) return found(fromTraffic, "traffic-stats")
 
-  // ONE request at a time, the source FR24 challenges least first. Measured on
-  // this Worker's own logs (29 Oct 2026): search answered 6 of 7 calls while
-  // airport.json and traffic-stats were challenged almost every time — and
-  // this chain used to open with those two together and then two more, four
-  // requests in ~50ms, of which none got through. The aircraft lookup, which
-  // kept working, sends one.
-  //
-  // Search carries position but no timezone; the caller derives the zone from
-  // the coordinates (the app has geo-tz), and a missing zone must never be read
+  // Tier 2 — position without a timezone. The caller derives the zone from
+  // the coordinates (the app has geo-tz); a missing zone must never be read
   // as UTC.
-  const search = await upstream("search", searchUrl(code, 10), log)
+  const [rows, search] = await Promise.all([
+    airportRows(log),
+    upstream("search", searchUrl(code, 10), log),
+  ])
+  const listed = rows ? findAirportRow(rows, code) : null
+  if (listed) return found(listed, "airport-list")
+
   const hits = Array.isArray(search.data?.results) ? search.data.results : []
   for (const hit of hits) {
     if (hit?.type !== "airport") continue
@@ -462,20 +464,7 @@ async function handleAirport(url, log) {
     if (airport) return found(airport, "search")
   }
 
-  // The sources that carry the timezone, each only if the last said nothing.
-  const detailed = await upstream("airport.json", airportJsonUrl(code, ["details"], 1, 1), log)
-  const fromApi = matchingAirport(normalizeAirportDetails(detailed.data?.result?.response?.airport?.pluginData?.details), code)
-  if (fromApi) return found(fromApi, "airport.json")
-
-  const traffic = await upstream("traffic-stats", `${WWW}/airports/traffic-stats/?airport=${encodeURIComponent(code)}`, log)
-  const fromTraffic = matchingAirport(normalizeAirportDetails(traffic.data?.details), code)
-  if (fromTraffic) return found(fromTraffic, "traffic-stats")
-
-  const rows = await airportRows(log)
-  const listed = rows ? findAirportRow(rows, code) : null
-  if (listed) return found(listed, "airport-list")
-
-  return nothingOrFailed(log, `No airport found for ${code}`, ["search", "airport.json", "traffic-stats", "airports.php"])
+  return nothingOrFailed(log, `No airport found for ${code}`)
 }
 
 /** @type {Handler} */
@@ -752,10 +741,8 @@ export function airportFromSearchHit(hit) {
   if (!hit || hit.type !== "airport") return null
   const label = str(hit.label)
   const codes = label.match(/\(([A-Z0-9]{3})?\s*\/\s*([A-Z0-9]{4})?\)\s*$/i)
-  // `id` is the IATA, or the ICAO when the query matched one (match "icao").
-  const id = str(hit.id).toUpperCase()
-  const iata = str(codes?.[1] || (id.length === 3 ? id : "")).toUpperCase()
-  const icao = str(codes?.[2] || (id.length === 4 ? id : "")).toUpperCase()
+  const iata = str(codes?.[1] || (str(hit.id).length === 3 ? hit.id : "")).toUpperCase()
+  const icao = str(codes?.[2]).toUpperCase()
   const latitude = num(hit.detail?.lat)
   const longitude = num(hit.detail?.lon)
   if ((!icao && !iata) || latitude === null || longitude === null) return null
@@ -809,10 +796,9 @@ export function normalizeAircraftHit(hit) {
     typecode: str(hit.detail?.equip).toUpperCase(),
     model: "",
     serialNumber: "",
-    // `owner` is the operating airline's ICAO code ("TGW"), not a name.
     operator: str(hit.detail?.owner),
     operatorIata: "",
-    operatorIcao: /^[A-Z]{3}$/i.test(str(hit.detail?.owner)) ? str(hit.detail?.owner).toUpperCase() : "",
+    operatorIcao: "",
     owner: str(hit.detail?.owner),
   }
 }
@@ -1046,16 +1032,14 @@ function failed(log) {
 }
 
 /**
- * Nothing found is only "not found" when a source that WOULD know actually
- * answered. When none did, the caller must hear 502 — "try later", not "this
- * does not exist, type it in". `definitive` names the sources whose silence
- * counts: the live feed answering without an aircraft (it is simply not
- * flying) does not make the aircraft unknown.
+ * Nothing found is only "not found" when at least one source actually
+ * ANSWERED. When every source failed, the caller must hear 502 — "try later",
+ * not "this does not exist, type it in".
  *
- * @param {Attempt[]} log @param {string} message @param {string[]} definitive @returns {Answer}
+ * @param {Attempt[]} log @param {string} message @returns {Answer}
  */
-function nothingOrFailed(log, message, definitive) {
-  return log.some((a) => a.ok && definitive.includes(a.name)) ? notFound(message) : failed(log)
+function nothingOrFailed(log, message) {
+  return log.some((a) => a.ok) ? notFound(message) : failed(log)
 }
 
 /** @param {unknown} err */

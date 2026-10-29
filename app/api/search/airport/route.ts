@@ -11,13 +11,9 @@
  *      own chain: airport.json + traffic-stats, then the airport list + search
  *   3. traffic-stats directly — no Worker configured, or a Worker deployment
  *      that predates `/airport` (it answers that route 400)
- *   4. OurAirports open data (`lib/airports/open-data.ts`) when FR24 gave
- *      nothing — as of 29 Oct 2026 FR24 challenges every airport endpoint
- *      from the Worker, so this is what answers a code the bundled dataset
- *      lacks. `source: "open-data"`; the caller caches it like any other.
  *
  * A source that gives coordinates but no timezone (the Worker's list and
- * search tiers, open data) has its zone derived here with geo-tz. The client stores a
+ * search tiers) has its zone derived here with geo-tz. The client stores a
  * blank zone as "UTC", which would put every local time at that airport out.
  *
  * Cache hits skip FR24 entirely. Stale records (enrichedAt older than
@@ -33,7 +29,6 @@ import { NextResponse } from "next/server"
 import { find as findTimezones } from "geo-tz"
 import { getMongoClient } from "@/lib/mongodb"
 import { callFr24Worker, fr24WorkerConfigured } from "@/lib/fr24/worker-client"
-import { findOpenDataAirport } from "@/lib/airports/open-data"
 import { AIRPORT_CACHE_TTL_MS, type EnrichedAirport } from "./shared"
 
 export const runtime = "nodejs"
@@ -121,16 +116,6 @@ function withTimezone(airport: AirportResult): AirportResult {
     return zone ? { ...airport, timezone: zone } : airport
   } catch {
     return airport
-  }
-}
-
-/** The open-data tier, with its zone derived. Never throws. */
-async function fromOpenData(code: string): Promise<AirportResult | null> {
-  try {
-    const airport = await findOpenDataAirport(code)
-    return airport ? withTimezone(airport) : null
-  } catch {
-    return null
   }
 }
 
@@ -288,17 +273,12 @@ export async function GET(request: Request) {
   if (fr24WorkerConfigured()) {
     const viaWorker = await fetchViaWorker(normalized)
     if (!viaWorker.legacy) {
-      let result = viaWorker.result ? withTimezone(viaWorker.result) : null
-      let source: "fr24" | "open-data" | null = result ? "fr24" : null
-      if (!result) {
-        result = await fromOpenData(normalized)
-        if (result) source = "open-data"
-      }
+      const result = viaWorker.result ? withTimezone(viaWorker.result) : null
       console.log(
         "[Airport Search]",
         JSON.stringify({
           query,
-          source: source ?? "worker",
+          source: "worker",
           tier: viaWorker.source,
           status: viaWorker.status,
           hasResult: !!result,
@@ -310,28 +290,23 @@ export async function GET(request: Request) {
       if (debug) {
         return NextResponse.json({
           result,
-          source,
+          source: result ? "fr24" : null,
           debug: { query, via: "worker", tier: viaWorker.source, status: viaWorker.status, error: viaWorker.error },
         })
       }
-      return NextResponse.json({ result, source })
+      return NextResponse.json({ result, source: result ? "fr24" : null })
     }
   }
 
   // 3. No Worker, or one without `/airport` → traffic-stats
   const attempt = await fetchFr24Airport(normalized)
   if (attempt.result) attempt.result = withTimezone(attempt.result)
-  let source: "fr24" | "open-data" | null = attempt.result ? "fr24" : null
-  if (!attempt.result) {
-    attempt.result = await fromOpenData(normalized)
-    if (attempt.result) source = "open-data"
-  }
 
   console.log(
     "[Airport Search]",
     JSON.stringify({
       query,
-      source: source ?? "fr24",
+      source: "fr24",
       via: attempt.via,
       ok: attempt.ok,
       status: attempt.status,
@@ -346,7 +321,7 @@ export async function GET(request: Request) {
   if (debug) {
     return NextResponse.json({
       result: attempt.result,
-      source,
+      source: attempt.result ? "fr24" : null,
       debug: {
         query,
         via: attempt.via,
@@ -361,5 +336,8 @@ export async function GET(request: Request) {
     })
   }
 
-  return NextResponse.json({ result: attempt.result, source })
+  return NextResponse.json({
+    result: attempt.result,
+    source: attempt.result ? "fr24" : null,
+  })
 }

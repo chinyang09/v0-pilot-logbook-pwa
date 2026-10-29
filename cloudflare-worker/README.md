@@ -22,13 +22,6 @@ management; the old Worker was getting the same 403 on search and
 traffic-stats before this one was deployed. The routes that depend on them
 answer 502 with their `attempts`.
 
-The challenge is decided per request, not per endpoint: the Worker's logs show
-the same search answering 403 at one data centre and 200 at another seconds
-later. That is why the app's aircraft lookup still finds things now and then —
-it makes up to three search attempts — and why the app's airport route no
-longer depends on FR24 alone: it ends in OurAirports open data
-(`lib/airports/open-data.ts`).
-
 What still answers without a challenge:
 
 | | Host | Notes |
@@ -61,7 +54,7 @@ Add `debug=1` to any route to see each upstream attempt.
 | `/probe` | every upstream once, from here (`code=`, `reg=`, `flight=` set the samples) | — |
 | `/aircraft?reg=9V-TNL` | aircraft by registration | search → the registration's flight history → live feed |
 | `/aircraft/flights?reg=9V-TNL&page=1&limit=25` | the airframe + the flights it has flown | `common/v1/flight/list.json?fetchBy=reg` |
-| `/airport?code=WSSS` | airport by ICAO or IATA | search → `airport.json` → `traffic-stats` → `_json/airports.php`, one at a time — search first because it is the endpoint FR24 challenges least (search and the list give position only; `timezone` is `""`) |
+| `/airport?code=WSSS` | airport by ICAO or IATA | `airport.json` + `traffic-stats` (both carry the timezone) → `_json/airports.php` + search (position only; `timezone` is `""`) |
 | `/airport/details?code=WSSS` | details, runways, weather | `airport.json` plugins |
 | `/airport/schedule?code=WSSS&mode=departures&page=1&limit=50&timestamp=` | departures or arrivals board | `airport.json` schedule plugin |
 | `/airports` | every airport | `_json/airports.php` |
@@ -86,7 +79,7 @@ minutes, boards 2 minutes. Only a found answer is cached — never a failure.
 
 | Caller | Route |
 |---|---|
-| `app/api/search/airport` | `/airport` (falls back to the legacy passthrough on an older Worker), then OurAirports open data, deriving a missing timezone from the coordinates with geo-tz |
+| `app/api/search/airport` | `/airport` (falls back to the legacy passthrough on an older Worker), deriving a missing timezone from the coordinates with geo-tz |
 | `app/api/search/aircraft` | the legacy search first (as always), then `/aircraft` when it finds nothing |
 | `app/api/fr24/[...path]` | any normalized route, for signed-in users — the PWA's door (`lib/fr24/client.ts`) |
 
