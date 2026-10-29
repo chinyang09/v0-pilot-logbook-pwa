@@ -7,11 +7,11 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const handoff = vi.hoisted(() => ({ answer: null as unknown, history: null as unknown, routes: [] as string[] }))
+const handoff = vi.hoisted(() => ({ answer: null as unknown, calls: [] as { route: string; params: Record<string, unknown> }[] }))
 vi.mock("@/lib/lookup/handoff", () => ({
-  lookupFromEdge: async (route: string) => {
-    handoff.routes.push(route)
-    return route === "aircraft/flights" ? handoff.history : handoff.answer
+  lookupFromEdge: async (route: string, params: Record<string, unknown>) => {
+    handoff.calls.push({ route, params })
+    return handoff.answer
   },
 }))
 vi.mock("@/lib/icao-types/icao-types-server", () => ({
@@ -20,36 +20,31 @@ vi.mock("@/lib/icao-types/icao-types-server", () => ({
 
 import { enrichAircraftFromFR24 } from "../aircraft-enrichment"
 
-const hit = (registration: string, typecode = "A21N") => ({
-  registration, icao24: "76CDF1", typecode, model: "", serialNumber: "", operator: "TGW", operatorIata: "", operatorIcao: "TGW", owner: "TGW",
+const candidate = (registration: string, exact: boolean, typecode = "A21N") => ({
+  registration, icao24: "76CDF1", typecode, operator: "TGW", source: "fr24", exact,
 })
 
 describe("enrichAircraftFromFR24", () => {
   beforeEach(() => {
     handoff.answer = null
-    handoff.history = { ok: false, status: 404, error: "nothing" }
-    handoff.routes = []
+    handoff.calls = []
   })
 
-  it("takes the exact registration over the first hit, and hydrates the type", async () => {
-    handoff.answer = { ok: true, status: 200, source: "search", data: [hit("9V-TNA"), hit("9V-TNL")] }
+  it("asks the door for that registration only, and hydrates the type", async () => {
+    handoff.answer = { ok: true, status: 200, source: "search", data: [candidate("9V-TNL", true)] }
     const result = await enrichAircraftFromFR24("9vtnl")
     expect(result).toMatchObject({ status: "found", data: { registration: "9V-TNL", typecode: "A21N", shortDescription: "L2J" } })
+    expect(handoff.calls).toEqual([{ route: "aircraft/candidates", params: { q: "9vtnl", exact: 1 } }])
   })
 
-  it("never takes a near miss — the flight history is asked, and without it the aircraft is not found", async () => {
-    handoff.answer = { ok: true, status: 200, source: "search", data: [hit("9V-TNA"), hit("9V-TNB")] }
+  it("never takes a near miss, even if one came back", async () => {
+    handoff.answer = { ok: true, status: 200, source: "search", data: [candidate("9V-TNA", false)] }
     expect(await enrichAircraftFromFR24("9V-TNL")).toEqual({ status: "not_found" })
-    expect(handoff.routes).toEqual(["aircraft", "aircraft/flights"])
-
-    handoff.history = { ok: true, status: 200, source: "flight-list", data: { aircraft: hit("9V-TNL", "A320"), flights: [] } }
-    expect(await enrichAircraftFromFR24("9V-TNL")).toMatchObject({ status: "found", data: { registration: "9V-TNL", typecode: "A320" } })
-
-    handoff.history = { ok: false, status: 502, error: "Upstream failed" }
-    expect((await enrichAircraftFromFR24("9V-TNL")).status).toBe("unavailable")
+    handoff.answer = { ok: true, status: 200, source: "search", data: [candidate("9V-TNA", true)] }
+    expect(await enrichAircraftFromFR24("9V-TNL")).toEqual({ status: "not_found" })
   })
 
-  it("is not_found only when a source answered and has no such aircraft", async () => {
+  it("is not_found only when every source answered and has no such aircraft", async () => {
     handoff.answer = { ok: false, status: 404, error: "No aircraft found for 9V-ZZZ" }
     expect(await enrichAircraftFromFR24("9V-ZZZ")).toEqual({ status: "not_found" })
   })

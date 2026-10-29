@@ -3,9 +3,16 @@
  *
  * GET /api/lookup/airport?code=WSSS
  * GET /api/lookup/aircraft/flights?reg=9V-TNL&page=1
- * … any normalized Worker route (`LOOKUP_ROUTES`); the browser helpers are in
- * `lib/lookup/client.ts`, the shapes in `lib/fr24/types.ts`, and server code
- * reaches it through `lookupFromEdge` (`lib/lookup/handoff.ts`).
+ * GET /api/lookup/aircraft/candidates?q=9VB
+ * … any normalized Worker route (`LOOKUP_ROUTES`), passed through, or one the
+ * door composes from them (`lib/lookup/composite.ts`). The browser helpers are
+ * in `lib/lookup/client.ts`, the shapes in `lib/lookup/types.ts`, and server
+ * code reaches it through `lookupFromEdge` (`lib/lookup/handoff.ts`).
+ *
+ * This is the app's ONE online-lookup surface. `/api/search/*` (the per-kind
+ * routes it grew out of) is gone; the shared MongoDB pool is the two Node
+ * routes beside this one, `/api/lookup/pool/{aircraft,airport}`, which a
+ * static segment routes before this catch-all.
  *
  * WHY EDGE: the upstream scores whoever calls the Worker, and challenges the
  * Node runtime's calls on every endpoint (measured 29 Oct 2026; see
@@ -30,6 +37,7 @@
 import { NextResponse } from "next/server"
 import { callFr24Worker, fr24WorkerConfigured } from "@/lib/fr24/worker-client"
 import type { Fr24Route } from "@/lib/fr24/types"
+import { COMPOSITE_ROUTE_NAMES, isCompositeRoute, runCompositeRoute } from "@/lib/lookup/composite"
 
 export const runtime = "edge"
 export const dynamic = "force-dynamic"
@@ -96,8 +104,12 @@ export async function GET(
 
   const { path } = await params
   const route = path.join("/")
-  if (!isLookupRoute(route)) {
-    return NextResponse.json({ ok: false, error: "Unknown route", routes: [...LOOKUP_ROUTES] }, { status: 404 })
+  const composite = isCompositeRoute(route)
+  if (!composite && !isLookupRoute(route)) {
+    return NextResponse.json(
+      { ok: false, error: "Unknown route", routes: [...LOOKUP_ROUTES, ...COMPOSITE_ROUTE_NAMES] },
+      { status: 404 }
+    )
   }
   if (!fr24WorkerConfigured()) {
     return NextResponse.json({ ok: false, error: "Lookup service not configured" }, { status: 503 })
@@ -110,7 +122,7 @@ export async function GET(
     if (key !== "debug" && key !== "path") query[key] = value
   })
 
-  const answer = await callFr24Worker(route, query)
+  const answer = composite ? await runCompositeRoute(route, query) : await callFr24Worker(route as Fr24Route, query)
   if (answer.ok) {
     return NextResponse.json(
       { ok: true, data: answer.data, source: answer.source },

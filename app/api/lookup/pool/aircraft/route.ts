@@ -1,17 +1,23 @@
 /**
- * Batch aircraft lookup from MongoDB enriched submissions
+ * The shared aircraft pool — NODE (MongoDB).
  *
- * POST /api/search/aircraft/batch
+ * POST /api/lookup/pool/aircraft
  * Body: { registrations: ["9VSWA", "N12345", ...] }
  *
- * Checks aircraftSubmissions (status: "enriched") for matching registrations.
- * Returns all matches in a single response — no auth required (reference data).
- * Includes ICAO type hydration fields (shortDescription, WTC, WTG).
+ * Checks aircraftSubmissions (status: "enriched") for matching registrations,
+ * keyed by `normalizeRegistration`. Returns all matches in a single response.
+ * Includes ICAO type hydration fields (shortDescription, WTC, WTG). Browser
+ * callers go through `lookup.poolAircraft` (`lib/lookup/client.ts`).
+ *
+ * Under `/api/lookup` but not behind its sign-in rule: that rule protects the
+ * gateway Worker's quota, and this spends none — it reads reference data other
+ * pilots already added. It was `/api/search/aircraft/batch`, unauthenticated.
  */
 
 import { NextResponse } from "next/server"
 import { getMongoClient } from "@/lib/mongodb"
 import { normalizeRegistration } from "@/lib/utils/string"
+import type { PooledAircraft } from "@/lib/lookup/types"
 
 export async function POST(request: Request) {
   let body: { registrations?: string[] }
@@ -55,16 +61,7 @@ export async function POST(request: Request) {
       .toArray()
 
     // Build result map keyed by normalized registration
-    const results: Record<string, {
-      registration: string
-      typecode: string
-      icao24: string
-      operator: string
-      shortDescription: string
-      wtc: string
-      wtg: string
-      manufacturerCode: string
-    }> = {}
+    const results: Record<string, PooledAircraft> = {}
 
     for (const doc of enrichedDocs) {
       results[doc.registrationNormalized] = {
@@ -81,7 +78,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ results })
   } catch (error) {
-    console.error("[Batch Aircraft Search] MongoDB error:", error)
+    console.error("[Aircraft Pool] MongoDB error:", error)
     return NextResponse.json({ results: {} })
   }
 }

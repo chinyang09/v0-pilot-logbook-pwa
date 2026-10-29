@@ -51,7 +51,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 | `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp, and that the single-pass timeline sums and acclimatisation equal their per-item definitions |
 | `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation, and a REAL schedule PDF (`fixtures/schedule-oct-2026-local-base.pdf`) run through the actual extractor |
 | `lib/utils/parsers/shared/__tests__/pooled-map.test.ts` | the bounded fan-out both enrichment chains end in |
-| `lib/lookup/__tests__/search-candidates.test.ts`, `app/api/search/aircraft/__tests__/` | search candidates — airframe and live-flight hits, exact / begins / inside ranking, one row per tail, airport codes off the label; the route asking the flight history only for a whole registration search missed; enrichment never taking a near miss |
+| `lib/lookup/__tests__/search-candidates.test.ts`, `lib/lookup/__tests__/composite.test.ts`, `app/api/lookup/__tests__/` | search candidates — airframe and live-flight hits, exact / begins / inside ranking, one row per tail, airport codes off the label; the composed `aircraft/candidates` asking the flight history only for a whole registration search missed, and `exact=1` answering 404 only when every source answered; the door's sign-in rule over both kinds of route; enrichment never taking a near miss |
 | `lib/airports/__tests__/code-changes.test.ts`, `lib/utils/parsers/shared/__tests__/airport-enricher.test.ts` | codes that moved between airports (VTZ) — the date rule, each end at its own instant, which stored flights the repair corrects, both airports bundled in one zone; the chain resolving a moved code through its airports and flagging a pool that disagrees |
 | `lib/utils/__tests__/history-markers.test.ts` | overlay marker ordering — which dialog `history.back()` would actually take |
 | `lib/utils/parsers/logten/__tests__/` | the LogTen Pro migration, run against REAL exports in `fixtures/` — value coercion, the three parsers, UTC-vs-local detection + conversion, duplicate detection, and the cross-file pass |
@@ -59,7 +59,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 | `lib/settings/__tests__/` | per-user settings — flat sparse fields, only moved keys written, the legacy carry-up seeding only non-default choices the account lacks, theme kept off the record |
 | `lib/theme/__tests__/` | the palette generator — contrast and gamut for every preset in both modes and a sweep of custom seeds, and that globals.css carries the default palette exactly |
 | `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, the 90-day window, the recycle bin, sync compaction, conflict resolution, the canonical document shape + write modes, push batching, the sync triggers |
-| `cloudflare-worker/__tests__/` | the FR24 gateway Worker — its normalizers (FR24 shapes → the app's), each lookup chain against stand-in upstreams (which source answers when another is challenged, 404 vs 502, failures never cached, `/raw` kept to FR24 hosts), and the legacy passthroughs; `app/api/search/airport/__tests__/` pins the route over it (Edge, Worker only, an older Worker's fallback); `lib/airports/__tests__/` the browser's online lookup (the shared pool asked before FR24, a blank timezone derived) |
+| `cloudflare-worker/__tests__/` | the FR24 gateway Worker — its normalizers (FR24 shapes → the app's), each lookup chain against stand-in upstreams (which source answers when another is challenged, 404 vs 502, failures never cached, `/raw` kept to FR24 hosts), the legacy passthroughs, and the probe's explore mode (`shapeOf`); `lib/airports/__tests__/` the browser's online lookup (the shared pool asked before the gateway, its offset dropped, a blank timezone derived) |
 | `lib/sync/server/__tests__/` | the server engine end to end — two devices pushing and pulling, deletions, stale pushes, paging, the migration — against an in-memory Mongo stand-in (`fake-mongo.ts`; it implements only the operators the engine sends) |
 
 Tests that touch a parser must mock `@/lib/db` and
@@ -82,9 +82,9 @@ app/                              # Next.js App Router
 │   ├── auth/                     #   Registration, login, passkey, session
 │   ├── sync/                     #   Round-trip sync (route.ts), legacy bulk + per-collection, TTL setup
 │   ├── ocr/                      #   Image OCR processing
-│   ├── search/                   #   FR24 proxy routes
-│   │   ├── aircraft/             #     Aircraft search + batch lookup
-│   │   └── airport/              #     Airport search
+│   ├── lookup/                   #   THE online-lookup door (Edge) + the shared pool
+│   │   ├── [...path]/            #     Worker routes passed through + composed ones
+│   │   └── pool/                 #     aircraft/ + airport/ — MongoDB pool (Node)
 │   ├── submissions/              #   User-submitted reference data
 │   │   ├── aircraft/             #     Custom aircraft → enrichment
 │   │   └── airport/              #     Custom airport → enrichment
@@ -558,15 +558,17 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
   | `/airports`, `/airlines`, `/search`, `/live`, `/flight/details` | the lists, search grouped by kind, the live feed, one live flight |
 
   `GET /probe` on the deployed Worker reports which upstreams answer from
-  Cloudflare today — run it before concluding a lookup is broken in the app.
+  Cloudflare today — run it before concluding a lookup is broken in the app;
+  `explore=1` adds sources no route reads yet and the SHAPE of what each
+  answers (and of what the in-use normalizers drop), for deciding what to add.
   **FR24 scores whoever CALLS the Worker, not the Worker.** For a Worker's
   subrequest Cloudflare carries the original caller's bot signals through,
   so the same Worker, headers and endpoints pass from a pilot's browser and
   from Vercel's EDGE runtime and are challenged from the NODE runtime
   (measured 29 Oct 2026: every Edge call passed, every Node call failed,
   same region). That is why every app route that calls the Worker must run
-  on Edge — `/api/search/airport` was moved to Node on 2 Jun 2026 to read
-  MongoDB and stopped finding airports. A NODE route that needs a lookup
+  on Edge — the old airport search route was moved to Node on 2 Jun 2026 to
+  read MongoDB and stopped finding airports. A NODE route that needs a lookup
   (the aircraft enrichment on submit and the daily cron) HANDS IT to the Edge
   door with `lookupFromEdge` (`lib/lookup/handoff.ts`): on the user's own
   deployment with their cookies (which is what gets a preview's call past
@@ -580,7 +582,12 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
   FR24 scores a caller; do not work
   round the challenge (impersonated clients, FR24's web gRPC headers). The
   Worker's secret binding is `PROXY_SECRET` — the dashboard one was
-  `" PROXY_SECRET"` with a leading space, so the secret was never enforced
+  `" PROXY_SECRET"` with a leading space, so the secret was never enforced.
+  Keep it a SECRET (encrypted), not a plain-text variable: `wrangler deploy`
+  replaces the Worker's configuration with `wrangler.toml`'s, and a deploy
+  without `keep_vars = true` (now set) deleted the plain-text one on 29 Oct
+  2026 and left the Worker open — after a deploy, `/probe` without the header
+  must answer 401.
   404 means a source answered and has no such thing (manual entry); 502 means
   every source failed (try later) — callers must not treat them alike. The
   Worker's legacy passthroughs (`/v1/search/web/find`,
@@ -588,7 +595,17 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
   either order. Server code calls it through `callFr24Worker`
   (`lib/fr24/worker-client.ts`, reads `FR24_PROXY_URL`/`FR24_PROXY_SECRET`);
   the PWA through `/api/lookup/[...path]` (EDGE; `lib/lookup/client.ts`),
-  which never exposes `/raw` or `/probe`. The door admits server code with
+  which never exposes `/raw` or `/probe`. **The door is the app's ONE online
+  lookup surface**: it passes the Worker's normalized routes through and
+  COMPOSES the ones the app needs from several of them
+  (`lib/lookup/composite.ts` — `aircraft/candidates`, `airport/candidates`),
+  in one envelope, behind one sign-in rule; the shared MongoDB pool is the two
+  Node routes beside it, `/api/lookup/pool/{aircraft,airport}` (a static
+  segment routes before the catch-all; not behind the sign-in rule, because it
+  spends no lookup quota). `/api/search/*`, the per-kind routes all of this
+  grew out of, is GONE — nothing fetches a lookup URL by hand, every caller
+  goes through `lookup.*`, and a new route is a key in `LookupRoutes`
+  (`lib/lookup/types.ts`). The door admits server code with
   `x-lookup-secret` and a browser only with a session the Node
   `/api/auth/session` confirms (Edge cannot read MongoDB, so it forwards the
   cookies there; a failed check is a 503, not a sign-out). The path does not
@@ -597,8 +614,8 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
 
 **Lookup Chain (aircraft):**
 1. Local IndexedDB (`referenceDb.aircraftDatabase`) — FR24 + custom + MongoDB-synced records in one unified table
-2. Server batch lookup (`/api/search/aircraft/batch`) — checks enriched submissions from other users
-3. FR24 live search (`/api/search/aircraft`) — EDGE. It answers EVERY aircraft
+2. The shared pool (`lookup.poolAircraft`, `/api/lookup/pool/aircraft`) — checks enriched submissions from other users
+3. The door's `aircraft/candidates` (`lookup.aircraftCandidates`) — EDGE. It answers EVERY aircraft
    the text could be (`aircraftCandidates`, `lib/lookup/search-candidates.ts`),
    off the Worker's `/search`: airframe hits AND live flights flying a matching
    tail, exact first, then the registrations it begins, then those it is
@@ -608,22 +625,26 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
    whole registration (5+ characters once the dash goes), the registration's
    flight history (`aircraft/flights`) is asked as well — search does not index
    every airframe. ONLY an exact candidate is ever taken without the pilot
-   choosing it: the add-aircraft form lists the rest, the import enricher and
-   the server enrichment take the exact one or nothing
+   choosing it: the add-aircraft form and the aircraft page list the rest; the
+   import enricher and the server enrichment ask with `exact=1`
+   (`lookup.aircraftExact`), which answers that registration, 404 only when
+   every source asked has answered, and 502 when one could not be asked
 4. Manual entry (user types registration + type code)
 
 **Lookup Chain (airport):**
 1. Local IndexedDB (`referenceDb.airports`) — includes static + custom airports
-2. Shared pool (`/api/search/airport/batch`, MongoDB, Node) — airports other
-   users added; asked first, so they never cost an FR24 call
-3. FR24 live search (`/api/search/airport`) — EDGE, FR24 only. 2 and 3 are
-   one call from the browser, `lookupAirportOnline`
+2. Shared pool (`lookup.poolAirports`, `/api/lookup/pool/airport`, MongoDB,
+   Node) — airports other users added; asked first, so they never cost a
+   gateway call
+3. The door's `airport` (`lookup.airport`, the Worker's chain) — EDGE. 2 and 3
+   are one call from the browser, `lookupAirportOnline`
    (`lib/airports/online-lookup.ts`), which also derives a blank timezone
-   through `/api/timezone`
+   through `/api/timezone`; `lookupAirportLive` is 3 alone, for the import
+   enricher, which asks the pool for every code in one request
 4. Manual entry (user types ICAO + details)
 
 The add-airport form also LISTS what a partial code could be
-(`/api/search/airport/candidates`, EDGE, `airportCandidates` — the codes read
+(the door's `airport/candidates`, EDGE, `airportCandidates` — the codes read
 off the search hit's label, name matched when the text is no code); choosing
 one looks it up in full like a typed code.
 
@@ -3360,11 +3381,11 @@ Notable route groups:
 
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
-| `/api/search/aircraft?q=` | GET | No | Every aircraft the text could be, each marked `exact` — EDGE, the Worker's `/search`, then `aircraft/flights` for a whole registration search did not list |
-| `/api/search/airport/candidates?q=` | GET | No | Every airport a partial code (or a name) could be — EDGE, the Worker's `/search` |
-| `/api/search/aircraft/batch` | POST | No | Batch lookup from enriched MongoDB |
-| `/api/search/airport?q=` | GET | No | FR24 airport lookup proxy — EDGE, the Worker's `/airport` chain only; the timezone is passed through as the source gave it (blank on its position-only tiers) |
-| `/api/lookup/<route>` | GET | Yes (session or `x-lookup-secret`) | The gateway Worker's normalized routes, EDGE (`lib/lookup/client.ts`; Node code: `lookupFromEdge`) |
+| `/api/lookup/<route>` | GET | Yes (session or `x-lookup-secret`) | The gateway Worker's normalized routes (`airport` — the timezone as the source gave it, blank on its position-only tiers), EDGE (`lib/lookup/client.ts`; Node code: `lookupFromEdge`) |
+| `/api/lookup/aircraft/candidates?q=` | GET | Yes | Every aircraft the text could be, each marked `exact` — the Worker's `/search`, then `aircraft/flights` for a whole registration search did not list; `exact=1` for that registration or 404 |
+| `/api/lookup/airport/candidates?q=` | GET | Yes | Every airport a partial code (or a name) could be — the Worker's `/search` |
+| `/api/lookup/pool/aircraft` | POST | No | The shared aircraft pool — enriched submissions, MongoDB (Node) |
+| `/api/lookup/pool/airport` | POST | No | The shared airport pool — enriched submissions, MongoDB (Node) |
 | `/api/submissions/aircraft` | POST | Yes | Submit custom aircraft for enrichment |
 | `/api/submissions/airport` | POST | Yes | Submit custom airport for enrichment |
 | `/api/enrichment/batch` | POST | CRON_SECRET (required) | Background enrichment of pending submissions; fails closed if `CRON_SECRET` is unset |
@@ -4781,7 +4802,7 @@ When making changes, be aware of these high-impact files:
 - Do not use `npm install` or `npm add` — always use `pnpm` to keep `pnpm-lock.yaml` in sync (Vercel uses frozen-lockfile)
 - Do not expose FR24 as the data source in UI — the user explicitly requires online lookups to be transparent (no "Online Results" labels, no Globe icons, no "FlightRadar24" branding)
 - Do not add hexdb.io fallback for aircraft lookup — if FR24 fails, manual entry is the only option
-- Do not call FR24 from the app except through the gateway Worker (`callFr24Worker` from an Edge route, `lookupFromEdge` from a Node one, `lib/lookup/client.ts` in the browser), and do not let an airport with a BLANK timezone reach the client — the Worker's position-only tiers return `""`, `lookupAirportOnline` / `deriveTimezone` derive the zone from the coordinates, and the client would otherwise store it as UTC. And run every route that calls the Worker on the EDGE runtime: FR24 scores the Worker's caller, and challenges the Node runtime's calls on every endpoint. A route that needs MongoDB keeps that in a separate Node route, as the aircraft and airport `batch` routes do. Never hand the Worker's secret to a browser, and never expose its `/raw` (an FR24 passthrough) or `/probe` through the app
+- Do not call FR24 from the app except through the gateway Worker (`callFr24Worker` from an Edge route, `lookupFromEdge` from a Node one, `lib/lookup/client.ts` in the browser), and do not let an airport with a BLANK timezone reach the client — the Worker's position-only tiers return `""`, `lookupAirportOnline` / `deriveTimezone` derive the zone from the coordinates, and the client would otherwise store it as UTC. And run every route that calls the Worker on the EDGE runtime: FR24 scores the Worker's caller, and challenges the Node runtime's calls on every endpoint. A route that needs MongoDB keeps that in a separate Node route, as the shared pool (`/api/lookup/pool/*`) does. And do not add an online-lookup route outside `/api/lookup`, or fetch one by hand: a Worker route goes in `LOOKUP_ROUTES` and `LookupRoutes`, one that combines several in `lib/lookup/composite.ts`, and every caller uses `lookup.*` Never hand the Worker's secret to a browser, and never expose its `/raw` (an FR24 passthrough) or `/probe` through the app
 - Do not bypass `recalculateFlightFields()` `manualOverrides` — users' manually entered field values must never be overwritten by enrichment
 - Do not let a hidden keep-alive page recompute on a data change — read data through the hooks that hold it (`useHeldWhileHidden`), and add a new list hook the same way. And never default SWR's `data` to a fresh `[]` per render: it breaks every downstream memo, and under the hold it loops
 - Do not put the active route back into context as a plain value, and do not render a keep-alive page's element inline in the stack — either one re-renders all six retained pages on every tab switch. The route is a store whose SNAPSHOT is the per-page boolean (`useSyncExternalStore`), and each page is `memo`ized on its route key

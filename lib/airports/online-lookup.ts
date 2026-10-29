@@ -2,14 +2,15 @@
  * The online half of the airport lookup, for the browser — called once the
  * local reference table has answered "not here".
  *
- *   1. The shared pool — POST /api/search/airport/batch (MongoDB, Node)
- *   2. FR24 — GET /api/search/airport (EDGE, FR24 only)
+ *   1. The shared pool — `lookup.poolAirports` (POST /api/lookup/pool/airport,
+ *      MongoDB, Node)
+ *   2. The gateway — `lookup.airport` (GET /api/lookup/airport, EDGE)
  *   3. A blank timezone derived from the coordinates — GET /api/timezone
  *
  * The pool is asked first so an airport another pilot already added never
- * costs an FR24 call. The two are separate routes because the FR24 call must
- * run on the Edge runtime (see `app/api/search/airport/route.ts`) and the
- * MongoDB driver cannot.
+ * costs a gateway call. The two are separate routes because the gateway call
+ * must run on the Edge runtime (see `app/api/lookup/[...path]/route.ts`) and
+ * the MongoDB driver cannot.
  *
  * Step 3 matters because callers store a blank timezone as "UTC", which puts
  * every local time at that airport out. FR24's position-only sources carry no
@@ -19,7 +20,8 @@
  * means nobody could answer (manual entry).
  */
 
-import type { EnrichedAirport } from "@/app/api/search/airport/shared"
+import { lookup } from "@/lib/lookup/client"
+import type { EnrichedAirport } from "@/lib/lookup/types"
 
 export type OnlineAirportSource = "cache" | "fr24"
 
@@ -43,33 +45,15 @@ function timeoutSignal(signal?: AbortSignal): AbortSignal {
 }
 
 async function fromPool(code: string, signal?: AbortSignal): Promise<EnrichedAirport | null> {
-  try {
-    const res = await fetch("/api/search/airport/batch", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ codes: [code] }),
-      signal: timeoutSignal(signal),
-    })
-    if (!res.ok) return null
-    const data = (await res.json()) as { results?: Record<string, EnrichedAirport> }
-    const hit = data.results?.[code]
-    return hit?.icao ? hit : null
-  } catch {
-    return null
-  }
+  const hit = (await lookup.poolAirports([code], timeoutSignal(signal)))?.[code]
+  return hit?.icao ? hit : null
 }
 
-async function fromFr24(code: string, signal?: AbortSignal): Promise<EnrichedAirport | null> {
-  try {
-    const res = await fetch(`/api/search/airport?q=${encodeURIComponent(code)}`, {
-      signal: timeoutSignal(signal),
-    })
-    if (!res.ok) return null
-    const data = (await res.json()) as { result?: EnrichedAirport | null }
-    return data.result?.icao ? data.result : null
-  } catch {
-    return null
-  }
+async function fromGateway(code: string, signal?: AbortSignal): Promise<EnrichedAirport | null> {
+  const answer = await lookup.airport(code, timeoutSignal(signal))
+  if (!answer.ok || !answer.data?.icao) return null
+  const { timezoneOffsetSeconds: _offset, ...airport } = answer.data
+  return airport
 }
 
 /** Fill a blank timezone from the coordinates. Returns the airport unchanged when it cannot. */
@@ -93,6 +77,15 @@ export async function deriveTimezone<T extends { timezone: string; latitude: num
   }
 }
 
+/**
+ * The gateway alone, its timezone filled — for a caller that has already asked
+ * the pool (the import enricher asks it for every code in one request).
+ */
+export async function lookupAirportLive(code: string, signal?: AbortSignal): Promise<EnrichedAirport | null> {
+  const live = await fromGateway(code.trim().toUpperCase(), signal)
+  return live ? deriveTimezone(live, signal) : null
+}
+
 export async function lookupAirportOnline(code: string, signal?: AbortSignal): Promise<OnlineAirport | null> {
   const key = code.trim().toUpperCase()
   if (key.length < 3) return null
@@ -101,7 +94,6 @@ export async function lookupAirportOnline(code: string, signal?: AbortSignal): P
   if (pooled) return { result: await deriveTimezone(pooled, signal), source: "cache" }
   if (signal?.aborted) return null
 
-  const live = await fromFr24(key, signal)
-  if (live) return { result: await deriveTimezone(live, signal), source: "fr24" }
-  return null
+  const live = await lookupAirportLive(key, signal)
+  return live ? { result: live, source: "fr24" } : null
 }

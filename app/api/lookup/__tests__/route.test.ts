@@ -2,7 +2,9 @@
  * /api/lookup — the Edge door to the gateway Worker. Server code gets in with
  * the server secret; a browser gets in only with a session the Node session
  * route confirms (Edge cannot read MongoDB); a session check that could not be
- * made is a 503, not a sign-out; and the Worker's own statuses pass through.
+ * made is a 503, not a sign-out; the Worker's own statuses pass through; and
+ * a composed route (`lib/lookup/composite.ts`) answers in the same envelope
+ * behind the same rule.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -83,5 +85,21 @@ describe("GET /api/lookup/[...path]", () => {
     expect((await call(["aircraft"], { "x-lookup-secret": "s3cret" })).status).toBe(404)
     expect((await call(["raw"], { "x-lookup-secret": "s3cret" }, "?url=x")).status).toBe(404)
     expect((await call(["probe"], { "x-lookup-secret": "s3cret" }, "")).status).toBe(404)
+  })
+
+  it("answers a composed route in the same envelope, behind the same rule", async () => {
+    routes["https://gw.test/"] = () =>
+      json({ ok: true, source: "search", data: { aircraft: [{ id: "9V-TNL", label: "9V-TNL", detail: { equip: "A320" }, type: "aircraft" }] } })
+    expect((await call(["aircraft", "candidates"], {}, "?q=9V-TNL")).status).toBe(401)
+
+    const res = await call(["aircraft", "candidates"], { "x-lookup-secret": "s3cret" }, "?q=9V-TNL")
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ ok: true, source: "search", data: [{ registration: "9V-TNL", exact: true }] })
+    expect(calls).toEqual(["https://gw.test/search?q=9V-TNL&limit=30"])
+  })
+
+  it("lists the composed routes beside the Worker's when it refuses one", async () => {
+    const body = await (await call(["nope"], { "x-lookup-secret": "s3cret" }, "")).json()
+    expect(body.routes).toEqual(expect.arrayContaining(["search", "aircraft/candidates", "airport/candidates"]))
   })
 })

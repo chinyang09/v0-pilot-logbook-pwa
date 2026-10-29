@@ -3,9 +3,12 @@
  *
  * The lookup is handed to the Edge door (`lookupFromEdge`) — the upstream
  * challenges the Node runtime, so calling the Worker from here failed for
- * every aircraft. It asks the Worker's `/aircraft` chain (search → the
- * registration's flight history → the live feed). Also hydrates with ICAO
- * DOC 8643 type data when the type code is known.
+ * every aircraft. It asks `aircraft/candidates` with `exact=1`
+ * (`lib/lookup/composite.ts`): the search, then the registration's flight
+ * history when search did not list it — the SAME rule the add-aircraft form
+ * and the import enricher read, and only the registration asked for (a near
+ * miss would file the submission as another aeroplane). Also hydrates with
+ * ICAO DOC 8643 type data when the type code is known.
  *
  * THREE outcomes, and callers must keep them apart: `unavailable` (the lookup
  * could not be made — a challenge, a timeout, no route to the door) is not
@@ -42,23 +45,14 @@ export async function enrichAircraftFromFR24(
   registration: string,
   request?: Request
 ): Promise<AircraftEnrichment> {
-  const answer = await lookupFromEdge("aircraft", { reg: registration }, { request })
+  const answer = await lookupFromEdge("aircraft/candidates", { q: registration, exact: 1 }, { request })
   if (!answer.ok) {
     return answer.status === 404 ? { status: "not_found" } : { status: "unavailable", error: answer.error }
   }
-
-  // ONLY the registration asked for. The chain's search stage answers every
-  // hit when none is exact, and taking the first of those filed the
-  // submission as a different aeroplane. Search does not index every
-  // airframe, so a miss there is asked of the registration's flight history.
+  // The door answers the exact registration or 404; checked again, because a
+  // near miss filed here types every flight on it as another aeroplane.
   const wanted = normalizeRegistration(registration)
-  let aircraft = answer.data.find((a) => normalizeRegistration(a.registration) === wanted)
-  if (!aircraft) {
-    const history = await lookupFromEdge("aircraft/flights", { reg: registration, limit: 1 }, { request })
-    if (!history.ok && history.status !== 404) return { status: "unavailable", error: history.error }
-    const info = history.ok ? history.data.aircraft : null
-    if (info && normalizeRegistration(info.registration) === wanted) aircraft = info
-  }
+  const aircraft = answer.data.find((a) => a.exact && normalizeRegistration(a.registration) === wanted)
   if (!aircraft) return { status: "not_found" }
 
   const typecode = aircraft.typecode || ""

@@ -3,8 +3,8 @@
  * reuse the same lookup pipeline:
  *
  *   1. Local IndexedDB (batchGetAircraftByRegistrations) — bulk
- *   2. Server batch (POST /api/search/aircraft/batch) — MongoDB enrichment cache
- *   3. FR24 live (GET /api/search/aircraft?q=REG) — per-reg fallback
+ *   2. The shared pool (`lookup.poolAircraft`, POST /api/lookup/pool/aircraft) — MongoDB enrichment cache
+ *   3. The gateway (`lookup.aircraftExact`, GET /api/lookup/aircraft/candidates?exact=1) — per-reg fallback
  *
  * Results from steps 2 and 3 are written back to local IndexedDB so the next
  * import for the same registration is fully local. FR24 hits are also queued
@@ -19,6 +19,7 @@ import {
 import { submitAircraftToServer } from "@/lib/submissions/submit";
 import { normalizeRegistration } from "@/lib/utils/string";
 import { pooledForEach } from "./pooled-map";
+import { lookup } from "@/lib/lookup/client";
 import type { AircraftRecord } from "@/types/entities/aircraft.types";
 
 export interface EnrichProgress {
@@ -75,28 +76,9 @@ export async function enrichAircraftBatch(
   // ---------- 2. Server batch (MongoDB enrichment cache) ----------
   if (remaining.length > 0) {
     try {
-      const batchRes = await fetch("/api/search/aircraft/batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ registrations: remaining }),
-        signal: AbortSignal.timeout(8000),
-      });
+      const normalizedMap = await lookup.poolAircraft(remaining, AbortSignal.timeout(8000));
 
-      if (batchRes.ok) {
-        const { results } = await batchRes.json();
-        const normalizedMap = (results || {}) as Record<
-          string,
-          {
-            registration: string;
-            typecode: string;
-            icao24: string;
-            operator: string;
-            shortDescription: string;
-            wtc: string;
-            wtg: string;
-            manufacturerCode: string;
-          }
-        >;
+      if (normalizedMap) {
 
         for (const reg of remaining) {
           const match = normalizedMap[normalizeReg(reg)];
@@ -145,26 +127,15 @@ export async function enrichAircraftBatch(
     // out at once. See `pooled-map.ts`.
     await pooledForEach(remaining, async (reg) => {
         try {
-          const res = await fetch(
-            `/api/search/aircraft?q=${encodeURIComponent(reg)}`,
-            { signal: AbortSignal.timeout(8000) }
-          );
-
-          if (!res.ok) {
-            failedRegs.push(reg);
-            stats.failed++;
-            return;
-          }
-
-          // Only the registration asked for: the search answers every
-          // aircraft the text could mean, and a near miss filed as this tail
-          // would type the flight as another aeroplane.
-          const data = await res.json();
+          // Only the registration asked for (`exact=1`): a near miss filed
+          // as this tail would type the flight as another aeroplane.
+          // The door may ask the search and then the flight history: the client's
+          // 15s, not a single call's 8s.
+          const answer = await lookup.aircraftExact(reg);
           const wanted = normalizeRegistration(reg);
-          const match = (data?.results ?? []).find(
-            (r: { registration?: string; exact?: boolean }) =>
-              r.exact ?? normalizeRegistration(r.registration || "") === wanted
-          );
+          const match = answer.ok
+            ? answer.data.find((r) => r.exact && normalizeRegistration(r.registration) === wanted)
+            : undefined;
 
           if (!match || !match.registration) {
             failedRegs.push(reg);

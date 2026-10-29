@@ -3,6 +3,7 @@
 import { AircraftTypeSuggestions } from "@/components/aircraft-type-suggestions"
 import { SuggestionList } from "@/components/ui/suggestion-list"
 import { normalizeRegistration } from "@/lib/utils/string"
+import { lookup } from "@/lib/lookup/client"
 import { CODE_INPUT_PROPS } from "@/lib/utils/input-props"
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Button } from "@/components/ui/button"
@@ -152,14 +153,10 @@ export function AircraftNewForm({
       // list of what it could be, for the pilot to choose from.
       setIsFr24Loading(true)
       try {
-        const res = await fetch(
-          `/api/search/aircraft?q=${encodeURIComponent(reg)}`,
-          // The route may ask the search and then the flight history.
-          { signal: AbortSignal.timeout(15000) }
-        )
-        const data = res.ok ? ((await res.json()) as { results?: (OnlineAircraft & { exact?: boolean })[] }) : null
+        // The door may ask the search and then the flight history.
+        const answer = await lookup.aircraftCandidates(reg)
         if (stale) return
-        const results = data?.results ?? []
+        const results = answer.ok ? answer.data : []
         const exact = results.find((r) => r.exact)
         if (exact) fill(exact)
         else setCandidates(results)

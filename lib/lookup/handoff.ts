@@ -21,7 +21,8 @@
  * "not found".
  */
 
-import type { Fr24Result, Fr24Route, Fr24Routes } from "@/lib/fr24/types"
+import type { Fr24Result } from "@/lib/fr24/types"
+import type { LookupRoute, LookupRoutes } from "./types"
 
 const HANDOFF_TIMEOUT_MS = 15000
 
@@ -39,11 +40,11 @@ export function handoffOrigin(request?: Request): string | null {
   return null
 }
 
-export async function lookupFromEdge<R extends Fr24Route>(
+export async function lookupFromEdge<R extends LookupRoute>(
   route: R,
   params: Record<string, string | number | undefined>,
   options: { request?: Request; timeoutMs?: number } = {}
-): Promise<Fr24Result<Fr24Routes[R]>> {
+): Promise<Fr24Result<LookupRoutes[R]>> {
   const origin = handoffOrigin(options.request)
   if (!origin) return { ok: false, status: 0, error: "No origin to reach the lookup route" }
 
@@ -70,7 +71,7 @@ export async function lookupFromEdge<R extends Fr24Route>(
       | { ok?: boolean; data?: unknown; source?: string; error?: string }
       | null
     if (response.ok && body?.ok === true) {
-      return { ok: true, status: response.status, data: body.data as Fr24Routes[R], source: body.source ?? "" }
+      return { ok: true, status: response.status, data: body.data as LookupRoutes[R], source: body.source ?? "" }
     }
     // A non-JSON answer is deployment protection's sign-in page or a platform
     // error — the lookup was not made, so it reads as 502, never as 404.

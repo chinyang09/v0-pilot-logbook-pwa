@@ -23,6 +23,7 @@ import { showUndoToast } from "@/lib/utils/undo-toast"
 import { useReferenceAircraft, useFlights } from "@/hooks/data"
 import { getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
 import { normalizeRegistration } from "@/lib/utils/string"
+import { lookup } from "@/lib/lookup/client"
 import { syncService } from "@/lib/sync"
 import { Button } from "@/components/ui/button"
 import { PageContainer } from "@/components/page-container"
@@ -290,11 +291,9 @@ export default function AircraftPage() {
 
     const searchFr24 = async () => {
       try {
-        const res = await fetch(`/api/search/aircraft?q=${encodeURIComponent(debouncedSearchQuery)}`)
-        if (!res.ok) throw new Error("FR24 search failed")
-        const data = await res.json()
+        const answer = await lookup.aircraftCandidates(debouncedSearchQuery)
         if (!cancelled) {
-          setFr24Results(data.results || [])
+          setFr24Results(answer.ok ? answer.data : [])
         }
       } catch {
         if (!cancelled) setFr24Results([])

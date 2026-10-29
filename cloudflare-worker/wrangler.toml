@@ -4,6 +4,13 @@ compatibility_date = "2025-01-15"
 workers_dev = true
 preview_urls = false
 
+# Keep variables set in the dashboard. Without this a `wrangler deploy` replaces
+# the Worker's configuration with this file's — which has no [vars] — and on
+# 29 Oct 2026 that removed a PROXY_SECRET entered as a plain-text VARIABLE,
+# leaving the Worker open. Secrets (`wrangler secret put`, or a dashboard
+# variable with Encrypt on) survive a deploy either way; keep it one.
+keep_vars = true
+
 # Workers Logs. The dashboard had this on; a deploy from a config without it
 # turns it off.
 [observability]

@@ -3,12 +3,12 @@
  * Same shape as aircraft-enricher.ts, applied to airport codes.
  *
  *   1. Local IndexedDB (getAirportByIcao/getAirportByIata) — fast
- *   2. Server batch (POST /api/search/airport/batch) — MongoDB cache,
- *      filtered by enrichedAt freshness (180 day TTL)
- *   3. FR24 live (GET /api/search/airport?q=CODE) — per-code fallback, on
- *      the Edge runtime and FR24 only; a timezone it did not carry is
- *      derived from the coordinates (`deriveTimezone`), or it would be
- *      stored as "UTC"
+ *   2. The shared pool (`lookup.poolAirports`, POST /api/lookup/pool/airport) —
+ *      MongoDB, filtered by enrichedAt freshness (180 day TTL), every code in
+ *      one request
+ *   3. The gateway (`lookupAirportLive`, GET /api/lookup/airport) — per-code
+ *      fallback, on the Edge runtime; a timezone it did not carry is derived
+ *      from the coordinates (`deriveTimezone`), or it would be stored as "UTC"
  *
  * Results from steps 2 and 3 are written back to local IndexedDB as custom
  * airports, so the next import for the same code is fully local. FR24 hits
@@ -38,7 +38,9 @@ import {
 import { submitAirportToServer } from "@/lib/submissions/submit"
 import { createId } from "@/lib/auth/shared/cuid"
 import { pooledForEach } from "./pooled-map"
-import { deriveTimezone } from "@/lib/airports/online-lookup"
+import { lookupAirportLive } from "@/lib/airports/online-lookup"
+import { lookup } from "@/lib/lookup/client"
+import type { EnrichedAirport } from "@/lib/lookup/types"
 import { icaoForIataAt, icaosForIata, isReassignedIata } from "@/lib/airports/code-changes"
 import type { Airport } from "@/types/entities/airport.types"
 
@@ -73,19 +75,6 @@ export interface EnrichAirportResult {
   }
 }
 
-type EnrichedAirportPayload = {
-  icao: string
-  iata: string
-  name: string
-  city: string
-  country: string
-  countryCode: string
-  latitude: number
-  longitude: number
-  elevation: number
-  timezone: string
-}
-
 async function localLookup(code: string): Promise<Airport | undefined> {
   const c = code.toUpperCase()
   // ICAO is 4 chars, IATA is 3 chars — try the more likely one first.
@@ -103,7 +92,7 @@ async function localLookup(code: string): Promise<Airport | undefined> {
   return (await getAirportByIcao(c)) || (await getAirportByIata(c))
 }
 
-async function persistEnriched(payload: EnrichedAirportPayload): Promise<Airport> {
+async function persistEnriched(payload: EnrichedAirport): Promise<Airport> {
   const submissionId = createId()
   const airport = await addCustomAirport({
     icao: payload.icao,
@@ -158,16 +147,9 @@ export async function enrichAirportBatch(
   // ---------- 2. Server batch (MongoDB cache) ----------
   if (remaining.length > 0 || toCheck.length > 0) {
     try {
-      const batchRes = await fetch("/api/search/airport/batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ codes: [...remaining, ...toCheck] }),
-        signal: AbortSignal.timeout(8000),
-      })
+      const resultMap = await lookup.poolAirports([...remaining, ...toCheck], AbortSignal.timeout(8000))
 
-      if (batchRes.ok) {
-        const { results } = await batchRes.json()
-        const resultMap = (results || {}) as Record<string, EnrichedAirportPayload>
+      if (resultMap) {
 
         for (const code of toCheck) {
           const pooled = resultMap[code]?.icao?.toUpperCase()
@@ -211,20 +193,7 @@ export async function enrichAirportBatch(
     // airports than one roster does.
     await pooledForEach(remaining, async (code) => {
         try {
-          const res = await fetch(
-            `/api/search/airport?q=${encodeURIComponent(code)}`,
-            { signal: AbortSignal.timeout(12000) }
-          )
-
-          if (!res.ok) {
-            failedCodes.push(code)
-            stats.failed++
-            return
-          }
-
-          const data = await res.json()
-          const found = data?.result as EnrichedAirportPayload | null
-          const match = found?.icao ? await deriveTimezone(found) : null
+          const match = await lookupAirportLive(code)
 
           if (!match || !match.icao) {
             failedCodes.push(code)

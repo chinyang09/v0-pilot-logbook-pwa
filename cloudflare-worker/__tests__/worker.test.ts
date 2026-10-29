@@ -174,6 +174,19 @@ describe("normalizers", () => {
     expect(grouped).toEqual({ airport: [{ id: "a" }], aircraft: [{ id: "b" }, { id: "c" }] })
   })
 
+  it("shapes a payload for the probe's explore mode — keys and types, never the values", () => {
+    expect(w.shapeOf({ a: 1, b: "x", c: [{ d: true }, { d: false }], e: null, f: [] })).toEqual({
+      a: "number",
+      b: "string",
+      c: [{ d: "boolean" }, "×2"],
+      e: null,
+      f: [],
+    })
+    expect(w.shapeOf({ a: { b: { c: { d: 1 } } } }, 2)).toEqual({ a: { b: "object" } })
+    const wide = Object.fromEntries(Array.from({ length: 45 }, (_, i) => [`k${i}`, i]))
+    expect((w.shapeOf(wide) as Record<string, unknown>)["…"]).toBe("5 more keys")
+  })
+
   it("reads an airlines.php row", () => {
     expect(w.normalizeAirline({ Name: "Scoot", Code: "TR", ICAO: "TGW" })).toEqual({ name: "Scoot", iata: "TR", icao: "TGW" })
     expect(w.normalizeAirline({ Name: "", Code: "TR" })).toBeNull()
@@ -205,6 +218,24 @@ describe("routes", () => {
     await Promise.all(pending)
     return { status: res.status, cache: res.headers.get("x-cache"), body: await res.json() }
   }
+
+  it("probes the in-use sources, and the candidates only with explore=1", async () => {
+    upstream = (url) =>
+      url.includes("flight/list.json") && url.includes("fetchBy=reg")
+        ? json({ result: { response: { data: [{ identification: { id: "3a1b" }, time: { real: { departure: 1700000000 } }, aircraft: { images: { large: [] } } }] } } })
+        : json({ result: { response: {} } })
+    const plain = await call("/probe")
+    expect(plain.body.explore).toBeUndefined()
+    expect(plain.body.summary.some((line: string) => line.includes("explore:"))).toBe(false)
+
+    const explored = await call("/probe?explore=1")
+    expect(Object.keys(explored.body.explore)).toEqual(
+      expect.arrayContaining(["api search.json", "airport.json every plugin", "flight-playback", "in use: flight-list by reg (one flight)"])
+    )
+    // What the flight-list normalizer leaves on the table shows up in its shape.
+    expect(explored.body.explore["in use: flight-list by reg (one flight)"].shape.aircraft).toEqual({ images: { large: [] } })
+    expect(explored.body.summary.some((line: string) => line.includes("explore: flight-playback"))).toBe(true)
+  })
 
   it("refuses a request without the secret, but answers /health", async () => {
     upstream = () => challenge()

@@ -38,6 +38,8 @@
  *   /                      route index
  *   /health                liveness, touches nothing upstream
  *   /probe                 every upstream, once, from this Worker
+ *   /probe?explore=1       … plus CANDIDATE sources no route uses yet, with the
+ *                          shape of what each answers (what the app could add)
  *   /aircraft?reg=         aircraft by registration  (search → flight list → live feed)
  *   /aircraft/flights?reg=&page=&limit=   flight history for a registration
  *   /airport?code=         airport by ICAO or IATA   (airport.json + traffic-stats → airport list + search)
@@ -210,7 +212,7 @@ const ROUTES = {
 
 const ROUTE_DOCS = {
   "/health": "liveness",
-  "/probe": "which upstreams answer from this Worker (code=, reg=, flight= override the samples)",
+  "/probe": "which upstreams answer from this Worker (code=, reg=, flight= override the samples; explore=1 adds candidate sources and the shape of their data)",
   "/aircraft?reg=9V-TNL": "aircraft by registration",
   "/aircraft/flights?reg=9V-TNL&page=1&limit=25": "flight history for a registration",
   "/airport?code=WSSS": "airport by ICAO or IATA",
@@ -598,7 +600,12 @@ async function handleProbe(url, log) {
 
   // The click handler needs a live flight id; take one from the feed.
   const liveId = parseFeed(results[8].data)[0]?.id
-  if (liveId) await upstream("clickhandler", `${DATA_LIVE}/clickhandler/?flight=${liveId}`, log)
+  const click = liveId ? await upstream("clickhandler", `${DATA_LIVE}/clickhandler/?flight=${liveId}`, log) : null
+
+  const explore =
+    url.searchParams.get("explore") === "1"
+      ? await exploreUpstreams({ code, reg, flight, flightList: results[6].data, click: click?.data, inUse: results }, log)
+      : undefined
 
   return {
     status: 200,
@@ -606,9 +613,90 @@ async function handleProbe(url, log) {
       ok: true,
       samples: { code, reg, flight },
       summary: log.map((a) => `${a.ok ? "OK  " : "FAIL"} ${a.name} — ${a.ok ? `${a.status}, ${a.ms}ms` : a.error}`),
+      explore,
       attempts: log,
     },
   }
+}
+
+/**
+ * What the app COULD read, for a decision about what to build next — not used
+ * by any route. Each candidate is asked once and answered with the SHAPE of
+ * its data (`shapeOf`: keys and value types, a few levels down, arrays by their
+ * first element), never the data itself; the in-use sources are shaped too, at
+ * the level their normalizers read, so a field they drop shows up as well.
+ *
+ * @param {{ code: string, reg: string, flight: string, flightList: any, click: any, inUse: { data: any }[] }} s
+ * @param {Attempt[]} log
+ */
+async function exploreUpstreams(s, log) {
+  const first = s.flightList?.result?.response?.data?.[0]
+  const fr24Id = first?.identification?.id
+  const departed = first?.time?.real?.departure || first?.time?.scheduled?.departure
+  /** @type {[name: string, url: string, pick: (data: any) => any][]} */
+  const candidates = [
+    // A second search host: a tier for the search chain if www is challenged.
+    ["api search.json", `${API}/search.json?query=${encodeURIComponent(s.reg)}&limit=10`, (d) => d?.result],
+    [
+      "airport.json every plugin",
+      airportJsonUrl(s.code, ["details", "runways", "weather", "aircraftOnGround", "aircraftCount", "scheduledRoutesStatistics", "satelliteImage", "flightdiary"], 1, 1),
+      (d) => d?.result?.response?.airport?.pluginData,
+    ],
+    ["airport.json routes page", airportJsonUrl(s.code, ["scheduledRoutesStatistics"], 1, 100), (d) => d?.result?.response?.airport?.pluginData?.scheduledRoutesStatistics],
+    ["flight-list by airport", `${API}/flight/list.json?query=${s.code.toLowerCase()}&fetchBy=airport&page=1&limit=5`, (d) => d?.result?.response],
+    ["airport-disruptions", `${WWW}/webapi/v1/airport-disruptions`, (d) => d],
+    ["most-tracked", `${WWW}/flights/most-tracked`, (d) => d],
+    ["live-feed by callsign", feedUrl({ callsign: s.flight, limit: "5" }), (d) => d],
+  ]
+  if (fr24Id && departed) {
+    candidates.push([
+      "flight-playback",
+      `${API}/flight-playback.json?flightId=${encodeURIComponent(fr24Id)}&timestamp=${departed}`,
+      (d) => d?.result?.response?.data?.flight,
+    ])
+  }
+
+  const answers = await Promise.all(candidates.map(([name, target]) => upstream(`explore: ${name}`, target, log)))
+  /** @type {Record<string, unknown>} */
+  const out = {}
+  candidates.forEach(([name, , pick], i) => {
+    const a = answers[i]
+    out[name] = a.ok ? { status: a.attempt.status, bytes: a.attempt.bytes, shape: shapeOf(pick(a.data)) } : { error: a.attempt.error }
+  })
+
+  // The sources routes already read, at the level their normalizers read —
+  // what they leave on the table.
+  out["in use: flight-list by reg (one flight)"] = { shape: shapeOf(first) }
+  out["in use: flight-list by reg (aircraft)"] = { shape: shapeOf(s.flightList?.result?.response?.aircraftInfo) }
+  out["in use: clickhandler"] = s.click ? { shape: shapeOf(s.click) } : { error: "no live flight in the sample bounds" }
+  out["in use: search hit kinds"] = { shape: shapeOf(s.inUse[0].data?.results) }
+  return out
+}
+
+/**
+ * The shape of a JSON value: objects by key (at most 40), arrays by their first
+ * element and length, scalars by type — depth-limited so the probe stays small.
+ *
+ * @param {any} value
+ * @param {number} [depth]
+ * @returns {unknown}
+ */
+export function shapeOf(value, depth = 4) {
+  if (value === null || value === undefined) return null
+  if (Array.isArray(value)) {
+    if (!value.length) return []
+    return depth > 0 ? [shapeOf(value[0], depth - 1), `×${value.length}`] : `array×${value.length}`
+  }
+  if (typeof value === "object") {
+    if (depth <= 0) return "object"
+    const keys = Object.keys(value)
+    /** @type {Record<string, unknown>} */
+    const shape = {}
+    for (const k of keys.slice(0, 40)) shape[k] = shapeOf(value[k], depth - 1)
+    if (keys.length > 40) shape["…"] = `${keys.length - 40} more keys`
+    return shape
+  }
+  return typeof value
 }
 
 // ---------------------------------------------------------------------------
@@ -668,9 +756,10 @@ function feedUrl(filters) {
 // ---------------------------------------------------------------------------
 
 /**
- * The app's airport (matches `EnrichedAirport` in app/api/search/airport/shared.ts,
- * plus the offset when the source states one). `timezone` is "" when the
- * source carries none.
+ * The app's airport — `Fr24Airport` in lib/fr24/types.ts; the app stores it
+ * without the offset, as `EnrichedAirport` in lib/lookup/types.ts. The offset
+ * is set when the source states one; `timezone` is "" when the source carries
+ * none.
  *
  * @typedef {{
  *   icao: string, iata: string, name: string, city: string, country: string,

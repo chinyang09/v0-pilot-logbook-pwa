@@ -17,7 +17,7 @@ vi.mock("@/lib/db/stores/reference/airports.store", () => ({
   addCustomAirport: vi.fn(async (a: Partial<Airport>) => ({ ...a, isCustom: true })),
 }))
 vi.mock("@/lib/submissions/submit", () => ({ submitAirportToServer: vi.fn() }))
-vi.mock("@/lib/airports/online-lookup", () => ({ deriveTimezone: vi.fn(async (a: unknown) => a) }))
+vi.mock("@/lib/airports/online-lookup", () => ({ lookupAirportLive: vi.fn(async () => null) }))
 
 import { enrichAirportBatch } from "../airport-enricher"
 
@@ -35,7 +35,7 @@ beforeEach(() => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init?: { body?: string }) => {
-      if (url === "/api/search/airport/batch") {
+      if (url === "/api/lookup/pool/airport") {
         poolAsked.push((JSON.parse(init?.body || "{}") as { codes: string[] }).codes)
         return new Response(JSON.stringify({ results: poolAnswer }), { status: 200 })
       }

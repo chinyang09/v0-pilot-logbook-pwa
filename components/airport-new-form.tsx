@@ -14,20 +14,13 @@ import { submitAirportToServer } from "@/lib/submissions/submit"
 import { useRegisterDetailActions, useRegisterMainActions } from "@/hooks/use-page-actions"
 import { lookupAirportOnline } from "@/lib/airports/online-lookup"
 import { SuggestionList } from "@/components/ui/suggestion-list"
-import type { AirportCandidate } from "@/lib/lookup/search-candidates"
+import { lookup } from "@/lib/lookup/client"
+import type { AirportCandidate } from "@/lib/lookup/types"
 
 /** The airports a code being typed could be. Never throws; empty on any failure. */
 async function fetchAirportCandidates(code: string): Promise<AirportCandidate[]> {
-  try {
-    const res = await fetch(`/api/search/airport/candidates?q=${encodeURIComponent(code)}`, {
-      signal: AbortSignal.timeout(10000),
-    })
-    if (!res.ok) return []
-    const data = (await res.json()) as { results?: AirportCandidate[] }
-    return data.results ?? []
-  } catch {
-    return []
-  }
+  const answer = await lookup.airportCandidates(code, AbortSignal.timeout(10000))
+  return answer.ok ? answer.data : []
 }
 
 export interface AirportNewFormProps {

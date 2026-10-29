@@ -1,7 +1,7 @@
 /**
- * Batch airport lookup from MongoDB enriched submissions
+ * The shared airport pool — NODE (MongoDB).
  *
- * POST /api/search/airport/batch
+ * POST /api/lookup/pool/airport
  * Body: { codes: ["WSSS", "SIN", "WMKK", "KUL", ...] }
  *
  * Each code is matched against EITHER icao or iata so callers can mix
@@ -9,9 +9,11 @@
  * code (uppercased), so a request with both "WSSS" and "SIN" returns two
  * entries that happen to point at the same airport.
  *
- * Mirrors /api/search/aircraft/batch — checks airportSubmissions
- * (status: "enriched") and returns enriched data. No auth required
- * (reference data).
+ * Mirrors `/api/lookup/pool/aircraft` — checks airportSubmissions
+ * (status: "enriched") and returns enriched data. Not behind the door's
+ * sign-in rule, for the same reason (it spends no lookup quota). It was
+ * `/api/search/airport/batch`. Browser callers go through
+ * `lookup.poolAirports` (`lib/lookup/client.ts`).
  *
  * Staleness: records older than AIRPORT_CACHE_TTL_MS are excluded so the
  * caller falls through to FR24 and refreshes the cache. Airport reference
@@ -22,7 +24,11 @@
 
 import { NextResponse } from "next/server"
 import { getMongoClient } from "@/lib/mongodb"
-import { AIRPORT_CACHE_TTL_MS, type EnrichedAirport } from "../shared"
+import type { EnrichedAirport } from "@/lib/lookup/types"
+
+// Airport reference data is unusually stable, so 180 days comfortably catches
+// a policy-level timezone change within a half-year without spending lookups.
+const AIRPORT_CACHE_TTL_MS = 180 * 24 * 60 * 60 * 1000
 
 export async function POST(request: Request) {
   let body: { codes?: string[]; icaos?: string[] }
@@ -107,7 +113,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ results })
   } catch (error) {
-    console.error("[Batch Airport Search] MongoDB error:", error)
+    console.error("[Airport Pool] MongoDB error:", error)
     return NextResponse.json({ results: {} })
   }
 }

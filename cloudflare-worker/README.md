@@ -58,6 +58,7 @@ Add `debug=1` to any route to see each upstream attempt.
 |---|---|---|
 | `/health` | liveness | — |
 | `/probe` | every upstream once, from here (`code=`, `reg=`, `flight=` set the samples) | — |
+| `/probe?explore=1` | … plus CANDIDATE sources no route reads yet (a second search host, every `airport.json` plugin, an airport's route statistics, flight playback, disruptions, most-tracked), each answered with the SHAPE of its data — keys and types, never values — and the in-use sources shaped at the level their normalizers read, so a field they drop shows up too | — |
 | `/aircraft?reg=9V-TNL` | aircraft by registration | search → the registration's flight history → live feed |
 | `/aircraft/flights?reg=9V-TNL&page=1&limit=25` | the airframe + the flights it has flown | `common/v1/flight/list.json?fetchBy=reg` |
 | `/airport?code=WSSS` | airport by ICAO or IATA | `airport.json` + `traffic-stats` (both carry the timezone) → `_json/airports.php` + search (position only; `timezone` is `""`, which the app derives from the coordinates) |
@@ -85,10 +86,13 @@ minutes, boards 2 minutes. Only a found answer is cached — never a failure.
 
 | Caller | Route |
 |---|---|
-| `app/api/search/airport` (Edge) | `/airport` (falls back to the legacy passthrough on an older Worker); the browser derives a missing timezone (`lib/airports/online-lookup.ts`) |
-| `app/api/search/aircraft` (Edge) | `/aircraft`, once (the legacy search passthrough stays here for an older app build) |
-| `app/api/lookup/[...path]` (Edge) | any normalized route, for signed-in users and for server code with `x-lookup-secret` — the PWA's door (`lib/lookup/client.ts`) |
-| `app/api/submissions/aircraft`, `app/api/enrichment/batch` (Node) | `/aircraft`, handed to the Edge door (`lib/lookup/handoff.ts`) |
+| `app/api/lookup/[...path]` (Edge) | the app's ONE door: any normalized route passed through, plus the routes it composes (`lib/lookup/composite.ts` — `aircraft/candidates` and `airport/candidates`, off `/search` and `/aircraft/flights`), for signed-in users and for server code with `x-lookup-secret`. The browser reaches it through `lib/lookup/client.ts`; the browser derives a missing timezone (`lib/airports/online-lookup.ts`) |
+| `app/api/submissions/aircraft`, `app/api/enrichment/batch` (Node) | `aircraft/candidates?exact=1`, handed to the Edge door (`lib/lookup/handoff.ts`) |
+
+`/api/search/*` — the per-kind routes the door grew out of — is gone. The
+shared MongoDB pool it also held is `/api/lookup/pool/{aircraft,airport}`
+(Node), which calls no Worker route. The Worker's `/aircraft` chain and its
+legacy passthroughs stay, for an installed app on an older build.
 
 The server side reads `FR24_PROXY_URL` + `FR24_PROXY_SECRET`
 (`lib/fr24/worker-client.ts`); the secret never reaches a browser.
@@ -99,7 +103,12 @@ The server side reads `FR24_PROXY_URL` + `FR24_PROXY_SECRET`
 
 1. Workers & Pages → `fr24-search-proxy` → Edit code.
 2. Replace the whole file with `worker.js`. Deploy.
-3. Settings → Variables and Secrets: keep (or add) the `PROXY_SECRET` secret.
+3. Settings → Variables and Secrets: keep (or add) `PROXY_SECRET` as a
+   **Secret** (Type: Secret, or a variable with Encrypt on). A plain-text
+   variable is part of the Worker's configuration, and a `wrangler deploy`
+   from a config without `keep_vars = true` deletes it — which left the Worker
+   open on 29 Oct 2026. `wrangler.toml` now sets `keep_vars`; a secret is safe
+   either way.
 4. Open `https://fr24-search-proxy.<subdomain>.workers.dev/probe` with the
    secret header, e.g.
 
@@ -115,8 +124,15 @@ The server side reads `FR24_PROXY_URL` + `FR24_PROXY_SECRET`
 
 ```bash
 cd cloudflare-worker
-wrangler deploy
+wrangler deploy                    # keep_vars: dashboard variables survive
 wrangler secret put PROXY_SECRET   # first time only
+```
+
+After a deploy, check the secret is still enforced — `/probe` without the
+header must answer 401:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" https://fr24-search-proxy.<subdomain>.workers.dev/probe
 ```
 
 Vercel needs `FR24_PROXY_URL` (the workers.dev URL) and `FR24_PROXY_SECRET`
