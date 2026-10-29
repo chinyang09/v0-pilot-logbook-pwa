@@ -50,6 +50,11 @@ describe("GET /api/lookup/[...path]", () => {
     expect(calls).toEqual(["https://gw.test/aircraft?reg=9V-TNL"])
   })
 
+  it("does not forward Next's own catch-all parameter to the Worker", async () => {
+    await call(["aircraft"], { "x-lookup-secret": "s3cret" }, "?reg=9V-TNL&path=aircraft")
+    expect(calls).toEqual(["https://gw.test/aircraft?reg=9V-TNL"])
+  })
+
   it("turns away a request with neither the secret nor a session cookie", async () => {
     const res = await call(["aircraft"], { "x-lookup-secret": "wrong" })
     expect(res.status).toBe(401)

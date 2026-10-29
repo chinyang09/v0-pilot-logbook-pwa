@@ -104,8 +104,10 @@ export async function GET(
   }
 
   const query: Record<string, string> = {}
+  // `path` is Next's own catch-all parameter, which it also puts in the URL's
+  // query; the Worker has no use for it.
   new URL(request.url).searchParams.forEach((value, key) => {
-    if (key !== "debug") query[key] = value
+    if (key !== "debug" && key !== "path") query[key] = value
   })
 
   const answer = await callFr24Worker(route, query)

@@ -86,7 +86,7 @@ minutes, boards 2 minutes. Only a found answer is cached — never a failure.
 | Caller | Route |
 |---|---|
 | `app/api/search/airport` (Edge) | `/airport` (falls back to the legacy passthrough on an older Worker); the browser derives a missing timezone (`lib/airports/online-lookup.ts`) |
-| `app/api/search/aircraft` (Edge) | the legacy search first (as always), then `/aircraft` when it finds nothing |
+| `app/api/search/aircraft` (Edge) | `/aircraft`, once (the legacy search passthrough stays here for an older app build) |
 | `app/api/lookup/[...path]` (Edge) | any normalized route, for signed-in users and for server code with `x-lookup-secret` — the PWA's door (`lib/lookup/client.ts`) |
 | `app/api/submissions/aircraft`, `app/api/enrichment/batch` (Node) | `/aircraft`, handed to the Edge door (`lib/lookup/handoff.ts`) |
 

@@ -596,7 +596,11 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
 **Lookup Chain (aircraft):**
 1. Local IndexedDB (`referenceDb.aircraftDatabase`) — FR24 + custom + MongoDB-synced records in one unified table
 2. Server batch lookup (`/api/search/aircraft/batch`) — checks enriched submissions from other users
-3. FR24 live search (`/api/search/aircraft`) — server-side proxy to bypass CORS
+3. FR24 live search (`/api/search/aircraft`) — EDGE, ONE call to the Worker's
+   `/aircraft` chain (it replaced the legacy search passthrough, which answered
+   the same fields but could not tell a miss from a challenge and searched up
+   to three times on a miss). FR24's search matches WHOLE registrations, with
+   or without the dash — `9VOFH` finds 9V-OFH, the prefix `9VO` finds nothing
 4. Manual entry (user types registration + type code)
 
 **Lookup Chain (airport):**
@@ -3323,7 +3327,7 @@ Notable route groups:
 
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
-| `/api/search/aircraft?q=` | GET | No | FR24 aircraft search proxy |
+| `/api/search/aircraft?q=` | GET | No | Aircraft lookup — EDGE, the Worker's `/aircraft` chain |
 | `/api/search/aircraft/batch` | POST | No | Batch lookup from enriched MongoDB |
 | `/api/search/airport?q=` | GET | No | FR24 airport lookup proxy — EDGE, the Worker's `/airport` chain only; the timezone is passed through as the source gave it (blank on its position-only tiers) |
 | `/api/lookup/<route>` | GET | Yes (session or `x-lookup-secret`) | The gateway Worker's normalized routes, EDGE (`lib/lookup/client.ts`; Node code: `lookupFromEdge`) |
