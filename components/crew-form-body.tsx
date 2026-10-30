@@ -5,6 +5,10 @@ import { FormSection } from "@/components/ui/form-section"
 import { SettingsRow, ToggleRow } from "@/components/ui/settings-row"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import Link from "next/link"
+import { useMemo, useState } from "react"
+import { SuggestionList } from "@/components/ui/suggestion-list"
+import { useAirlines } from "@/hooks/use-airlines"
+import { matchAirlines, resolveAirline } from "@/lib/airlines/airlines"
 import { ChevronRight } from "lucide-react"
 import { seatOf, withLoggingPreferences } from "@/lib/utils/roster/pilot-role"
 import {
@@ -59,12 +63,7 @@ export function CrewFormBody({
           onChange={(v) => updateField("crewId", v)}
           placeholder="Crew ID"
         />
-        <SettingsRow
-          label="Organization"
-          value={formData.organization}
-          onChange={(v) => updateField("organization", v)}
-          placeholder="Company"
-        />
+        <OrganizationField value={formData.organization} onChange={(v) => updateField("organization", v)} />
         <SettingsRow
           label="Licence Number"
           value={formData.licenceNumber}
@@ -155,5 +154,54 @@ export function CrewFormBody({
         />
       </FormSection>
     </div>
+  )
+}
+
+/**
+ * The company, free text — with the airlines it could be listed under it
+ * while it is being typed, so a pick writes the airline's standard name
+ * ("scoot", "Scoot Tigerair" → "Scoot"). On the pilot's own card that name is
+ * also what gives a flight number its airline ("TR") when Settings › Logging
+ * names none. The list is loaded only once the field is typed in.
+ */
+function OrganizationField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [typing, setTyping] = useState(false)
+  const rows = useAirlines(typing)
+  const matches = useMemo(() => {
+    if (!typing) return []
+    const exact = resolveAirline(rows, value)
+    return exact && exact.name === value.trim() ? [] : matchAirlines(rows, value)
+  }, [typing, rows, value])
+
+  return (
+    <>
+      <SettingsRow
+        label="Organization"
+        value={value}
+        onChange={(v) => {
+          setTyping(true)
+          onChange(v)
+        }}
+        placeholder="Company"
+      />
+      {matches.length > 0 && (
+        <div className="px-4 pb-3 row-divider">
+          <SuggestionList
+            label="Matching airlines"
+            items={matches.map((a) => ({
+              key: `${a.icao}|${a.iata}|${a.name}`,
+              title: a.name,
+              badge: a.iata || undefined,
+              meta: a.icao ? [a.icao] : undefined,
+            }))}
+            onSelect={(key) => {
+              const airline = matches.find((a) => `${a.icao}|${a.iata}|${a.name}` === key)
+              if (airline) onChange(airline.name)
+              setTyping(false)
+            }}
+          />
+        </div>
+      )}
+    </>
   )
 }

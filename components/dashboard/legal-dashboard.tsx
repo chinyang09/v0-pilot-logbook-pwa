@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Check, TriangleAlert, OctagonAlert, ArrowUpRight, Info } from "lucide-react"
+import { Check, TriangleAlert, OctagonAlert, ArrowUpRight, Info, RefreshCw } from "lucide-react"
 
 import { usePilotStatus } from "@/hooks/data/use-pilot-status"
 import { usePageActive } from "@/hooks/use-page-active"
@@ -22,6 +22,9 @@ import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { RequirementDetailPanel } from "./requirement-detail-panel"
 import { DutyFlightsPanel } from "./duty-flights-panel"
+import { useDutyLookups, type DutyLookups } from "@/hooks/use-duty-lookups"
+import { whereaboutsLines } from "@/lib/lookup/aircraft-whereabouts"
+import type { FlightLog } from "@/types/entities/flight.types"
 import { cn } from "@/lib/utils"
 
 /**
@@ -200,6 +203,17 @@ export function LegalDashboard({ className }: { className?: string }) {
       openRequirement ? <RequirementDetailPanel key={openRequirement.id} requirement={openRequirement} /> : null,
     )
   }, [isActive, onDashboard, openReqId, openRequirement, openDutyMs, setDetailContent])
+  // The duty the chain draws — this one on duty, else the next — with its
+  // gates and inbound aeroplane asked by themselves once it is close enough
+  // for either to be published, and only while the page is on screen.
+  const dutyAtMs =
+    status.duty.phase === "on_duty" && status.duty.active ? status.duty.active.startMs : status.duty.next?.reportMs ?? null
+  const dutyClose = dutyAtMs !== null && dutyAtMs >= now - DUTY_LOOKUP_WINDOW_MS && dutyAtMs <= now + DUTY_LOOKUP_WINDOW_MS
+  const duty = useDutyLookups(dutyClose ? dutyAtMs : null, { auto: isActive })
+  const dutyInfo = React.useMemo(
+    () => (dutyClose && duty.legs.length > 0 ? describeDuty(duty.legs, duty.lookups, duty.loading, duty.refresh, preferences?.display) : undefined),
+    [dutyClose, duty.legs, duty.lookups, duty.loading, duty.refresh, preferences?.display],
+  )
   const openRequirementCell = React.useCallback((id: string) => setSelectedId(`req:${id}`), [setSelectedId])
   const openDuty = React.useCallback((atMs: number) => setSelectedId(`duty:${atMs}`), [setSelectedId])
 
@@ -216,9 +230,40 @@ export function LegalDashboard({ className }: { className?: string }) {
       openRequirementId={isDesktop ? openReqId : null}
       onOpenRequirement={openRequirementCell}
       onOpenDuty={openDuty}
+      dutyInfo={dutyInfo}
       className={className}
     />
   )
+}
+
+/** How far either side of now a duty's gates and aeroplane are worth asking about. */
+const DUTY_LOOKUP_WINDOW_MS = 18 * 3600_000
+
+/** What the duty band shows under the chain, from the duty's lookups. */
+export interface DutyInfo {
+  /** Each leg's departure and arrival gate, in leg order ("" until published). */
+  legGates: { dep: string; arr: string }[]
+  /** "9V-NCA · Landed 03:00Z · 30m ago · TR289 from DPS · Gate D41", or null. */
+  inbound: string | null
+  loading: boolean
+  onRefresh: () => void
+}
+
+function describeDuty(
+  legs: FlightLog[],
+  lookups: DutyLookups | null,
+  loading: boolean,
+  onRefresh: () => void,
+  display?: DisplayPreferences,
+): DutyInfo {
+  const legGates = legs.map((f) => {
+    const g = lookups?.gates[f.id]
+    return g?.status === "done" ? { dep: g.gates.departure.gate, arr: g.gates.arrival.gate } : { dep: "", arr: "" }
+  })
+  const w = lookups?.inbound
+  const lines = w?.status === "done" ? whereaboutsLines(w.whereabouts, w.checkedAt, display?.clockSeparator) : null
+  const inbound = lines ? [lookups!.inboundRegistration, lines.primary, lines.secondary].filter(Boolean).join(" · ") : null
+  return { legGates, inbound, loading, onRefresh }
 }
 
 /** The presentational half — pure props, so it renders without the database. */
@@ -229,6 +274,7 @@ export function LegalDashboardView({
   openRequirementId = null,
   onOpenRequirement,
   onOpenDuty,
+  dutyInfo,
   className,
 }: {
   status: PilotStatus
@@ -245,6 +291,8 @@ export function LegalDashboardView({
   onOpenRequirement?: (id: string) => void
   /** Open the duty the sector chain draws (its start, ms). Without it the chain is not a button. */
   onOpenDuty?: (atMs: number) => void
+  /** The chain's duty's gates and inbound aeroplane, when it is close enough to ask. */
+  dutyInfo?: DutyInfo
   className?: string
 }) {
   const tone = TONE[status.state]
@@ -280,7 +328,7 @@ export function LegalDashboardView({
           sideways could see neither. */}
       <div className="relative flex min-h-0 flex-col divide-y divide-border/40 overflow-y-auto overscroll-contain scrollbar-hide">
         <Annunciator status={status} />
-        <DutyBand status={status} now={now} display={display} onOpenDuty={onOpenDuty} />
+        <DutyBand status={status} now={now} display={display} onOpenDuty={onOpenDuty} dutyInfo={dutyInfo} />
         <CurrencyBand requirements={currency} openId={openRequirementId} onOpen={onOpenRequirement} />
         <LimitsBand requirements={limits} />
       </div>
@@ -413,11 +461,13 @@ function DutyBand({
   now,
   display,
   onOpenDuty,
+  dutyInfo,
 }: {
   status: PilotStatus
   now: number
   display?: DisplayPreferences
   onOpenDuty?: (atMs: number) => void
+  dutyInfo?: DutyInfo
 }) {
   const { phase, active, lastDuty, next, rest, standby } = status.duty
 
@@ -679,6 +729,7 @@ function DutyBand({
       <SectorChain
         legs={view.legs}
         nextRoute={view.nextRoute}
+        legGates={dutyInfo?.legGates}
         // The chain draws THIS duty on duty and the NEXT one otherwise, so
         // that is the duty a tap opens.
         onOpen={(() => {
@@ -686,6 +737,30 @@ function DutyBand({
           return onOpenDuty && atMs != null ? () => onOpenDuty(atMs) : undefined
         })()}
       />
+
+      {/* The aeroplane for the first leg, and the refresh for it and the
+          gates — asked by themselves, never stored, so a later gate is a tap
+          away. Only while the duty is close enough to ask about. */}
+      {dutyInfo && (
+        <div className="mt-2 flex items-center gap-2">
+          <p
+            title={dutyInfo.inbound ?? undefined}
+            className="min-w-0 flex-1 truncate text-[11px] leading-tight text-muted-foreground"
+            suppressHydrationWarning
+          >
+            {dutyInfo.inbound ?? (dutyInfo.loading ? "Checking gates and aircraft…" : "Gates and aircraft not published yet")}
+          </p>
+          <button
+            type="button"
+            onClick={dutyInfo.onRefresh}
+            disabled={dutyInfo.loading}
+            aria-label="Refresh gates and aircraft"
+            className="relative shrink-0 rounded-full p-0.5 text-muted-foreground after:absolute after:-inset-3 after:content-[''] focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-60"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", dutyInfo.loading && "animate-spin")} />
+          </button>
+        </div>
+      )}
     </section>
   )
 }
@@ -799,7 +874,18 @@ function Scale({ slots }: { slots: Slot[] }) {
  * come. The airport codes sit under the dots, so a four-sector day reads as a
  * pattern rather than as a route string nobody can locate themselves in.
  */
-function SectorChain({ legs, nextRoute, onOpen }: { legs: SectorLeg[]; nextRoute?: string; onOpen?: () => void }) {
+function SectorChain({
+  legs,
+  nextRoute,
+  legGates,
+  onOpen,
+}: {
+  legs: SectorLeg[]
+  nextRoute?: string
+  /** Each leg's gates in order; drawn under the stops when they line up with the chain. */
+  legGates?: { dep: string; arr: string }[]
+  onOpen?: () => void
+}) {
   const stops = React.useMemo(() => {
     if (legs.length > 0) {
       return [
@@ -815,6 +901,13 @@ function SectorChain({ legs, nextRoute, onOpen }: { legs: SectorLeg[]; nextRoute
   if (stops.length < 2) return null
 
   const activeIndex = legs.findIndex((l) => l.status === "active")
+  // A stop's gate is the departure gate of the leg leaving it, and the last
+  // stop's is the last leg's arrival gate. Only when the logbook's legs ARE
+  // the chain's — otherwise a gate could sit under the wrong airport.
+  const gates =
+    legGates && legGates.length === stops.length - 1 && legGates.some((g) => g.dep || g.arr)
+      ? stops.map((_, i) => (i < legGates.length ? legGates[i].dep : legGates[i - 1].arr))
+      : null
 
   // A button when it opens its duty — the same box either way, so the band's
   // height does not move; the hit area grows by a pseudo-element instead.
@@ -860,6 +953,11 @@ function SectorChain({ legs, nextRoute, onOpen }: { legs: SectorLeg[]; nextRoute
             >
               {stop.code}
             </span>
+            {gates && (
+              <span className="text-[10px] font-semibold leading-none tabular-nums text-foreground" suppressHydrationWarning>
+                {gates[i] || "–"}
+              </span>
+            )}
           </span>
         </React.Fragment>
       ))}

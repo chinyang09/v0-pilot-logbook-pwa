@@ -2,6 +2,7 @@
 
 import { AircraftTypeSuggestions } from "@/components/aircraft-type-suggestions"
 import { AirlineFleetSection } from "@/components/airline-fleet-section"
+import { SegmentedTabs, type SegmentedTab } from "@/components/import/segmented-tabs"
 import { SuggestionList } from "@/components/ui/suggestion-list"
 import { normalizeRegistration } from "@/lib/utils/string"
 import { lookup } from "@/lib/lookup/client"
@@ -46,6 +47,12 @@ export interface AircraftNewFormProps {
   onViewExisting?: (registration: string) => void
 }
 
+type AddMode = "registration" | "fleet"
+const ADD_MODES: SegmentedTab<AddMode>[] = [
+  { value: "registration", label: "By registration" },
+  { value: "fleet", label: "By fleet" },
+]
+
 export function AircraftNewForm({
   prefilledReg = "",
   selectMode = false,
@@ -58,6 +65,9 @@ export function AircraftNewForm({
   const router = useRouter()
 
   const [isSaving, setIsSaving] = useState(false)
+  // By registration (the default) or a whole type of an airline's fleet at
+  // once. Not while picking one aircraft for a flight.
+  const [mode, setMode] = useState<AddMode>("registration")
   const [registration, setRegistration] = useState(prefilledReg.toUpperCase())
   const [typecode, setTypecode] = useState("")
   const {
@@ -275,7 +285,7 @@ export function AircraftNewForm({
   }
 
   const isDuplicate = !!existingAircraft
-  const canSave = registration.trim().length > 0 && !isDuplicate && !isSaving
+  const canSave = mode === "registration" && registration.trim().length > 0 && !isDuplicate && !isSaving
   // Show type code field only when FR24 search failed or returned no results
   const showManualTypeField = fr24Searched && !fr24Found && !existingAircraft
 
@@ -306,6 +316,15 @@ export function AircraftNewForm({
 
   const formContent = (
     <div className="container mx-auto px-2 pt-4">
+      {!selectMode && (
+        <div className="mb-4 flex justify-center">
+          <SegmentedTabs tabs={ADD_MODES} value={mode} onChange={setMode} />
+        </div>
+      )}
+      {mode === "fleet" && !selectMode ? (
+        <AirlineFleetSection />
+      ) : (
+      <>
       <FormSection title="Details" className="mb-6">
           <SettingsRow
             label="Registration"
@@ -483,9 +502,8 @@ export function AircraftNewForm({
         }
       </p>
 
-      {/* A whole type of an airline's fleet at once, rather than tail by tail.
-          Not while picking one aircraft for a flight. */}
-      {!selectMode && <AirlineFleetSection />}
+      </>
+      )}
     </div>
   )
 
