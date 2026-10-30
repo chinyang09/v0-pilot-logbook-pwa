@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest"
 import type { FlightSuggestion } from "@/lib/lookup/flight-suggest"
-import { lookupPatch, ownedAfter, seedFromNextFlight, seedFromSuggestion, withAirlinePrefix } from "../flight-seed"
+import { afterPrefill, lookupPatch, ownedAfter, seedFromNextFlight, seedFromSuggestion, withAirlinePrefix } from "../flight-seed"
 
 const TR288: FlightSuggestion = {
   flightNumber: "TR288",
@@ -173,5 +173,21 @@ describe("seeding a derived leg from what the aeroplane flies next", () => {
     expect(withAirlinePrefix("12a", "TR")).toBe("TR12A")
     expect(withAirlinePrefix("SQ288", "TR")).toBe("SQ288")
     expect(withAirlinePrefix("288", null)).toBe("288")
+  })
+})
+
+describe("the airline shown in an empty Flight #", () => {
+  it("is added to digits and replaced by a designator", () => {
+    expect(afterPrefill("TR", "TR2", "TR")).toBe("TR2")
+    // Typing the code out of habit, one key at a time, and pasting it whole.
+    expect(afterPrefill("TR", "TRT", "TR")).toBe("T")
+    expect(afterPrefill("TR", "TRTR288", "TR")).toBe("TR288")
+    expect(afterPrefill("TR", "TRSQ12", "TR")).toBe("SQ12")
+  })
+
+  it("leaves everything else as typed", () => {
+    expect(afterPrefill("TR2", "TR28", "TR")).toBe("TR28")
+    expect(afterPrefill("TR", "T", "TR")).toBe("T")
+    expect(afterPrefill("TR", "TRS", undefined)).toBe("TRS")
   })
 })

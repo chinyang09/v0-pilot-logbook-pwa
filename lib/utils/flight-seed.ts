@@ -194,3 +194,15 @@ export function withAirlinePrefix(number: string, airline: string | null | undef
   const trimmed = (number || "").trim()
   return airline && /^\d{1,4}[A-Z]?$/i.test(trimmed) ? `${airline.toUpperCase()}${trimmed.toUpperCase()}` : number
 }
+
+/**
+ * What an EMPTY Flight # field holds after a key, when it was showing the
+ * airline as a prefix ("TR"): a LETTER typed first replaces the prefix — the
+ * pilot is writing the whole designator ("TR288" out of habit, "SQ12", a
+ * paste), and keeping it gave "TRTR288"; a digit is added to it ("TR288").
+ * Anything else is left as typed.
+ */
+export function afterPrefill(shown: string, typed: string, prefill: string | undefined): string {
+  if (!prefill || shown !== prefill || !typed.startsWith(prefill)) return typed
+  return /^[A-Za-z]/.test(typed.slice(prefill.length)) ? typed.slice(prefill.length) : typed
+}

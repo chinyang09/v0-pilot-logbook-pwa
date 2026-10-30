@@ -96,13 +96,19 @@ import { ChoicePicker, type MenuOption } from "@/components/ui/option-menu";
 import type { EntryType } from "@/types/entities/flight.types";
 import type { DisplayPreferences } from "@/types/db/stores.types";
 import type { ExtractedFlightData } from "@/lib/ocr";
-import type { FlightSuggestion } from "@/lib/lookup/flight-suggest";
-import { isSeedable, lookupPatch, ownedAfter, withAirlinePrefix, type LookupOwned, type SeedField } from "@/lib/utils/flight-seed";
+import { normalizeFlightNumber, type FlightSuggestion } from "@/lib/lookup/flight-suggest";
+import { afterPrefill, isSeedable, lookupPatch, ownedAfter, withAirlinePrefix, type LookupOwned, type SeedField } from "@/lib/utils/flight-seed";
 import { getAirportDisplayCode } from "@/lib/utils/airport-display";
 import { canLookUp, useFlightLookup, type FlightLookupState } from "@/hooks/use-flight-suggestion";
 import { useAirlineCode } from "@/hooks/use-airline-code";
 
 const EMPTY_OWNED: LookupOwned = {};
+
+/** Two spellings of one flight number — "288" with the airline, "TR0288", "TR288". */
+function sameFlightNumber(a: string | undefined, b: string | undefined, airline: string | null): boolean {
+  const norm = (n: string | undefined) => normalizeFlightNumber(withAirlinePrefix(n || "", airline));
+  return !!a && !!b && norm(a) === norm(b);
+}
 
 /**
  * What a lookup found, in one line: "Scheduled SIN → KIX · 02:25Z–08:55Z ·
@@ -273,7 +279,8 @@ function useDraftText(value: string, commit: (next: string) => void, prefill?: s
       setFocused(true);
     },
     onBlur: () => setFocused(false),
-    change: (next: string) => {
+    change: (typed: string) => {
+      const next = afterPrefill(draft, typed, prefill);
       setDraft(next);
       setAwaiting(true);
       startTransition(() => commit(next));
@@ -1370,13 +1377,16 @@ function FlightFormImpl({
   const applyLookup = useCallback(
     (s: FlightSuggestion, overwrite = false) => {
       const prev = formDataRef.current;
+      // An answer that lands after the pilot moved on — another number,
+      // another date, another flight open — is not about this record.
+      if (prev.date !== s.date || !sameFlightNumber(prev.flightNumber, s.flightNumber, airline)) return;
       const previous = lookupOwned.id === prev.id ? lookupOwned.owned : EMPTY_OWNED;
       const { patch, conflicts } = lookupPatch(prev, s, previous, { overwrite });
       setLookupOwned({ id: prev.id, owned: ownedAfter(prev, previous, patch) });
       setLookupConflicts(conflicts);
       if (Object.keys(patch).length) setFormData((current) => ({ ...current, ...patch }));
     },
-    [lookupOwned]
+    [lookupOwned, airline]
   );
   const flightLookup = useFlightLookup(applyLookup);
   const [lookupFor, setLookupFor] = useState(formData.id);
@@ -1397,7 +1407,14 @@ function FlightFormImpl({
       lookupOwned.id === formData.id && lookupOwned.owned.scheduledOut === formData.scheduledOut ? undefined : formData.scheduledOut;
     void flightLookup.run(number, formData.date || "", ownOut);
   }, [airline, flightLookup, formData.date, formData.flightNumber, formData.id, formData.scheduledOut, lookupOwned, updateField]);
-  const lookupState = flightLookup.state;
+  // The status line speaks for the number and date it was asked about; once
+  // either changes it has nothing to say until the pilot asks again.
+  const lookupState =
+    flightLookup.state &&
+    flightLookup.state.date === formData.date &&
+    sameFlightNumber(formData.flightNumber, flightLookup.state.number, airline)
+      ? flightLookup.state
+      : null;
   const lookupEnabled = isSeedable(formData);
 
   // Handle OCR data extraction and populate form
@@ -2092,7 +2109,7 @@ function FlightFormImpl({
                 aria-label="Flight number"
                 {...CODE_INPUT_PROPS}
                 value={formData.flightNumber || ""}
-                prefill={airline ?? undefined}
+                prefill={getEntryType(formData) === "simulator" ? undefined : airline ?? undefined}
                 transform={toUpper}
                 onCommit={commitFlightNumber}
                 onKeyDown={(e) => {

@@ -2,7 +2,8 @@
 
 /**
  * The duty the legal page's sector chain draws, in the DETAIL panel: each of
- * its flights with its gates, and where the aeroplane for the first leg is.
+ * its flights with its gates, and where the aeroplane for the next leg to fly
+ * is.
  * The same answer the duty band shows (`useDutyLookups`, one cache); a tap on
  * either row asks again. Nothing is stored.
  */
@@ -18,15 +19,16 @@ import { whereaboutsValue } from "@/hooks/use-aircraft-whereabouts"
 import { useDutyLookups } from "@/hooks/use-duty-lookups"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { getAirportDisplayCode } from "@/lib/utils/airport-display"
+import { inboundLeg } from "@/lib/utils/dashboard/duty-flights"
 
 export function DutyFlightsPanel({ atMs }: { atMs: number }) {
   const { preferences } = usePreferences()
   const pref = preferences.display.airportIdentifier
   const separator = preferences.display.clockSeparator
   const { setSelectedId } = useDetailPanel()
-  const { legs, lookups, loading, refresh } = useDutyLookups(atMs, { auto: true })
+  const { legs, lookups, loading, refresh } = useDutyLookups(atMs, { active: true })
   const day = new Date(atMs).toISOString().slice(0, 10)
-  const inboundLeg = legs.find((f) => f.aircraftReg)
+  const inboundFlight = inboundLeg(legs)
 
   return (
     <DetailFormPanel title={`Duty · ${day}`} dirty={false} canSave={false} saving={false} onSave={() => {}} onCancel={() => {}}>
@@ -38,8 +40,8 @@ export function DutyFlightsPanel({ atMs }: { atMs: number }) {
         </FormSection>
       ) : (
         <>
-          {inboundLeg && (
-            <FormSection title={`Aircraft · ${inboundLeg.aircraftReg}`}>
+          {inboundFlight && (
+            <FormSection title={`Aircraft · ${inboundFlight.aircraftReg} · before ${inboundFlight.flightNumber || "departure"}`}>
               <CheckRow
                 label="Inbound"
                 value={lookups ? whereaboutsValue(lookups.inbound, separator) : null}

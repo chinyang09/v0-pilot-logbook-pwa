@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest"
 import type { FlightLog } from "@/types/entities/flight.types"
-import { dutyFlights, legDepartureIso } from "../duty-flights"
+import { dutyFlights, inboundLeg, legDepartureIso } from "../duty-flights"
 
 const at = Date.parse("2026-10-30T01:25:00Z")
 const leg = (id: string, scheduledOut: string, over: Partial<FlightLog> = {}) =>
@@ -27,6 +27,26 @@ describe("a duty's legs", () => {
       at
     )
     expect(legs.map((l) => l.id)).toEqual(["flown"])
+  })
+
+  it("stop at the first long time on the ground — that is the next duty", () => {
+    const legs = dutyFlights(
+      [
+        leg("out", "02:25", { scheduledIn: "05:25" }),
+        leg("back", "06:20", { scheduledIn: "08:55" }),
+        leg("next-duty", "19:00", { scheduledIn: "21:00" }),
+      ],
+      at
+    )
+    expect(legs.map((l) => l.id)).toEqual(["out", "back"])
+  })
+
+  it("ask after the next leg still to fly, else the first", () => {
+    const flown = leg("out", "02:25", { aircraftReg: "9V-NCA", outTime: "02:31" })
+    const next = leg("back", "06:20", { aircraftReg: "9V-NCB" })
+    expect(inboundLeg([flown, next])?.id).toBe("back")
+    expect(inboundLeg([flown])?.id).toBe("out")
+    expect(inboundLeg([leg("x", "02:25")])).toBeNull()
   })
 
   it("departs at its scheduled OUT on its UTC date", () => {
