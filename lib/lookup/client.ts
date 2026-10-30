@@ -117,6 +117,13 @@ export const lookup = {
   /** That flight's gates, terminals and belt — "" until published. */
   flightGates: (number: string, date: string, out?: string, signal?: AbortSignal) =>
     lookupGet("flight/gates", { number, date, out }, signal),
+  /**
+   * Where an aeroplane is before `at` (ISO UTC; now when omitted): the flight
+   * bringing it in — landed, airborne or not yet left, and its arrival gate —
+   * and the one it flies after that.
+   */
+  aircraftWhereabouts: (reg: string, at?: string, signal?: AbortSignal) =>
+    lookupGet("aircraft/whereabouts", { reg, at }, signal),
   /** An airline's fleet by type; `code` is its IATA (2) or ICAO (3) designator. */
   airlineFleet: (code: string, signal?: AbortSignal) =>
     lookupGet("airline/fleet", code.trim().length === 3 ? { icao: code.trim() } : { iata: code.trim() }, signal),

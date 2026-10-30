@@ -113,6 +113,8 @@ export interface ExecutionResult {
   currenciesSaved: number;
   discrepancies: Discrepancy[];
   errors: Array<{ operation: string; message: string }>;
+  /** Every flight the import created or changed — for checks run after it. */
+  touchedFlightIds: string[];
 }
 
 export interface ExecuteOptions {
@@ -732,6 +734,7 @@ export async function executeRosterImport(
     currenciesSaved: 0,
     discrepancies: [],
     errors: [],
+    touchedFlightIds: [],
   };
 
   const currentUser = await getLoggingProfile();
@@ -1178,5 +1181,6 @@ export async function executeRosterImport(
     // Watermarks are advisory — never fail an import over them.
   }
 
+  result.touchedFlightIds = touchedFlightIds;
   return result;
 }

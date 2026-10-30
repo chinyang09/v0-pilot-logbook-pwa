@@ -19,6 +19,7 @@
 
 import type { FlightLog } from "@/types/entities/flight.types"
 import type { FlightSuggestion } from "@/lib/lookup/flight-suggest"
+import type { AircraftMovement } from "@/lib/lookup/aircraft-whereabouts"
 import { getEntryType } from "@/lib/utils/entry-type"
 
 export type SeedField =
@@ -76,4 +77,61 @@ export function seedFromSuggestion(
     if (blank(flight.aircraftType) && s.typecode) patch.aircraftType = s.typecode
   }
   return patch
+}
+
+const same = (a?: string, b?: string) => !!a && !!b && a.toUpperCase() === b.toUpperCase()
+
+/**
+ * A next leg or a return the pilot just made from a flight, filled from what
+ * the aeroplane flies NEXT (`aircraft/whereabouts`' `next`): the flight number,
+ * the far end and the scheduled times — blanks only, and only when that flight
+ * departs from this leg's own departure airport (otherwise it is not this
+ * leg) and, if this leg already names its arrival, goes there.
+ *
+ * `allowDate` lets the DATE move too, to the day that flight departs, up to a
+ * day after the leg's own. It is for a leg the app has just DERIVED — its date
+ * was copied from the flight before it, not chosen — and only while the leg
+ * records no times at all: an overnight turnaround's return is the next day.
+ */
+export function seedFromNextFlight(
+  flight: Partial<FlightLog>,
+  next: AircraftMovement,
+  opts: { allowDate?: boolean } = {}
+): Partial<FlightLog> {
+  if (!isSeedable(flight) || !next.origin || !next.scheduledDeparture) return {}
+  const fromHere = same(flight.departureIcao, next.origin.icao) || same(flight.departureIata, next.origin.iata)
+  if (!fromHere) return {}
+  if (
+    next.destination &&
+    ((flight.arrivalIcao && next.destination.icao && !same(flight.arrivalIcao, next.destination.icao)) ||
+      (!flight.arrivalIcao && flight.arrivalIata && next.destination.iata && !same(flight.arrivalIata, next.destination.iata)))
+  ) {
+    return {}
+  }
+
+  const departs = next.scheduledDeparture.slice(0, 10)
+  const patch: Partial<FlightLog> = {}
+  if (departs !== flight.date) {
+    const recorded = [flight.outTime, flight.offTime, flight.onTime, flight.inTime].some((t) => !blank(t))
+    const dayAfter = flight.date ? new Date(Date.parse(`${flight.date}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10) : ""
+    if (!opts.allowDate || recorded || departs !== dayAfter) return {}
+    patch.date = departs
+  }
+  if (blank(flight.flightNumber) && next.flightNumber) patch.flightNumber = next.flightNumber
+  if (next.destination && blank(flight.arrivalIcao) && blank(flight.arrivalIata)) {
+    patch.arrivalIcao = next.destination.icao
+    patch.arrivalIata = next.destination.iata
+  }
+  if (blank(flight.scheduledOut)) patch.scheduledOut = hhmm(next.scheduledDeparture)
+  if (blank(flight.scheduledIn) && hhmm(next.scheduledArrival)) patch.scheduledIn = hhmm(next.scheduledArrival)
+  return patch
+}
+
+/**
+ * A flight number typed as digits alone takes the pilot's airline (Settings ›
+ * Logging): "288" → "TR288". Anything with a letter in it is left as typed.
+ */
+export function withAirlinePrefix(number: string, airline: string | null | undefined): string {
+  const trimmed = (number || "").trim()
+  return airline && /^\d{1,4}[A-Z]?$/i.test(trimmed) ? `${airline.toUpperCase()}${trimmed.toUpperCase()}` : number
 }

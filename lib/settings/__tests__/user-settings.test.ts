@@ -34,7 +34,7 @@ describe("resolveSettings", () => {
     const r = resolveSettings(null)
     expect(r.display.timeFormat).toBe(DEFAULT_DISPLAY_PREFERENCES.timeFormat)
     expect(r.autoFill).toEqual(DEFAULT_AUTO_FILL_PREFERENCES)
-    expect(r.logging).toEqual({ seat: null, pfRole: null, pfRoleFrom: null, newFlightPilotFlying: true, authority: "CAAS" })
+    expect(r.logging).toEqual({ seat: null, pfRole: null, pfRoleFrom: null, newFlightPilotFlying: true, authority: "CAAS", airline: null })
     expect("theme" in r.display).toBe(false)
   })
 

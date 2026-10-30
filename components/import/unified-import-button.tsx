@@ -222,6 +222,12 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           scheduleGeneratedAt: reportStampsRef.current.scheduleGeneratedAt,
           logbookGeneratedAt: reportStampsRef.current.logbookGeneratedAt,
         });
+        // A flight logged on another aeroplane than that day's published
+        // schedule gets a note in Discrepancies — never a change. In the
+        // background: it asks the network, and the import is already done.
+        void import("@/lib/utils/roster/aircraft-cross-check")
+          .then(({ crossCheckImportedAircraft }) => crossCheckImportedAircraft(result.touchedFlightIds))
+          .catch(() => {});
         const parts: string[] = [];
         if (result.created) parts.push(`${result.created} created`);
         if (result.updated) parts.push(`${result.updated} updated`);

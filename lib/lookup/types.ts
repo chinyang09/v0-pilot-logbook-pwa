@@ -9,9 +9,10 @@
 
 import type { Fr24Airport, Fr24Routes } from "@/lib/fr24/types"
 import type { FlightGates, FlightSuggestion } from "./flight-suggest"
+import type { AircraftMovement, AircraftWhereabouts } from "./aircraft-whereabouts"
 import type { AircraftCandidate, AirportCandidate } from "./search-candidates"
 
-export type { AircraftCandidate, AirportCandidate, FlightGates, FlightSuggestion }
+export type { AircraftCandidate, AirportCandidate, AircraftMovement, AircraftWhereabouts, FlightGates, FlightSuggestion }
 
 /** An airport as the app stores it — the Worker's, less the offset it carries. */
 export type EnrichedAirport = Omit<Fr24Airport, "timezoneOffsetSeconds">
@@ -37,6 +38,8 @@ export interface LookupRoutes extends Fr24Routes {
   "flight/suggest": FlightSuggestion
   /** Its departure and arrival gates; "" until published. */
   "flight/gates": FlightGates
+  /** Where an aeroplane is before a time: its inbound flight (and arrival gate) and the one after. */
+  "aircraft/whereabouts": AircraftWhereabouts
 }
 
 export type LookupRoute = keyof LookupRoutes

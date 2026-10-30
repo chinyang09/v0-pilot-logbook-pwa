@@ -24,6 +24,7 @@ import {
   MapPin,
   FileText,
   XCircle,
+  Plane,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -79,6 +80,11 @@ export const DISCREPANCY_TYPE_CONFIG: Record<
     icon: XCircle,
     label: "Stale Report",
     description: "Older report skipped to protect newer data",
+  },
+  aircraft_mismatch: {
+    icon: Plane,
+    label: "Aircraft",
+    description: "Logged on a different aircraft from the day's published schedule",
   },
   // These two normally render as a FlightMismatchCard on the discrepancies
   // page; the entries exist so a resolved one still has a label in the notes

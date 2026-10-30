@@ -23,6 +23,7 @@ import { addFleetAircraftToDatabase, batchGetAircraftByRegistrations } from "@/l
 import { getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
 import { CACHE_KEYS } from "@/hooks/data"
 import { normalizeRegistration } from "@/lib/utils/string"
+import { usePreferences } from "@/components/providers/preferences-provider"
 
 const SETTLE_MS = 500
 
@@ -32,7 +33,9 @@ type FleetState =
   | { status: "failed" }
 
 export function AirlineFleetSection({ onAdded }: { onAdded?: (count: number) => void }) {
-  const [code, setCode] = useState("")
+  // Starts at the pilot's own airline (Settings › Logging), when one is set.
+  const { preferences } = usePreferences()
+  const [code, setCode] = useState(preferences.logging.airline ?? "")
   const key = /^[A-Z0-9]{2,3}$/.test(code.trim().toUpperCase()) ? code.trim().toUpperCase() : null
   const [result, setResult] = useState<{ key: string; value: FleetState } | null>(null)
   const [adding, setAdding] = useState<string | null>(null)

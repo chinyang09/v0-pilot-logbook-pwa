@@ -242,3 +242,71 @@ describe("flight/suggest and flight/gates", () => {
     expect(await runCompositeRoute("flight/gates", { number: "TR288", date: "2026-12-30" })).toMatchObject({ ok: false, status: 404 })
   })
 })
+
+describe("aircraft/whereabouts", () => {
+  const calls: string[] = []
+  let answers: Record<string, () => Response>
+  const end = (iata: string, info: Record<string, string> = {}) => ({ iata, icao: "", name: iata, timezone: "", gate: "", terminal: "", baggage: "", ...info })
+  const flight = (over: Record<string, unknown>) => ({
+    fr24Id: "3c8a1b2f", flightNumber: "TR289", callsign: "", status: "", live: false, registration: "9V-NCA", typecode: "A21N", model: "",
+    airline: null, origin: end("DPS"), destination: end("SIN"),
+    scheduledDeparture: null, scheduledArrival: null, actualDeparture: null, actualArrival: null,
+    estimatedDeparture: null, estimatedArrival: null, durationSeconds: null,
+    ...over,
+  })
+  const soon = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString()
+
+  beforeEach(() => {
+    calls.length = 0
+    vi.stubEnv("FR24_PROXY_URL", "https://gw.test/")
+    vi.stubEnv("FR24_PROXY_SECRET", "s")
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input))
+        calls.push(url.pathname)
+        return (answers[url.pathname.slice(1)] ?? (() => json({ ok: false, error: "nothing" }, 404)))()
+      })
+    )
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
+
+  const list = (...flights: unknown[]) => () =>
+    json({ ok: true, source: "flight-list", data: { aircraft: { registration: "9V-NCA", typecode: "A21N" }, page: 1, totalPages: 1, total: flights.length, flights } })
+
+  it("answers a landed inbound with its arrival gate off the arrivals board, and the flight after it", async () => {
+    answers = {
+      "aircraft/flights": list(
+        flight({ flightNumber: "TR288", origin: end("SIN"), destination: end("DPS"), scheduledDeparture: soon(60) }),
+        flight({ scheduledDeparture: soon(-200), actualDeparture: soon(-195), actualArrival: soon(-30), scheduledArrival: soon(-25) })
+      ),
+      "airport/schedule": () =>
+        json({ ok: true, source: "airport.json", data: { flights: [flight({ scheduledDeparture: soon(-200), destination: end("", { gate: "D41", terminal: "1" }) })] } }),
+    }
+    const answer = await runCompositeRoute("aircraft/whereabouts", { reg: "9V-NCA", at: soon(60) })
+    expect(answer).toMatchObject({
+      ok: true,
+      data: { inbound: { flightNumber: "TR289", status: "landed", arrivalGate: "D41", arrivalTerminal: "1" }, next: { flightNumber: "TR288" } },
+    })
+    expect(calls).toEqual(["/aircraft/flights", "/airport/schedule"])
+  })
+
+  it("takes a live inbound's gate from the tracked flight, without the board", async () => {
+    answers = {
+      "aircraft/flights": list(flight({ live: true, scheduledDeparture: soon(-120), actualDeparture: soon(-115), estimatedArrival: soon(30) })),
+      "flight/details": () => json({ ok: true, source: "clickhandler", data: flight({ destination: end("SIN", { gate: "C11", terminal: "1" }) }) }),
+    }
+    const answer = await runCompositeRoute("aircraft/whereabouts", { reg: "9V-NCA" })
+    expect(answer).toMatchObject({ ok: true, data: { inbound: { status: "airborne", arrivalGate: "C11" }, next: null } })
+    expect(calls).toEqual(["/aircraft/flights", "/flight/details"])
+  })
+
+  it("refuses without a registration, and is 404 for one nobody lists", async () => {
+    answers = {}
+    expect(await runCompositeRoute("aircraft/whereabouts", {})).toMatchObject({ ok: false, status: 400 })
+    expect(await runCompositeRoute("aircraft/whereabouts", { reg: "9V-ZZZ" })).toMatchObject({ ok: false, status: 404 })
+  })
+})

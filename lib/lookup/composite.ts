@@ -8,6 +8,7 @@
  *   airport/candidates?q=VOV         every airport a partial code could be
  *   flight/suggest?number=TR288&date=2026-10-30[&out=02:25]   that flight that day
  *   flight/gates?number=TR288&date=2026-10-30[&out=02:25]     its gates, when published
+ *   aircraft/whereabouts?reg=9V-NCA[&at=ISO]   where the aeroplane is before `at`
  *
  * They were `/api/search/aircraft` and `/api/search/airport/candidates`. Under
  * the door they share its sign-in rule and its envelope: 200 `{ ok, data,
@@ -24,6 +25,7 @@ import { callFr24Worker } from "@/lib/fr24/worker-client"
 import type { Fr24Flight, Fr24Result } from "@/lib/fr24/types"
 import { normalizeRegistration } from "@/lib/utils/string"
 import { findOnBoard, normalizeFlightNumber, pickFlightOnDate, suggestFlight, type FlightGates } from "./flight-suggest"
+import { movementOf, pickWhereabouts } from "./aircraft-whereabouts"
 import { aircraftCandidates, airportCandidates } from "./search-candidates"
 import type { LookupRoutes } from "./types"
 
@@ -159,13 +161,66 @@ async function flightGatesRoute(query: Query): Promise<Fr24Result<LookupRoutes["
   return answer(null, null, "none", list.source)
 }
 
-type CompositeRoute = "aircraft/candidates" | "airport/candidates" | "flight/suggest" | "flight/gates"
+/** Boards reach about a day either side of now; an arrival outside that is not asked about. */
+const BOARD_REACH_MS = { back: 12 * 3600_000, ahead: 24 * 3600_000 }
+
+/**
+ * Where an aeroplane is before `at` (default now): its registration's list,
+ * the last flight it departs on before then — landed, airborne or not yet
+ * left — and the one after it. The inbound's ARRIVAL gate is where the crew
+ * usually joins it: the tracked flight's own while it is live, else the
+ * arrivals board at its destination, read from an hour before it lands.
+ */
+async function aircraftWhereaboutsRoute(query: Query): Promise<Fr24Result<LookupRoutes["aircraft/whereabouts"]>> {
+  const reg = (query.reg || "").trim()
+  if (normalizeRegistration(reg).length < 3) return { ok: false, status: 400, error: "reg= is required" }
+  const atMs = query.at ? Date.parse(query.at) : Date.now()
+  if (Number.isNaN(atMs)) return { ok: false, status: 400, error: "at= must be an ISO time" }
+
+  const list = await callFr24Worker("aircraft/flights", { reg, limit: 30 }, STEP_TIMEOUT_MS)
+  if (!list.ok) return list.status === 404 ? { ok: false, status: 404, error: `No flights found for ${reg}` } : list
+  const { inbound, next } = pickWhereabouts(list.data.flights, atMs)
+
+  let gate = { gate: "", terminal: "" }
+  if (inbound?.live && inbound.fr24Id) {
+    const live = await callFr24Worker("flight/details", { id: inbound.fr24Id }, STEP_TIMEOUT_MS)
+    if (live.ok && live.data.destination) gate = { gate: live.data.destination.gate, terminal: live.data.destination.terminal }
+  }
+  const arrival = inbound && movementOf(inbound).arrival
+  const arrivalMs = arrival ? Date.parse(arrival) : null
+  const destination = inbound?.destination?.iata || inbound?.destination?.icao
+  if (inbound && !gate.gate && destination && arrivalMs !== null && arrivalMs > Date.now() - BOARD_REACH_MS.back && arrivalMs < Date.now() + BOARD_REACH_MS.ahead) {
+    const board = await callFr24Worker(
+      "airport/schedule",
+      { code: destination, mode: "arrivals", limit: 100, timestamp: Math.floor(arrivalMs / 1000) - 3600 },
+      STEP_TIMEOUT_MS
+    )
+    const row = board.ok ? findOnBoard(board.data.flights, inbound.flightNumber, inbound.scheduledDeparture) : null
+    if (row?.destination) gate = { gate: row.destination.gate, terminal: row.destination.terminal }
+  }
+
+  return {
+    ok: true,
+    status: 200,
+    source: list.source,
+    data: {
+      registration: list.data.aircraft?.registration || inbound?.registration || reg.toUpperCase(),
+      typecode: list.data.aircraft?.typecode || inbound?.typecode || "",
+      at: new Date(atMs).toISOString(),
+      inbound: inbound ? { ...movementOf(inbound), arrivalGate: gate.gate, arrivalTerminal: gate.terminal } : null,
+      next: next ? movementOf(next) : null,
+    },
+  }
+}
+
+type CompositeRoute = "aircraft/candidates" | "airport/candidates" | "flight/suggest" | "flight/gates" | "aircraft/whereabouts"
 
 const COMPOSITE_ROUTES: { [R in CompositeRoute]: (query: Query) => Promise<Fr24Result<LookupRoutes[R]>> } = {
   "aircraft/candidates": aircraftCandidatesRoute,
   "airport/candidates": airportCandidatesRoute,
   "flight/suggest": flightSuggestRoute,
   "flight/gates": flightGatesRoute,
+  "aircraft/whereabouts": aircraftWhereaboutsRoute,
 }
 
 export const COMPOSITE_ROUTE_NAMES = Object.keys(COMPOSITE_ROUTES) as CompositeRoute[]

@@ -70,7 +70,8 @@ export default function Dashboard() {
   useEffect(() => {
     // Keep-alive: a hidden dashboard must not write the panel another page owns.
     if (!isActive || !onDashboard) return
-    if (selectedId?.startsWith("req:")) {
+    // `req:` and `duty:` are the legal page's own.
+    if (selectedId?.startsWith("req:") || selectedId?.startsWith("duty:")) {
       if (view !== "legal") setDetailContent(null)
       return
     }

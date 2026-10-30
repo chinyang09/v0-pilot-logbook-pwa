@@ -96,10 +96,13 @@ import type { EntryType } from "@/types/entities/flight.types";
 import type { DisplayPreferences } from "@/types/db/stores.types";
 import type { ExtractedFlightData } from "@/lib/ocr";
 import type { FlightSuggestion } from "@/lib/lookup/flight-suggest";
-import { isSeedable, seedFromSuggestion } from "@/lib/utils/flight-seed";
+import { isSeedable, seedFromSuggestion, withAirlinePrefix } from "@/lib/utils/flight-seed";
 import { getAirportDisplayCode } from "@/lib/utils/airport-display";
 import { useFlightSuggestion } from "@/hooks/use-flight-suggestion";
-import { gateLabel, useFlightGates } from "@/hooks/use-flight-gates";
+import { gatesValue, useFlightGates } from "@/hooks/use-flight-gates";
+import { useAircraftWhereabouts, whereaboutsValue } from "@/hooks/use-aircraft-whereabouts";
+import { CheckRow } from "@/components/check-row";
+import { flightInstantMs } from "@/lib/airports/code-changes";
 import { useDayKey } from "@/hooks/use-day-key";
 
 /** "Scheduled SIN → KIX · 02:25Z–08:55Z · 9V-TNF" / "Usually SIN → KIX · 02:25Z–08:55Z". */
@@ -1334,7 +1337,12 @@ function FlightFormImpl({
   );
 
   const commitRemarks = useCallback((v: string) => updateField("remarks", v), [updateField]);
-  const commitFlightNumber = useCallback((v: string) => updateField("flightNumber", v), [updateField]);
+  // A number typed as digits alone takes the pilot's airline (288 → TR288).
+  const airline = preferences.logging.airline;
+  const commitFlightNumber = useCallback(
+    (v: string) => updateField("flightNumber", withAirlinePrefix(v, airline)),
+    [updateField, airline]
+  );
 
   // Flight number + date → that flight (lib/lookup/flight-suggest.ts). Only a
   // change the pilot makes asks: the pair a flight OPENED with never spends a
@@ -1360,20 +1368,13 @@ function FlightFormImpl({
     Object.keys(seedFromSuggestion(formData, flightLookup.suggestion, { includeAircraft: false })).length > 0;
   const flightGates = useFlightGates(formData.flightNumber, formData.date, formData.scheduledOut);
   const dayKey = useDayKey();
-  const showGates =
-    !!formData.flightNumber && getEntryType(formData) !== "simulator" && nearToday(formData.date, dayKey);
-  const gatesValue = (() => {
-    const g = flightGates.state;
-    if (!g) return undefined;
-    if (g.status === "loading") return "Checking…";
-    if (g.status === "missing") return "No such flight that day";
-    if (g.status === "failed") return "Unavailable · tap to retry";
-    const dep = gateLabel(g.gates.departure.gate, g.gates.departure.terminal);
-    const arr = gateLabel(g.gates.arrival.gate, g.gates.arrival.terminal);
-    if (!dep && !arr) return "Not published yet";
-    const belt = g.gates.arrival.baggage ? ` · Belt ${g.gates.arrival.baggage}` : "";
-    return `${dep || "–"} → ${arr || "–"}${belt}`;
-  })();
+  const nearNow = getEntryType(formData) !== "simulator" && nearToday(formData.date, dayKey);
+  // Where the aeroplane is before THIS departure — the flight bringing it in.
+  const departsAtMs = formData.date ? flightInstantMs(formData.date, formData.scheduledOut || formData.outTime) : null;
+  const inbound = useAircraftWhereabouts(
+    formData.aircraftReg,
+    departsAtMs !== null && (formData.scheduledOut || formData.outTime) ? new Date(departsAtMs).toISOString() : null
+  );
 
   // Handle OCR data extraction and populate form
   const handleOCRDataExtracted = useCallback((data: ExtractedFlightData) => {
@@ -2143,14 +2144,24 @@ function FlightFormImpl({
           </SwipeableRow>
 
           {/* Checked on a tap and never stored: a gate is published late and
-              moves. Offered only around today, when one can be published. */}
-          {showGates && (
-            <SettingsRow
+              moves, and an aeroplane's whereabouts move by the minute. Offered
+              only around today, when either can be known. */}
+          {nearNow && !!formData.flightNumber && (
+            <CheckRow
               label="Gates"
-              value={gatesValue}
-              placeholder="Check"
-              onClick={() => void flightGates.check()}
+              value={gatesValue(flightGates.state)}
+              loading={flightGates.state?.status === "loading"}
+              onCheck={() => void flightGates.check()}
               icon={<DoorOpen className="h-4 w-4" />}
+            />
+          )}
+          {nearNow && !!formData.aircraftReg && (
+            <CheckRow
+              label="Inbound"
+              value={whereaboutsValue(inbound.state, clockSeparator)}
+              loading={inbound.state?.status === "loading"}
+              onCheck={() => void inbound.check()}
+              icon={<Plane className="h-4 w-4" />}
             />
           )}
 

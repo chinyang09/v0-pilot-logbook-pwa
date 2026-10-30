@@ -43,3 +43,23 @@ export function useFlightGates(flightNumber: string | undefined, date: string | 
 export function gateLabel(gate: string, terminal: string): string {
   return [gate, terminal && `T${terminal.replace(/^T/i, "")}`].filter(Boolean).join(" · ")
 }
+
+/**
+ * A gates check as a row's value: "D41 · T1 → 12 · Belt 5", or what stands
+ * in for it. `null` until checked.
+ */
+export function gatesValue(
+  state: ReturnType<typeof useFlightGates>["state"]
+): { primary: string; secondary?: string } | null {
+  if (!state || state.status === "loading") return null
+  if (state.status === "missing") return { primary: "No such flight that day" }
+  if (state.status === "failed") return { primary: "Unavailable · tap to retry" }
+  const dep = gateLabel(state.gates.departure.gate, state.gates.departure.terminal)
+  const arr = gateLabel(state.gates.arrival.gate, state.gates.arrival.terminal)
+  if (!dep && !arr) return { primary: "Not published yet" }
+  const belt = state.gates.arrival.baggage ? ` · Belt ${state.gates.arrival.baggage}` : ""
+  return {
+    primary: `${dep || "–"} → ${arr || "–"}${belt}`,
+    secondary: `${state.gates.departure.airport} → ${state.gates.arrival.airport}`,
+  }
+}

@@ -44,6 +44,7 @@ export type DiscrepancyType =
   | "missing_in_logbook"  // In schedule but not logged
   | "missing_in_schedule" // In logbook but not in schedule
   | "stale_report"        // Older report tried to overwrite newer data
+  | "aircraft_mismatch"   // Logged on another aeroplane than the day's published schedule (a note, never a change)
   // Kept on the record permanently rather than resolved-and-forgotten: these
   // are the pilot's own account of the sector, and a licence submission is
   // checked against them. Recorded whichever way the user decided.
