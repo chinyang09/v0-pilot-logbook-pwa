@@ -73,6 +73,11 @@ describe("flight suggestion", () => {
     expect(suggestFlight(LIST, "TR288", "2026-10-01")).toMatchObject({ basedOn: "2026-10-24", scheduledDeparture: "2026-10-01T02:15:00.000Z", registration: "" })
   })
 
+  it("is null for a day INSIDE the list the number does not operate — never usual times projected onto it", () => {
+    // TR288's real list skips 31 Oct; here it skips 27 Oct.
+    expect(suggestFlight(LIST, "TR288", "2026-10-27")).toBeNull()
+  })
+
   it("is null for a number the list does not have", () => {
     expect(suggestFlight(LIST, "TR600", "2026-10-30")).toBeNull()
     expect(suggestFlight([], "TR288", "2026-10-30")).toBeNull()

@@ -9,7 +9,10 @@
  * | basis | from | may fill a blank field by itself |
  * |---|---|---|
  * | `scheduled` | the list's row for THAT date | yes — it is that day's schedule |
- * | `usual` | the nearest dated row, its times moved to the date asked | no — it is a guess (a retimed or cancelled day looks the same), and scheduled times feed the FDP plan |
+ * | `usual` | a date OUTSIDE the list: the nearest dated row, its times moved to the date asked | no — it is a guess (a retimed or cancelled day looks the same), and scheduled times feed the FDP plan |
+ *
+ * A date INSIDE the list with no row for it is a day the number does not
+ * operate, and answers nothing.
  *
  * Dates are the app's: the UTC date of OUT (`FlightLog.date`). Pure, so the
  * door (Edge) and the tests share it.
@@ -120,6 +123,10 @@ export function suggestFlight(flights: Fr24Flight[], number: string, date: strin
   if (Number.isNaN(asked)) return null
   const dated = flights.filter((f) => normalizeFlightNumber(f.flightNumber) === wanted && f.scheduledDeparture)
   if (!dated.length) return null
+  // A date INSIDE the list's span with no row is a day the flight does not
+  // operate (TR288 skips some days) — not one to project times onto.
+  const days = dated.map((f) => dateOf(f.scheduledDeparture)).sort()
+  if (date >= days[0] && date <= days[days.length - 1]) return null
   const nearest = dated.reduce((best, f) =>
     Math.abs(Date.parse(dateOf(f.scheduledDeparture) + "T00:00:00Z") - asked) <
     Math.abs(Date.parse(dateOf(best.scheduledDeparture) + "T00:00:00Z") - asked)
