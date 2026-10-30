@@ -43,7 +43,12 @@ function dutyLine(legs: FlightLog[], lookups: DutyLookups | null, loading: boole
   const reg = lookups.inboundRegistration
   const w = lookups.inbound
   if (w?.status === "done") {
-    const lines = whereaboutsLines(w.whereabouts, w.checkedAt, display?.clockSeparator)
+    // The gate is already drawn under the stop the leg leaves from; saying it
+    // again here is the same fact twice. Only while that gate is not
+    // published yet does the inbound's arrival gate stand in for it.
+    const leg = lookups.inboundFlightId ? lookups.gates[lookups.inboundFlightId] : undefined
+    const gateShown = leg?.status === "done" && !!leg.gates.departure.gate
+    const lines = whereaboutsLines(w.whereabouts, w.checkedAt, display?.clockSeparator, { gate: !gateShown })
     return lines ? [reg, lines.primary, lines.secondary].filter(Boolean).join(" · ") : `${reg} · no earlier flight found`
   }
   if (w?.status === "missing") return `${reg} · no recent flights found`

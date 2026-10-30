@@ -28,6 +28,14 @@ interface DetailPanelContextType {
   // Set the selected item (updates URL unless opts.explicit === false)
   setSelectedId: (id: string | null, opts?: SetSelectedIdOptions) => void
   /**
+   * The detail's own Back (the phone overlay's button): back to the PREVIOUS
+   * PAGE when this detail was opened from another page (the crew card's
+   * "Seat and logged role" → Settings › Logging, a comparison → its flight),
+   * else close the detail onto this page's list. Not for a programmatic close
+   * (a delete, a cancel): those stay on the page.
+   */
+  backFromDetail: () => void
+  /**
    * True when the current route's selection was set explicitly this session
    * (user tapped an item / created one) rather than restored from
    * sessionStorage or auto-selected. The mobile overlay opens for explicit
@@ -194,6 +202,15 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
   const pushedBaseRef = useRef<string | null>(null)
   const lastUrlSelectedRef = useRef<string | null>(searchParams.get("selected"))
   const lastBaseRef = useRef(currentBase)
+  const lastPathnameRef = useRef(pathname)
+  /**
+   * The base whose detail was opened FROM ANOTHER PAGE — arrived at with
+   * `?selected=` already in the URL (a link like `/settings?selected=logging`).
+   * Its Back is the history's, not "close onto this page's list": the list is
+   * a parent the pilot never visited, and Back landed them there instead of
+   * on the page they came from.
+   */
+  const arrivedBaseRef = useRef<string | null>(null)
   const backClearedRef = useRef(false)
   /**
    * True from the moment we route a selection until `searchParams` catches up.
@@ -235,8 +252,16 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     // Only a back WITHIN a section closes its detail. Leaving the section drops
     // `?selected=` too, and treating that as a close would wipe the section we
     // just arrived at — including its stored selection.
+    const prevPathname = lastPathnameRef.current
+    lastPathnameRef.current = pathname
     if (prevBase !== currentBase) {
       pushedBaseRef.current = null
+      // Arrived with a selection, from a top-level PAGE. A redirect route
+      // (`/flights/<id>` → `/logbook?selected=<id>`, `/crew/<id>`) is not a
+      // page anyone was on, and may be the very first entry of the session —
+      // going back over it would leave the app.
+      const fromPage = (prevPathname?.split("/").filter(Boolean).length ?? 0) <= 1
+      arrivedBaseRef.current = urlSelected !== null && fromPage ? currentBase : null
       return
     }
     if (urlSelected !== null || prev === null) return
@@ -245,7 +270,7 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     setSelections(p => (p[currentBase] == null ? p : { ...p, [currentBase]: null }))
     setExplicitBases(p => (p[currentBase] ? { ...p, [currentBase]: false } : p))
     saveSelection(currentBase, null)
-  }, [searchParams, currentBase])
+  }, [searchParams, currentBase, pathname])
 
   const setSelectedId = useCallback((id: string | null, opts?: SetSelectedIdOptions) => {
     const explicit = opts?.explicit !== false
@@ -316,6 +341,22 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     }
   }, [currentBase, pathname, router, searchParams])
 
+  const backFromDetail = useCallback(() => {
+    if (arrivedBaseRef.current !== currentBase) {
+      setSelectedId(null)
+      return
+    }
+    // Opened from another page: go back to it. This page's selection is
+    // cleared as well, so a kept-alive page (the logbook) does not reopen the
+    // record the next time its tab is tapped.
+    arrivedBaseRef.current = null
+    pushedBaseRef.current = null
+    setSelections((p) => (p[currentBase] == null ? p : { ...p, [currentBase]: null }))
+    setExplicitBases((p) => (p[currentBase] ? { ...p, [currentBase]: false } : p))
+    saveSelection(currentBase, null)
+    router.back()
+  }, [currentBase, router, setSelectedId])
+
   // Re-sync ?selected= into the URL when returning to a keep-alive tab whose
   // EXPLICIT selection survived in state (tab navigation links carry no query,
   // so a copied URL used to lose the selection). Explicit-only on the exact
@@ -379,9 +420,10 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
       setDetailContent,
       selectedId,
       setSelectedId,
+      backFromDetail,
       selectionExplicit,
     }),
-    [detailContent, setDetailContent, selectedId, setSelectedId, selectionExplicit],
+    [detailContent, setDetailContent, selectedId, setSelectedId, backFromDetail, selectionExplicit],
   )
 
   return (
@@ -397,6 +439,7 @@ const defaultValue: DetailPanelContextType = {
   setDetailContent: () => {},
   selectedId: null,
   setSelectedId: () => {},
+  backFromDetail: () => {},
   selectionExplicit: false,
 }
 

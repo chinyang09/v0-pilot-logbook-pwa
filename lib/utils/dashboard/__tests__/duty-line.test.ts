@@ -49,6 +49,8 @@ describe("the duty band's line", () => {
       },
     })
     expect(line(l)).toBe("9V-NCA · Landed 03:00Z · 30m ago · Gate D41 T1 · TR289 from DPS")
+    // Once the leg's own gate is drawn under its stop, it is not said twice.
+    expect(line({ ...l, gates: { a: gates("D41", "") } })).toBe("9V-NCA · Landed 03:00Z · 30m ago · TR289 from DPS")
   })
 
   it("says checking while it asks, and not asked when it has not", () => {

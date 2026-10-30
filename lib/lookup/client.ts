@@ -20,6 +20,24 @@ import type { EnrichedAirport, LookupRoute, LookupRoutes, PooledAircraft } from 
 
 const CLIENT_TIMEOUT_MS = 15000
 
+/**
+ * The caller's signal (a newer request cancelling this one) AND the timeout —
+ * a caller passing its own signal used to drop the timeout, so a request that
+ * never answered left the flight form's Lookup spinning for good.
+ */
+function withTimeout(signal: AbortSignal | undefined): AbortSignal {
+  const timeout = AbortSignal.timeout(CLIENT_TIMEOUT_MS)
+  if (!signal) return timeout
+  if (typeof AbortSignal.any === "function") return AbortSignal.any([signal, timeout])
+  // Engines before AbortSignal.any (Safari < 17.4): one controller both feed.
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  if (signal.aborted) abort()
+  signal.addEventListener("abort", abort, { once: true })
+  timeout.addEventListener("abort", abort, { once: true })
+  return controller.signal
+}
+
 export async function lookupGet<R extends LookupRoute>(
   route: R,
   params: Record<string, string | number | undefined> = {},
@@ -32,9 +50,7 @@ export async function lookupGet<R extends LookupRoute>(
   const qs = query.toString()
 
   try {
-    const response = await fetch(`/api/lookup/${route}${qs ? `?${qs}` : ""}`, {
-      signal: signal ?? AbortSignal.timeout(CLIENT_TIMEOUT_MS),
-    })
+    const response = await fetch(`/api/lookup/${route}${qs ? `?${qs}` : ""}`, { signal: withTimeout(signal) })
     const body = (await response.json().catch(() => null)) as
       | { ok?: boolean; data?: unknown; source?: string; error?: string }
       | null
@@ -58,7 +74,7 @@ async function poolPost<T>(path: string, body: unknown, signal?: AbortSignal): P
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-      signal: signal ?? AbortSignal.timeout(CLIENT_TIMEOUT_MS),
+      signal: withTimeout(signal),
     })
     if (!response.ok) return null
     const data = (await response.json()) as { results?: Record<string, T> }
@@ -109,8 +125,9 @@ export const lookup = {
   liveFlight: (id: string, signal?: AbortSignal) => lookupGet("flight/details", { id }, signal),
   /**
    * A flight number on a UTC date (`FlightLog.date`). `basis: "scheduled"` is
-   * that day's schedule and may fill a blank field; `"usual"` is another day's
-   * times moved onto it and must only be OFFERED.
+   * that day's schedule; `"usual"` is another day's times moved onto it, and
+   * never carries an aeroplane. Asked only when the pilot asks (the flight
+   * form's Lookup) — `lookupPatch` decides what it may write.
    */
   flightSuggest: (number: string, date: string, out?: string, signal?: AbortSignal) =>
     lookupGet("flight/suggest", { number, date, out }, signal),

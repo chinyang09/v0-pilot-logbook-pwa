@@ -99,7 +99,8 @@ function span(ms: number): string {
 export function whereaboutsLines(
   w: AircraftWhereabouts,
   nowMs: number,
-  clockSeparator: "colon" | "none" = "colon"
+  clockSeparator: "colon" | "none" = "colon",
+  opts: { gate?: boolean } = {}
 ): { primary: string; secondary: string } | null {
   const inbound = w.inbound
   if (!inbound) return null
@@ -114,7 +115,7 @@ export function whereaboutsLines(
           : `Landing ${clock}${at !== null ? ` · in ${span(at - nowMs)}` : ""}`
         : `Due ${clock} · not departed yet`
   const from = inbound.origin ? ` from ${inbound.origin.iata || inbound.origin.icao}` : ""
-  const gate = [inbound.arrivalGate && `Gate ${inbound.arrivalGate}`, inbound.arrivalTerminal && `T${inbound.arrivalTerminal.replace(/^T/i, "")}`]
+  const gate = opts.gate === false ? "" : [inbound.arrivalGate && `Gate ${inbound.arrivalGate}`, inbound.arrivalTerminal && `T${inbound.arrivalTerminal.replace(/^T/i, "")}`]
     .filter(Boolean)
     .join(" ")
   // The gate first: it is what a pilot walking in needs, and where a line is

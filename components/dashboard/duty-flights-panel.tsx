@@ -16,10 +16,16 @@ import { CheckRow } from "@/components/check-row"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { gatesValue } from "@/hooks/use-flight-gates"
 import { whereaboutsValue } from "@/hooks/use-aircraft-whereabouts"
-import { useDutyLookups } from "@/hooks/use-duty-lookups"
+import { useDutyLookups, type DutyLookups } from "@/hooks/use-duty-lookups"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { getAirportDisplayCode } from "@/lib/utils/airport-display"
 import { inboundLeg } from "@/lib/utils/dashboard/duty-flights"
+
+/** Whether a leg's departure gate is published — and so shown in its Gates row. */
+function departureGateShown(lookups: DutyLookups, flightId: string): boolean {
+  const g = lookups.gates[flightId]
+  return g?.status === "done" && !!g.gates.departure.gate
+}
 
 export function DutyFlightsPanel({ atMs }: { atMs: number }) {
   const { preferences } = usePreferences()
@@ -44,7 +50,9 @@ export function DutyFlightsPanel({ atMs }: { atMs: number }) {
             <FormSection title={`Aircraft · ${inboundFlight.aircraftReg} · before ${inboundFlight.flightNumber || "departure"}`}>
               <CheckRow
                 label="Inbound"
-                value={lookups ? whereaboutsValue(lookups.inbound, separator) : null}
+                // The leg's own Gates row below says the gate once it is
+                // published; the inbound's arrival gate stands in until then.
+                value={lookups ? whereaboutsValue(lookups.inbound, separator, { gate: !departureGateShown(lookups, inboundFlight.id) }) : null}
                 loading={loading}
                 onCheck={refresh}
                 icon={<Plane className="h-4 w-4" />}

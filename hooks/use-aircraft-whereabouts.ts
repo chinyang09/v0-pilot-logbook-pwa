@@ -41,10 +41,11 @@ export function useAircraftWhereabouts(registration: string | undefined, atIso?:
 /** A whereabouts check as a row's value. `null` until checked. */
 export function whereaboutsValue(
   state: WhereaboutsState | null | undefined,
-  clockSeparator: "colon" | "none" = "colon"
+  clockSeparator: "colon" | "none" = "colon",
+  opts: { gate?: boolean } = {}
 ): { primary: string; secondary?: string } | null {
   if (!state || state.status === "loading") return null
   if (state.status === "missing") return { primary: "No recent flights found" }
   if (state.status === "failed") return { primary: "Unavailable · tap to retry" }
-  return whereaboutsLines(state.whereabouts, state.checkedAt, clockSeparator) ?? { primary: "No earlier flight found" }
+  return whereaboutsLines(state.whereabouts, state.checkedAt, clockSeparator, opts) ?? { primary: "No earlier flight found" }
 }
