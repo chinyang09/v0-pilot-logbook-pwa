@@ -668,15 +668,25 @@ async function exploreUpstreams(s, log) {
     ["airline routes page", `${WWW}/data/airlines/${slug}/routes`, "html"],
     // What a routes-map pin asks for: an airport's destinations on this
     // airline (a guess at the page's own query, from its old markup).
-    ["airline routes from an airport (guess)", `${WWW}/data/airlines/${slug}/routes?get-airport-arr-dep=${s.airportIata}&format=json`, (d) => d],
+    // Answered as `{ arrivals, departures }`, each by country → `{ number, airports }`;
+    // shaped down to ONE destination, which is where the detail is.
+    [
+      "airline routes from an airport",
+      `${WWW}/data/airlines/${slug}/routes?get-airport-arr-dep=${s.airportIata}&format=json`,
+      (d) => {
+        const country = Object.values(d?.departures || {})[0]
+        const [code, airport] = Object.entries(country?.airports || {})[0] || []
+        return { countries: Object.keys(d?.departures || {}).length, code, airport }
+      },
+    ],
     // An airport's departures board and a flight number's history, as pages.
     ["airport departures page", `${WWW}/airport/${s.airportIata.toLowerCase()}/departures`, "html"],
     ["flight number page", `${WWW}/data/flights/${s.flight.toLowerCase()}`, "html"],
     // The board's own data (the in-use schedule route), one row deep — where a gate would be.
     [
-      "airport.json departures (one row)",
+      "airport.json departures (one row's airports)",
       `${airportJsonUrl(s.code, ["schedule"], 1, 3)}&plugin-setting[schedule][mode]=departures&plugin-setting[schedule][timestamp]=${Math.floor(Date.now() / 1000)}`,
-      (d) => d?.result?.response?.airport?.pluginData?.schedule?.departures?.data?.[0],
+      (d) => d?.result?.response?.airport?.pluginData?.schedule?.departures?.data?.[0]?.flight?.airport,
     ],
     // What the airline has in the air (and on the ground, last 4h) right now.
     ["live-feed by airline", feedUrl({ airline: s.airline }), (d) => parseFeed(d)],

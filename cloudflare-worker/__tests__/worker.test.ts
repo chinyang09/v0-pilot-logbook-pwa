@@ -271,8 +271,8 @@ describe("routes", () => {
         "airline fleet page",
         "airport departures page",
         "flight number page",
-        "airport.json departures (one row)",
-        "airline routes from an airport (guess)",
+        "airport.json departures (one row's airports)",
+        "airline routes from an airport",
         "live-feed by airline",
         "in use: flight-list by reg (one flight)",
       ])
