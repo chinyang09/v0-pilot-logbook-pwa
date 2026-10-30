@@ -58,6 +58,8 @@ import type { ImportDefaults } from "@/types/db/stores.types";
 import { recalculateFlightFields } from "@/lib/utils/flight-calculations";
 import { normalizeAircraftType } from "@/lib/utils/parsers/shared/aircraft-type-map";
 import { hhmmToMinutes } from "@/lib/utils/time";
+import { flightInstantMs } from "@/lib/airports/code-changes";
+import type { Airport } from "@/types/entities/airport.types";
 import {
   deriveSectorCrew,
   type ParsedSector,
@@ -111,6 +113,8 @@ export interface ExecutionResult {
   currenciesSaved: number;
   discrepancies: Discrepancy[];
   errors: Array<{ operation: string; message: string }>;
+  /** Every flight the import created or changed — for checks run after it. */
+  touchedFlightIds: string[];
 }
 
 export interface ExecuteOptions {
@@ -132,6 +136,17 @@ export interface ExecuteOptions {
 // Sector → FlightLog hydration
 // ============================================================
 
+/** An airport by its ICAO, else by its IATA code as the code stood at `at`. */
+async function resolveFlightAirport(
+  icao: string | undefined,
+  iata: string | undefined,
+  at: number | null
+): Promise<Airport | undefined> {
+  const byIcao = icao ? await getAirportByIcao(icao) : undefined;
+  if (byIcao) return byIcao;
+  return iata ? getAirportByIata(iata, at ?? undefined) : undefined;
+}
+
 async function hydrateFlightFromSector(
   sector: ParsedSector,
   currentUser: Personnel,
@@ -139,13 +154,19 @@ async function hydrateFlightFromSector(
   importSource: FlightLog["importSource"],
   importDefaults: ImportDefaults
 ): Promise<FlightLogCreate> {
+  // The parsers resolved each code to the airport it meant when the sector
+  // flew (a code can move — VTZ, VOVZ → VOVI); the IATA lookup is the fallback,
+  // at the same instants. Offsets are taken at those instants too.
+  const out = sector.actualOut || sector.scheduledOut;
+  const depAt = flightInstantMs(sector.date, out);
+  const arrAt = flightInstantMs(sector.date, sector.actualIn || sector.scheduledIn || out, out);
   const [depAirport, arrAirport] = await Promise.all([
-    getAirportByIata(sector.departureIata),
-    getAirportByIata(sector.arrivalIata),
+    resolveFlightAirport(sector.departureIcao, sector.departureIata, depAt),
+    resolveFlightAirport(sector.arrivalIcao, sector.arrivalIata, arrAt),
   ]);
 
-  const depOffset = depAirport ? getAirportTimeInfo(depAirport.tz).offset : 0;
-  const arrOffset = arrAirport ? getAirportTimeInfo(arrAirport.tz).offset : 0;
+  const depOffset = depAirport ? getAirportTimeInfo(depAirport.tz, new Date(depAt ?? Date.now())).offset : 0;
+  const arrOffset = arrAirport ? getAirportTimeInfo(arrAirport.tz, new Date(arrAt ?? Date.now())).offset : 0;
 
   // Crew: schedule provides full crew with crewIds; logbook-only path uses
   // the resolved truncation. `deriveSectorCrew` is the shared resolver the
@@ -404,9 +425,16 @@ async function postWriteRecalculate(
 ): Promise<void> {
   const flight = await userDb.flights.get(flightId);
   if (!flight) return;
+  // The flight's own ICAO is the airport; its IATA only when it has none, and
+  // then as the code stood when the flight flew.
+  const out = flight.outTime || flight.scheduledOut;
   const [depAp, arrAp] = await Promise.all([
-    getAirportByIata(flight.departureIata),
-    getAirportByIata(flight.arrivalIata),
+    resolveFlightAirport(flight.departureIcao, flight.departureIata, flightInstantMs(flight.date, out)),
+    resolveFlightAirport(
+      flight.arrivalIcao,
+      flight.arrivalIata,
+      flightInstantMs(flight.date, flight.inTime || flight.scheduledIn || out, out)
+    ),
   ]);
   const updates = recalculateFlightFields(
     flight,
@@ -706,6 +734,7 @@ export async function executeRosterImport(
     currenciesSaved: 0,
     discrepancies: [],
     errors: [],
+    touchedFlightIds: [],
   };
 
   const currentUser = await getLoggingProfile();
@@ -1152,5 +1181,6 @@ export async function executeRosterImport(
     // Watermarks are advisory — never fail an import over them.
   }
 
+  result.touchedFlightIds = touchedFlightIds;
   return result;
 }

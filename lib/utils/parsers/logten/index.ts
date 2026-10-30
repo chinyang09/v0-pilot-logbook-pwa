@@ -28,7 +28,7 @@ import {
   userDb,
 } from "@/lib/db";
 import { normalizeRegistration } from "@/lib/utils/string";
-import { enrichAirportBatch } from "../shared/airport-enricher";
+import { codeConflictMessage, enrichAirportBatch } from "../shared/airport-enricher";
 import { enrichAircraftBatch } from "../shared/aircraft-enricher";
 import type { NormalizedDocument } from "../types";
 import { parseLogtenAddressBook } from "./address-book";
@@ -252,6 +252,9 @@ export async function parseLogtenExport(
       for (const [code, airport] of enriched.enriched) {
         airports.set(code, airport);
       }
+      for (const conflict of enriched.codeConflicts ?? []) {
+        plan.warnings.push({ line: 0, message: codeConflictMessage(conflict) });
+      }
     }
     for (const [code, airport] of airports) {
       try {
@@ -283,6 +286,7 @@ export async function parseLogtenExport(
         existingFlights,
         airports,
         offsets,
+        offsetAt: (tz, at) => getAirportTimeInfo(tz, at).offset,
         typeByRegistration: plan.aircraft.typeByRegistration,
         lookupByRegistration,
       },

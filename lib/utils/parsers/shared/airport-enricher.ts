@@ -3,10 +3,12 @@
  * Same shape as aircraft-enricher.ts, applied to airport codes.
  *
  *   1. Local IndexedDB (getAirportByIcao/getAirportByIata) — fast
- *   2. Server batch (POST /api/search/airport/batch) — MongoDB cache,
- *      filtered by enrichedAt freshness (180 day TTL)
- *   3. FR24 live (GET /api/search/airport?q=CODE) — per-code fallback,
- *      which itself also checks the MongoDB cache before hitting FR24
+ *   2. The shared pool (`lookup.poolAirports`, POST /api/lookup/pool/airport) —
+ *      MongoDB, filtered by enrichedAt freshness (180 day TTL), every code in
+ *      one request
+ *   3. The gateway (`lookupAirportLive`, GET /api/lookup/airport) — per-code
+ *      fallback, on the Edge runtime; a timezone it did not carry is derived
+ *      from the coordinates (`deriveTimezone`), or it would be stored as "UTC"
  *
  * Results from steps 2 and 3 are written back to local IndexedDB as custom
  * airports, so the next import for the same code is fully local. FR24 hits
@@ -15,6 +17,17 @@
  *
  * Codes can be a mix of ICAO (4 chars) and IATA (3 chars) — the batch
  * endpoint matches either field.
+ *
+ * A code that has MOVED between airports (`lib/airports/code-changes.ts` —
+ * VTZ, VOVZ → VOVI) is resolved through the airports it has meant: each of
+ * their ICAOs goes through the chain and comes back as a key of its own, so a
+ * caller picks the one a flight's DATE asks for (`pickAirportAt`). The code's
+ * own key holds the airport it means today.
+ *
+ * And a code the device answers locally is checked against the shared pool
+ * in the same request (`codeConflicts`): a pool that gives another airport for
+ * it is how a move nobody has dated yet shows up. It is reported, never
+ * applied — which airport a flight used depends on when it flew.
  */
 
 import {
@@ -25,6 +38,10 @@ import {
 import { submitAirportToServer } from "@/lib/submissions/submit"
 import { createId } from "@/lib/auth/shared/cuid"
 import { pooledForEach } from "./pooled-map"
+import { lookupAirportLive } from "@/lib/airports/online-lookup"
+import { lookup } from "@/lib/lookup/client"
+import type { EnrichedAirport } from "@/lib/lookup/types"
+import { icaoForIataAt, icaosForIata, isReassignedIata } from "@/lib/airports/code-changes"
 import type { Airport } from "@/types/entities/airport.types"
 
 export interface EnrichAirportProgress {
@@ -34,31 +51,28 @@ export interface EnrichAirportProgress {
   stage: "local" | "server-batch" | "fr24"
 }
 
+/** A code this device and the shared pool resolve to DIFFERENT airports. */
+export interface AirportCodeConflict {
+  code: string
+  localIcao: string
+  poolIcao: string
+}
+
 export interface EnrichAirportResult {
   /** Map of original input code → resolved Airport. Includes whatever was
-   *  already in local IndexedDB as well as freshly-enriched entries. */
+   *  already in local IndexedDB as well as freshly-enriched entries, and the
+   *  ICAO keys of every airport a moved code has meant. */
   enriched: Map<string, Airport>
   /** Codes that no source could resolve. */
   failedCodes: string[]
+  /** Locally resolved codes the shared pool answers with another airport. */
+  codeConflicts: AirportCodeConflict[]
   stats: {
     localHits: number
     serverBatchHits: number
     fr24Hits: number
     failed: number
   }
-}
-
-type EnrichedAirportPayload = {
-  icao: string
-  iata: string
-  name: string
-  city: string
-  country: string
-  countryCode: string
-  latitude: number
-  longitude: number
-  elevation: number
-  timezone: string
 }
 
 async function localLookup(code: string): Promise<Airport | undefined> {
@@ -78,7 +92,7 @@ async function localLookup(code: string): Promise<Airport | undefined> {
   return (await getAirportByIcao(c)) || (await getAirportByIata(c))
 }
 
-async function persistEnriched(payload: EnrichedAirportPayload): Promise<Airport> {
+async function persistEnriched(payload: EnrichedAirport): Promise<Airport> {
   const submissionId = createId()
   const airport = await addCustomAirport({
     icao: payload.icao,
@@ -104,12 +118,17 @@ export async function enrichAirportBatch(
   const stats = { localHits: 0, serverBatchHits: 0, fr24Hits: 0, failed: 0 }
 
   if (codes.length === 0) {
-    return { enriched, failedCodes: [], stats }
+    return { enriched, failedCodes: [], codeConflicts: [], stats }
   }
 
+  const requested = codes.map((c) => c.trim().toUpperCase()).filter(Boolean)
+  // A moved code is resolved through the airports it has meant, never asked
+  // about by itself: online, the code alone answers with one of them, and
+  // which one is exactly the question the date has to settle.
   const uniqueCodes = Array.from(
-    new Set(codes.map((c) => c.trim().toUpperCase()).filter(Boolean))
+    new Set(requested.flatMap((c) => (isReassignedIata(c) ? icaosForIata(c) : [c])))
   )
+  const movedCodes = Array.from(new Set(requested.filter(isReassignedIata)))
 
   // ---------- 1. Local IndexedDB ----------
   for (const code of uniqueCodes) {
@@ -121,20 +140,24 @@ export async function enrichAirportBatch(
   }
 
   let remaining = uniqueCodes.filter((c) => !enriched.has(c))
+  // IATA codes answered here, to compare with the pool's answer.
+  const toCheck = uniqueCodes.filter((c) => c.length === 3 && enriched.has(c))
+  const codeConflicts: AirportCodeConflict[] = []
 
   // ---------- 2. Server batch (MongoDB cache) ----------
-  if (remaining.length > 0) {
+  if (remaining.length > 0 || toCheck.length > 0) {
     try {
-      const batchRes = await fetch("/api/search/airport/batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ codes: remaining }),
-        signal: AbortSignal.timeout(8000),
-      })
+      const resultMap = await lookup.poolAirports([...remaining, ...toCheck], AbortSignal.timeout(8000))
 
-      if (batchRes.ok) {
-        const { results } = await batchRes.json()
-        const resultMap = (results || {}) as Record<string, EnrichedAirportPayload>
+      if (resultMap) {
+
+        for (const code of toCheck) {
+          const pooled = resultMap[code]?.icao?.toUpperCase()
+          const local = enriched.get(code)?.icao?.toUpperCase()
+          if (pooled && local && pooled !== local) {
+            codeConflicts.push({ code, localIcao: local, poolIcao: pooled })
+          }
+        }
 
         for (const code of remaining) {
           const match = resultMap[code]
@@ -170,19 +193,7 @@ export async function enrichAirportBatch(
     // airports than one roster does.
     await pooledForEach(remaining, async (code) => {
         try {
-          const res = await fetch(
-            `/api/search/airport?q=${encodeURIComponent(code)}`,
-            { signal: AbortSignal.timeout(8000) }
-          )
-
-          if (!res.ok) {
-            failedCodes.push(code)
-            stats.failed++
-            return
-          }
-
-          const data = await res.json()
-          const match = data?.result as EnrichedAirportPayload | null
+          const match = await lookupAirportLive(code)
 
           if (!match || !match.icao) {
             failedCodes.push(code)
@@ -195,22 +206,18 @@ export async function enrichAirportBatch(
           stats.fr24Hits++
 
           // Fire-and-forget — hydrates MongoDB cache for other users.
-          // Skipped if the GET endpoint already came from cache (data.source
-          // === "cache") to avoid re-submitting unchanged records.
-          if (data?.source !== "cache") {
-            submitAirportToServer({
-              submissionId: airport.submissionId || createId(),
-              icao: match.icao,
-              iata: match.iata,
-              name: match.name,
-              city: match.city,
-              country: match.country,
-              timezone: match.timezone,
-              latitude: match.latitude,
-              longitude: match.longitude,
-              elevation: match.elevation,
-            })
-          }
+          submitAirportToServer({
+            submissionId: airport.submissionId || createId(),
+            icao: match.icao,
+            iata: match.iata,
+            name: match.name,
+            city: match.city,
+            country: match.country,
+            timezone: match.timezone,
+            latitude: match.latitude,
+            longitude: match.longitude,
+            elevation: match.elevation,
+          })
         } catch {
           failedCodes.push(code)
           stats.failed++
@@ -227,5 +234,22 @@ export async function enrichAirportBatch(
     )
   }
 
-  return { enriched, failedCodes, stats }
+  // A moved code's own key is the airport it means today.
+  for (const code of movedCodes) {
+    const current = icaoForIataAt(code)
+    const airport = current ? enriched.get(current) : undefined
+    if (airport) enriched.set(code, airport)
+    else if (!failedCodes.includes(code)) failedCodes.push(code)
+  }
+
+  return { enriched, failedCodes, codeConflicts, stats }
+}
+
+/** The import warning for a code the device and the shared pool disagree on. */
+export function codeConflictMessage(conflict: AirportCodeConflict): string {
+  return (
+    `${conflict.code} is ${conflict.localIcao} on this device, but the shared airport list now has it as ` +
+    `${conflict.poolIcao}. If the code has moved to a new airport, flights after the move are filed at the ` +
+    `old one — check their airports.`
+  )
 }

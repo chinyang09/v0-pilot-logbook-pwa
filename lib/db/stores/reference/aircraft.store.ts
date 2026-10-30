@@ -376,6 +376,26 @@ export async function bulkUpsertAircraftReferences(
   return entries.length
 }
 
+/**
+ * Aircraft from an airline's fleet, in one write. A registration this device
+ * already holds (live) is left exactly as it is — it may be the pilot's own
+ * record; a binned one is written again, because the pilot asked for it.
+ * Answers how many were written.
+ */
+export async function addFleetAircraftToDatabase(records: AircraftRecord[]): Promise<number> {
+  if (records.length === 0) return 0
+  const held = await batchGetAircraftByRegistrations(records.map((r) => r.registration))
+  const onDevice = new Set([...held.values()].map((a) => normalizeRegistration(a.registration)))
+  const entries: AircraftReference[] = records
+    .filter((r) => !onDevice.has(normalizeRegistration(r.registration)))
+    .map((record) => ({
+      registration: record.registration.toUpperCase(),
+      data: buildAircraftData(record, "fr24"),
+    }))
+  if (entries.length) await referenceDb.aircraftDatabase.bulkPut(entries)
+  return entries.length
+}
+
 // ============================================
 // Basic CRUD
 // ============================================

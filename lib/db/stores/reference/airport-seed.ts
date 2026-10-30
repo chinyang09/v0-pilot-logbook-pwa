@@ -7,8 +7,14 @@
 import { referenceDb } from "../../reference-db"
 import type { Airport } from "@/types/entities/airport.types"
 
-export const AIRPORT_SOURCE_URL = "/airports.min.json"
-export const AIRPORT_DATA_VERSION = "2025.10.27-min"
+export const AIRPORT_DATA_VERSION = "2026.10.29-min"
+/**
+ * Versioned, because the service worker serves other same-origin files
+ * stale-while-revalidate: a bare URL handed the first seed after a data change
+ * the PREVIOUS file, which was then stamped with the new version and never
+ * looked at again. A new version is a new URL, so it misses the cache.
+ */
+export const AIRPORT_SOURCE_URL = `/airports.min.json?v=${AIRPORT_DATA_VERSION}`
 
 /** What the seed worker reports. */
 export type AirportSeedMessage =

@@ -53,7 +53,8 @@ import {
   enrichAircraftBatch,
   type EnrichResult,
 } from "./shared/aircraft-enricher";
-import { enrichAirportBatch } from "./shared/airport-enricher";
+import { codeConflictMessage, enrichAirportBatch } from "./shared/airport-enricher";
+import { flightInstantMs, pickAirportAt } from "@/lib/airports/code-changes";
 import { resolveCrewByName } from "./shared/crew-resolver";
 
 // ============================================================
@@ -405,9 +406,9 @@ export async function parseLogbookV2(
         onProgress?.(pct, "Resolving airports", `${current}/${total}: ${code}`);
       }
     );
-    const airportMap = new Map(
-      Array.from(uniqueIatas).map((iata) => [iata, airportEnrich.enriched.get(iata)] as const)
-    );
+    for (const conflict of airportEnrich?.codeConflicts ?? []) {
+      plan.warnings.push({ line: 0, message: codeConflictMessage(conflict) });
+    }
 
     // Aircraft enrichment chain.
     let enrichResult: EnrichResult = {
@@ -466,8 +467,12 @@ export async function parseLogbookV2(
           continue;
         }
 
-        const depAp = airportMap.get(row.depIata);
-        const arrAp = airportMap.get(row.arrIata);
+        // A code names the airport it meant WHEN the sector flew (VTZ moved
+        // from VOVZ to VOVI on 17 Aug 2026). The logbook's times are UTC.
+        const depAt = flightInstantMs(row.flightDate, row.outT);
+        const arrAt = flightInstantMs(row.flightDate, row.inT, row.outT);
+        const depAp = pickAirportAt(airportEnrich.enriched, row.depIata, depAt);
+        const arrAp = pickAirportAt(airportEnrich.enriched, row.arrIata, arrAt);
 
         if (!depAp || !arrAp) {
           plan.warnings.push({
@@ -546,8 +551,10 @@ export async function parseLogbookV2(
         let toLdgContext: ParsedSector["toLdgContext"] | undefined;
 
         if (!planned && depAp && arrAp && row.outT && row.inT) {
-          const depOffset = getAirportTimeInfo(depAp.tz).offset;
-          const arrOffset = getAirportTimeInfo(arrAp.tz).offset;
+          // The offset at the time of the flight, not today's — a zone that
+          // keeps summer time answers differently in July and January.
+          const depOffset = getAirportTimeInfo(depAp.tz, new Date(depAt ?? Date.now())).offset;
+          const arrOffset = getAirportTimeInfo(arrAp.tz, new Date(arrAt ?? Date.now())).offset;
           const takeoffAtNight = isTakeoffAtNight(
             row.flightDate,
             row.outT,

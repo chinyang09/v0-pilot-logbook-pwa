@@ -58,7 +58,7 @@ async function runBatch(request: Request) {
   const startedAt = Date.now()
   const client = await getMongoClient()
   const db = client.db("skylog")
-  const results = { aircraft: { processed: 0, enriched: 0, failed: 0 }, airport: { processed: 0, enriched: 0 } }
+  const results = { aircraft: { processed: 0, enriched: 0, failed: 0, unavailable: 0 }, airport: { processed: 0, enriched: 0 } }
 
   // --- Aircraft batch enrichment ---
   const aircraftCol = db.collection("aircraftSubmissions")
@@ -80,7 +80,18 @@ async function runBatch(request: Request) {
     // risk the platform killing the function mid-write.
     if (Date.now() - startedAt > AIRCRAFT_TIME_BUDGET_MS) break
     results.aircraft.processed++
-    const enriched = await enrichAircraftFromFR24(doc.registration)
+    // No user request here, so the lookup goes to the production domain.
+    const lookup = await enrichAircraftFromFR24(doc.registration)
+    const enriched = lookup.status === "found" ? lookup.data : null
+
+    if (lookup.status === "unavailable") {
+      // The lookup could not be made (a challenge, a timeout). That is not
+      // evidence the aircraft is unknown, so its retries are left alone —
+      // counting these is what marked submissions "failed" while every
+      // lookup from Node was being challenged.
+      results.aircraft.unavailable++
+      continue
+    }
 
     if (enriched) {
       await aircraftCol.updateOne(

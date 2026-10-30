@@ -167,6 +167,7 @@ function LoggingSection({ preferences, updateLogging }: {
             clearable
           />
         )}
+        <AirlineRow value={preferences.logging.airline} onCommit={(airline) => updateLogging({ airline })} />
         <SelectRow<"pf" | "pm">
           label="New flights start as"
           description="A flight you add, or a next leg or return. A recorded flight keeps what was recorded, and an import takes the report's."
@@ -179,6 +180,40 @@ function LoggingSection({ preferences, updateLogging }: {
         />
       </FormSection>
     </div>
+  )
+}
+
+/**
+ * The pilot's airline by IATA code. Held as a draft while typed and saved on
+ * leaving the field — a synced setting written per keystroke would send "T"
+ * and then "TR" to every device.
+ */
+function AirlineRow({ value, onCommit }: { value: string | null; onCommit: (airline: string | null) => void }) {
+  const [draft, setDraft] = useState(value ?? "")
+  const [seen, setSeen] = useState(value)
+  // Follow the stored value when it changes underneath (another device).
+  if (seen !== value) {
+    setSeen(value)
+    setDraft(value ?? "")
+  }
+  const code = draft.trim().toUpperCase()
+  const valid = code === "" || /^[A-Z0-9]{2}$/.test(code)
+  return (
+    <SettingsRow
+      label="Airline"
+      description={
+        valid
+          ? "Its two-character code. A flight number typed as digits takes it (288 → TR288), and Add a fleet starts with it."
+          : "Two letters or digits, as on a flight number (TR, SQ, 3K)."
+      }
+      value={draft}
+      onChange={(v) => setDraft(v.toUpperCase().slice(0, 2))}
+      onBlur={() => {
+        if (valid && (code || null) !== value) onCommit(code || null)
+      }}
+      placeholder="e.g. TR"
+      uppercase
+    />
   )
 }
 

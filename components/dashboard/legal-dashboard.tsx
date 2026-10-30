@@ -21,6 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { RequirementDetailPanel } from "./requirement-detail-panel"
+import { DutyFlightsPanel } from "./duty-flights-panel"
 import { cn } from "@/lib/utils"
 
 /**
@@ -182,16 +183,25 @@ export function LegalDashboard({ className }: { className?: string }) {
   const openRequirement = openReqId
     ? status.legality.requirements.find((r) => r.id === openReqId) ?? null
     : null
+  // The sector chain opens its duty's flights — gates, the inbound aeroplane —
+  // as `duty:<start ms>`, so the one-screen page gains no row for them.
+  const openDutyMs = selectedId?.startsWith("duty:") ? Number(selectedId.slice(5)) : null
   const onDashboard = usePathname() === "/"
   React.useEffect(() => {
     // Keep-alive: a hidden dashboard must not write the panel another page
     // owns (the pathname moves a commit before the active-route store does).
-    if (!isActive || !onDashboard || !openReqId) return
+    if (!isActive || !onDashboard) return
+    if (openDutyMs !== null && Number.isFinite(openDutyMs)) {
+      setDetailContent(<DutyFlightsPanel key={openDutyMs} atMs={openDutyMs} />)
+      return
+    }
+    if (!openReqId) return
     setDetailContent(
       openRequirement ? <RequirementDetailPanel key={openRequirement.id} requirement={openRequirement} /> : null,
     )
-  }, [isActive, onDashboard, openReqId, openRequirement, setDetailContent])
+  }, [isActive, onDashboard, openReqId, openRequirement, openDutyMs, setDetailContent])
   const openRequirementCell = React.useCallback((id: string) => setSelectedId(`req:${id}`), [setSelectedId])
+  const openDuty = React.useCallback((atMs: number) => setSelectedId(`duty:${atMs}`), [setSelectedId])
 
   if (aggLoading || statusLoading) {
     return <Skeleton className={cn("h-full min-h-[24rem] rounded-3xl", className)} />
@@ -205,6 +215,7 @@ export function LegalDashboard({ className }: { className?: string }) {
       // Lit only where the panel BESIDE the page shows it.
       openRequirementId={isDesktop ? openReqId : null}
       onOpenRequirement={openRequirementCell}
+      onOpenDuty={openDuty}
       className={className}
     />
   )
@@ -217,6 +228,7 @@ export function LegalDashboardView({
   display,
   openRequirementId = null,
   onOpenRequirement,
+  onOpenDuty,
   className,
 }: {
   status: PilotStatus
@@ -231,6 +243,8 @@ export function LegalDashboardView({
   openRequirementId?: string | null
   /** Open a requirement's detail. Without it the cells are not buttons. */
   onOpenRequirement?: (id: string) => void
+  /** Open the duty the sector chain draws (its start, ms). Without it the chain is not a button. */
+  onOpenDuty?: (atMs: number) => void
   className?: string
 }) {
   const tone = TONE[status.state]
@@ -266,7 +280,7 @@ export function LegalDashboardView({
           sideways could see neither. */}
       <div className="relative flex min-h-0 flex-col divide-y divide-border/40 overflow-y-auto overscroll-contain scrollbar-hide">
         <Annunciator status={status} />
-        <DutyBand status={status} now={now} display={display} />
+        <DutyBand status={status} now={now} display={display} onOpenDuty={onOpenDuty} />
         <CurrencyBand requirements={currency} openId={openRequirementId} onOpen={onOpenRequirement} />
         <LimitsBand requirements={limits} />
       </div>
@@ -398,10 +412,12 @@ function DutyBand({
   status,
   now,
   display,
+  onOpenDuty,
 }: {
   status: PilotStatus
   now: number
   display?: DisplayPreferences
+  onOpenDuty?: (atMs: number) => void
 }) {
   const { phase, active, lastDuty, next, rest, standby } = status.duty
 
@@ -660,7 +676,16 @@ function DutyBand({
           could never answer — it showed history, not this duty. On duty it is
           THIS duty's progress; otherwise it is the NEXT duty's shape, which is
           what the footnote above it has just named. */}
-      <SectorChain legs={view.legs} nextRoute={view.nextRoute} />
+      <SectorChain
+        legs={view.legs}
+        nextRoute={view.nextRoute}
+        // The chain draws THIS duty on duty and the NEXT one otherwise, so
+        // that is the duty a tap opens.
+        onOpen={(() => {
+          const atMs = onDuty ? active.startMs : next?.reportMs
+          return onOpenDuty && atMs != null ? () => onOpenDuty(atMs) : undefined
+        })()}
+      />
     </section>
   )
 }
@@ -774,7 +799,7 @@ function Scale({ slots }: { slots: Slot[] }) {
  * come. The airport codes sit under the dots, so a four-sector day reads as a
  * pattern rather than as a route string nobody can locate themselves in.
  */
-function SectorChain({ legs, nextRoute }: { legs: SectorLeg[]; nextRoute?: string }) {
+function SectorChain({ legs, nextRoute, onOpen }: { legs: SectorLeg[]; nextRoute?: string; onOpen?: () => void }) {
   const stops = React.useMemo(() => {
     if (legs.length > 0) {
       return [
@@ -791,8 +816,20 @@ function SectorChain({ legs, nextRoute }: { legs: SectorLeg[]; nextRoute?: strin
 
   const activeIndex = legs.findIndex((l) => l.status === "active")
 
+  // A button when it opens its duty — the same box either way, so the band's
+  // height does not move; the hit area grows by a pseudo-element instead.
+  const Box = onOpen ? "button" : "div"
   return (
-    <div className="mt-3 flex items-start">
+    <Box
+      {...(onOpen
+        ? { type: "button" as const, onClick: onOpen, "aria-label": "Gates and aircraft for this duty" }
+        : {})}
+      className={cn(
+        "mt-3 flex w-full items-start",
+        onOpen &&
+          "relative rounded-md text-left after:absolute after:-inset-y-2 after:inset-x-0 after:content-[''] focus-visible:outline-2 focus-visible:outline-ring",
+      )}
+    >
       {stops.map((stop, i) => (
         <React.Fragment key={`${stop.code}-${i}`}>
           {i > 0 && (
@@ -826,7 +863,7 @@ function SectorChain({ legs, nextRoute }: { legs: SectorLeg[]; nextRoute?: strin
           </span>
         </React.Fragment>
       ))}
-    </div>
+    </Box>
   )
 }
 

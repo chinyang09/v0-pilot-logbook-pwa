@@ -62,7 +62,8 @@ import {
   summarizeOperations,
 } from "@/lib/utils/roster/plan-summary";
 import { normalizeAircraftType } from "./shared/aircraft-type-map";
-import { enrichAirportBatch } from "./shared/airport-enricher";
+import { codeConflictMessage, enrichAirportBatch } from "./shared/airport-enricher";
+import { icaoForIataAt, isReassignedIata } from "@/lib/airports/code-changes";
 import {
   flightMatchWindow,
   inWindow,
@@ -553,7 +554,16 @@ function extractSectorsFromRow(
 // ============================================================
 
 interface AirportLookup {
-  (iata: string): Promise<{ tz: string; icao?: string } | undefined>;
+  /** `atMs`: the instant the airport is wanted for — a code that has moved
+   *  between airports (`lib/airports/code-changes.ts`) depends on it. */
+  (iata: string, atMs?: number): Promise<{ tz: string; icao?: string } | undefined>;
+}
+
+/** The epoch ms of a normalised UTC time, or undefined. */
+function instantOf(t: { utcDate: string; utcTime: string } | null): number | undefined {
+  if (!t) return undefined;
+  const ms = Date.parse(`${t.utcDate}T${t.utcTime}:00Z`);
+  return Number.isNaN(ms) ? undefined : ms;
 }
 
 async function normalizeSector(
@@ -620,14 +630,23 @@ async function normalizeSector(
     return null;
   }
 
+  // Now that the sector has instants, a code that has MOVED between airports
+  // (VTZ: VOVZ until 17 Aug 2026, VOVI from then) names the one it meant when
+  // the aeroplane was there. The times above were converted on the first
+  // answer, which is safe: both sides of a move share a zone.
+  const depAt = isReassignedIata(raw.departureIata) ? await lookupAirport(raw.departureIata, instantOf(anchor)) : dep;
+  const arrAt = isReassignedIata(raw.arrivalIata)
+    ? await lookupAirport(raw.arrivalIata, instantOf(actIn || schedIn) ?? instantOf(anchor))
+    : arr;
+
   return {
     date: anchor.utcDate,
     flightNumber: raw.flightNumber,
     aircraftType: raw.aircraftType,
     departureIata: raw.departureIata,
     arrivalIata: raw.arrivalIata,
-    departureIcao: dep?.icao,
-    arrivalIcao: arr?.icao,
+    departureIcao: depAt?.icao,
+    arrivalIcao: arrAt?.icao,
     scheduledOut: schedOut?.utcTime,
     scheduledIn: schedIn?.utcTime,
     actualOut: actOut?.utcTime,
@@ -1047,12 +1066,16 @@ export async function parseScheduleCSV(
       { tz: string; icao?: string } | undefined
     >();
     const lookupAirport = async (
-      iata: string
+      iata: string,
+      atMs?: number
     ): Promise<{ tz: string; icao?: string } | undefined> => {
-      if (airportCache.has(iata)) return airportCache.get(iata);
-      const a = await getAirportByIata(iata);
+      // Keyed on the airport the code means at that instant, so a moved code
+      // caches each of its airports and an unmoved one caches once.
+      const key = `${iata}|${icaoForIataAt(iata, atMs) ?? ""}`;
+      if (airportCache.has(key)) return airportCache.get(key);
+      const a = await getAirportByIata(iata, atMs);
       const entry = a?.tz ? { tz: a.tz, icao: a.icao } : undefined;
-      airportCache.set(iata, entry);
+      airportCache.set(key, entry);
       return entry;
     };
 
@@ -1172,13 +1195,16 @@ export async function parseScheduleCSV(
     }
     if (uniqueIatasForEnrich.size > 0) {
       onProgress?.(45, "Resolving airports", `${uniqueIatasForEnrich.size} unique codes...`)
-      await enrichAirportBatch(
+      const airportEnrich = await enrichAirportBatch(
         Array.from(uniqueIatasForEnrich),
         ({ current, total, code }) => {
           const pct = 45 + Math.floor((current / total) * 5)
           onProgress?.(pct, "Resolving airports", `${current}/${total}: ${code}`)
         }
       )
+      for (const conflict of airportEnrich?.codeConflicts ?? []) {
+        plan.warnings.push({ line: 0, message: codeConflictMessage(conflict) })
+      }
       // The in-import airportCache inside lookupAirport will pick up the
       // newly-written records on its next call — no need to invalidate it
       // because it hasn't been populated yet (Stage B hasn't started).

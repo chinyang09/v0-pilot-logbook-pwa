@@ -103,6 +103,12 @@ export interface LoggingPreferences {
    * limits the operator flies under (`DutyTimeDefaults.regulationType`).
    */
   authority: LogbookAuthority
+  /**
+   * The airline the pilot flies for, by its two-character IATA code ("TR"). A
+   * flight number typed as digits takes it ("288" → "TR288"), and Add a fleet
+   * starts with it. null = not set.
+   */
+  airline: string | null
 }
 
 export const DEFAULT_LOGGING_PREFERENCES: LoggingPreferences = {
@@ -111,6 +117,7 @@ export const DEFAULT_LOGGING_PREFERENCES: LoggingPreferences = {
   pfRoleFrom: null,
   newFlightPilotFlying: true,
   authority: "CAAS",
+  airline: null,
 }
 
 export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {

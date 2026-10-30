@@ -12,6 +12,16 @@ import { addCustomAirport, getAirportByIcao, updateFlight } from "@/lib/db"
 import { syncService } from "@/lib/sync"
 import { submitAirportToServer } from "@/lib/submissions/submit"
 import { useRegisterDetailActions, useRegisterMainActions } from "@/hooks/use-page-actions"
+import { lookupAirportOnline } from "@/lib/airports/online-lookup"
+import { SuggestionList } from "@/components/ui/suggestion-list"
+import { lookup } from "@/lib/lookup/client"
+import type { AirportCandidate } from "@/lib/lookup/types"
+
+/** The airports a code being typed could be. Never throws; empty on any failure. */
+async function fetchAirportCandidates(code: string): Promise<AirportCandidate[]> {
+  const answer = await lookup.airportCandidates(code, AbortSignal.timeout(10000))
+  return answer.ok ? answer.data : []
+}
 
 export interface AirportNewFormProps {
   prefilledCode?: string
@@ -67,6 +77,9 @@ export function AirportNewForm({
   const [isFr24Loading, setIsFr24Loading] = useState(false)
   const [fr24Searched, setFr24Searched] = useState(false)
   const [fr24Found, setFr24Found] = useState(false)
+  // Every airport a code being typed could be — the pilot chooses; only the
+  // whole code is looked up and filled in by itself.
+  const [candidates, setCandidates] = useState<AirportCandidate[]>([])
 
   // Duplicate detection state
   const [existingAirport, setExistingAirport] = useState<{
@@ -82,6 +95,7 @@ export function AirportNewForm({
     const code = icao.trim().toUpperCase()
     if (code.length < 3) {
       setFr24Data(null)
+      setCandidates([])
       setFr24Searched(false)
       setFr24Found(false)
       setExistingAirport(null)
@@ -90,10 +104,13 @@ export function AirportNewForm({
 
     // Reset state when ICAO changes
     setFr24Data(null)
+    setCandidates([])
     setFr24Searched(false)
     setFr24Found(false)
     setExistingAirport(null)
 
+    // An answer for a code since typed over must not land.
+    let stale = false
     const timer = setTimeout(async () => {
       // 1. Check for duplicates in local DB
       setIsDuplicateChecking(true)
@@ -115,32 +132,28 @@ export function AirportNewForm({
         setIsDuplicateChecking(false)
       }
 
-      // 2. No duplicate found — search FR24 (only for 4-char ICAO codes)
+      // 2. Not on this device. A whole ICAO code is looked up (the shared pool,
+      // then FR24) and fills the form; anything shorter — or a code the lookup
+      // cannot answer — lists the airports it could be.
       if (code.length >= 4) {
         setIsFr24Loading(true)
         try {
-          const res = await fetch(
-            `/api/search/airport?q=${encodeURIComponent(code)}`,
-            { signal: AbortSignal.timeout(5000) }
-          )
-          if (res.ok) {
-            const data = await res.json()
-            if (data.result) {
-              setFr24Data(data.result)
-              setFr24Found(true)
-              // Auto-populate all fields from FR24
-              if (data.result.iata) setIata(data.result.iata)
-              if (data.result.name) setName(data.result.name)
-              if (data.result.city) setCity(data.result.city)
-              if (data.result.country) setCountry(data.result.country)
-              if (data.result.latitude) setLatitude(String(data.result.latitude))
-              if (data.result.longitude) setLongitude(String(data.result.longitude))
-              if (data.result.elevation) setElevation(String(data.result.elevation))
-              if (data.result.timezone) setTimezone(data.result.timezone)
-            } else {
-              setFr24Data(null)
-              setFr24Found(false)
-            }
+          const data = await lookupAirportOnline(code)
+          const others = data ? [] : (await fetchAirportCandidates(code)).filter((c) => c.icao !== code)
+          if (stale) return
+          setCandidates(others)
+          if (data) {
+            setFr24Data(data.result)
+            setFr24Found(true)
+            // Auto-populate all fields from the lookup
+            if (data.result.iata) setIata(data.result.iata)
+            if (data.result.name) setName(data.result.name)
+            if (data.result.city) setCity(data.result.city)
+            if (data.result.country) setCountry(data.result.country)
+            if (data.result.latitude) setLatitude(String(data.result.latitude))
+            if (data.result.longitude) setLongitude(String(data.result.longitude))
+            if (data.result.elevation) setElevation(String(data.result.elevation))
+            if (data.result.timezone) setTimezone(data.result.timezone)
           } else {
             setFr24Data(null)
             setFr24Found(false)
@@ -149,15 +162,25 @@ export function AirportNewForm({
           setFr24Data(null)
           setFr24Found(false)
         } finally {
-          setIsFr24Loading(false)
-          setFr24Searched(true)
+          if (!stale) {
+            setIsFr24Loading(false)
+            setFr24Searched(true)
+          }
         }
       } else {
+        setIsFr24Loading(true)
+        const found = await fetchAirportCandidates(code)
+        if (stale) return
+        setCandidates(found)
+        setIsFr24Loading(false)
         setFr24Searched(true)
       }
     }, 500)
 
-    return () => clearTimeout(timer)
+    return () => {
+      stale = true
+      clearTimeout(timer)
+    }
   }, [icao])
 
   // Auto-derive timezone from lat/lng via geo-tz API (only when FR24 didn't provide timezone)
@@ -359,7 +382,7 @@ export function AirportNewForm({
           )}
 
           {/* FR24 auto-search status */}
-          {!existingAirport && isFr24Loading && icao.trim().length >= 4 && (
+          {!existingAirport && isFr24Loading && icao.trim().length >= 3 && (
             <div className="flex items-center gap-2 px-4 py-2.5 row-divider text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
               Searching...
@@ -379,8 +402,30 @@ export function AirportNewForm({
             </div>
           )}
 
-          {/* FR24 no results — editable fields below */}
-          {!existingAirport && !isFr24Loading && !fr24Found && fr24Searched && icao.trim().length >= 4 && (
+          {/* A partial code — every airport it could be, to choose from */}
+          {!existingAirport && !isFr24Loading && !fr24Found && candidates.length > 0 && (
+            <div className="px-4 py-2.5 row-divider">
+              <div className="text-xs text-muted-foreground">
+                {candidates.length === 1 ? "1 airport matches" : `${candidates.length} airports match`} — choose one,
+                or keep typing.
+              </div>
+              <SuggestionList
+                label="Matching airports"
+                items={candidates.map((c) => ({
+                  key: c.icao,
+                  title: c.icao,
+                  badge: c.iata || undefined,
+                  subtitle: c.name || undefined,
+                }))}
+                // The chosen code is looked up in full, like a typed one — and
+                // one already on this device says so.
+                onSelect={(picked) => setIcao(picked)}
+              />
+            </div>
+          )}
+
+          {/* No results — editable fields below */}
+          {!existingAirport && !isFr24Loading && !fr24Found && fr24Searched && candidates.length === 0 && icao.trim().length >= 4 && (
             <div className="px-4 py-2.5 row-divider text-xs text-muted-foreground">
               Not found online — enter details manually below.
             </div>

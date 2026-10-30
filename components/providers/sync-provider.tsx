@@ -4,7 +4,13 @@ import type React from "react"
 import { useEffect, useRef } from "react"
 import { syncService } from "@/lib/sync"
 import { refreshAllData } from "@/hooks/data"
-import { migrateLegacyPreferences, repairFlightTimezones, repairMissingFlightTimes, repairSimulatorEntries } from "@/lib/db"
+import {
+  migrateLegacyPreferences,
+  repairFlightTimezones,
+  repairMissingFlightTimes,
+  repairReassignedAirports,
+  repairSimulatorEntries,
+} from "@/lib/db"
 import { useAuth } from "@/components/providers/auth-provider"
 
 /** One pass per sign-in or launch; each repair is idempotent and never fatal. */
@@ -32,6 +38,22 @@ async function repairStoredFlights(): Promise<number> {
     console.error("[Sync] flight time repair failed:", error)
   }
   return repaired
+}
+
+/**
+ * The moved-airport-code repair, apart from the rest: it waits for the airport
+ * table, and after a data change that is a reseed of ~29k rows (~15s) — not
+ * something the launch's other repairs and cache refresh should queue behind.
+ */
+async function repairAirportCodes(): Promise<void> {
+  try {
+    const { corrected, flagged } = await repairReassignedAirports()
+    if (corrected > 0) console.warn(`[Sync] moved ${corrected} flights to the airport their code meant on the day`)
+    if (flagged > 0) console.warn(`[Sync] noted ${flagged} signed or locked flights at a moved airport code`)
+    if (corrected + flagged > 0) await refreshAllData()
+  } catch (error) {
+    console.error("[Sync] airport code repair failed:", error)
+  }
 }
 
 /**
@@ -104,10 +126,12 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         await migrateSettings()
         await repairStoredFlights()
         await refreshAllData()
+        void repairAirportCodes()
       })()
     } else {
       console.log("[v0] Offline - skipping initial sync, triggers will handle it when online")
       void repairStoredFlights().then((n) => (n > 0 ? refreshAllData() : undefined))
+      void repairAirportCodes()
     }
   }, [userId])
 

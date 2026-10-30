@@ -1,6 +1,10 @@
 "use client"
 
 import { AircraftTypeSuggestions } from "@/components/aircraft-type-suggestions"
+import { AirlineFleetSection } from "@/components/airline-fleet-section"
+import { SuggestionList } from "@/components/ui/suggestion-list"
+import { normalizeRegistration } from "@/lib/utils/string"
+import { lookup } from "@/lib/lookup/client"
 import { CODE_INPUT_PROPS } from "@/lib/utils/input-props"
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Button } from "@/components/ui/button"
@@ -23,6 +27,14 @@ import type { AircraftType } from "@/types/entities/aircraft-type.types"
 import type { AircraftRecord } from "@/types/entities/aircraft.types"
 import { useAircraftTypeSearch } from "@/hooks/use-aircraft-type-search"
 import { useRegisterDetailActions, useRegisterMainActions } from "@/hooks/use-page-actions"
+
+/** An aircraft the online lookup answered with. */
+interface OnlineAircraft {
+  registration: string
+  typecode: string
+  icao24: string
+  operator: string
+}
 
 export interface AircraftNewFormProps {
   prefilledReg?: string
@@ -58,13 +70,14 @@ export function AircraftNewForm({
   // Type info looked up from Dexie for FR24 results
   const [fr24TypeInfo, setFr24TypeInfo] = useState<AircraftType | null>(null)
 
-  // FR24 inline search state
-  const [fr24Data, setFr24Data] = useState<{
-    registration: string
-    typecode: string
-    icao24: string
-    operator: string
-  } | null>(null)
+  // Online lookup state
+  const [fr24Data, setFr24Data] = useState<OnlineAircraft | null>(null)
+  // Every aircraft a PARTIAL registration could be — the pilot chooses; only
+  // an exact registration fills the form by itself.
+  const [candidates, setCandidates] = useState<OnlineAircraft[]>([])
+  // A candidate the pilot picked: the search that follows the registration
+  // change answers with it rather than asking again.
+  const pickedRef = useRef<OnlineAircraft | null>(null)
   const [isFr24Loading, setIsFr24Loading] = useState(false)
   const [fr24Searched, setFr24Searched] = useState(false)
   // Whether FR24 returned a result (drives whether type code field is shown)
@@ -82,6 +95,7 @@ export function AircraftNewForm({
     const reg = registration.trim()
     if (reg.length < 3) {
       setFr24Data(null)
+      setCandidates([])
       setFr24Searched(false)
       setFr24Found(false)
       setExistingAircraft(null)
@@ -90,12 +104,15 @@ export function AircraftNewForm({
 
     // Reset state when registration changes
     setFr24Data(null)
+    setCandidates([])
     setFr24Searched(false)
     setFr24Found(false)
     setExistingAircraft(null)
     setTypecode("")
     resetTypeSearch()
 
+    // An answer for a registration since typed over must not land.
+    let stale = false
     const timer = setTimeout(async () => {
       // 1. Check for duplicates in local DB
       setIsDuplicateChecking(true)
@@ -118,40 +135,46 @@ export function AircraftNewForm({
         setIsDuplicateChecking(false)
       }
 
-      // 2. No duplicate found — search FR24
+      const fill = (match: OnlineAircraft) => {
+        setFr24Data(match)
+        setFr24Found(true)
+        if (match.typecode) setTypecode(match.typecode)
+      }
+
+      // 2. A candidate the pilot just chose is the answer for its registration.
+      const picked = pickedRef.current
+      pickedRef.current = null
+      if (picked && normalizeRegistration(picked.registration) === normalizeRegistration(reg)) {
+        fill(picked)
+        setFr24Searched(true)
+        return
+      }
+
+      // 3. Online: an exact registration fills the form; anything else is a
+      // list of what it could be, for the pilot to choose from.
       setIsFr24Loading(true)
       try {
-        const res = await fetch(
-          `/api/search/aircraft?q=${encodeURIComponent(reg)}`,
-          { signal: AbortSignal.timeout(5000) }
-        )
-        if (res.ok) {
-          const data = await res.json()
-          const match = data.results?.[0] || null
-          if (match) {
-            setFr24Data(match)
-            setFr24Found(true)
-            // Auto-populate typecode from FR24
-            if (match.typecode) {
-              setTypecode(match.typecode)
-            }
-          } else {
-            setFr24Data(null)
-            setFr24Found(false)
-          }
-        } else {
-          setFr24Data(null)
-          setFr24Found(false)
-        }
+        // The door may ask the search and then the flight history.
+        const answer = await lookup.aircraftCandidates(reg)
+        if (stale) return
+        const results = answer.ok ? answer.data : []
+        const exact = results.find((r) => r.exact)
+        if (exact) fill(exact)
+        else setCandidates(results)
       } catch {
         setFr24Data(null)
         setFr24Found(false)
       } finally {
-        setIsFr24Loading(false)
-        setFr24Searched(true)
+        if (!stale) {
+          setIsFr24Loading(false)
+          setFr24Searched(true)
+        }
       }
     }, 500)
-    return () => clearTimeout(timer)
+    return () => {
+      stale = true
+      clearTimeout(timer)
+    }
   }, [registration, resetTypeSearch])
 
   // Look up ICAO type info when FR24 returns a typecode
@@ -162,6 +185,16 @@ export function AircraftNewForm({
     }
     getAircraftType(fr24Data.typecode).then((info) => setFr24TypeInfo(info))
   }, [fr24Data?.typecode])
+
+  const handlePickCandidate = useCallback(
+    (key: string) => {
+      const picked = candidates.find((c) => c.registration === key)
+      if (!picked) return
+      pickedRef.current = picked
+      setRegistration(picked.registration.toUpperCase())
+    },
+    [candidates]
+  )
 
   const handleSelectType = useCallback((type: AircraftType) => {
     baseHandleSelectType(type)
@@ -341,8 +374,28 @@ export function AircraftNewForm({
             </div>
           )}
 
-          {/* FR24 no results — editable type code field below */}
-          {!existingAircraft && !isFr24Loading && !fr24Found && fr24Searched && registration.trim().length >= 3 && (
+          {/* A partial registration — every aircraft it could be, to choose from */}
+          {!existingAircraft && !isFr24Loading && !fr24Found && candidates.length > 0 && (
+            <div className="px-4 py-2.5 row-divider">
+              <div className="text-xs text-muted-foreground">
+                {candidates.length === 1 ? "1 aircraft matches" : `${candidates.length} aircraft match`} — choose one,
+                or keep typing.
+              </div>
+              <SuggestionList
+                label="Matching aircraft"
+                items={candidates.map((c) => ({
+                  key: c.registration,
+                  title: c.registration,
+                  badge: c.typecode || undefined,
+                  subtitle: c.operator || undefined,
+                }))}
+                onSelect={handlePickCandidate}
+              />
+            </div>
+          )}
+
+          {/* No results — editable type code field below */}
+          {!existingAircraft && !isFr24Loading && !fr24Found && fr24Searched && candidates.length === 0 && registration.trim().length >= 3 && (
             <div className="px-4 py-2.5 row-divider text-xs text-muted-foreground">
               Not found online — enter type code manually below.
             </div>
@@ -423,12 +476,16 @@ export function AircraftNewForm({
           )}
       </FormSection>
 
-      <p className="text-xs text-muted-foreground px-4">
+      <p className="text-xs text-muted-foreground px-4 mb-6">
         {fr24Found
           ? "Aircraft details found and will be saved automatically."
           : "Enter the aircraft registration. Type code can be entered manually if not found online."
         }
       </p>
+
+      {/* A whole type of an airline's fleet at once, rather than tail by tail.
+          Not while picking one aircraft for a flight. */}
+      {!selectMode && <AirlineFleetSection />}
     </div>
   )
 

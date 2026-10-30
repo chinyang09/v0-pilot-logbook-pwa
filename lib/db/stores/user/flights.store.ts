@@ -21,10 +21,23 @@ import { DELETED_RETENTION_MS, isWithinRetention } from "@/lib/utils/retention"
 import { sortFlights } from "@/lib/utils/flight-sort"
 import { isSimulatorEntry, simulatorRepairPatch } from "@/lib/utils/entry-type"
 import { timezoneRepairPatch } from "@/lib/utils/flight-timezone"
-import { blockFollowersPatch, flightTimeRepairPatch } from "@/lib/utils/flight-calculations"
+import { blockFollowersPatch, flightTimeRepairPatch, recalculateFlightFields } from "@/lib/utils/flight-calculations"
 import { inferMultiPilotTime, inferPilotFlying, inferPilotRole } from "@/lib/utils/flight-evidence"
 import { parseAdditionalCrewField, withAdditionalCrew } from "@/lib/utils/crew-complement"
-import { getAirportByIcao, getAirportTimeInfo, isAirportTableSeeded } from "../reference/airports.store"
+import {
+  ensureAirportDatabase,
+  getAirportByIcao,
+  getAirportTimeInfo,
+  isAirportTableSeeded,
+} from "../reference/airports.store"
+import { ensureDiscrepancy, resolveDiscrepancy } from "./discrepancies.store"
+import {
+  IATA_REASSIGNMENTS,
+  airportCodeCorrections,
+  flightInstantMs,
+  isReassignedIata,
+  type AirportCodeCorrection,
+} from "@/lib/airports/code-changes"
 
 /**
  * Not in the recycle bin — i.e. a flight that still counts for anything.
@@ -181,6 +194,105 @@ export async function repairFlightTimezones(): Promise<number> {
     if (await updateFlight(flight.id, patch)) repaired++
   }
   return repaired
+}
+
+/** The note a signed or locked flight gets instead of a correction — one per side. */
+function airportCodeNoteId(flightId: string, side: AirportCodeCorrection["side"]): string {
+  return `airport-code:${flightId}:${side}`
+}
+
+function airportCodeNoteMessage(flight: FlightLog, c: AirportCodeCorrection): string {
+  const move = IATA_REASSIGNMENTS.find((r) => r.iata === c.iata && (r.fromIcao === c.correct || r.toIcao === c.correct))
+  const why = move ? ` ${move.note}.` : ""
+  const lockedBy = flight.signature ? "signed" : "locked"
+  return (
+    `${flight.flightNumber || "This flight"} on ${flight.date} records ${c.stored} for its ${c.side}, but ${c.iata} ` +
+    `was ${c.correct} on that date.${why} It is ${lockedBy}, so it was left as it is — correct the airport by hand ` +
+    `if it is wrong.`
+  )
+}
+
+/**
+ * Puts each flight at the airport its IATA code meant WHEN IT FLEW, for the
+ * codes that have moved between airports (`lib/airports/code-changes.ts`).
+ * VTZ moved from VOVZ to VOVI on 17 Aug 2026, and the flights imported since
+ * were filed at VOVZ: the code was resolved with no date, and the device had
+ * only the old airport. Only a flight holding ONE OF THE CODE'S airports, and
+ * the wrong one for its date, is touched — an unrelated ICAO is the pilot's
+ * own entry.
+ *
+ * The correction carries the new airport's offset and the figures its
+ * position decides (night, day/night takeoffs and landings), recalculated with
+ * the pilot's pins respected. A SIGNED or LOCKED flight is the pilot's
+ * certified record and is never changed here: it gets a note in Discrepancies
+ * instead (once, under a derived id), and the note resolves itself once the
+ * flight is right. Through `updateFlight`, so it is an ordinary field patch
+ * every device pulls. Idempotent.
+ */
+export async function repairReassignedAirports(): Promise<{ corrected: number; flagged: number }> {
+  const result = { corrected: 0, flagged: 0 }
+  await ensureAirportDatabase()
+  if (!isAirportTableSeeded()) return result
+  const flights = await userDb.flights
+    .filter(
+      (f: FlightLog) =>
+        isLiveFlight(f) && !isSimulatorEntry(f) && (isReassignedIata(f.departureIata) || isReassignedIata(f.arrivalIata))
+    )
+    .toArray()
+
+  for (const flight of flights) {
+    const corrections = airportCodeCorrections(flight)
+    const sides = new Set(corrections.map((c) => c.side))
+
+    // A note raised earlier whose flight is now right closes itself.
+    for (const side of ["departure", "arrival"] as const) {
+      if (sides.has(side)) continue
+      const note = await userDb.discrepancies.get(airportCodeNoteId(flight.id, side))
+      if (note && !note.resolved) await resolveDiscrepancy(note.id, "keep_logbook", "The airport now matches the date.")
+    }
+    if (corrections.length === 0) continue
+
+    if (flight.signature || flight.isLocked) {
+      for (const c of corrections) {
+        const added = await ensureDiscrepancy({
+          id: airportCodeNoteId(flight.id, c.side),
+          type: "route_mismatch",
+          severity: "warning",
+          flightLogId: flight.id,
+          field: c.side === "departure" ? "departureIcao" : "arrivalIcao",
+          logbookValue: c.stored,
+          scheduleValue: c.correct,
+          message: airportCodeNoteMessage(flight, c),
+          resolved: false,
+        })
+        if (added) result.flagged++
+      }
+      continue
+    }
+
+    const patch: Partial<FlightLog> = {}
+    for (const c of corrections) {
+      if (c.side === "departure") patch.departureIcao = c.correct
+      else patch.arrivalIcao = c.correct
+    }
+    const next = { ...flight, ...patch }
+    const [dep, arr] = await Promise.all([getAirportByIcao(next.departureIcao), getAirportByIcao(next.arrivalIcao)])
+    // The airport it belongs at is not on this device yet: next launch.
+    if ((patch.departureIcao && !dep) || (patch.arrivalIcao && !arr)) continue
+
+    const out = flight.outTime || flight.scheduledOut
+    const depAt = flightInstantMs(flight.date, out)
+    const arrAt = flightInstantMs(flight.date, flight.inTime || flight.scheduledIn || out, out)
+    if (patch.departureIcao && dep?.tz && depAt != null) {
+      patch.departureTimezone = getAirportTimeInfo(dep.tz, new Date(depAt)).offset
+    }
+    if (patch.arrivalIcao && arr?.tz && arrAt != null) {
+      patch.arrivalTimezone = getAirportTimeInfo(arr.tz, new Date(arrAt)).offset
+    }
+    const recalculated = recalculateFlightFields({ ...flight, ...patch }, dep ?? null, arr ?? null)
+    if (await updateFlight(flight.id, { ...patch, ...recalculated })) result.corrected++
+  }
+  return result
 }
 
 /**

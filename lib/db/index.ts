@@ -65,6 +65,7 @@ export {
   purgeExpiredDeletedFlights,
   repairSimulatorEntries,
   repairFlightTimezones,
+  repairReassignedAirports,
   repairMissingFlightTimes,
   getDeletedFlights,
   isLiveFlight,
@@ -289,6 +290,7 @@ export {
   // Custom entries & sync
   addCustomAircraftToDatabase,
   bulkUpsertAircraftReferences,
+  addFleetAircraftToDatabase,
   clearAircraftCache,
 } from "./stores/reference/aircraft.store";
 

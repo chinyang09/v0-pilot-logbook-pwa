@@ -34,6 +34,7 @@ import { useRegisterMainActions } from "@/hooks/use-page-actions";
 import { GlassSearchButton } from "@/components/ui/glass-search-button";
 import { GlassIconButton } from "@/components/ui/glass-icon-button";
 import { PanelLoading } from "@/components/ui/page-loading";
+import { lookupAirportOnline } from "@/lib/airports/online-lookup";
 
 // Memoized airport card to prevent unnecessary re-renders during virtualization
 interface AirportCardProps {
@@ -209,11 +210,10 @@ export default function AirportsPage() {
 
     const searchFr24 = async () => {
       try {
-        const res = await fetch(`/api/search/airport?q=${encodeURIComponent(query)}`);
-        if (!res.ok) throw new Error("FR24 airport search failed");
-        const data = await res.json();
+        // The shared pool first, then FR24 — see lib/airports/online-lookup.ts.
+        const data = await lookupAirportOnline(query);
         if (!cancelled) {
-          setFr24Result(data.result || null);
+          setFr24Result(data?.result ?? null);
         }
       } catch {
         if (!cancelled) setFr24Result(null);

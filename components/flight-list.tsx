@@ -667,6 +667,16 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
         );
         primeFlightCache(created);
         onEdit?.(created);
+        // The missing sector: what the aeroplane flies after the leg this one
+        // follows fills the new leg's blanks (number, far end, times).
+        if (action === "next-leg" || action === "return-trip") {
+          void import("@/lib/utils/seed-derived-leg")
+            .then(({ seedDerivedLeg }) => seedDerivedLeg(created, source))
+            .then((seeded) => {
+              if (seeded) mutate(CACHE_KEYS.flights);
+            })
+            .catch(() => {});
+        }
       },
       [held, handleToggleLock, onEdit, newFlightPilotFlying]
     );

@@ -6,10 +6,12 @@
     "moduleResolution": "Bundler",
     "strict": true,
     "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "isolatedModules": true,
     "types": ["@cloudflare/workers-types"]
   },
-  "include": ["worker.ts"]
+  "include": ["worker.js"]
 }

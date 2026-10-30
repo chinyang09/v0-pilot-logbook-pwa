@@ -18,6 +18,10 @@ import { submitAircraftToServer } from "@/lib/submissions/submit"
 import { getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
 import type { AircraftType } from "@/types/entities/aircraft-type.types"
 import { useAircraftTypeSearch } from "@/hooks/use-aircraft-type-search"
+import { CheckRow } from "@/components/check-row"
+import { useAircraftWhereabouts, whereaboutsValue } from "@/hooks/use-aircraft-whereabouts"
+import { usePreferences } from "@/components/providers/preferences-provider"
+import { formatClockDisplay } from "@/lib/utils/time"
 
 interface AircraftDetailPanelProps {
   /** Aircraft data from the parent's SWR hook (reactive) */
@@ -236,6 +240,9 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
             />
           </FormSection>
 
+          {/* Where it is now — checked on a tap, never stored. */}
+          {aircraft.registration && <AircraftNowSection registration={aircraft.registration} />}
+
           {displayType ? (
             <FormSection title="Type Information">
               <SettingsRow label="Description" value={displayType.description} readOnly />
@@ -262,5 +269,41 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
         <div className="h-chrome-bottom" />
       </div>
     </div>
+  )
+}
+
+/**
+ * The aeroplane's last flight — landed, in the air or not yet left, and the
+ * gate it arrives at — and, once checked, the one it flies next. Asked of now,
+ * on a tap.
+ */
+function AircraftNowSection({ registration }: { registration: string }) {
+  const { preferences } = usePreferences()
+  const separator = preferences.display.clockSeparator
+  const { state, check } = useAircraftWhereabouts(registration)
+  const next = state?.status === "done" ? state.whereabouts.next : null
+  const nextAt = next?.scheduledDeparture
+  return (
+    <FormSection title="Now">
+      <CheckRow
+        label="Last flight"
+        value={whereaboutsValue(state, separator)}
+        loading={state?.status === "loading"}
+        onCheck={() => void check()}
+      />
+      {next && (
+        <SettingsRow
+          label="Next flight"
+          value={[
+            next.flightNumber,
+            next.destination && `to ${next.destination.iata || next.destination.icao}`,
+            nextAt && `${formatClockDisplay(nextAt.slice(11, 16), separator)}Z`,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+          readOnly
+        />
+      )}
+    </FormSection>
   )
 }
