@@ -6,6 +6,8 @@
  *   aircraft/candidates?q=9VB        every aircraft the text could be
  *   aircraft/candidates?q=9V-TNL&exact=1   that registration, or 404
  *   airport/candidates?q=VOV         every airport a partial code could be
+ *   flight/suggest?number=TR288&date=2026-10-30[&out=02:25]   that flight that day
+ *   flight/gates?number=TR288&date=2026-10-30[&out=02:25]     its gates, when published
  *
  * They were `/api/search/aircraft` and `/api/search/airport/candidates`. Under
  * the door they share its sign-in rule and its envelope: 200 `{ ok, data,
@@ -19,8 +21,9 @@
  */
 
 import { callFr24Worker } from "@/lib/fr24/worker-client"
-import type { Fr24Result } from "@/lib/fr24/types"
+import type { Fr24Flight, Fr24Result } from "@/lib/fr24/types"
 import { normalizeRegistration } from "@/lib/utils/string"
+import { findOnBoard, normalizeFlightNumber, pickFlightOnDate, suggestFlight, type FlightGates } from "./flight-suggest"
 import { aircraftCandidates, airportCandidates } from "./search-candidates"
 import type { LookupRoutes } from "./types"
 
@@ -78,11 +81,91 @@ async function airportCandidatesRoute(query: Query): Promise<Fr24Result<LookupRo
   return search.status === 404 ? { ok: true, status: 200, data: [], source: "" } : search
 }
 
-type CompositeRoute = "aircraft/candidates" | "airport/candidates"
+/** A flight number's list (a week back, a week ahead), or the reason it could not be had. */
+async function flightList(query: Query): Promise<{ number: string; date: string; out?: string; flights: Fr24Flight[]; source: string } | Fr24Result<never>> {
+  const number = (query.number || query.flight || "").trim()
+  const date = (query.date || "").trim()
+  if (normalizeFlightNumber(number).length < 3 || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return { ok: false, status: 400, error: "number= and date=YYYY-MM-DD are required" }
+  }
+  const list = await callFr24Worker("flight", { number, limit: 100 }, STEP_TIMEOUT_MS)
+  if (!list.ok) return list.status === 404 ? { ok: false, status: 404, error: `No flight ${number} found` } : list
+  const out = /^\d{2}:\d{2}$/.test(query.out || "") ? query.out : undefined
+  return { number, date, out, flights: list.data.flights, source: list.source }
+}
+
+const isFailure = (v: object): v is Fr24Result<never> => "ok" in v
+
+async function flightSuggestRoute(query: Query): Promise<Fr24Result<LookupRoutes["flight/suggest"]>> {
+  const list = await flightList(query)
+  if (isFailure(list)) return list
+  const suggestion = suggestFlight(list.flights, list.number, list.date, list.out)
+  if (!suggestion) return { ok: false, status: 404, error: `No flight ${list.number} found` }
+  return { ok: true, status: 200, data: suggestion, source: list.source }
+}
+
+/**
+ * The gates of the flight that day: the tracked flight's own when it is in
+ * the air or about to be, else the departures board at its origin and the
+ * arrivals board at its destination, each read from an hour before the
+ * scheduled time. A gate not yet published is "" — answered, not failed.
+ */
+async function flightGatesRoute(query: Query): Promise<Fr24Result<LookupRoutes["flight/gates"]>> {
+  const list = await flightList(query)
+  if (isFailure(list)) return list
+  const row = pickFlightOnDate(list.flights, list.number, list.date, list.out)
+  const flight = row && suggestFlight([row], list.number, list.date)
+  if (!row || !flight) return { ok: false, status: 404, error: `No flight ${list.number} on ${list.date}` }
+
+  const code = (a: Fr24Flight["origin"]) => a?.iata || a?.icao || ""
+  const answer = (dep: Fr24Flight | null, arr: Fr24Flight | null, source: FlightGates["source"], from: string) => ({
+    ok: true as const,
+    status: 200,
+    source: from,
+    data: {
+      flight,
+      departure: { airport: code(row.origin), gate: dep?.origin?.gate ?? "", terminal: dep?.origin?.terminal ?? "" },
+      arrival: {
+        airport: code(row.destination),
+        gate: arr?.destination?.gate ?? "",
+        terminal: arr?.destination?.terminal ?? "",
+        baggage: arr?.destination?.baggage ?? "",
+      },
+      source,
+    },
+  })
+
+  if (row.live && row.fr24Id) {
+    const live = await callFr24Worker("flight/details", { id: row.fr24Id }, STEP_TIMEOUT_MS)
+    if (live.ok && (live.data.origin?.gate || live.data.destination?.gate)) return answer(live.data, live.data, "live", live.source)
+  }
+
+  const board = (a: Fr24Flight["origin"], mode: "departures" | "arrivals", at: string | null) =>
+    a && at
+      ? callFr24Worker("airport/schedule", { code: code(a), mode, limit: 100, timestamp: Math.floor(Date.parse(at) / 1000) - 3600 }, STEP_TIMEOUT_MS)
+      : null
+  const [departures, arrivals] = await Promise.all([
+    board(row.origin, "departures", row.scheduledDeparture),
+    board(row.destination, "arrivals", row.scheduledArrival),
+  ])
+  const dep = departures?.ok ? findOnBoard(departures.data.flights, list.number, row.scheduledDeparture) : null
+  const arr = arrivals?.ok ? findOnBoard(arrivals.data.flights, list.number, row.scheduledDeparture) : null
+  if (dep?.origin?.gate || dep?.origin?.terminal || arr?.destination?.gate || arr?.destination?.terminal) {
+    return answer(dep, arr, "board", "airport.json")
+  }
+  // Neither board could be READ: that is a failure, not "no gate yet".
+  const failure = [departures, arrivals].find((b) => b && !b.ok && b.status !== 404)
+  if (failure && !failure.ok && !departures?.ok && !arrivals?.ok) return { ok: false, status: 502, error: failure.error }
+  return answer(null, null, "none", list.source)
+}
+
+type CompositeRoute = "aircraft/candidates" | "airport/candidates" | "flight/suggest" | "flight/gates"
 
 const COMPOSITE_ROUTES: { [R in CompositeRoute]: (query: Query) => Promise<Fr24Result<LookupRoutes[R]>> } = {
   "aircraft/candidates": aircraftCandidatesRoute,
   "airport/candidates": airportCandidatesRoute,
+  "flight/suggest": flightSuggestRoute,
+  "flight/gates": flightGatesRoute,
 }
 
 export const COMPOSITE_ROUTE_NAMES = Object.keys(COMPOSITE_ROUTES) as CompositeRoute[]

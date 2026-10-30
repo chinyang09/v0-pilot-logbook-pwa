@@ -37,6 +37,10 @@ export interface Fr24FlightAirport {
   iata: string
   name: string
   timezone: string
+  /** "" where the source carries none — a flight-list row never does; an airport board and a live flight may. */
+  gate: string
+  terminal: string
+  baggage: string
 }
 
 /**
@@ -124,6 +128,51 @@ export interface Fr24Airline {
   icao: string
 }
 
+/** An airline's fleet page, by type. Serial numbers and ages are not published there. */
+export interface Fr24Fleet {
+  airline: Fr24Airline
+  total: number
+  types: { typecode: string; count: number; aircraft: { registration: string; model: string }[] }[]
+}
+
+export interface Fr24RouteEnd {
+  iata: string
+  icao: string
+  name: string
+  country: string
+  latitude: number | null
+  longitude: number | null
+}
+
+/** Every airport pair an airline flies (its routes page). */
+export interface Fr24AirlineRoutes {
+  airline: Fr24Airline
+  routes: { from: Fr24RouteEnd; to: Fr24RouteEnd }[]
+}
+
+export interface Fr24RouteAirport {
+  iata: string
+  icao: string
+  name: string
+  city: string
+  latitude: number | null
+  longitude: number | null
+  /**
+   * The flight numbers serving it and the days each operates, a few days
+   * ahead. `departure` (ISO UTC) is on DEPARTURES only — the scheduled
+   * departure from the airport asked; an arrival's time is not verified.
+   */
+  flights: { number: string; days: { date: string; departure?: string | null; equipment: string }[] }[]
+}
+
+/** One airport's destinations (and origins) on an airline. */
+export interface Fr24AirportRoutes {
+  airline: Fr24Airline
+  airport: string
+  departures: Fr24RouteAirport[]
+  arrivals: Fr24RouteAirport[]
+}
+
 /** What each normalized Worker route answers with in `data`. */
 export interface Fr24Routes {
   aircraft: Fr24Aircraft[]
@@ -137,6 +186,9 @@ export interface Fr24Routes {
   flight: Fr24FlightPage
   "flight/details": Fr24LiveFlightDetails
   live: Fr24LiveFlight[]
+  "airline/fleet": Fr24Fleet
+  "airline/routes": Fr24AirlineRoutes
+  "airline/routes/from": Fr24AirportRoutes
 }
 
 export type Fr24Route = keyof Fr24Routes

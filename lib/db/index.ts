@@ -290,6 +290,7 @@ export {
   // Custom entries & sync
   addCustomAircraftToDatabase,
   bulkUpsertAircraftReferences,
+  addFleetAircraftToDatabase,
   clearAircraftCache,
 } from "./stores/reference/aircraft.store";
 

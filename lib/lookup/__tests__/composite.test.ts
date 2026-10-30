@@ -157,3 +157,88 @@ describe("composite lookup routes", () => {
     })
   })
 })
+
+describe("flight/suggest and flight/gates", () => {
+  const calls: string[] = []
+  let answers: Record<string, () => Response>
+
+  const end = (iata: string, icao: string, info: Record<string, string> = {}) => ({ iata, icao, name: iata, timezone: "", gate: "", terminal: "", baggage: "", ...info })
+  const flight = (over: Record<string, unknown> = {}) => ({
+    fr24Id: "3c8a1b2f", flightNumber: "TR288", callsign: "", status: "", live: false, registration: "9V-TNF", typecode: "A20N", model: "",
+    airline: null, origin: end("SIN", "WSSS"), destination: end("KIX", "RJBB"),
+    scheduledDeparture: "2026-10-30T02:25:00.000Z", scheduledArrival: "2026-10-30T08:55:00.000Z",
+    actualDeparture: null, actualArrival: null, estimatedDeparture: null, estimatedArrival: null, durationSeconds: null,
+    ...over,
+  })
+  const page = (flights: unknown[]) => json({ ok: true, source: "flight-list", data: { page: 1, totalPages: 1, total: flights.length, flights } })
+
+  beforeEach(() => {
+    calls.length = 0
+    answers = { flight: () => page([flight()]) }
+    vi.stubEnv("FR24_PROXY_URL", "https://gw.test/")
+    vi.stubEnv("FR24_PROXY_SECRET", "s")
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input))
+        calls.push(`${url.pathname}${url.search}`)
+        const route = url.pathname.slice(1) + (url.searchParams.get("mode") ? `:${url.searchParams.get("mode")}` : "")
+        return (answers[route] ?? (() => json({ ok: false, error: "nothing" }, 404)))()
+      })
+    )
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
+
+  it("answers the flight that day from one list call", async () => {
+    const answer = await runCompositeRoute("flight/suggest", { number: "tr288", date: "2026-10-30" })
+    expect(answer).toMatchObject({ ok: true, data: { basis: "scheduled", registration: "9V-TNF", origin: { icao: "WSSS" } } })
+    expect(calls).toEqual(["/flight?number=tr288&limit=100"])
+  })
+
+  it("refuses a request without a flight number and a date, and is 404 for a number nobody lists", async () => {
+    expect(await runCompositeRoute("flight/suggest", { number: "TR288" })).toMatchObject({ ok: false, status: 400 })
+    expect(calls).toEqual([])
+    answers.flight = () => json({ ok: false, error: "nothing" }, 404)
+    expect(await runCompositeRoute("flight/suggest", { number: "TR999", date: "2026-10-30" })).toMatchObject({ ok: false, status: 404 })
+    answers.flight = () => json({ ok: false, error: "challenge" }, 502)
+    expect(await runCompositeRoute("flight/suggest", { number: "TR999", date: "2026-10-30" })).toMatchObject({ ok: false, status: 502 })
+  })
+
+  it("reads the gates off the departures board at the origin and the arrivals board at the destination", async () => {
+    answers["airport/schedule:departures"] = () => page([flight({ origin: end("", "", { gate: "D41", terminal: "1" }) })])
+    answers["airport/schedule:arrivals"] = () => page([flight({ destination: end("", "", { gate: "12", terminal: "1", baggage: "5" }) })])
+    const answer = await runCompositeRoute("flight/gates", { number: "TR288", date: "2026-10-30" })
+    expect(answer).toMatchObject({
+      ok: true,
+      data: { source: "board", departure: { airport: "SIN", gate: "D41", terminal: "1" }, arrival: { airport: "KIX", gate: "12", baggage: "5" } },
+    })
+    // Each board from an hour before the scheduled time.
+    expect(calls).toContain(`/airport/schedule?code=SIN&mode=departures&limit=100&timestamp=${Date.parse("2026-10-30T02:25:00Z") / 1000 - 3600}`)
+  })
+
+  it("asks the tracked flight first when it is live", async () => {
+    answers.flight = () => page([flight({ live: true })])
+    answers["flight/details"] = () =>
+      json({ ok: true, source: "clickhandler", data: flight({ origin: end("SIN", "WSSS", { gate: "D40" }), destination: end("KIX", "RJBB", { gate: "8" }) }) })
+    const answer = await runCompositeRoute("flight/gates", { number: "TR288", date: "2026-10-30" })
+    expect(answer).toMatchObject({ ok: true, data: { source: "live", departure: { gate: "D40" }, arrival: { gate: "8" } } })
+    expect(calls.some((c) => c.startsWith("/airport/schedule"))).toBe(false)
+  })
+
+  it("is an answer with no gate when none is published — and a failure when no board could be read", async () => {
+    answers["airport/schedule:departures"] = () => page([])
+    answers["airport/schedule:arrivals"] = () => page([])
+    expect(await runCompositeRoute("flight/gates", { number: "TR288", date: "2026-10-30" })).toMatchObject({
+      ok: true,
+      data: { source: "none", departure: { gate: "" }, arrival: { gate: "" } },
+    })
+    answers["airport/schedule:departures"] = () => json({ ok: false, error: "challenge" }, 502)
+    answers["airport/schedule:arrivals"] = () => json({ ok: false, error: "challenge" }, 502)
+    expect(await runCompositeRoute("flight/gates", { number: "TR288", date: "2026-10-30" })).toMatchObject({ ok: false, status: 502 })
+    // A date the list has no flight on.
+    expect(await runCompositeRoute("flight/gates", { number: "TR288", date: "2026-12-30" })).toMatchObject({ ok: false, status: 404 })
+  })
+})

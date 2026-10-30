@@ -1,6 +1,7 @@
 "use client"
 
 import { AircraftTypeSuggestions } from "@/components/aircraft-type-suggestions"
+import { AirlineFleetSection } from "@/components/airline-fleet-section"
 import { SuggestionList } from "@/components/ui/suggestion-list"
 import { normalizeRegistration } from "@/lib/utils/string"
 import { lookup } from "@/lib/lookup/client"
@@ -475,12 +476,16 @@ export function AircraftNewForm({
           )}
       </FormSection>
 
-      <p className="text-xs text-muted-foreground px-4">
+      <p className="text-xs text-muted-foreground px-4 mb-6">
         {fr24Found
           ? "Aircraft details found and will be saved automatically."
           : "Enter the aircraft registration. Type code can be entered manually if not found online."
         }
       </p>
+
+      {/* A whole type of an airline's fleet at once, rather than tail by tail.
+          Not while picking one aircraft for a flight. */}
+      {!selectMode && <AirlineFleetSection />}
     </div>
   )
 

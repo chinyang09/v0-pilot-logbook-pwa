@@ -107,6 +107,25 @@ export const lookup = {
     lookupGet("flight", { number, page, limit }, signal),
   /** One live flight by its id from `live`. */
   liveFlight: (id: string, signal?: AbortSignal) => lookupGet("flight/details", { id }, signal),
+  /**
+   * A flight number on a UTC date (`FlightLog.date`). `basis: "scheduled"` is
+   * that day's schedule and may fill a blank field; `"usual"` is another day's
+   * times moved onto it and must only be OFFERED.
+   */
+  flightSuggest: (number: string, date: string, out?: string, signal?: AbortSignal) =>
+    lookupGet("flight/suggest", { number, date, out }, signal),
+  /** That flight's gates, terminals and belt — "" until published. */
+  flightGates: (number: string, date: string, out?: string, signal?: AbortSignal) =>
+    lookupGet("flight/gates", { number, date, out }, signal),
+  /** An airline's fleet by type; `code` is its IATA (2) or ICAO (3) designator. */
+  airlineFleet: (code: string, signal?: AbortSignal) =>
+    lookupGet("airline/fleet", code.trim().length === 3 ? { icao: code.trim() } : { iata: code.trim() }, signal),
+  /** Every airport pair an airline flies. */
+  airlineRoutes: (code: string, signal?: AbortSignal) =>
+    lookupGet("airline/routes", code.trim().length === 3 ? { icao: code.trim() } : { iata: code.trim() }, signal),
+  /** One airport's destinations on an airline, with the flight numbers serving each. */
+  airlineRoutesFrom: (code: string, airportIata: string, signal?: AbortSignal) =>
+    lookupGet("airline/routes/from", { ...(code.trim().length === 3 ? { icao: code.trim() } : { iata: code.trim() }), airport: airportIata }, signal),
   /** Live positions; give at least one filter. `bounds` is "N,S,W,E". */
   live: (filters: { reg?: string; airline?: string; type?: string; bounds?: string; limit?: number }, signal?: AbortSignal) =>
     lookupGet("live", filters, signal),

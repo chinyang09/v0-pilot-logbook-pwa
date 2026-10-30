@@ -133,6 +133,71 @@ describe("normalizers", () => {
     })
   })
 
+  it("carries each end's gate, terminal and baggage belt where the source has them (a board row, the live flight)", () => {
+    const flight = w.normalizeFlight({
+      identification: { number: { default: "TR288" } },
+      airport: {
+        origin: { code: { iata: "SIN", icao: "WSSS" }, info: { terminal: "1", gate: "D41", baggage: null } },
+        destination: { code: { iata: "KIX", icao: "RJBB" }, info: { terminal: null, gate: null, baggage: null } },
+      },
+    })
+    expect(flight.origin).toMatchObject({ gate: "D41", terminal: "1", baggage: "" })
+    expect(flight.destination).toMatchObject({ gate: "", terminal: "", baggage: "" })
+    // A flight-list row has no `info` at all.
+    expect(w.normalizeFlight({ airport: { origin: { code: { iata: "SIN" } } } }).origin).toMatchObject({ gate: "", terminal: "" })
+  })
+
+  it("reads an airline's fleet page by type — the type's count, each airframe's registration and model", () => {
+    // The real markup's structure (Scoot, 30 Oct 2026), trimmed to two types.
+    const lock = `<td><a target="premium" href="javascript: void(0);" class="hasTooltip premium-content disabled"><svg class="premium-lock"></svg></a></td>`
+    const row = (reg: string, model: string) =>
+      `<tr><td><a class="regLinks" target="_self" href="/data/aircraft/${reg.toLowerCase()}"> ${reg} </a></td><td> ${model} </td> ${lock}${lock} </tr>`
+    const page = `<meta http-equiv="X-UA-Compatible" content="IE=Edge"><dl id="list-aircraft"><dt class="header"><div>TYPE</div><div>NUMBER OF AIRCRAFT</div></dt>
+      <dt><div>A20N</div><div>2</div><i class="pull-right fa fa-angle-down"></i></dt><dd><table class="table"><thead><tr><th>Registration</th><th>Aircraft type</th></tr></thead><tbody>
+      ${row("9V-TNC", "Airbus A320-271N")} ${row("9V-TNE", "Airbus A320-271N")}</tbody></table></dd>
+      <dt><div>B789</div><div>1</div></dt><dd><table><tbody>${row("9V-OFH", "Boeing 787-9 Dreamliner")}</tbody></table></dd></dl>`
+    expect(w.parseFleetPage(page)).toEqual([
+      { typecode: "A20N", count: 2, aircraft: [{ registration: "9V-TNC", model: "Airbus A320-271N" }, { registration: "9V-TNE", model: "Airbus A320-271N" }] },
+      { typecode: "B789", count: 1, aircraft: [{ registration: "9V-OFH", model: "Boeing 787-9 Dreamliner" }] },
+    ])
+    expect(w.parseFleetPage("<html>no list</html>")).toEqual([])
+  })
+
+  it("reads every airport pair off a routes page's arrRoutes, and nothing when it carries none", () => {
+    const page = `<script>var dispatcher = {"a":1}; var arrRoutes=[{"airport1":{"country":"Singapore","iata":"SIN","icao":"WSSS","lat":1.35,"lon":103.99,"name":"Singapore Changi Airport"},"airport2":{"country":"Japan","iata":"KIX","icao":"RJBB","lat":34.43,"lon":135.24,"name":"Osaka Kansai"}}];</script>`
+    expect(w.parseRoutesPage(page)).toEqual([
+      {
+        from: { iata: "SIN", icao: "WSSS", name: "Singapore Changi Airport", country: "Singapore", latitude: 1.35, longitude: 103.99 },
+        to: { iata: "KIX", icao: "RJBB", name: "Osaka Kansai", country: "Japan", latitude: 34.43, longitude: 135.24 },
+      },
+    ])
+    expect(w.parseRoutesPage("<html></html>")).toBeNull()
+  })
+
+  it("flattens a routes-map answer to one row per airport: flight numbers, their days, a departure's UTC time", () => {
+    // The real answer's structure (SIN on Scoot, 30 Oct 2026), one airport.
+    const melbourne = {
+      name: "Melbourne Airport", city: "Melbourne", icao: "YMML", distance: 6031823, position: { lat: "-37.665794", lon: "144.837296" },
+      flights: { TR38: { utc: { "2026-10-31": { aircraft: "789", time: "02:55", timestamp: 1793415300, offset: 28800 }, "2026-10-30": { aircraft: "B789", time: "02:55", timestamp: 1793328900, offset: 28800 } } } },
+    }
+    const answer = w.normalizeAirportRoutes({
+      departures: { Australia: { number: { airports: 1, flights: 2 }, airports: { MEL: melbourne } } },
+      arrivals: { Australia: { number: { airports: 1, flights: 2 }, airports: { MEL: melbourne } } },
+    })
+    expect(answer.departures).toEqual([
+      {
+        iata: "MEL", icao: "YMML", name: "Melbourne Airport", city: "Melbourne", latitude: -37.665794, longitude: 144.837296,
+        flights: [{ number: "TR38", days: [
+          { date: "2026-10-30", departure: "2026-10-30T02:55:00.000Z", equipment: "B789" },
+          { date: "2026-10-31", departure: "2026-10-31T02:55:00.000Z", equipment: "789" },
+        ] }],
+      },
+    ])
+    // An arrival's time is not verified against anything, so it carries none.
+    expect(answer.arrivals[0].flights[0].days[0]).toEqual({ date: "2026-10-30", equipment: "B789" })
+    expect(w.normalizeAirportRoutes(null)).toEqual({ departures: [], arrivals: [] })
+  })
+
   it("reads the live feed's positional rows and skips its bookkeeping keys", () => {
     // A real row, as data-cloud's feed.js returned it.
     const feed = {
@@ -272,7 +337,7 @@ describe("routes", () => {
         "airport departures page",
         "flight number page",
         "airport.json departures (one row's airports)",
-        "airline routes from an airport",
+        "airline routes from an airport (sample)",
         "live-feed by airline",
         "in use: flight-list by reg (one flight)",
       ])
@@ -280,6 +345,37 @@ describe("routes", () => {
     // What the flight-list normalizer leaves on the table shows up in its shape.
     expect(explored.body.explore["in use: flight-list by reg (one flight)"].shape.aircraft).toEqual({ images: { large: [] } })
     expect(explored.body.summary.some((line: string) => line.includes("explore: flight-playback"))).toBe(true)
+  })
+
+  it("reads an airline's fleet by its IATA code, its ICAO read off the airline list for the page's address", async () => {
+    const asked: string[] = []
+    upstream = (url) => {
+      asked.push(url)
+      if (url.includes("airlines.php")) return json({ rows: [{ Name: "Scoot", Code: "TR", ICAO: "TGW" }] })
+      return new Response(`<dl id="list-aircraft"><dt><div>A20N</div><div>1</div></dt><dd><table><tr><td><a class="regLinks" href="#"> 9V-TNC </a></td><td> Airbus A320-271N </td></tr></table></dd></dl>`, { headers: { "content-type": "text/html" } })
+    }
+    const answer = await call("/airline/fleet?iata=tr")
+    expect(answer.status).toBe(200)
+    expect(answer.body.data).toEqual({
+      airline: { name: "Scoot", iata: "TR", icao: "TGW" },
+      total: 1,
+      types: [{ typecode: "A20N", count: 1, aircraft: [{ registration: "9V-TNC", model: "Airbus A320-271N" }] }],
+    })
+    expect(asked).toContain("https://www.flightradar24.com/data/airlines/tr-tgw/fleet")
+    expect((await call("/airline/fleet")).status).toBe(400)
+  })
+
+  it("asks one airport's destinations with the routes map's own query", async () => {
+    const asked: string[] = []
+    upstream = (url) => {
+      asked.push(url)
+      return json({ departures: {}, arrivals: {} })
+    }
+    const answer = await call("/airline/routes/from?iata=TR&icao=TGW&airport=sin")
+    // The airline list is kept per isolate, so the name may come from an earlier call.
+    expect(answer.body.data).toEqual({ airline: expect.objectContaining({ iata: "TR", icao: "TGW" }), airport: "SIN", departures: [], arrivals: [] })
+    expect(asked.at(-1)).toBe("https://www.flightradar24.com/data/airlines/tr-tgw/routes?get-airport-arr-dep=SIN&format=json")
+    expect((await call("/airline/routes/from?iata=TR")).status).toBe(400)
   })
 
   it("refuses a request without the secret, but answers /health", async () => {

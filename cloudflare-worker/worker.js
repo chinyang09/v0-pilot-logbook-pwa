@@ -50,6 +50,10 @@
  *   /search?q=&limit=      FR24 search, grouped by kind
  *   /flight?number=&page=&limit=   flight history for a flight number
  *   /flight/details?id=    one live flight (FR24 flight id, from /live)
+ *   /airline/fleet?iata=|icao=          an airline's fleet, by type (its fleet page)
+ *   /airline/routes?iata=|icao=         every airport pair it flies (its routes page)
+ *   /airline/routes/from?iata=|icao=&airport=SIN   one airport's destinations
+ *                          on it, each with the flight numbers and their days
  *   /live?reg=|airline=|type=|bounds=   live positions
  *   /raw?url=              verbatim passthrough to an FR24 host (needs PROXY_SECRET)
  *
@@ -115,6 +119,9 @@ const CACHE_TTL = {
   "/aircraft/flights": 600,
   "/flight": 600,
   "/search": 3600,
+  "/airline/fleet": 86400,
+  "/airline/routes": 86400,
+  "/airline/routes/from": 6 * 3600,
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +215,9 @@ const ROUTES = {
   "/flight": handleFlightHistory,
   "/flight/details": handleFlightDetails,
   "/live": handleLive,
+  "/airline/fleet": handleAirlineFleet,
+  "/airline/routes": handleAirlineRoutes,
+  "/airline/routes/from": handleAirlineRoutesFrom,
 }
 
 const ROUTE_DOCS = {
@@ -224,6 +234,9 @@ const ROUTE_DOCS = {
   "/flight?number=TR600&page=1&limit=25": "flight history for a flight number",
   "/flight/details?id=<fr24 id>": "one live flight",
   "/live?reg=9V-TNL": "live positions (reg | airline | type | bounds=N,S,W,E)",
+  "/airline/fleet?iata=TR": "an airline's fleet by type (iata= or icao=)",
+  "/airline/routes?iata=TR": "every airport pair an airline flies",
+  "/airline/routes/from?iata=TR&airport=SIN": "one airport's destinations on an airline, with flight numbers and days",
   "/raw?url=https://api.flightradar24.com/...": "verbatim passthrough (needs PROXY_SECRET)",
 }
 
@@ -576,6 +589,203 @@ async function handleLive(url, log) {
   return found(parseFeed(res.data), "live-feed")
 }
 
+// ---------------------------------------------------------------------------
+// An airline: its fleet and its network. FR24 publishes both only as pages
+// (`/data/airlines/<iata>-<icao>/…`), so these READ the page — the fleet off
+// its `#list-aircraft` table, the network off the `arrRoutes` it embeds — and
+// one airport's destinations off the JSON the routes map asks for on a pin.
+// ---------------------------------------------------------------------------
+
+/**
+ * The airline a request names, by IATA and/or ICAO — the page needs both, so
+ * the missing one is read off the airline list.
+ *
+ * @param {URL} url
+ * @param {Attempt[]} log
+ * @returns {Promise<{ iata: string, icao: string, name: string } | Answer>}
+ */
+async function airlineFromQuery(url, log) {
+  const iata = cleanCode(url.searchParams.get("iata"), 2, 2)
+  const icao = cleanCode(url.searchParams.get("icao"), 3, 3)
+  if (!iata && !icao) return bad("iata= or icao= is required (e.g. iata=TR)")
+  const rows = await airlineRows(log)
+  const known = rows?.find((a) => (iata && icao ? a.iata === iata && a.icao === icao : iata ? a.iata === iata : a.icao === icao))
+  if (known) return known
+  if (iata && icao) return { iata, icao, name: "" }
+  if (!rows) return failed(log)
+  return notFound(`No airline found for ${iata || icao}`)
+}
+
+/** @param {{ iata: string, icao: string }} a */
+const airlinePage = (a) => `${WWW}/data/airlines/${a.iata.toLowerCase()}-${a.icao.toLowerCase()}`
+
+/** @param {unknown} v @returns {v is Answer} */
+const isAnswer = (v) => !!v && typeof v === "object" && "status" in v && "body" in v
+
+/** @type {Handler} */
+async function handleAirlineFleet(url, log) {
+  const airline = await airlineFromQuery(url, log)
+  if (isAnswer(airline)) return airline
+  const res = await upstream("fleet page", `${airlinePage(airline)}/fleet`, log, { text: true })
+  if (!res.ok) return failed(log)
+  const types = parseFleetPage(res.text)
+  if (!types.length) return notFound(`No fleet listed for ${airline.iata || airline.icao}`)
+  return found({ airline, total: types.reduce((n, t) => n + t.aircraft.length, 0), types }, "fleet-page")
+}
+
+/** @type {Handler} */
+async function handleAirlineRoutes(url, log) {
+  const airline = await airlineFromQuery(url, log)
+  if (isAnswer(airline)) return airline
+  const res = await upstream("routes page", `${airlinePage(airline)}/routes`, log, { text: true })
+  if (!res.ok) return failed(log)
+  const routes = parseRoutesPage(res.text)
+  if (!routes) return failed(log)
+  return found({ airline, routes }, "routes-page")
+}
+
+/** @type {Handler} */
+async function handleAirlineRoutesFrom(url, log) {
+  const airport = cleanCode(url.searchParams.get("airport"), 3, 3)
+  if (!airport) return bad("airport= is required (an IATA code, e.g. SIN)")
+  const airline = await airlineFromQuery(url, log)
+  if (isAnswer(airline)) return airline
+  const res = await upstream("routes by airport", `${airlinePage(airline)}/routes?get-airport-arr-dep=${airport}&format=json`, log)
+  if (!res.ok) return failed(log)
+  return found({ airline, airport, ...normalizeAirportRoutes(res.data) }, "routes-page")
+}
+
+/** @type {{ at: number, rows: { iata: string, icao: string, name: string }[] } | null} */
+let airlineList = null
+
+/** @param {Attempt[]} log @returns {Promise<{ iata: string, icao: string, name: string }[] | null>} */
+async function airlineRows(log) {
+  if (airlineList && Date.now() - airlineList.at < AIRPORT_LIST_MS) return airlineList.rows
+  const res = await upstream("airlines.php", `${WWW}/_json/airlines.php`, log)
+  if (!res.ok) return airlineList?.rows ?? null
+  const rows = (Array.isArray(res.data?.rows) ? res.data.rows : []).map(normalizeAirline).filter(isPresent)
+  if (!rows.length) return airlineList?.rows ?? null
+  airlineList = { at: Date.now(), rows }
+  return rows
+}
+
+/**
+ * An airline's fleet page, by type: each `<dt>` names a type and its count,
+ * the `<dd>` after it lists the airframes — a registration link and the model.
+ * (Serial number and age are behind FR24's paywall on that page, so they are
+ * not read.)
+ *
+ * @param {string} html
+ * @returns {{ typecode: string, count: number, aircraft: { registration: string, model: string }[] }[]}
+ */
+export function parseFleetPage(html) {
+  const list = /<dl[^>]*id=["']list-aircraft["'][^>]*>([\s\S]*?)<\/dl>/i.exec(html || "")?.[1]
+  if (!list) return []
+  const types = []
+  for (const m of list.matchAll(/<dt(?![^>]*class=["'][^"']*header)[^>]*>([\s\S]*?)<\/dt>\s*<dd[^>]*>([\s\S]*?)<\/dd>/gi)) {
+    const cells = [...m[1].matchAll(/<div[^>]*>([\s\S]*?)<\/div>/gi)].map((c) => textOf(c[1]))
+    const typecode = (cells[0] || "").toUpperCase()
+    if (!typecode) continue
+    const aircraft = []
+    for (const row of m[2].matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)) {
+      const reg = /<a[^>]*class=["'][^"']*regLinks[^"']*["'][^>]*>([\s\S]*?)<\/a>/i.exec(row[1])
+      if (!reg) continue
+      const tds = [...row[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((c) => textOf(c[1]))
+      aircraft.push({ registration: textOf(reg[1]).toUpperCase(), model: tds[1] || "" })
+    }
+    types.push({ typecode, count: Number(cells[1]) || aircraft.length, aircraft })
+  }
+  return types
+}
+
+/**
+ * Every airport pair on an airline's routes page — the `arrRoutes` it embeds
+ * for its map. `null` when the page carries none (its markup changed).
+ *
+ * @param {string} html
+ */
+export function parseRoutesPage(html) {
+  const at = /\barrRoutes\s*=\s*\[/.exec(html || "")
+  if (!at) return null
+  let rows
+  try {
+    rows = JSON.parse(balancedLiteral(html, at.index + at[0].length - 1))
+  } catch {
+    return null
+  }
+  if (!Array.isArray(rows)) return null
+  /** @param {any} a */
+  const end = (a) =>
+    a && typeof a === "object"
+      ? {
+          iata: str(a.iata).toUpperCase(),
+          icao: str(a.icao).toUpperCase(),
+          name: str(a.name),
+          country: str(a.country),
+          latitude: num(a.lat),
+          longitude: num(a.lon),
+        }
+      : null
+  return rows
+    .map((/** @type {any} */ r) => ({ from: end(r?.airport1), to: end(r?.airport2) }))
+    .filter((r) => r.from && r.to)
+}
+
+/**
+ * The routes map's answer for one airport: `{ arrivals, departures }`, each by
+ * country → `{ airports: { <IATA>: { name, city, icao, position, flights } } }`,
+ * where `flights` is by flight number → `{ utc: { <YYYY-MM-DD>: { time, timestamp,
+ * aircraft, offset } } }`. Flattened to one row per airport.
+ *
+ * A DEPARTURE's `time`/`timestamp` is its scheduled departure from the airport
+ * asked, in UTC (measured against the flight list: TR38 SIN 02:55Z both). An
+ * arrival's has not been checked against anything, so arrivals carry their
+ * flight numbers and dates only.
+ *
+ * @param {any} data
+ */
+export function normalizeAirportRoutes(data) {
+  /** @param {any} side @param {boolean} timed */
+  const flatten = (side, timed) => {
+    const out = []
+    for (const country of Object.values(side && typeof side === "object" ? side : {})) {
+      for (const [code, a] of Object.entries(/** @type {any} */ (country)?.airports || {})) {
+        const flights = Object.entries(/** @type {any} */ (a)?.flights || {}).map(([number, f]) => ({
+          number: number.toUpperCase(),
+          days: Object.entries(/** @type {any} */ (f)?.utc || {})
+            .map(([date, d]) => ({
+              date,
+              ...(timed ? { departure: isoFromEpoch(/** @type {any} */ (d)?.timestamp) } : {}),
+              equipment: str(/** @type {any} */ (d)?.aircraft).toUpperCase(),
+            }))
+            .sort((x, y) => (x.date < y.date ? -1 : 1)),
+        }))
+        out.push({
+          iata: code.toUpperCase(),
+          icao: str(/** @type {any} */ (a)?.icao).toUpperCase(),
+          name: str(/** @type {any} */ (a)?.name),
+          city: str(/** @type {any} */ (a)?.city),
+          latitude: num(/** @type {any} */ (a)?.position?.lat),
+          longitude: num(/** @type {any} */ (a)?.position?.lon),
+          flights,
+        })
+      }
+    }
+    return out
+  }
+  return { departures: flatten(data?.departures, true), arrivals: flatten(data?.arrivals, false) }
+}
+
+/** A cell's text: tags dropped, entities that matter decoded, whitespace collapsed. @param {string} html */
+function textOf(html) {
+  return html
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
 /** @type {Handler} */
 async function handleProbe(url, log) {
   const code = cleanCode(url.searchParams.get("code"), 3, 4) || "WSSS"
@@ -656,7 +866,7 @@ async function exploreUpstreams(s, log) {
   const fr24Id = first?.identification?.id
   const departed = first?.time?.real?.departure || first?.time?.scheduled?.departure
   const slug = `${s.airlineIata}-${s.airline}`.toLowerCase()
-  /** @type {[name: string, url: string, pick: ((data: any) => any) | "html" | "bytes"][]} */
+  /** @type {[name: string, url: string, pick: ((data: any) => any) | "html" | "html-excerpt" | "bytes"][]} */
   const candidates = [
     // The newer web API (`/api/v1/…`, sniffed from the site). The airport id
     // is FR24's own number; without one the code is tried.
@@ -664,24 +874,35 @@ async function exploreUpstreams(s, log) {
     ["www api/v1 airline (guess)", `${WWW}/api/v1/airlines/${s.airline}`, (d) => d],
     ["www api/v1 airline fleet (guess)", `${WWW}/api/v1/airlines/${s.airline}/fleet`, (d) => d],
     // An airline's fleet and routes, as the site shows them (HTML).
-    ["airline fleet page", `${WWW}/data/airlines/${slug}/fleet`, "html"],
+    ["airline fleet page", `${WWW}/data/airlines/${slug}/fleet`, "html-excerpt"],
     ["airline routes page", `${WWW}/data/airlines/${slug}/routes`, "html"],
     // What a routes-map pin asks for: an airport's destinations on this
     // airline (a guess at the page's own query, from its old markup).
     // Answered as `{ arrivals, departures }`, each by country → `{ number, airports }`;
     // shaped down to ONE destination, which is where the detail is.
     [
-      "airline routes from an airport",
+      "airline routes from an airport (sample)",
       `${WWW}/data/airlines/${slug}/routes?get-airport-arr-dep=${s.airportIata}&format=json`,
       (d) => {
         const country = Object.values(d?.departures || {})[0]
         const [code, airport] = Object.entries(country?.airports || {})[0] || []
-        return { countries: Object.keys(d?.departures || {}).length, code, airport }
+        const [number, timetable] = Object.entries(airport?.flights || {})[0] || []
+        return { countries: Object.keys(d?.departures || {}).length, code, airport: { ...airport, flights: undefined }, number, timetable }
       },
     ],
     // An airport's departures board and a flight number's history, as pages.
     ["airport departures page", `${WWW}/airport/${s.airportIata.toLowerCase()}/departures`, "html"],
     ["flight number page", `${WWW}/data/flights/${s.flight.toLowerCase()}`, "html"],
+    // Whether a flight number's list reaches the days AHEAD, and whether those
+    // already name an aeroplane: one line per row, no more.
+    [
+      "flight-list by flight (sample)",
+      flightListUrl("flight", s.flight, 1, 25),
+      (d) =>
+        (d?.result?.response?.data || []).map((/** @type {any} */ f) =>
+          [isoFromEpoch(f?.time?.scheduled?.departure), f?.aircraft?.registration || "-", f?.status?.generic?.status?.text || f?.status?.text || ""].join(" ")
+        ),
+    ],
     // The board's own data (the in-use schedule route), one row deep — where a gate would be.
     [
       "airport.json departures (one row's airports)",
@@ -725,8 +946,11 @@ async function exploreUpstreams(s, log) {
     } else if (typeof pick === "function") {
       const data = pick(a.data)
       const rows = Array.isArray(data) ? data.length : undefined
-      out[name] = { status: a.attempt.status, bytes: a.attempt.bytes, rows, shape: shapeOf(data) }
-    } else if (pick === "html") {
+      // A pick that is already small (a few rows, one timetable) is shown as
+      // well: a shape cannot say whether a time is UTC or what a code names.
+      const small = JSON.stringify(data ?? null)
+      out[name] = { status: a.attempt.status, bytes: a.attempt.bytes, rows, shape: shapeOf(data), ...(name.endsWith("(sample)") && small.length <= 4000 ? { sample: data } : {}) }
+    } else if (pick === "html" || pick === "html-excerpt") {
       const regs = registrationTokens(a.text)
       out[name] = {
         status: a.attempt.status,
@@ -734,6 +958,10 @@ async function exploreUpstreams(s, log) {
         registrations: regs.length,
         sample: regs.slice(0, 5),
         ...pageAnatomy(a.text),
+        // The markup around the first registration — how the list is laid
+        // out, for writing its parser.
+        // A registration that is an element's whole TEXT, not a header's (X-UA-Compatible).
+        ...(pick === "html-excerpt" ? { excerpt: markupAround(a.text, />\s*(?:[A-Z][A-Z0-9]?|[0-9][A-Z])-[A-Z0-9]{2,5}\s*</) } : {}),
       }
     } else if (pick === "bytes") {
       out[name] = { status: a.attempt.status, bytes: a.attempt.bytes, contentType: a.attempt.contentType }
@@ -807,6 +1035,22 @@ function describeLiteral(name, literal) {
   } catch {
     return { name, chars: literal.length, parses: false }
   }
+}
+
+/**
+ * The markup around the first match of `needle` in a page: scripts and styles
+ * dropped, whitespace collapsed, ~1.5KB before it and ~1.5KB after.
+ *
+ * @param {string} html
+ * @param {RegExp} needle
+ */
+export function markupAround(html, needle) {
+  const clean = html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/\s+/g, " ")
+  const at = clean.search(needle)
+  return at < 0 ? "" : clean.slice(Math.max(0, at - 1500), at + 1500)
 }
 
 /**
@@ -1103,6 +1347,8 @@ export function normalizeFlight(f) {
   const id = f?.identification || {}
   const aircraft = f?.aircraft || {}
   const time = f?.time || {}
+  // `info` is where a board row and the live click handler carry the gate,
+  // terminal and baggage belt; a flight-list row carries none ("").
   /** @param {any} a */
   const airport = (a) =>
     a && typeof a === "object"
@@ -1111,6 +1357,9 @@ export function normalizeFlight(f) {
           iata: str(a.code?.iata).toUpperCase(),
           name: str(a.name),
           timezone: str(a.timezone?.name),
+          gate: str(a.info?.gate),
+          terminal: str(a.info?.terminal),
+          baggage: str(a.info?.baggage),
         }
       : null
   return {

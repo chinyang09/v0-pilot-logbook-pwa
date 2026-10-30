@@ -26,6 +26,9 @@ const LOOKUP_ROUTES: ReadonlySet<Fr24Route> = new Set<Fr24Route>([
   "flight",
   "flight/details",
   "live",
+  "airline/fleet",
+  "airline/routes",
+  "airline/routes/from",
 ])
 
 export const DOOR_ROUTES: readonly string[] = [...LOOKUP_ROUTES, ...COMPOSITE_ROUTE_NAMES]
