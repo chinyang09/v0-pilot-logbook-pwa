@@ -577,7 +577,16 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
   `not_found` / `unavailable`) and only `not_found` costs a retry: counting
   a challenged lookup as "unknown aircraft" is what marked submissions
   `failed` while every Node lookup was challenged. A `/probe` run from a server
-  measures that server, not the app. The keyed official API
+  measures that server, not the app — which is why `/api/lookup-test/probe`
+  exists (EDGE, no sign-in, previews only by default): it is the one place the
+  probe measures the caller the app actually is. Run 30 Oct 2026 from `iad1`,
+  every in-use source answered; of the candidates, an airline's FLEET page
+  (`/data/airlines/<iata>-<icao>/fleet`, HTML, ~63 Scoot registrations), the
+  live feed by airline, flight playback (the track and photos), the second
+  search host (`common/v1/search.json`), airport disruptions and airline logos
+  answer; the live click handler carries gate/terminal/baggage, which the
+  flight history does not; `/api/v1/airlines/<icao>/fleet` exists but answers
+  401 (an FR24 account — not to be worked round). The keyed official API
   (`fr24api.flightradar24.com`) is the route that does not depend on how
   FR24 scores a caller; do not work
   round the challenge (impersonated clients, FR24's web gRPC headers). The
@@ -3384,6 +3393,7 @@ Notable route groups:
 | `/api/lookup/<route>` | GET | Yes (session or `x-lookup-secret`) | The gateway Worker's normalized routes (`airport` — the timezone as the source gave it, blank on its position-only tiers), EDGE (`lib/lookup/client.ts`; Node code: `lookupFromEdge`) |
 | `/api/lookup/aircraft/candidates?q=` | GET | Yes | Every aircraft the text could be, each marked `exact` — the Worker's `/search`, then `aircraft/flights` for a whole registration search did not list; `exact=1` for that registration or 404 |
 | `/api/lookup/airport/candidates?q=` | GET | Yes | Every airport a partial code (or a name) could be — the Worker's `/search` |
+| `/api/lookup-test/<route>` | GET | No (OFF in production unless `LOOKUP_TEST_ROUTE=1`; a preview is behind Vercel's deployment protection) | The operator's test door, EDGE: every `/api/lookup` route without the sign-in, plus the Worker's `/probe` (`probe?explore=1`) run from where the APP runs — never `/raw` |
 | `/api/lookup/pool/aircraft` | POST | No | The shared aircraft pool — enriched submissions, MongoDB (Node) |
 | `/api/lookup/pool/airport` | POST | No | The shared airport pool — enriched submissions, MongoDB (Node) |
 | `/api/submissions/aircraft` | POST | Yes | Submit custom aircraft for enrichment |
@@ -4802,7 +4812,7 @@ When making changes, be aware of these high-impact files:
 - Do not use `npm install` or `npm add` — always use `pnpm` to keep `pnpm-lock.yaml` in sync (Vercel uses frozen-lockfile)
 - Do not expose FR24 as the data source in UI — the user explicitly requires online lookups to be transparent (no "Online Results" labels, no Globe icons, no "FlightRadar24" branding)
 - Do not add hexdb.io fallback for aircraft lookup — if FR24 fails, manual entry is the only option
-- Do not call FR24 from the app except through the gateway Worker (`callFr24Worker` from an Edge route, `lookupFromEdge` from a Node one, `lib/lookup/client.ts` in the browser), and do not let an airport with a BLANK timezone reach the client — the Worker's position-only tiers return `""`, `lookupAirportOnline` / `deriveTimezone` derive the zone from the coordinates, and the client would otherwise store it as UTC. And run every route that calls the Worker on the EDGE runtime: FR24 scores the Worker's caller, and challenges the Node runtime's calls on every endpoint. A route that needs MongoDB keeps that in a separate Node route, as the shared pool (`/api/lookup/pool/*`) does. And do not add an online-lookup route outside `/api/lookup`, or fetch one by hand: a Worker route goes in `LOOKUP_ROUTES` and `LookupRoutes`, one that combines several in `lib/lookup/composite.ts`, and every caller uses `lookup.*` Never hand the Worker's secret to a browser, and never expose its `/raw` (an FR24 passthrough) or `/probe` through the app
+- Do not call FR24 from the app except through the gateway Worker (`callFr24Worker` from an Edge route, `lookupFromEdge` from a Node one, `lib/lookup/client.ts` in the browser), and do not let an airport with a BLANK timezone reach the client — the Worker's position-only tiers return `""`, `lookupAirportOnline` / `deriveTimezone` derive the zone from the coordinates, and the client would otherwise store it as UTC. And run every route that calls the Worker on the EDGE runtime: FR24 scores the Worker's caller, and challenges the Node runtime's calls on every endpoint. A route that needs MongoDB keeps that in a separate Node route, as the shared pool (`/api/lookup/pool/*`) does. And do not add an online-lookup route outside `/api/lookup`, or fetch one by hand: a Worker route goes in `LOOKUP_ROUTES` and `LookupRoutes`, one that combines several in `lib/lookup/composite.ts`, and every caller uses `lookup.*` Never hand the Worker's secret to a browser, never expose its `/raw` (an FR24 passthrough) through the app, and expose `/probe` only through `/api/lookup-test` — which stays off in production unless `LOOKUP_TEST_ROUTE=1` is set there on purpose. Both doors answer through `lib/lookup/door.ts`; do not give the test door routing of its own
 - Do not bypass `recalculateFlightFields()` `manualOverrides` — users' manually entered field values must never be overwritten by enrichment
 - Do not let a hidden keep-alive page recompute on a data change — read data through the hooks that hold it (`useHeldWhileHidden`), and add a new list hook the same way. And never default SWR's `data` to a fresh `[]` per render: it breaks every downstream memo, and under the hold it loops
 - Do not put the active route back into context as a plain value, and do not render a keep-alive page's element inline in the stack — either one re-renders all six retained pages on every tab switch. The route is a store whose SNAPSHOT is the per-page boolean (`useSyncExternalStore`), and each page is `memo`ized on its route key
