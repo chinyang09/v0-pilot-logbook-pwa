@@ -187,6 +187,14 @@ describe("normalizers", () => {
     expect((w.shapeOf(wide) as Record<string, unknown>)["…"]).toBe("5 more keys")
   })
 
+  it("counts registration-like tokens in a page, once each", () => {
+    expect(w.registrationTokens("<td>9V-OFH</td><td>A21N</td><td>9V-OFH</td><td>B-LRA</td> TR600 2026-10-30")).toEqual([
+      "9V-OFH",
+      "B-LRA",
+    ])
+    expect(w.registrationTokens("")).toEqual([])
+  })
+
   it("reads an airlines.php row", () => {
     expect(w.normalizeAirline({ Name: "Scoot", Code: "TR", ICAO: "TGW" })).toEqual({ name: "Scoot", iata: "TR", icao: "TGW" })
     expect(w.normalizeAirline({ Name: "", Code: "TR" })).toBeNull()
@@ -230,7 +238,15 @@ describe("routes", () => {
 
     const explored = await call("/probe?explore=1")
     expect(Object.keys(explored.body.explore)).toEqual(
-      expect.arrayContaining(["api search.json", "airport.json every plugin", "flight-playback", "in use: flight-list by reg (one flight)"])
+      expect.arrayContaining([
+        "api search.json",
+        "airport.json every plugin",
+        "flight-playback",
+        "www api/v1 airport (sniffed)",
+        "airline fleet page",
+        "live-feed by airline",
+        "in use: flight-list by reg (one flight)",
+      ])
     )
     // What the flight-list normalizer leaves on the table shows up in its shape.
     expect(explored.body.explore["in use: flight-list by reg (one flight)"].shape.aircraft).toEqual({ images: { large: [] } })

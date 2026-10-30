@@ -604,14 +604,27 @@ async function handleProbe(url, log) {
 
   const explore =
     url.searchParams.get("explore") === "1"
-      ? await exploreUpstreams({ code, reg, flight, flightList: results[6].data, click: click?.data, inUse: results }, log)
+      ? await exploreUpstreams(
+          {
+            code,
+            reg,
+            flight,
+            airline: cleanCode(url.searchParams.get("airline"), 3, 3) || "TGW",
+            airlineIata: cleanCode(url.searchParams.get("airlineIata"), 2, 2) || "TR",
+            airportId: (url.searchParams.get("airportId") || "").replace(/[^0-9]/g, "").slice(0, 8),
+            flightList: results[6].data,
+            click: click?.data,
+            inUse: results,
+          },
+          log
+        )
       : undefined
 
   return {
     status: 200,
     body: {
       ok: true,
-      samples: { code, reg, flight },
+      samples: { code, reg, flight, airline: url.searchParams.get("airline") || "TGW" },
       summary: log.map((a) => `${a.ok ? "OK  " : "FAIL"} ${a.name} — ${a.ok ? `${a.status}, ${a.ms}ms` : a.error}`),
       explore,
       attempts: log,
@@ -626,15 +639,33 @@ async function handleProbe(url, log) {
  * first element), never the data itself; the in-use sources are shaped too, at
  * the level their normalizers read, so a field they drop shows up as well.
  *
- * @param {{ code: string, reg: string, flight: string, flightList: any, click: any, inUse: { data: any }[] }} s
+ * A guessed URL is marked as one: it is asked to find out whether it exists.
+ * An HTML page (an airline's fleet or routes page) is not shaped — it is
+ * counted: how many distinct registration-like tokens it carries, and five of
+ * them, which says whether a fleet list is in it without returning the page.
+ *
+ * @param {{ code: string, reg: string, flight: string, airline: string, airlineIata: string, airportId: string, flightList: any, click: any, inUse: { data: any }[] }} s
  * @param {Attempt[]} log
  */
 async function exploreUpstreams(s, log) {
   const first = s.flightList?.result?.response?.data?.[0]
   const fr24Id = first?.identification?.id
   const departed = first?.time?.real?.departure || first?.time?.scheduled?.departure
-  /** @type {[name: string, url: string, pick: (data: any) => any][]} */
+  const slug = `${s.airlineIata}-${s.airline}`.toLowerCase()
+  /** @type {[name: string, url: string, pick: ((data: any) => any) | "html" | "bytes"][]} */
   const candidates = [
+    // The newer web API (`/api/v1/…`, sniffed from the site). The airport id
+    // is FR24's own number; without one the code is tried.
+    ["www api/v1 airport (sniffed)", `${WWW}/api/v1/airports/${s.airportId || s.code}`, (d) => d],
+    ["www api/v1 airline (guess)", `${WWW}/api/v1/airlines/${s.airline}`, (d) => d],
+    ["www api/v1 airline fleet (guess)", `${WWW}/api/v1/airlines/${s.airline}/fleet`, (d) => d],
+    // An airline's fleet and routes, as the site shows them (HTML).
+    ["airline fleet page", `${WWW}/data/airlines/${slug}/fleet`, "html"],
+    ["airline routes page", `${WWW}/data/airlines/${slug}/routes`, "html"],
+    // What the airline has in the air (and on the ground, last 4h) right now.
+    ["live-feed by airline", feedUrl({ airline: s.airline }), (d) => parseFeed(d)],
+    ["airline logo", `https://cdn.flightradar24.com/assets/airlines/logotypes/${s.airlineIata}_${s.airline}.png`, "bytes"],
+    ["volcanic eruptions", `${WWW}/webapi/v1/volcanic-eruption-data`, (d) => d],
     // A second search host: a tier for the search chain if www is challenged.
     ["api search.json", `${API}/search.json?query=${encodeURIComponent(s.reg)}&limit=10`, (d) => d?.result],
     [
@@ -646,7 +677,7 @@ async function exploreUpstreams(s, log) {
     ["flight-list by airport", `${API}/flight/list.json?query=${s.code.toLowerCase()}&fetchBy=airport&page=1&limit=5`, (d) => d?.result?.response],
     ["airport-disruptions", `${WWW}/webapi/v1/airport-disruptions`, (d) => d],
     ["most-tracked", `${WWW}/flights/most-tracked`, (d) => d],
-    ["live-feed by callsign", feedUrl({ callsign: s.flight, limit: "5" }), (d) => d],
+    ["live-feed by callsign", feedUrl({ callsign: s.flight, limit: "5" }), (d) => parseFeed(d)],
   ]
   if (fr24Id && departed) {
     candidates.push([
@@ -656,12 +687,25 @@ async function exploreUpstreams(s, log) {
     ])
   }
 
-  const answers = await Promise.all(candidates.map(([name, target]) => upstream(`explore: ${name}`, target, log)))
+  const answers = await Promise.all(
+    candidates.map(([name, target, pick]) => upstream(`explore: ${name}`, target, log, { text: typeof pick !== "function" }))
+  )
   /** @type {Record<string, unknown>} */
   const out = {}
-  candidates.forEach(([name, , pick], i) => {
+  candidates.forEach(([name, target, pick], i) => {
     const a = answers[i]
-    out[name] = a.ok ? { status: a.attempt.status, bytes: a.attempt.bytes, shape: shapeOf(pick(a.data)) } : { error: a.attempt.error }
+    if (!a.ok) {
+      out[name] = { url: target, error: a.attempt.error }
+    } else if (pick === "html") {
+      const regs = registrationTokens(a.text)
+      out[name] = { status: a.attempt.status, bytes: a.attempt.bytes, registrations: regs.length, sample: regs.slice(0, 5) }
+    } else if (pick === "bytes") {
+      out[name] = { status: a.attempt.status, bytes: a.attempt.bytes, contentType: a.attempt.contentType }
+    } else {
+      const data = pick(a.data)
+      const rows = Array.isArray(data) ? data.length : undefined
+      out[name] = { status: a.attempt.status, bytes: a.attempt.bytes, rows, shape: shapeOf(data) }
+    }
   })
 
   // The sources routes already read, at the level their normalizers read —
@@ -671,6 +715,20 @@ async function exploreUpstreams(s, log) {
   out["in use: clickhandler"] = s.click ? { shape: shapeOf(s.click) } : { error: "no live flight in the sample bounds" }
   out["in use: search hit kinds"] = { shape: shapeOf(s.inUse[0].data?.results) }
   return out
+}
+
+/**
+ * Distinct registration-like tokens in a page — `9V-OFH`, `B-LRA`, `4X-EKA`: a
+ * country prefix with a letter in it, a dash, a mark. A date's `10-30` is not
+ * one; a dashless US `N12345` is missed, which a count can afford.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function registrationTokens(text) {
+  const seen = new Set()
+  for (const m of (text || "").matchAll(/\b((?:[A-Z][A-Z0-9]?|[0-9][A-Z])-[A-Z0-9]{2,5})\b/g)) seen.add(m[1])
+  return [...seen]
 }
 
 /**
