@@ -33,6 +33,26 @@ const LOOKUP_ROUTES: ReadonlySet<Fr24Route> = new Set<Fr24Route>([
 
 export const DOOR_ROUTES: readonly string[] = [...LOOKUP_ROUTES, ...COMPOSITE_ROUTE_NAMES]
 
+/**
+ * Answers that change by the minute — a gate, where an aeroplane is, a board,
+ * the weather, the live feed. The browser keeps every other answer for a
+ * minute (a pilot retyping a registration asks again for nothing), but kept
+ * for these the duty band's refresh read the same answer back from the HTTP
+ * cache for a minute after it was pressed.
+ */
+const LIVE_ROUTES: ReadonlySet<string> = new Set([
+  "flight/gates",
+  "aircraft/whereabouts",
+  "airport/schedule",
+  "airport/details",
+  "flight/details",
+  "live",
+])
+
+export function cacheControlFor(route: string): string {
+  return LIVE_ROUTES.has(route) ? "no-store" : "private, max-age=60"
+}
+
 function isLookupRoute(route: string): route is Fr24Route {
   return LOOKUP_ROUTES.has(route as Fr24Route)
 }
@@ -62,7 +82,7 @@ export async function answerLookup(request: Request, route: string): Promise<Res
   if (answer.ok) {
     return NextResponse.json(
       { ok: true, data: answer.data, source: answer.source },
-      { headers: { "cache-control": "private, max-age=60" } }
+      { headers: { "cache-control": cacheControlFor(route) } }
     )
   }
   // A 0 is a timeout or an unreachable Worker — say 502, same as every

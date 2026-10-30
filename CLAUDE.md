@@ -598,7 +598,17 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
   2026 and left the Worker open — after a deploy, `/probe` without the header
   must answer 401.
   404 means a source answered and has no such thing (manual entry); 502 means
-  every source failed (try later) — callers must not treat them alike. The
+  every source failed (try later) — callers must not treat them alike. Every
+  hop reads that envelope through ONE function, `readEnvelope`
+  (`lib/fr24/envelope.ts`) — the Worker client, the Node → Edge hand-off and
+  the browser each parsed it by hand, and the browser read an answer that was
+  not the envelope (a deploy's HTML 404, a sign-in page) as "not found". It is
+  502. The door lets the browser keep an answer for a minute, except the ones
+  that move by the minute (`LIVE_ROUTES`: gates, whereabouts, boards, airport
+  details, the live feed) — kept, the duty band's refresh read the same gate
+  back from the HTTP cache. The shared pool answers a MongoDB failure 503,
+  which `lookup.pool*` turns into `null` ("not asked"), not `{}` ("nobody has
+  it"). The
   Worker's legacy passthroughs (`/v1/search/web/find`,
   `/airports/traffic-stats/`) stay so the app and the Worker can deploy in
   either order. Server code calls it through `callFr24Worker`

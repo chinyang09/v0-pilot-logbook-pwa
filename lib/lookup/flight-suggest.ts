@@ -73,7 +73,8 @@ const minutesOfDay = (iso: string) => {
 }
 const DAY_MS = 86_400_000
 
-function airportOf(a: Fr24Flight["origin"]): SuggestedAirport | null {
+/** An end of a flight as the app names an airport; null when the source named neither code. */
+export function suggestedAirport(a: Fr24Flight["origin"]): SuggestedAirport | null {
   return a && (a.icao || a.iata) ? { icao: a.icao, iata: a.iata, name: a.name } : null
 }
 
@@ -99,8 +100,8 @@ function fromRow(f: Fr24Flight, date: string): FlightSuggestion {
     date,
     basis: "scheduled",
     basedOn: null,
-    origin: airportOf(f.origin),
-    destination: airportOf(f.destination),
+    origin: suggestedAirport(f.origin),
+    destination: suggestedAirport(f.destination),
     scheduledDeparture: f.scheduledDeparture,
     scheduledArrival: f.scheduledArrival,
     registration: f.registration,

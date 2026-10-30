@@ -15,18 +15,19 @@
  * transparent to the pilot.
  */
 
+import { readEnvelope, setQuery } from "@/lib/fr24/envelope"
 import type { Fr24Result } from "@/lib/fr24/types"
 import type { EnrichedAirport, LookupRoute, LookupRoutes, PooledAircraft } from "./types"
 
 const CLIENT_TIMEOUT_MS = 15000
 
 /**
- * The caller's signal (a newer request cancelling this one) AND the timeout —
+ * The caller's signal (a newer request cancelling this one) AND a timeout —
  * a caller passing its own signal used to drop the timeout, so a request that
  * never answered left the flight form's Lookup spinning for good.
  */
-function withTimeout(signal: AbortSignal | undefined): AbortSignal {
-  const timeout = AbortSignal.timeout(CLIENT_TIMEOUT_MS)
+export function withTimeout(signal: AbortSignal | undefined, timeoutMs = CLIENT_TIMEOUT_MS): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs)
   if (!signal) return timeout
   if (typeof AbortSignal.any === "function") return AbortSignal.any([signal, timeout])
   // Engines before AbortSignal.any (Safari < 17.4): one controller both feed.
@@ -43,21 +44,11 @@ export async function lookupGet<R extends LookupRoute>(
   params: Record<string, string | number | undefined> = {},
   signal?: AbortSignal
 ): Promise<Fr24Result<LookupRoutes[R]>> {
-  const query = new URLSearchParams()
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== "") query.set(key, String(value))
-  }
-  const qs = query.toString()
-
+  // Relative to the page; the base is only there to let URL build the query.
+  const url = setQuery(new URL(`/api/lookup/${route}`, "http://door"), params)
   try {
-    const response = await fetch(`/api/lookup/${route}${qs ? `?${qs}` : ""}`, { signal: withTimeout(signal) })
-    const body = (await response.json().catch(() => null)) as
-      | { ok?: boolean; data?: unknown; source?: string; error?: string }
-      | null
-    if (response.ok && body?.ok === true) {
-      return { ok: true, status: response.status, data: body.data as LookupRoutes[R], source: body.source ?? "" }
-    }
-    return { ok: false, status: response.status, error: body?.error || `HTTP ${response.status}` }
+    const response = await fetch(`${url.pathname}${url.search}`, { signal: withTimeout(signal) })
+    return readEnvelope<LookupRoutes[R]>(response.status, await response.json().catch(() => null))
   } catch (err) {
     return { ok: false, status: 0, error: (err as Error).message }
   }
@@ -82,6 +73,12 @@ async function poolPost<T>(path: string, body: unknown, signal?: AbortSignal): P
   } catch {
     return null
   }
+}
+
+/** An airline by its IATA (2) or ICAO (3) designator, as the airline routes take it. */
+const airlineQuery = (code: string): { iata: string } | { icao: string } => {
+  const c = code.trim()
+  return c.length === 3 ? { icao: c } : { iata: c }
 }
 
 export const lookup = {
@@ -142,14 +139,12 @@ export const lookup = {
   aircraftWhereabouts: (reg: string, at?: string, signal?: AbortSignal) =>
     lookupGet("aircraft/whereabouts", { reg, at }, signal),
   /** An airline's fleet by type; `code` is its IATA (2) or ICAO (3) designator. */
-  airlineFleet: (code: string, signal?: AbortSignal) =>
-    lookupGet("airline/fleet", code.trim().length === 3 ? { icao: code.trim() } : { iata: code.trim() }, signal),
+  airlineFleet: (code: string, signal?: AbortSignal) => lookupGet("airline/fleet", airlineQuery(code), signal),
   /** Every airport pair an airline flies. */
-  airlineRoutes: (code: string, signal?: AbortSignal) =>
-    lookupGet("airline/routes", code.trim().length === 3 ? { icao: code.trim() } : { iata: code.trim() }, signal),
+  airlineRoutes: (code: string, signal?: AbortSignal) => lookupGet("airline/routes", airlineQuery(code), signal),
   /** One airport's destinations on an airline, with the flight numbers serving each. */
   airlineRoutesFrom: (code: string, airportIata: string, signal?: AbortSignal) =>
-    lookupGet("airline/routes/from", { ...(code.trim().length === 3 ? { icao: code.trim() } : { iata: code.trim() }), airport: airportIata }, signal),
+    lookupGet("airline/routes/from", { ...airlineQuery(code), airport: airportIata }, signal),
   /** Live positions; give at least one filter. `bounds` is "N,S,W,E". */
   live: (filters: { reg?: string; airline?: string; type?: string; bounds?: string; limit?: number }, signal?: AbortSignal) =>
     lookupGet("live", filters, signal),

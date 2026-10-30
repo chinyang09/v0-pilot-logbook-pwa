@@ -11,13 +11,22 @@
 import { useCallback, useState } from "react"
 import { lookup } from "@/lib/lookup/client"
 import { whereaboutsLines, type AircraftWhereabouts } from "@/lib/lookup/aircraft-whereabouts"
+import type { Fr24Result } from "@/lib/fr24/types"
 import { normalizeRegistration } from "@/lib/utils/string"
 
-export type WhereaboutsState =
-  | { status: "loading" }
+/** A whereabouts answer as it is shown: found, nothing found (404), or not asked (anything else). */
+export type WhereaboutsAnswer =
   | { status: "done"; whereabouts: AircraftWhereabouts; checkedAt: number }
   | { status: "missing" }
   | { status: "failed" }
+
+export type WhereaboutsState = { status: "loading" } | WhereaboutsAnswer
+
+/** The answer kept with the instant it landed, so "30m ago" is said relative to the check. */
+export function whereaboutsAnswer(answer: Fr24Result<AircraftWhereabouts>): WhereaboutsAnswer {
+  if (answer.ok) return { status: "done", whereabouts: answer.data, checkedAt: Date.now() }
+  return { status: answer.status === 404 ? "missing" : "failed" }
+}
 
 export function useAircraftWhereabouts(registration: string | undefined, atIso?: string | null) {
   const key = `${normalizeRegistration(registration || "")}|${atIso || ""}`
@@ -26,12 +35,7 @@ export function useAircraftWhereabouts(registration: string | undefined, atIso?:
   const check = useCallback(async () => {
     if (!registration || normalizeRegistration(registration).length < 3) return
     setState({ key, value: { status: "loading" } })
-    const answer = await lookup.aircraftWhereabouts(registration, atIso || undefined)
-    const value: WhereaboutsState = answer.ok
-      ? { status: "done", whereabouts: answer.data, checkedAt: Date.now() }
-      : answer.status === 404
-        ? { status: "missing" }
-        : { status: "failed" }
+    const value = whereaboutsAnswer(await lookup.aircraftWhereabouts(registration, atIso || undefined))
     setState((prev) => (prev?.key !== key ? prev : { key, value }))
   }, [key, registration, atIso])
 

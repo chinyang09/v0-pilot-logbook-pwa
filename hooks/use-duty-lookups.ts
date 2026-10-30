@@ -24,22 +24,17 @@ import useSWR from "swr"
 import { useFlights } from "@/hooks/data"
 import { lookup } from "@/lib/lookup/client"
 import { normalizeFlightNumber, type FlightGates } from "@/lib/lookup/flight-suggest"
-import type { AircraftWhereabouts } from "@/lib/lookup/aircraft-whereabouts"
+import { whereaboutsAnswer, type WhereaboutsAnswer } from "@/hooks/use-aircraft-whereabouts"
 import { dutyFlights, inboundLeg, legDepartureIso } from "@/lib/utils/dashboard/duty-flights"
 import { normalizeRegistration } from "@/lib/utils/string"
 import type { FlightLog } from "@/types/entities/flight.types"
 
 export type GateState = { status: "done"; gates: FlightGates } | { status: "missing" } | { status: "failed" }
-export type WhereaboutsState =
-  | { status: "done"; whereabouts: AircraftWhereabouts; checkedAt: number }
-  | { status: "missing" }
-  | { status: "failed" }
-
 export interface DutyLookups {
   /** By flight id; a leg with no flight number is absent. */
   gates: Record<string, GateState>
   /** The aeroplane before `inboundFlightId` departs, or null when no leg names one. */
-  inbound: WhereaboutsState | null
+  inbound: WhereaboutsAnswer | null
   inboundRegistration: string
   inboundFlightId: string | null
 }
@@ -56,12 +51,7 @@ async function fetchDutyLookups(legs: FlightLog[]): Promise<DutyLookups> {
         return [f.id, answer.ok ? { status: "done", gates: answer.data } : { status: answer.status === 404 ? "missing" : "failed" }]
       })
     ),
-    (async (): Promise<WhereaboutsState | null> => {
-      if (!first) return null
-      const answer = await lookup.aircraftWhereabouts(first.aircraftReg, legDepartureIso(first) ?? undefined)
-      if (answer.ok) return { status: "done", whereabouts: answer.data, checkedAt: Date.now() }
-      return { status: answer.status === 404 ? "missing" : "failed" }
-    })(),
+    first ? lookup.aircraftWhereabouts(first.aircraftReg, legDepartureIso(first) ?? undefined).then(whereaboutsAnswer) : null,
   ])
   return {
     gates: Object.fromEntries(gateAnswers.filter((e): e is [string, GateState] => !!e)),

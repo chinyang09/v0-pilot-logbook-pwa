@@ -20,7 +20,7 @@
  * means nobody could answer (manual entry).
  */
 
-import { lookup } from "@/lib/lookup/client"
+import { lookup, withTimeout } from "@/lib/lookup/client"
 import type { EnrichedAirport } from "@/lib/lookup/types"
 
 export type OnlineAirportSource = "cache" | "fr24"
@@ -31,18 +31,7 @@ export interface OnlineAirport {
 }
 
 const TIMEOUT_MS = 12000
-
-/** The caller's signal OR the timeout. By hand: `AbortSignal.any` needs Safari 17.4. */
-function timeoutSignal(signal?: AbortSignal): AbortSignal {
-  const timeout = AbortSignal.timeout(TIMEOUT_MS)
-  if (!signal) return timeout
-  const controller = new AbortController()
-  const abort = () => controller.abort()
-  if (signal.aborted) abort()
-  signal.addEventListener("abort", abort, { once: true })
-  timeout.addEventListener("abort", abort, { once: true })
-  return controller.signal
-}
+const timeoutSignal = (signal?: AbortSignal) => withTimeout(signal, TIMEOUT_MS)
 
 async function fromPool(code: string, signal?: AbortSignal): Promise<EnrichedAirport | null> {
   const hit = (await lookup.poolAirports([code], timeoutSignal(signal)))?.[code]
