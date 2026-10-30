@@ -70,6 +70,9 @@ Add `debug=1` to any route to see each upstream attempt.
 | `/flight?number=TR600&page=1&limit=25` | the flights a flight number has operated | `common/v1/flight/list.json?fetchBy=flight` |
 | `/flight/details?id=<fr24 id>` | one live flight, with its trail | `data-live …/clickhandler` |
 | `/live?reg=` / `airline=` / `type=` / `bounds=N,S,W,E` | live positions | `data-cloud …/zones/fcgi/feed.js` |
+| `/airline/fleet?iata=TR` (or `icao=TGW`) | an airline's fleet by type: count, each airframe's registration and model (serial and age are paywalled there, so not read) | `/data/airlines/<iata>-<icao>/fleet` (HTML, `#list-aircraft`); the other code off `_json/airlines.php` |
+| `/airline/routes?iata=TR` | every airport pair it flies | `/data/airlines/…/routes` (HTML, the `arrRoutes` it embeds) |
+| `/airline/routes/from?iata=TR&airport=SIN` | one airport's destinations (and origins), each with the flight numbers serving it and the days, a few ahead — a DEPARTURE's day carries its scheduled UTC departure | `/data/airlines/…/routes?get-airport-arr-dep=SIN&format=json` (what a pin on the routes map asks) |
 | `/raw?url=https://api.flightradar24.com/...` | verbatim, FR24 hosts only — **off unless `PROXY_SECRET` is set** | — |
 | `/v1/search/web/find`, `/airports/traffic-stats/` | LEGACY verbatim passthroughs, for an app deployment that predates the routes above | — |
 

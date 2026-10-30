@@ -657,6 +657,20 @@ The add-airport form also LISTS what a partial code could be
 off the search hit's label, name matched when the text is no code); choosing
 one looks it up in full like a typed code.
 
+**Smart seeding — what a flight number, a date and an airline already say**
+(30 Oct 2026; every source measured from Edge through `/api/lookup-test`):
+
+| | Source | Rule |
+|---|---|---|
+| a flight from its number + date (`flight/suggest`, `lib/lookup/flight-suggest.ts`) | the number's list (`/flight`): a week ahead SCHEDULED, a week back flown; the registration appears on the day the aeroplane is assigned | `basis: "scheduled"` is that UTC date's row; past the list, `"usual"` moves the nearest day's times onto the date and NEVER carries its registration |
+| filling the form (`lib/utils/flight-seed.ts`, `useFlightSuggestion`) | — | asked only once the pilot CHANGES the number or the date (opening a flight spends nothing); a scheduled answer fills BLANK fields only — route, scheduled out/in (UTC), the aeroplane; a `usual` one is OFFERED (Use), because scheduled times feed the FDP plan; never OOOI, never a simulator, signed or locked entry, nothing onto a record whose route names other airports |
+| gates (`flight/gates`, `useFlightGates`) | the tracked flight's `info`, else the departures board at the origin and the arrivals board at the destination, from an hour before | a Gates row in the form, around today only, checked on a TAP and never stored (a gate is published late and moves); "" until published is an answer, an unreadable board a failure |
+| a fleet (`airline/fleet`, `AirlineFleetSection` under the add-aircraft form) | the airline's fleet page, by type | Add writes a whole type in one `bulkPut` (`addFleetAircraftToDatabase`); a registration already held is left as it is |
+| the network (`airline/routes`, `airline/routes/from`) | the routes page's `arrRoutes`; a map pin's per-airport JSON | in the door, nothing reads them yet — the destination seeding they enable is on hold |
+
+The flight number's list, the boards and the per-airport timetable all reach
+only a few days ahead: a date further out gets usual times, not a schedule.
+
 **An IATA code is not an airport for all time** (`lib/airports/code-changes.ts`).
 VTZ moved from Visakhapatnam's old airport (VOVZ) to Bhogapuram (VOVI) at 00:01
 IST on 17 Aug 2026, and the company reports name airports by IATA only, so the
@@ -3393,6 +3407,9 @@ Notable route groups:
 | `/api/lookup/<route>` | GET | Yes (session or `x-lookup-secret`) | The gateway Worker's normalized routes (`airport` — the timezone as the source gave it, blank on its position-only tiers), EDGE (`lib/lookup/client.ts`; Node code: `lookupFromEdge`) |
 | `/api/lookup/aircraft/candidates?q=` | GET | Yes | Every aircraft the text could be, each marked `exact` — the Worker's `/search`, then `aircraft/flights` for a whole registration search did not list; `exact=1` for that registration or 404 |
 | `/api/lookup/airport/candidates?q=` | GET | Yes | Every airport a partial code (or a name) could be — the Worker's `/search` |
+| `/api/lookup/flight/suggest?number=&date=` | GET | Yes | A flight number on a UTC date: that day's schedule (`basis: "scheduled"`) or its usual times (`"usual"`); `out=HH:MM` picks between two the same day |
+| `/api/lookup/flight/gates?number=&date=` | GET | Yes | That flight's gates, terminals and belt — the tracked flight, else the airport boards; "" until published |
+| `/api/lookup/airline/{fleet,routes,routes/from}?iata=` | GET | Yes | The Worker's airline routes passed through: fleet by type, every airport pair, one airport's destinations with flight numbers |
 | `/api/lookup-test/<route>` | GET | No (OFF in production unless `LOOKUP_TEST_ROUTE=1`; a preview is behind Vercel's deployment protection) | The operator's test door, EDGE: every `/api/lookup` route without the sign-in, plus the Worker's `/probe` (`probe?explore=1`) run from where the APP runs — never `/raw` |
 | `/api/lookup/pool/aircraft` | POST | No | The shared aircraft pool — enriched submissions, MongoDB (Node) |
 | `/api/lookup/pool/airport` | POST | No | The shared airport pool — enriched submissions, MongoDB (Node) |
