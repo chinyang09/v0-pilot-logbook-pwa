@@ -4,7 +4,7 @@
  * GET /api/lookup/airport?code=WSSS
  * GET /api/lookup/aircraft/flights?reg=9V-TNL&page=1
  * GET /api/lookup/aircraft/candidates?q=9VB
- * … any normalized Worker route (`LOOKUP_ROUTES`), passed through, or one the
+ * … any normalized Worker route (`LOOKUP_ROUTES` in `lib/lookup/door.ts`), passed through, or one the
  * door composes from them (`lib/lookup/composite.ts`). The browser helpers are
  * in `lib/lookup/client.ts`, the shapes in `lib/lookup/types.ts`, and server
  * code reaches it through `lookupFromEdge` (`lib/lookup/handoff.ts`).
@@ -35,30 +35,10 @@
  */
 
 import { NextResponse } from "next/server"
-import { callFr24Worker, fr24WorkerConfigured } from "@/lib/fr24/worker-client"
-import type { Fr24Route } from "@/lib/fr24/types"
-import { COMPOSITE_ROUTE_NAMES, isCompositeRoute, runCompositeRoute } from "@/lib/lookup/composite"
+import { answerLookup } from "@/lib/lookup/door"
 
 export const runtime = "edge"
 export const dynamic = "force-dynamic"
-
-const LOOKUP_ROUTES: ReadonlySet<Fr24Route> = new Set<Fr24Route>([
-  "aircraft",
-  "aircraft/flights",
-  "airport",
-  "airport/details",
-  "airport/schedule",
-  "airports",
-  "airlines",
-  "search",
-  "flight",
-  "flight/details",
-  "live",
-])
-
-function isLookupRoute(route: string): route is Fr24Route {
-  return LOOKUP_ROUTES.has(route as Fr24Route)
-}
 
 /** Constant-time string comparison (no `crypto.timingSafeEqual` on Edge). */
 function sameSecret(a: string, b: string): boolean {
@@ -103,34 +83,5 @@ export async function GET(
   }
 
   const { path } = await params
-  const route = path.join("/")
-  const composite = isCompositeRoute(route)
-  if (!composite && !isLookupRoute(route)) {
-    return NextResponse.json(
-      { ok: false, error: "Unknown route", routes: [...LOOKUP_ROUTES, ...COMPOSITE_ROUTE_NAMES] },
-      { status: 404 }
-    )
-  }
-  if (!fr24WorkerConfigured()) {
-    return NextResponse.json({ ok: false, error: "Lookup service not configured" }, { status: 503 })
-  }
-
-  const query: Record<string, string> = {}
-  // `path` is Next's own catch-all parameter, which it also puts in the URL's
-  // query; the Worker has no use for it.
-  new URL(request.url).searchParams.forEach((value, key) => {
-    if (key !== "debug" && key !== "path") query[key] = value
-  })
-
-  const answer = composite ? await runCompositeRoute(route, query) : await callFr24Worker(route as Fr24Route, query)
-  if (answer.ok) {
-    return NextResponse.json(
-      { ok: true, data: answer.data, source: answer.source },
-      { headers: { "cache-control": "private, max-age=60" } }
-    )
-  }
-  // A 0 is a timeout or an unreachable Worker — say 502, same as every
-  // upstream failing, so the caller reads it as "try later".
-  const status = answer.status >= 400 ? answer.status : 502
-  return NextResponse.json({ ok: false, error: answer.error }, { status })
+  return answerLookup(request, path.join("/"))
 }

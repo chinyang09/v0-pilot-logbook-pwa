@@ -20,21 +20,20 @@ export function fr24WorkerConfigured(): boolean {
 }
 
 /**
- * Call a normalized Worker route. Never throws.
- *
- * A Worker deployment that predates the normalized routes answers them
- * `{ error: "Path not allowed" }` with a 400 — that comes back as
- * `status: 400`, and callers that have a legacy path fall back to it.
+ * GET a Worker path and hand back its status and parsed body, whatever shape
+ * it has — for the operator's routes (`probe`), which do not answer in the
+ * normalized envelope. Never throws; a timeout or an unreachable Worker is
+ * `status: 0`.
  */
-export async function callFr24Worker<R extends Fr24Route>(
-  route: R,
+export async function fetchFr24Worker(
+  path: string,
   params: Record<string, string | number | undefined>,
   timeoutMs = WORKER_TIMEOUT_MS
-): Promise<Fr24Result<Fr24Routes[R]>> {
+): Promise<{ status: number; body: unknown; error?: string }> {
   const base = process.env.FR24_PROXY_URL
-  if (!base) return { ok: false, status: 0, error: "FR24_PROXY_URL is not set" }
+  if (!base) return { status: 0, body: null, error: "FR24_PROXY_URL is not set" }
 
-  const url = new URL(`${base.replace(/\/$/, "")}/${route}`)
+  const url = new URL(`${base.replace(/\/$/, "")}/${path}`)
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== "") url.searchParams.set(key, String(value))
   }
@@ -49,24 +48,29 @@ export async function callFr24Worker<R extends Fr24Route>(
       cache: "no-store",
       signal: AbortSignal.timeout(timeoutMs),
     })
-    const body = (await response.json().catch(() => null)) as
-      | { ok?: boolean; data?: unknown; source?: string; error?: string }
-      | null
-
-    if (response.ok && body?.ok === true) {
-      return {
-        ok: true,
-        status: response.status,
-        data: body.data as Fr24Routes[R],
-        source: body.source ?? "",
-      }
-    }
-    return {
-      ok: false,
-      status: response.status,
-      error: body?.error || `HTTP ${response.status}`,
-    }
+    return { status: response.status, body: await response.json().catch(() => null) }
   } catch (err) {
-    return { ok: false, status: 0, error: `${(err as Error).name}: ${(err as Error).message}` }
+    return { status: 0, body: null, error: `${(err as Error).name}: ${(err as Error).message}` }
   }
+}
+
+/**
+ * Call a normalized Worker route. Never throws.
+ *
+ * A Worker deployment that predates the normalized routes answers them
+ * `{ error: "Path not allowed" }` with a 400 — that comes back as
+ * `status: 400`, and callers that have a legacy path fall back to it.
+ */
+export async function callFr24Worker<R extends Fr24Route>(
+  route: R,
+  params: Record<string, string | number | undefined>,
+  timeoutMs = WORKER_TIMEOUT_MS
+): Promise<Fr24Result<Fr24Routes[R]>> {
+  const { status, body: raw, error } = await fetchFr24Worker(route, params, timeoutMs)
+  if (error) return { ok: false, status, error }
+  const body = raw as { ok?: boolean; data?: unknown; source?: string; error?: string } | null
+  if (status >= 200 && status < 300 && body?.ok === true) {
+    return { ok: true, status, data: body.data as Fr24Routes[R], source: body.source ?? "" }
+  }
+  return { ok: false, status, error: body?.error || `HTTP ${status}` }
 }
