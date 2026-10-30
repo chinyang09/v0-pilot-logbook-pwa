@@ -195,6 +195,31 @@ describe("normalizers", () => {
     expect(w.registrationTokens("")).toEqual([])
   })
 
+  it("reads where a page gets its data — endpoints, scripts, embedded JSON, data attributes — never the values", () => {
+    const page = `
+      <script src="https://www.flightradar24.com/static/js/routes.min.js?v=3"></script>
+      <img src="https://cdn.flightradar24.com/assets/logo.png">
+      <script>
+        var arrRoutes = [{"airport1":{"iata":"SIN","name":"a ] b"},"airport2":{"iata":"PEN"}},{"airport1":{"iata":"SIN"},"airport2":{"iata":"BKK"}}];
+        fetch('/data/airlines/tr-tgw/routes?get-airport-arr-dep=' + code)
+        var broken = {not: json};
+      </script>
+      <script type="application/json" id="__NEXT_DATA__">{"props":{"flights":[]}}</script>
+      <tr data-row-id="1" data-flight-number="TR288" data-row-id="2"><td>Gate B4</td><td>Terminal 1</td></tr>`
+    const a = w.pageAnatomy(page)
+    expect(a.scripts).toEqual(["https://www.flightradar24.com/static/js/routes.min.js?v=3"])
+    expect(a.endpoints).toEqual(["/data/airlines/tr-tgw/routes?get-airport-arr-dep="])
+    expect(a.embedded).toEqual([
+      { name: "arrRoutes", chars: expect.any(Number), parses: true, rows: 2, shape: [{ airport1: { iata: "string", name: "string" }, airport2: { iata: "string" } }, "×2"] },
+      { name: "broken", chars: 11, parses: false },
+      { name: "__NEXT_DATA__", chars: 24, parses: true, rows: undefined, shape: { props: { flights: [] } } },
+    ])
+    expect(a.dataAttributes).toEqual(["row-id", "flight-number"])
+    expect(a.mentions).toEqual({ gate: 1, terminal: 1, baggage: 0 })
+    expect(w.balancedLiteral("x = [1, [2], \"]\"] tail", 4)).toBe('[1, [2], "]"]')
+    expect(w.balancedLiteral("[1, 2", 0)).toBe("")
+  })
+
   it("reads an airlines.php row", () => {
     expect(w.normalizeAirline({ Name: "Scoot", Code: "TR", ICAO: "TGW" })).toEqual({ name: "Scoot", iata: "TR", icao: "TGW" })
     expect(w.normalizeAirline({ Name: "", Code: "TR" })).toBeNull()
@@ -244,6 +269,10 @@ describe("routes", () => {
         "flight-playback",
         "www api/v1 airport (sniffed)",
         "airline fleet page",
+        "airport departures page",
+        "flight number page",
+        "airport.json departures (one row)",
+        "airline routes from an airport (guess)",
         "live-feed by airline",
         "in use: flight-list by reg (one flight)",
       ])

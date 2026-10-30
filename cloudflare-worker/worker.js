@@ -612,6 +612,7 @@ async function handleProbe(url, log) {
             airline: cleanCode(url.searchParams.get("airline"), 3, 3) || "TGW",
             airlineIata: cleanCode(url.searchParams.get("airlineIata"), 2, 2) || "TR",
             airportId: (url.searchParams.get("airportId") || "").replace(/[^0-9]/g, "").slice(0, 8),
+            airportIata: cleanCode(url.searchParams.get("airportIata"), 3, 3) || "SIN",
             flightList: results[6].data,
             click: click?.data,
             inUse: results,
@@ -640,11 +641,14 @@ async function handleProbe(url, log) {
  * the level their normalizers read, so a field they drop shows up as well.
  *
  * A guessed URL is marked as one: it is asked to find out whether it exists.
- * An HTML page (an airline's fleet or routes page) is not shaped — it is
- * counted: how many distinct registration-like tokens it carries, and five of
- * them, which says whether a fleet list is in it without returning the page.
+ * An HTML page (an airline's fleet or routes page, an airport's board, a
+ * flight number's history) is not returned — it is READ (`pageAnatomy`): the
+ * data endpoints its scripts reference, the JSON it embeds (by name and
+ * shape), its `data-*` attributes, and how often it mentions a gate. That is
+ * what a browser's network tab would show about where the page gets its data,
+ * measured from where the app runs.
  *
- * @param {{ code: string, reg: string, flight: string, airline: string, airlineIata: string, airportId: string, flightList: any, click: any, inUse: { data: any }[] }} s
+ * @param {{ code: string, reg: string, flight: string, airline: string, airlineIata: string, airportId: string, airportIata: string, flightList: any, click: any, inUse: { data: any }[] }} s
  * @param {Attempt[]} log
  */
 async function exploreUpstreams(s, log) {
@@ -662,6 +666,18 @@ async function exploreUpstreams(s, log) {
     // An airline's fleet and routes, as the site shows them (HTML).
     ["airline fleet page", `${WWW}/data/airlines/${slug}/fleet`, "html"],
     ["airline routes page", `${WWW}/data/airlines/${slug}/routes`, "html"],
+    // What a routes-map pin asks for: an airport's destinations on this
+    // airline (a guess at the page's own query, from its old markup).
+    ["airline routes from an airport (guess)", `${WWW}/data/airlines/${slug}/routes?get-airport-arr-dep=${s.airportIata}&format=json`, (d) => d],
+    // An airport's departures board and a flight number's history, as pages.
+    ["airport departures page", `${WWW}/airport/${s.airportIata.toLowerCase()}/departures`, "html"],
+    ["flight number page", `${WWW}/data/flights/${s.flight.toLowerCase()}`, "html"],
+    // The board's own data (the in-use schedule route), one row deep — where a gate would be.
+    [
+      "airport.json departures (one row)",
+      `${airportJsonUrl(s.code, ["schedule"], 1, 3)}&plugin-setting[schedule][mode]=departures&plugin-setting[schedule][timestamp]=${Math.floor(Date.now() / 1000)}`,
+      (d) => d?.result?.response?.airport?.pluginData?.schedule?.departures?.data?.[0],
+    ],
     // What the airline has in the air (and on the ground, last 4h) right now.
     ["live-feed by airline", feedUrl({ airline: s.airline }), (d) => parseFeed(d)],
     ["airline logo", `https://cdn.flightradar24.com/assets/airlines/logotypes/${s.airlineIata}_${s.airline}.png`, "bytes"],
@@ -698,7 +714,13 @@ async function exploreUpstreams(s, log) {
       out[name] = { url: target, error: a.attempt.error }
     } else if (pick === "html") {
       const regs = registrationTokens(a.text)
-      out[name] = { status: a.attempt.status, bytes: a.attempt.bytes, registrations: regs.length, sample: regs.slice(0, 5) }
+      out[name] = {
+        status: a.attempt.status,
+        bytes: a.attempt.bytes,
+        registrations: regs.length,
+        sample: regs.slice(0, 5),
+        ...pageAnatomy(a.text),
+      }
     } else if (pick === "bytes") {
       out[name] = { status: a.attempt.status, bytes: a.attempt.bytes, contentType: a.attempt.contentType }
     } else {
@@ -715,6 +737,91 @@ async function exploreUpstreams(s, log) {
   out["in use: clickhandler"] = s.click ? { shape: shapeOf(s.click) } : { error: "no live flight in the sample bounds" }
   out["in use: search hit kinds"] = { shape: shapeOf(s.inUse[0].data?.results) }
   return out
+}
+
+/**
+ * Where a page gets its data, read off the page itself: the data endpoints its
+ * markup references (and the scripts it loads, where the rest are written), the JSON it embeds (`var arrRoutes = [...]`,
+ * `<script type="application/json">`) by name, size and shape, its distinct
+ * `data-*` attributes (a table row's fields), and how often it says gate,
+ * terminal or baggage. Shapes and names only, never the values.
+ *
+ * @param {string} html
+ */
+export function pageAnatomy(html) {
+  const text = html || ""
+  const endpoints = new Set()
+  const scripts = new Set()
+  const ENDPOINT =
+    /(?:https?:)?\/\/[a-z0-9.-]*flightradar24\.com\/[^\s"'<>()\\]+|["'`](\/(?:api|webapi|common|_json|v1|zones|clickhandler|data\/airlines|data\/flights|airports?)\/[^"'`\s<>]*)["'`]/gi
+  for (const m of text.matchAll(ENDPOINT)) {
+    const found = (m[1] || m[0]).replace(/^["'`]|["'`]$/g, "")
+    // Assets are not data.
+    if (/\.(?:png|jpe?g|svg|gif|webp|css|woff2?|ico)(?:\?|$)/i.test(found)) continue
+    // A script is where a page's own requests are written — the next place to read.
+    if (/\.m?js(?:\?|$)/i.test(found)) {
+      if (scripts.size < 15) scripts.add(found.slice(0, 160))
+    } else if (endpoints.size < 30) endpoints.add(found.slice(0, 160))
+  }
+
+  /** @type {{ name: string, chars: number, parses: boolean, rows?: number, shape?: unknown }[]} */
+  const embedded = []
+  for (const m of text.matchAll(/(?:\b(?:var|let|const)\s+|window\.)([A-Za-z_$][\w$]*)\s*=\s*([[{])/g)) {
+    if (embedded.length >= 10) break
+    const literal = balancedLiteral(text, (m.index ?? 0) + m[0].length - 1)
+    if (literal.length < 2) continue
+    embedded.push(describeLiteral(m[1], literal))
+  }
+  for (const m of text.matchAll(/<script[^>]*type=["']application\/(?:ld\+)?json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    if (embedded.length >= 14) break
+    const id = /id=["']([^"']+)["']/.exec(m[0])?.[1] || "script json"
+    embedded.push(describeLiteral(id, m[1].trim()))
+  }
+
+  const dataAttributes = [...new Set([...text.matchAll(/\sdata-([a-z][a-z0-9-]*)=/g)].map((m) => m[1]))].slice(0, 40)
+  const count = (/** @type {RegExp} */ re) => (text.match(re) || []).length
+  return {
+    endpoints: [...endpoints],
+    scripts: [...scripts],
+    embedded,
+    dataAttributes,
+    mentions: { gate: count(/\bgate\b/gi), terminal: count(/\bterminal\b/gi), baggage: count(/\bbaggage\b|\bbelt\b/gi) },
+  }
+}
+
+/** @param {string} name @param {string} literal */
+function describeLiteral(name, literal) {
+  try {
+    const value = JSON.parse(literal)
+    return { name, chars: literal.length, parses: true, rows: Array.isArray(value) ? value.length : undefined, shape: shapeOf(value, 3) }
+  } catch {
+    return { name, chars: literal.length, parses: false }
+  }
+}
+
+/**
+ * The array or object literal opening at `start`, by bracket depth — strings
+ * skipped, so a bracket inside one does not count. Empty when it never closes.
+ *
+ * @param {string} text
+ * @param {number} start
+ */
+export function balancedLiteral(text, start) {
+  let depth = 0
+  /** @type {string | null} */
+  let quote = null
+  for (let i = start; i < text.length && i - start < 2_000_000; i++) {
+    const c = text[i]
+    if (quote) {
+      if (c === "\\") i++
+      else if (c === quote) quote = null
+    } else if (c === '"' || c === "'") quote = c
+    else if (c === "[" || c === "{") depth++
+    else if (c === "]" || c === "}") {
+      if (--depth === 0) return text.slice(start, i + 1)
+    }
+  }
+  return ""
 }
 
 /**
