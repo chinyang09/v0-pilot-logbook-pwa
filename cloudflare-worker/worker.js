@@ -712,6 +712,10 @@ async function exploreUpstreams(s, log) {
     const a = answers[i]
     if (!a.ok) {
       out[name] = { url: target, error: a.attempt.error }
+    } else if (typeof pick === "function") {
+      const data = pick(a.data)
+      const rows = Array.isArray(data) ? data.length : undefined
+      out[name] = { status: a.attempt.status, bytes: a.attempt.bytes, rows, shape: shapeOf(data) }
     } else if (pick === "html") {
       const regs = registrationTokens(a.text)
       out[name] = {
@@ -723,10 +727,6 @@ async function exploreUpstreams(s, log) {
       }
     } else if (pick === "bytes") {
       out[name] = { status: a.attempt.status, bytes: a.attempt.bytes, contentType: a.attempt.contentType }
-    } else {
-      const data = pick(a.data)
-      const rows = Array.isArray(data) ? data.length : undefined
-      out[name] = { status: a.attempt.status, bytes: a.attempt.bytes, rows, shape: shapeOf(data) }
     }
   })
 
