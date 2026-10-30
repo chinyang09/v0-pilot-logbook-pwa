@@ -1,10 +1,9 @@
 /**
- * The agenda under the roster's month: day by day, SOONEST FIRST, from the day
- * selected in the calendar (today unless you pick another) to the last day
- * anything is rostered.
- *
- * The old roster listed every date newest-first — a roster is read forwards,
- * "what is next", so the duty you need was at the bottom of the history.
+ * The agenda under the roster's month: every rostered day in date order, read
+ * FORWARDS, scrolling under the month as the logbook's list scrolls under its
+ * calendar. Tapping a day in the month scrolls that day's heading to just
+ * under the month (`scrollToDay`); scrolling the list moves the month's
+ * selection to the day at its top (`onTopDayChange`) — one list, two ways in.
  *
  * Duties are the roster's own rows: tap to edit, swipe to delete (into Recently
  * Deleted, like everything else). Flights are the logbook's and are read-only
@@ -19,7 +18,7 @@
  * ResizeObserver callback (never mid-commit).
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { observeRectAfterLayout, viewportRect } from "@/lib/utils/virtual-scroll"
 import { Plane, MonitorPlay, Trash2, Plus } from "lucide-react"
@@ -78,6 +77,15 @@ function flatten(agenda: Array<{ dayKey: string; items: RosterItem[] }>): Agenda
   return rows
 }
 
+/** How the page drives the list. */
+export interface RosterAgendaHandle {
+  /** Scroll so this day's heading sits just under the stuck month. */
+  scrollToDay: (dayKey: string, behavior?: ScrollBehavior) => void
+}
+
+/** A programmatic scroll is "done" once no scroll event has come for this long. */
+const SETTLE_MS = 160
+
 interface RosterAgendaProps {
   agenda: Array<{ dayKey: string; items: RosterItem[] }>
   todayKey: string
@@ -93,6 +101,11 @@ interface RosterAgendaProps {
   onOpenFlight: (flightId: string) => void
   /** Add a duty ON this day — an empty later day used to add it to the first. */
   onAddDuty: (dayKey: string) => void
+  /** The sticky month above the list: the list reads where it ends. */
+  stickyElement: HTMLElement | null
+  /** The pilot scrolled a different day to the top of the list. */
+  onTopDayChange: (dayKey: string) => void
+  controlRef?: Ref<RosterAgendaHandle>
 }
 
 /** One formatter for every day heading — `toLocaleDateString` builds one per call. */
@@ -109,8 +122,29 @@ export const RosterAgenda = memo(function RosterAgenda({
   onDeleteDuty,
   onOpenFlight,
   onAddDuty,
+  stickyElement,
+  onTopDayChange,
+  controlRef,
 }: RosterAgendaProps) {
   const rows = useMemo(() => flatten(agenda), [agenda])
+  // Every row's top in list coordinates, the day it belongs to and each day's
+  // heading — fixed heights make these exact, so nothing is measured.
+  const layout = useMemo(() => {
+    const starts: number[] = []
+    const dayOf: string[] = []
+    const headings = new Map<string, number>()
+    let y = 0
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]
+      starts.push(y)
+      const day = row.kind === "item" ? dayOf[i - 1] : row.dayKey
+      dayOf.push(day)
+      if (row.kind === "header") headings.set(day, i)
+      y += row.kind === "header" ? HEADER_H : ITEM_H
+    }
+    const lastHeading = rows.length ? (headings.get(dayOf[rows.length - 1]) ?? 0) : 0
+    return { starts, dayOf, headings, total: y, lastGroup: rows.length ? y - starts[lastHeading] : 0 }
+  }, [rows])
 
   // Where the list starts inside the shared scroller. Re-read whenever
   // anything above it changes height (the month grows a sixth week) — the
@@ -128,6 +162,146 @@ export const RosterAgenda = memo(function RosterAgenda({
     ro.observe(list)
     return () => ro.disconnect()
   }, [scrollElement])
+
+  // Where the stuck month ends, from the scroller's top: its `top` plus its
+  // height. Read in a ResizeObserver callback (the month grows a sixth week),
+  // with how much of the scroller is left under it — the tail spacer lets the
+  // LAST day reach the top too, or a tap on it could never be answered.
+  const stuckBottomRef = useRef(0)
+  const stickyHeightRef = useRef(0)
+  const [roomUnder, setRoomUnder] = useState(0)
+  useEffect(() => {
+    if (!stickyElement || !scrollElement) return
+    const read = () => {
+      const top = Number.parseFloat(getComputedStyle(stickyElement).top) || 0
+      stickyHeightRef.current = stickyElement.offsetHeight
+      stuckBottomRef.current = top + stickyElement.offsetHeight
+      const room = Math.max(0, scrollElement.clientHeight - stuckBottomRef.current)
+      setRoomUnder((prev) => (Math.abs(prev - room) < 1 ? prev : room))
+    }
+    const ro = new ResizeObserver(read)
+    ro.observe(stickyElement)
+    ro.observe(scrollElement)
+    return () => ro.disconnect()
+  }, [stickyElement, scrollElement])
+
+  const layoutRef = useRef(layout)
+  const marginRef = useRef(scrollMargin)
+  const onTopRef = useRef(onTopDayChange)
+  useLayoutEffect(() => {
+    layoutRef.current = layout
+    marginRef.current = scrollMargin
+    onTopRef.current = onTopDayChange
+  })
+
+  // The day under the month's lower edge, and how far into its group the edge is.
+  const anchorAt = useCallback((scrollTop: number): { day: string; delta: number } | null => {
+    const { starts, dayOf, headings } = layoutRef.current
+    if (!starts.length) return null
+    const y = scrollTop + stuckBottomRef.current - marginRef.current + 1
+    let lo = 0
+    let hi = starts.length - 1
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1
+      if (starts[mid] <= y) lo = mid
+      else hi = mid - 1
+    }
+    const day = dayOf[lo]
+    return { day, delta: y - 1 - starts[headings.get(day) ?? lo] }
+  }, [])
+
+  // A scroll WE started is not the pilot moving the list: the month already
+  // shows the day it is heading for, and reading days off it on the way would
+  // walk the selection through every day in between.
+  const programmaticRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const anchorRef = useRef<{ day: string; delta: number } | null>(null)
+  const reportedRef = useRef<string | null>(null)
+  const settle = useCallback(() => {
+    if (programmaticRef.current) clearTimeout(programmaticRef.current)
+    programmaticRef.current = setTimeout(() => {
+      programmaticRef.current = null
+    }, SETTLE_MS)
+  }, [])
+
+  useEffect(() => {
+    if (!scrollElement) return
+    let frame = 0
+    const onScroll = () => {
+      if (programmaticRef.current) settle()
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        const top = scrollElement.scrollTop
+        // The month's cover over the header band shows only once it is stuck:
+        // its natural place is right above the list.
+        const stickyTop = stuckBottomRef.current - stickyHeightRef.current
+        const naturalTop = marginRef.current - stickyHeightRef.current
+        stickyElement?.toggleAttribute("data-stuck", top + stickyTop >= naturalTop - 0.5)
+        const at = anchorAt(top)
+        anchorRef.current = at
+        if (!at || programmaticRef.current || at.day === reportedRef.current) return
+        reportedRef.current = at.day
+        onTopRef.current(at.day)
+      })
+    }
+    scrollElement.addEventListener("scroll", onScroll, { passive: true })
+    return () => {
+      scrollElement.removeEventListener("scroll", onScroll)
+      if (frame) cancelAnimationFrame(frame)
+    }
+  }, [scrollElement, stickyElement, anchorAt, settle])
+
+  // Rows arriving or leaving ABOVE the top day (a sync, a tapped empty day)
+  // would move the list under the reader; keep that day where it was. The
+  // offsets are exact, so this is one write, not a correction loop.
+  const prevLayoutRef = useRef(layout)
+  useLayoutEffect(() => {
+    const before = prevLayoutRef.current
+    prevLayoutRef.current = layout
+    const at = anchorRef.current
+    if (!scrollElement || !at || before === layout) return
+    const oldHeading = before.headings.get(at.day)
+    const newHeading = layout.headings.get(at.day)
+    if (oldHeading === undefined || newHeading === undefined) return
+    const shift = layout.starts[newHeading] - before.starts[oldHeading]
+    if (shift !== 0) scrollElement.scrollTop += shift
+  }, [layout, scrollElement])
+
+  const handle = useRef<RosterAgendaHandle | null>(null)
+  useImperativeHandle(
+    controlRef,
+    () => (handle.current = {
+      scrollToDay(dayKey, behavior = "smooth") {
+        if (!scrollElement) return
+        // Asked before the ResizeObservers have reported (the page's first
+        // open): wait a frame or two rather than read layout mid-commit.
+        if (!stuckBottomRef.current || !marginRef.current) {
+          let tries = 0
+          const retry = () => {
+            if (stuckBottomRef.current && marginRef.current) handle.current?.scrollToDay(dayKey, behavior)
+            else if (++tries < 10) requestAnimationFrame(retry)
+          }
+          requestAnimationFrame(retry)
+          return
+        }
+        const { starts, headings, dayOf } = layoutRef.current
+        let index = headings.get(dayKey)
+        if (index === undefined) {
+          // The nearest day after it, else the last.
+          const next = dayOf.findIndex((d) => d >= dayKey)
+          index = headings.get(dayOf[next === -1 ? dayOf.length - 1 : next])
+        }
+        if (index === undefined) return
+        reportedRef.current = dayOf[index]
+        anchorRef.current = { day: dayOf[index], delta: 0 }
+        const top = Math.max(0, marginRef.current + starts[index] - stuckBottomRef.current)
+        if (Math.abs(scrollElement.scrollTop - top) < 1) return
+        settle()
+        scrollElement.scrollTo({ top, behavior })
+      },
+    }),
+    [scrollElement, settle]
+  )
 
   // Stable, or the virtualizer rebuilds every row's measurement on each render.
   const getItemKey = useCallback((i: number) => rows[i].key, [rows])
@@ -149,7 +323,12 @@ export const RosterAgenda = memo(function RosterAgenda({
   })
 
   return (
-    <div ref={listRef} className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+    <div
+      ref={listRef}
+      className="relative w-full"
+      // The tail lets the last day reach the top under the month.
+      style={{ height: virtualizer.getTotalSize() + Math.max(0, roomUnder - layout.lastGroup) }}
+    >
       {virtualizer.getVirtualItems().map((v) => {
         const row = rows[v.index]
         return (
@@ -169,7 +348,7 @@ export const RosterAgenda = memo(function RosterAgenda({
                   onClick={() => onAddDuty(row.dayKey)}
                   className="control-surface flex h-9 items-center gap-1 rounded-full px-3 text-xs font-medium"
                 >
-                  <Plus className="h-3.5 w-3.5" /> Add duty
+                  <Plus className="h-3.5 w-3.5" /> Add Duty
                 </button>
               </div>
             ) : row.item.kind === "duty" ? (

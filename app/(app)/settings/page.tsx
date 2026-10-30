@@ -30,18 +30,18 @@ import type { DisplayPreferences, AutoFillPreferences, BottomNavTab } from "@/ty
 
 /** How each Auto-fill switch fills its category. The NAME is the logbook rules' (`logbook-rules.ts`). */
 const AUTO_FILL_HOW: Record<keyof AutoFillPreferences, string> = {
-  night: "Worked out from the sun at both airports",
-  pic: "The block time, when the role is PIC",
-  sic: "The block time, when the role is co-pilot",
-  p1us: "The block time, when the role is PIC under supervision",
-  dualRcvd: "The block time, when the role is dual",
-  dualGiven: "The block time, when the role is instructor",
-  multiPilot: "The block time, on a type certified for two pilots or with a second pilot aboard",
-  solo: "The block time, as PIC with nobody else recorded — never on a two-pilot type",
-  xc: "The block time, when departure differs from arrival",
-  ifr: "The flight time, on every flight",
-  actualInst: "The flight time, on every flight",
-  simInst: "The flight time, on every flight",
+  night: "From the sun at both airports.",
+  pic: "Block time, as PIC.",
+  sic: "Block time, as co-pilot.",
+  p1us: "Block time, as PIC under supervision.",
+  dualRcvd: "Block time, under instruction.",
+  dualGiven: "Block time, as instructor.",
+  multiPilot: "Block time, on a two-pilot type or crew.",
+  solo: "Block time, as PIC alone. Never on a two-pilot type.",
+  xc: "Block time, when the airports differ.",
+  ifr: "Flight time, every flight.",
+  actualInst: "Flight time, every flight.",
+  simInst: "Flight time, every flight.",
 }
 
 const ALL_NAV_TABS: Array<{ value: BottomNavTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
@@ -67,10 +67,10 @@ interface SectionDef {
 
 const SECTIONS: SectionDef[] = [
   { key: "appearance", label: "Appearance", icon: Sun, description: "Mode and palette" },
-  { key: "logging", label: "Logging", icon: NotebookPen, description: "Your seat and the role you log" },
+  { key: "logging", label: "Logging", icon: NotebookPen, description: "Seat, role and airline" },
   { key: "navigation", label: "Navigation", icon: Navigation, description: "Bottom tab bar" },
-  { key: "display", label: "Display Options", icon: Monitor, description: "Time, airport, coordinate format" },
-  { key: "autofill", label: "Auto-Fill Fields", icon: Clock, description: "Auto-populate time fields" },
+  { key: "display", label: "Display Options", icon: Monitor, description: "Times, airports, coordinates" },
+  { key: "autofill", label: "Auto-Fill Fields", icon: Clock, description: "Times filled in for you" },
   { key: "duty", label: "Duty Time Defaults", icon: Plane, description: "Report and debrief times" },
 ]
 
@@ -115,38 +115,38 @@ function LoggingSection({ preferences, updateLogging }: {
       <div>
         <h2 className="text-lg font-semibold">Logging</h2>
         <p className="text-sm text-muted-foreground">
-          The role new and imported flights start with. Saved to your account, so every device logs the same way.
+          How new and imported flights are logged. Synced to every device.
         </p>
       </div>
       <FormSection>
         <SelectRow<LogbookAuthority>
-          label="Logbook rules"
-          description={`${LOGBOOK_AUTHORITIES.find((a) => a.value === authority)?.description}. What your hours are called — it never changes a logged figure.`}
+          label="Logbook Rules"
+          description={`${LOGBOOK_AUTHORITIES.find((a) => a.value === authority)?.description}. Names only; figures never change.`}
           value={authority}
           onValueChange={(v) => updateLogging({ authority: v })}
           options={OFFERED_AUTHORITIES.map((a) => ({ value: a.value, label: a.label }))}
         />
         <SelectRow<Seat | "unset">
-          label="My seat"
+          label="My Seat"
           description={
             seat === "captain"
               ? "Logged PIC, flying or monitoring."
               : seat === "first_officer"
                 ? "Logged SIC when monitoring."
-                : "Sets the role new and imported flights start with."
+                : "Sets the role new flights start with."
           }
           value={seat ?? "unset"}
           onValueChange={(v) => v !== "unset" && updateLogging({ seat: v })}
           options={[
-            ...(seat ? [] : [{ value: "unset" as const, label: "Not set" }]),
+            ...(seat ? [] : [{ value: "unset" as const, label: "Not Set" }]),
             { value: "captain", label: "Captain" },
             { value: "first_officer", label: "First Officer" },
           ]}
         />
         {seat === "first_officer" && (
           <SelectRow<"SIC" | "PICUS">
-            label="When pilot flying, log as"
-            description="PICUS only where your operator's supervision method allows it — the captain countersigns it."
+            label="When Pilot Flying, Log As"
+            description="PICUS only where your operator allows it."
             value={pfRole}
             onValueChange={(v) => updateLogging({ pfRole: v })}
             options={[
@@ -157,25 +157,25 @@ function LoggingSection({ preferences, updateLogging }: {
         )}
         {seat === "first_officer" && pfRole === "PICUS" && (
           <DateRow
-            label="PICUS from"
-            description="Your check-out date. A leg flown before it is logged SIC."
+            label="PICUS From"
+            description="Your check-out. Earlier legs log as SIC."
             value={pfRoleFrom}
             // "" states "no date" outright, so a date left on the crew card
             // does not show through.
             onChange={(v) => updateLogging({ pfRoleFrom: v })}
-            placeholder="Not set"
+            placeholder="Not Set"
             clearable
           />
         )}
         <AirlineRow value={preferences.logging.airline} onCommit={(airline) => updateLogging({ airline })} />
         <SelectRow<"pf" | "pm">
-          label="New flights start as"
-          description="A flight you add, or a next leg or return. A recorded flight keeps what was recorded, and an import takes the report's."
+          label="New Flights Start As"
+          description="For flights you add. Imports keep the report's."
           value={preferences.logging.newFlightPilotFlying ? "pf" : "pm"}
           onValueChange={(v) => updateLogging({ newFlightPilotFlying: v === "pf" })}
           options={[
-            { value: "pf", label: "Pilot flying" },
-            { value: "pm", label: "Pilot monitoring" },
+            { value: "pf", label: "Pilot Flying" },
+            { value: "pm", label: "Pilot Monitoring" },
           ]}
         />
       </FormSection>
@@ -203,16 +203,17 @@ function AirlineRow({ value, onCommit }: { value: string | null; onCommit: (airl
       label="Airline"
       description={
         valid
-          ? "Its two-character code. A flight number typed as digits takes it (288 → TR288), and Add a fleet starts with it."
-          : "Two letters or digits, as on a flight number (TR, SQ, 3K)."
+          ? "Prefixes flight numbers: 288 → TR288."
+          : "Two letters or digits, e.g. TR, 3K."
       }
       value={draft}
       onChange={(v) => setDraft(v.toUpperCase().slice(0, 2))}
       onBlur={() => {
         if (valid && (code || null) !== value) onCommit(code || null)
       }}
-      placeholder="e.g. TR"
+      placeholder="TR"
       uppercase
+      maxLength={2}
     />
   )
 }
@@ -225,7 +226,7 @@ function NavigationSection({ preferences, updateNavigation }: {
     <div className="px-panel py-4 space-y-4">
       <div>
         <h2 className="text-lg font-semibold">Navigation</h2>
-        <p className="text-sm text-muted-foreground">Choose up to 4 tabs for the bottom tab bar (mobile) and the navigation pill (desktop).</p>
+        <p className="text-sm text-muted-foreground">Up to 4 tabs in the tab bar.</p>
       </div>
       <FormSection>
         <div className="p-3">
@@ -248,40 +249,40 @@ function DisplaySection({ preferences, updateDisplay }: {
     <div className="px-panel py-4 space-y-4">
       <div>
         <h2 className="text-lg font-semibold">Display Options</h2>
-        <p className="text-sm text-muted-foreground">Configure how times, airports, and coordinates are displayed.</p>
+        <p className="text-sm text-muted-foreground">How times, airports and coordinates appear.</p>
       </div>
 
       <FormSection>
         <SelectRow<DisplayPreferences["timeFormat"]>
           label="Time Format"
-          description="Durations as 2:30 or 02:30, or a 12-hour clock for times of day. Durations never show AM/PM."
+          description="Durations never show AM/PM."
           value={preferences.display.timeFormat}
           onValueChange={(value) => updateDisplay({ timeFormat: value })}
           options={[
             { value: "24h", label: "24h (2:30)" },
             { value: "24h-padded", label: "24h (02:30)" },
-            { value: "12h", label: "12h clock (2:30 PM)" },
+            { value: "12h", label: "12h Clock (2:30 PM)" },
           ]}
         />
         <SelectRow<DisplayPreferences["clockSeparator"]>
           label="Clock Times"
-          description="How out/off/on/in and other clock times are punctuated. Durations always keep the colon."
+          description="Durations keep the colon."
           value={preferences.display.clockSeparator}
           onValueChange={(value) => updateDisplay({ clockSeparator: value })}
           options={[
-            { value: "colon", label: "With colon (02:30)" },
-            { value: "none", label: "No colon (0230)" },
+            { value: "colon", label: "With Colon (02:30)" },
+            { value: "none", label: "No Colon (0230)" },
           ]}
         />
         <ToggleRow
           label="Use Zulu Time (UTC)"
-          description="Display all times in UTC"
+          description="Show all times in UTC."
           checked={preferences.display.useZuluTime}
           onCheckedChange={(checked) => updateDisplay({ useZuluTime: checked })}
         />
         <SelectRow<DisplayPreferences["airportIdentifier"]>
           label="Airport Identifier"
-          description="Preferred airport code display"
+          description="Code shown for airports."
           value={preferences.display.airportIdentifier}
           onValueChange={(value) => updateDisplay({ airportIdentifier: value })}
           options={[
@@ -292,7 +293,7 @@ function DisplaySection({ preferences, updateDisplay }: {
         />
         <SelectRow<DisplayPreferences["coordinateFormat"]>
           label="Coordinate Format"
-          description="How lat/lon coordinates are displayed"
+          description="Latitude and longitude."
           value={preferences.display.coordinateFormat}
           onValueChange={(value) => updateDisplay({ coordinateFormat: value })}
           options={[
@@ -314,8 +315,7 @@ function AutoFillSection({ preferences, updateAutoFill }: {
       <div>
         <h2 className="text-lg font-semibold">Auto-Fill Time Fields</h2>
         <p className="text-sm text-muted-foreground">
-          Choose which time fields are automatically populated when logging a flight.
-          Manually entered values are never overwritten.
+          Times filled in for you. What you enter is never overwritten.
         </p>
       </div>
       <FormSection>
@@ -342,13 +342,13 @@ function DutyTimeSection({ preferences, updateDutyTimeDefaults }: {
     <div className="px-panel py-4 space-y-4">
       <div>
         <h2 className="text-lg font-semibold">Duty Time Defaults</h2>
-        <p className="text-sm text-muted-foreground">Default report and debrief times used for duty period calculations.</p>
+        <p className="text-sm text-muted-foreground">Used to work out duty periods.</p>
       </div>
 
       <FormSection>
         <SelectRow<"CAAS" | "FAA" | "EASA">
           label="Regulation"
-          description="FTL ruleset used for FDP limits & rest"
+          description="Rules for FDP limits and rest."
           value={regulation}
           onValueChange={(v) => updateDutyTimeDefaults({ regulationType: v })}
           options={[
@@ -359,13 +359,13 @@ function DutyTimeSection({ preferences, updateDutyTimeDefaults }: {
         />
         <MinutesRow
           label="Report"
-          description="Minutes before scheduled OUT"
+          description="Minutes before scheduled OUT."
           minutes={preferences.dutyTimeDefaults.minutesBeforeOut}
           onCommit={(minutesBeforeOut) => updateDutyTimeDefaults({ minutesBeforeOut })}
         />
         <MinutesRow
           label="Debrief"
-          description="Minutes after IN"
+          description="Minutes after IN."
           minutes={preferences.dutyTimeDefaults.minutesAfterIn}
           onCommit={(minutesAfterIn) => updateDutyTimeDefaults({ minutesAfterIn })}
         />

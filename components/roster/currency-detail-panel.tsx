@@ -202,15 +202,15 @@ export function CurrencyDetailPanel({
 
       <FormSection title="Details">
         <SettingsRow
-          label="Document no."
+          label="Document No."
           value={values.documentNumber}
           onChange={(v) => set("documentNumber", v)}
           placeholder="Optional"
         />
         <SettingsRow label="Notes" value={values.notes} onChange={(v) => set("notes", v)} placeholder="Optional" />
         <ToggleRow
-          label="Update from schedule"
-          description="Take the expiry from an imported schedule report"
+          label="Update From Schedule"
+          description="From imported schedule reports."
           checked={values.autoUpdate}
           onCheckedChange={(v) => set("autoUpdate", v)}
         />

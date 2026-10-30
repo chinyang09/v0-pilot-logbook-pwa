@@ -34,17 +34,17 @@ import {
 const RESOLUTION_OPTIONS = [
   {
     value: "keep_logbook",
-    label: "Keep logbook entry",
+    label: "Keep Logbook Entry",
     description: "Use the values from your logbook, discard schedule data",
   },
   {
     value: "keep_schedule",
-    label: "Keep schedule entry",
+    label: "Keep Schedule Entry",
     description: "Use the values from your schedule, update logbook if needed",
   },
   {
     value: "merged",
-    label: "Merge both",
+    label: "Merge Both",
     description: "Combine information from both sources",
   },
   {
@@ -118,7 +118,7 @@ export function DiscrepancyDetailPanel({
       {discrepancy.flightLogId && (
         <ActionStack>
           <ActionRow
-            label="Open flight"
+            label="Open Flight"
             onClick={() => router.push(`/logbook?selected=${encodeURIComponent(discrepancy.flightLogId!)}`)}
           />
         </ActionStack>

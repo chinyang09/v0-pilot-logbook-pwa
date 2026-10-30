@@ -75,7 +75,7 @@ export function DutyFlightsPanel({ atMs }: { atMs: number }) {
                   )}
                 </FormSection>
                 <ActionStack>
-                  <ActionRow label="Open flight" onClick={() => setSelectedId(flight.id)} />
+                  <ActionRow label="Open Flight" onClick={() => setSelectedId(flight.id)} />
                 </ActionStack>
               </div>
             )

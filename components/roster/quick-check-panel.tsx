@@ -23,8 +23,8 @@ import { DetailFormPanel } from "@/components/ui/detail-form-panel"
 const noop = () => {}
 
 const MODE_TABS: SegmentedTab<"add" | "swap">[] = [
-  { value: "add", label: "Add a duty" },
-  { value: "swap", label: "Swap / remove" },
+  { value: "add", label: "Add a Duty" },
+  { value: "swap", label: "Swap / Remove" },
 ]
 
 interface QuickCheckPanelProps {
@@ -225,7 +225,7 @@ export function QuickCheckPanel({
     // to draw its own title bar with a "View Chart" button, which on a phone
     // did what Back does and on a tablet pointed at the chart beside it.
     <DetailFormPanel
-      title="Legality check"
+      title="Legality Check"
       dirty={false}
       canSave={false}
       saving={false}

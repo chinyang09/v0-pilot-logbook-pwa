@@ -117,8 +117,24 @@ describe("an explicit lookup over an earlier one", () => {
     const own = { date: "2026-10-30", departureIcao: "WSSS", arrivalIcao: "VTBS" }
     const looked = lookupPatch(own, TR288)
     expect(looked.patch).toEqual({})
-    expect(looked.conflicts).toEqual(expect.arrayContaining(["arrivalIcao", "arrivalIata", "scheduledOut"]))
+    // Only what the pilot actually wrote differs; a blank is not a difference.
+    expect(looked.conflicts).toEqual(["arrivalIcao"])
     expect(lookupPatch(own, TR288, {}, { overwrite: true }).patch).toMatchObject({ arrivalIcao: "RJBB" })
+  })
+
+  it("a blank that completes the pilot's own entry is filled, and spelling is not a difference", () => {
+    const own = { date: "2026-10-30", departureIcao: "wsss", arrivalIata: "KIX", aircraftReg: "9VTNF", scheduledOut: "02:25" }
+    const looked = lookupPatch(own, TR288)
+    expect(looked.conflicts).toEqual([])
+    expect(looked.patch).toMatchObject({ departureIata: "SIN", arrivalIcao: "RJBB", aircraftType: TR288.typecode })
+    expect(looked.patch).not.toHaveProperty("aircraftReg")
+    expect(looked.patch).not.toHaveProperty("departureIcao")
+  })
+
+  it("another aeroplane the pilot entered is a difference; its type is not filled from the other one", () => {
+    const looked = lookupPatch({ date: "2026-10-30", aircraftReg: "9V-OFH" }, TR288)
+    expect(looked.conflicts).toEqual(["aircraftReg"])
+    expect(looked.patch).not.toHaveProperty("aircraftType")
   })
 
   it("usual times fill the route and times, never the aeroplane; nothing onto a locked entry", () => {

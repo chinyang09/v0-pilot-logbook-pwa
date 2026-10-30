@@ -690,7 +690,7 @@ export default function LoginPage() {
                       setStep("register-callsign")
                     }}
                   >
-                    Create new account
+                    Create New Account
                   </Button>
                 </div>
               </GlassContainer>

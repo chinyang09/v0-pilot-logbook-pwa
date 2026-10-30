@@ -805,11 +805,11 @@ export default function AircraftPage() {
                   {allSortedAircraft.length === 0 && (
                     <EmptyState
                       icon={Plane}
-                      title="No aircraft yet"
-                      description="Aircraft are added as you log flights and import reports, or add one by registration."
+                      title="No Aircraft Yet"
+                      description="Added as you log and import, or add one."
                       action={
                         <Button variant="outline" size="sm" onClick={handleAddClick}>
-                          <Plus className="mr-1 h-4 w-4" /> Add aircraft
+                          <Plus className="mr-1 h-4 w-4" /> Add Aircraft
                         </Button>
                       }
                     />
@@ -865,7 +865,7 @@ export default function AircraftPage() {
                         onClick={handleAddClick}
                       >
                         <Plus className="h-4 w-4 mr-1" />
-                        Add aircraft
+                        Add Aircraft
                       </Button>
                     </div>
                   )}

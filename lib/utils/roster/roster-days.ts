@@ -155,22 +155,20 @@ export function buildRosterDays(
 }
 
 /**
- * The agenda: days that have something on them, SOONEST FIRST, from `fromKey`
- * on. The day asked for is always included — empty or not — so selecting a
- * quiet day says so rather than silently jumping to the next busy one.
+ * The agenda: EVERY day that has something on it, in date order — past and
+ * future — plus the days in `include` even when empty (today, and a day the
+ * pilot tapped), so selecting a quiet day says so rather than jumping to the
+ * next busy one. The list is virtualised and scrolled TO the selected day
+ * under the month, the way the logbook scrolls to a date: it no longer starts
+ * at the selection, which made every tap rebuild the list from somewhere else.
  */
-export function agendaFrom(
+export function rosterAgenda(
   days: ReadonlyMap<string, RosterItem[]>,
-  fromKey: string,
-  maxDays = 30
+  include: readonly string[] = []
 ): Array<{ dayKey: string; items: RosterItem[] }> {
-  const keys = [...days.keys()].filter((k) => k > fromKey).sort()
-  const out = [{ dayKey: fromKey, items: days.get(fromKey) ?? [] }]
-  for (const key of keys) {
-    if (out.length >= maxDays) break
-    out.push({ dayKey: key, items: days.get(key)! })
-  }
-  return out
+  const keys = new Set(days.keys())
+  for (const k of include) if (k) keys.add(k)
+  return [...keys].sort().map((dayKey) => ({ dayKey, items: days.get(dayKey) ?? [] }))
 }
 
 /** The short label a calendar cell shows for an item — the day at a glance. */

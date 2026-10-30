@@ -70,7 +70,7 @@ describe("CAAS — SASP Part 1 Appendix B", () => {
 
 describe("categoryLabel", () => {
   it("leads with the chosen authority's name and lists the offered others that differ", () => {
-    expect(categoryLabel(timeCategory("instructorTime"), "FAA")).toEqual({ label: "Dual given", helper: "CAAS Instructor" })
+    expect(categoryLabel(timeCategory("instructorTime"), "FAA")).toEqual({ label: "Dual Given", helper: "CAAS Instructor" })
     expect(categoryLabel(timeCategory("picTime"), "CAAS")).toEqual({ label: "P1", helper: "FAA PIC" })
     expect(categoryLabel(timeCategory("sicTime"), "FAA")).toEqual({ label: "SIC", helper: "CAAS P2" })
   })
@@ -95,8 +95,8 @@ describe("categoryLabel", () => {
 
 describe("roleLabel", () => {
   it("names the role the way the rules do", () => {
-    expect(roleLabel("Dual", "FAA")).toBe("Dual received")
-    expect(roleLabel("Instructor", "FAA")).toBe("Dual given")
+    expect(roleLabel("Dual", "FAA")).toBe("Dual Received")
+    expect(roleLabel("Instructor", "FAA")).toBe("Dual Given")
   })
 })
 

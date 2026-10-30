@@ -49,8 +49,8 @@ export interface AircraftNewFormProps {
 
 type AddMode = "registration" | "fleet"
 const ADD_MODES: SegmentedTab<AddMode>[] = [
-  { value: "registration", label: "By registration" },
-  { value: "fleet", label: "By fleet" },
+  { value: "registration", label: "By Registration" },
+  { value: "fleet", label: "By Fleet" },
 ]
 
 export function AircraftNewForm({
@@ -401,7 +401,7 @@ export function AircraftNewForm({
                 or keep typing.
               </div>
               <SuggestionList
-                label="Matching aircraft"
+                label="Matching Aircraft"
                 items={candidates.map((c) => ({
                   key: c.registration,
                   title: c.registration,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { agendaFrom, buildRosterDays, dayKeyAt, itemLabel, utcInstant } from "../roster-days"
+import { rosterAgenda, buildRosterDays, dayKeyAt, itemLabel, utcInstant } from "../roster-days"
 import type { ScheduleEntry } from "@/types/entities/roster.types"
 import type { FlightLog } from "@/types/entities/flight.types"
 
@@ -63,15 +63,16 @@ describe("roster days", () => {
     expect(items.map((i) => (i.kind === "flight" ? i.flown : null))).toEqual([false, true])
   })
 
-  it("lists the agenda soonest first, from the selected day, always including it", () => {
+  it("lists every busy day in date order, plus the days asked for even when empty", () => {
     const days = buildRosterDays(
       [duty({ id: "a", date: "2026-10-25" }), duty({ id: "b", date: "2026-10-21" }), duty({ id: "old", date: "2026-10-01" })],
       [],
       Z
     )
-    const agenda = agendaFrom(days, "2026-10-20")
-    expect(agenda.map((d) => d.dayKey)).toEqual(["2026-10-20", "2026-10-21", "2026-10-25"])
-    expect(agenda[0].items).toEqual([])
+    const agenda = rosterAgenda(days, ["2026-10-20", "2026-10-21"])
+    expect(agenda.map((d) => d.dayKey)).toEqual(["2026-10-01", "2026-10-20", "2026-10-21", "2026-10-25"])
+    expect(agenda[1].items).toEqual([])
+    expect(agenda[2].items.map((i) => i.id)).toEqual(["b"])
   })
 
   it("labels a cell by duty code, flight number or SIM", () => {

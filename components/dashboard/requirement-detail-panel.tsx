@@ -49,7 +49,7 @@ export function RequirementDetailPanel({ requirement }: { requirement: Requireme
       <FormSection>
         <ReadOnlyRow label="Status" value={STATE_WORD[state]} />
         <ReadOnlyRow label="Reads" value={value} />
-        {action && <ReadOnlyRow label="To do" value={action} />}
+        {action && <ReadOnlyRow label="To Do" value={action} />}
       </FormSection>
       {detail && detail.length > 0 && (
         <FormSection title="Detail">

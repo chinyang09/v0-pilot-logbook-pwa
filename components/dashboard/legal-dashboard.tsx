@@ -633,7 +633,7 @@ function DutyBand({
           },
           {
             value: rest.isLegalNow ? "Now" : clockAt(legalAtMs),
-            label: "Legal from",
+            label: "Legal From",
             tone: rest.isLegalNow ? "ok" : undefined,
           },
         ],
@@ -648,7 +648,7 @@ function DutyBand({
       chip: lastDuty?.route ? `Last ${lastDuty.route}` : undefined,
       bar: null,
       scale: lastDuty
-        ? [{ value: clockAt(lastDuty.debriefMs), label: "Last duty ended" }]
+        ? [{ value: clockAt(lastDuty.debriefMs), label: "Last Duty Ended" }]
         : [],
       footnote: { text: "No duty rostered", tone: "idle" },
       legs: [],

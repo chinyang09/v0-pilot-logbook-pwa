@@ -663,7 +663,7 @@ one looks it up in full like a typed code.
 | | Source | Rule |
 |---|---|---|
 | a flight from its number + date (`flight/suggest`, `lib/lookup/flight-suggest.ts`) | the number's list (`/flight`): a week ahead SCHEDULED, a week back flown; the registration appears on the day the aeroplane is assigned | `basis: "scheduled"` is that UTC date's row; past the list, `"usual"` moves the nearest day's times onto the date and NEVER carries its registration |
-| filling the form (`lib/utils/flight-seed.ts` `lookupPatch`, `useFlightLookup`) | — | asked ONLY on the form's Lookup button (or Enter in Flight #) — it used to ask by itself once the number settled, a lookup per pause while typing. An answer is applied only while the form still holds the number and date it was asked for (`sameFlightNumber`) — one landing after the pilot moved on is dropped, and the status line hides once either changes. Writes BLANK fields and whatever the PREVIOUS lookup wrote that the pilot has not touched since (`ownedAfter`), so 288 then 289 moves the route and times with the number and clears 288's aeroplane; anything the pilot entered is kept, and "Replace" writes over it. A `usual` answer fills route and times (the pilot asked; the status line says "Usual times (6 Nov)") but never the aeroplane; never OOOI, never a simulator, signed or locked entry. The status line wraps between its parts (`whitespace-nowrap` per part), never inside a registration |
+| filling the form (`lib/utils/flight-seed.ts` `lookupPatch`, `useFlightLookup`) | — | asked ONLY on the form's Lookup button (or Enter in Flight #) — it used to ask by itself once the number settled, a lookup per pause while typing. An answer is applied only while the form still holds the number and date it was asked for (`sameFlightNumber`) — one landing after the pilot moved on is dropped, and the status line hides once either changes. Writes BLANK fields and whatever the PREVIOUS lookup wrote that the pilot has not touched since (`ownedAfter`), so 288 then 289 moves the route and times with the number and clears 288's aeroplane; anything the pilot entered is kept, and "Replace" writes over it. Replace is offered only where the pilot's OWN non-blank value differs — a blank is filled, and a value that merely completes theirs (the IATA of their ICAO, the type of their registration) is filled too; "9VTNF" and "wsss" are not differences. It is read off the form AS IT STANDS (`lookupDiffers`), not stored when the answer came, so it follows edits; the line names the rows ("Kept yours: Aircraft, To") under the summary, never beside it A `usual` answer fills route and times (the pilot asked; the status line says "Usual times (6 Nov)") but never the aeroplane; never OOOI, never a simulator, signed or locked entry. The status line wraps between its parts (`whitespace-nowrap` per part), never inside a registration |
 | gates (`flight/gates`, `useDutyLookups`) | the tracked flight's `info`, else the departures board at the origin and the arrivals board at the destination, from an hour before | NOT in the flight form (it is for logging): drawn on the dashboard's sector chain, under each stop, asked ONLY while the page is on screen and the duty within 18h of now (no SWR key otherwise, so coming back asks about the duty as it now stands — deduplicated to 5 min — instead of showing a stale "nothing yet"), every 15 min while it stays up, with a refresh; never stored (a gate is published late and moves). The duty's legs end at the first 8h on the ground (`dutyFlights` — 18h can reach the next duty's first sector). The line under the chain (`describeDuty`, `lib/utils/dashboard/duty-line.ts`) never calls a failure "not published yet": checking / not checked / unavailable / not published are four different sentences |
 | a fleet (`airline/fleet`, `AirlineFleetSection`, the add-aircraft form's **By fleet** mode) | the airline's fleet page, by type | By registration is the default; By fleet asks for the pilot's airline when it opens, and otherwise only on Find / Enter — never per keystroke. Add writes a whole type in one `bulkPut` (`addFleetAircraftToDatabase`); a registration already held is left as it is |
 | the network (`airline/routes`, `airline/routes/from`) | the routes page's `arrRoutes`; a map pin's per-airport JSON | in the door, nothing reads them yet — the destination seeding they enable is on hold |
@@ -3012,6 +3012,15 @@ identical:
   chip), grow the HIT AREA with an `after:` pseudo-element on the
   `relative` control instead of the box — the logbook depends on every card
   being one height.
+- **Labels are Title Case** — a row's label, an option, a section title, a
+  tab, a button: "Pilot Flying", "New Flights Start As", "Add Duty", with
+  short articles and prepositions lower inside ("Add a Duty", "Nothing to
+  Compare"). Helper text under a label and a question in a dialog are
+  sentences. Helper text is ONE short line where it can be ("Prefixes flight
+  numbers: 288 → TR288.") — the label already names the thing.
+- **A short code field is sized to its code** (`SettingsRow`'s `maxLength`):
+  a text input claims ~200px, which squeezed the Airline row's helper text
+  into a narrower column than every other row's.
 - **A licence-record choice is readable on BOTH sides.** `OptionPair` and the
   import card's role chooser were 8–11px with the unselected side at 45%
   opacity — the value a pilot may want back was the one they could not read.
@@ -3734,11 +3743,31 @@ any other. That was the whole reason for tracking it.
 
 #### The roster page is CALENDAR FIRST
 
-`app/(app)/roster/page.tsx` is a month (`RosterMonth`) over an agenda
-(`RosterAgenda`) that runs **soonest first** from the selected day — today
-unless another is tapped. It used to be every imported date newest-first with
-the calendar behind a toggle, so the next duty, which is what a roster is
-opened for, sat at the far end of the history.
+`app/(app)/roster/page.tsx` is a month (`RosterMonth`) STUCK under the header
+over an agenda (`RosterAgenda`) of EVERY rostered day in date order
+(`rosterAgenda` — plus today and a day the pilot tapped, even when empty). It
+is the logbook's calendar and list: a tapped day scrolls to just under the
+month (`scrollToDay`), and scrolling moves the month's selection to the day at
+the top (`onTopDayChange`). It used to rebuild the agenda FROM the tapped day,
+so every day before it vanished; before that it was every imported date
+newest-first with the calendar behind a toggle.
+
+- **Stuck, and covered above.** The month is `position: sticky` at
+  `--chrome-top`, and once stuck its `::before` paints the header band above
+  it (`.roster-month-sticky[data-stuck]`) — rows pass UNDER the month and would
+  otherwise reappear above it. The page holds `useFloatingPanelUnderHeader`
+  while active, so the tap band and the fade's tail leave the month's controls
+  alone.
+- **A scroll the page started is not the pilot's.** `scrollToDay` marks the
+  scroll programmatic until no scroll event has come for `SETTLE_MS`, or the
+  selection would walk through every day on the way. And the effect that
+  scrolls to a TARGET is not keyed on the selection: the selection follows the
+  scroll, and re-running on it snapped the list back to the last tapped day.
+- **Rows arriving above the top day do not move it** (a sync, a tapped empty
+  day): the offsets are exact (fixed heights), so the shift is one
+  `scrollTop` write. A tail spacer lets the LAST day reach the top.
+- No Currencies / Discrepancies / FDP links under the month — they are in the
+  nav.
 
 - Each cell names what the day IS (`SBY1`, `OFF`, `TR602`, `SIM`) — two labels
   and a count. A dot only said "busy" and had to be tapped to be read.
@@ -3755,7 +3784,7 @@ opened for, sat at the far end of the history.
 - The header's Add duty pre-fills the selected day, and an empty day's own
   "Add duty" pre-fills THAT day (`onAddDuty(dayKey)` — it used to add to the
   selected day whichever empty day was tapped).
-- The agenda runs to the end of the roster (no fixed day count) and is
+- The agenda runs the whole roster and is
   VIRTUALIZED (`RosterAgenda`, `@tanstack/react-virtual`) on the page's own
   scroller, with the logbook's rules: every row kind has a FIXED height
   (`HEADER_H` 36, `ITEM_H` 64 — a 58px card and its gap), nothing is measured,

@@ -21,6 +21,7 @@ import type { FlightLog } from "@/types/entities/flight.types"
 import type { FlightSuggestion } from "@/lib/lookup/flight-suggest"
 import type { AircraftMovement } from "@/lib/lookup/aircraft-whereabouts"
 import { getEntryType } from "@/lib/utils/entry-type"
+import { normalizeRegistration } from "@/lib/utils/string"
 
 export type SeedField =
   | "aircraftReg"
@@ -97,9 +98,15 @@ export type LookupOwned = Partial<Record<SeedField, string>>
  * An explicit lookup's patch. A field the previous lookup wrote (`previous`)
  * and still holds that value is the lookup's, not the pilot's, so it counts as
  * blank — and goes back to blank when this answer has nothing for it (289's
- * aeroplane is not assigned yet; 288's must not stay). `conflicts` are the
- * fields the pilot's OWN values keep from this answer: what "Replace" would
- * write (`overwrite`).
+ * aeroplane is not assigned yet; 288's must not stay).
+ *
+ * A blank that only completes what the pilot already has — the IATA code of
+ * the airport they entered by ICAO, the type of the registration they typed —
+ * is filled too: it agrees with them, so it is no reason to ask.
+ *
+ * `conflicts` are the fields where the pilot's OWN value says something else:
+ * what "Replace" would write over (`overwrite`). A blank is never a conflict,
+ * and "9V-TNF" against "9VTNF" or "wsss" against "WSSS" is not a difference.
  */
 export function lookupPatch(
   flight: Partial<FlightLog>,
@@ -115,14 +122,38 @@ export function lookupPatch(
     return copy
   }
   const everything = seedFromSuggestion(without(() => true), s)
-  const patch = opts.overwrite ? { ...everything } : seedFromSuggestion(without(owned), s)
+  const own = without(owned)
+  const patch = opts.overwrite ? { ...everything } : seedFromSuggestion(own, s)
+  if (!opts.overwrite && !routeDisagrees(own, s)) {
+    const complete = (f: SeedField, agrees: boolean) => {
+      if (agrees && f in everything && !(f in patch) && blank(own[f])) patch[f] = everything[f]
+    }
+    const sideAgrees = (icao: SeedField, iata: SeedField) =>
+      sameSeedValue(icao, own[icao], everything[icao]) || sameSeedValue(iata, own[iata], everything[iata])
+    for (const [icao, iata] of [["departureIcao", "departureIata"], ["arrivalIcao", "arrivalIata"]] as const) {
+      const agrees = sideAgrees(icao, iata)
+      complete(icao, agrees)
+      complete(iata, agrees)
+    }
+    complete("aircraftType", sameSeedValue("aircraftReg", own.aircraftReg, everything.aircraftReg))
+  }
   for (const f of SEED_FIELDS) {
     if (owned(f) && !(f in patch) && !blank(flight[f])) patch[f] = ""
   }
   const conflicts = opts.overwrite
     ? []
-    : SEED_FIELDS.filter((f) => f in everything && !(f in patch) && (flight[f] ?? "") !== everything[f])
+    : SEED_FIELDS.filter(
+        (f) => f in everything && !(f in patch) && !blank(own[f]) && !sameSeedValue(f, own[f], everything[f])
+      )
   return { patch, conflicts }
+}
+
+/** Two spellings of one value: a registration's punctuation and a code's case do not count. */
+function sameSeedValue(f: SeedField, a: unknown, b: unknown): boolean {
+  if (blank(a) || blank(b)) return false
+  const norm = (v: unknown) =>
+    f === "aircraftReg" ? normalizeRegistration(String(v)) : String(v).trim().toUpperCase()
+  return norm(a) === norm(b)
 }
 
 /** What the lookup owns after `patch` was applied over `previous`. */

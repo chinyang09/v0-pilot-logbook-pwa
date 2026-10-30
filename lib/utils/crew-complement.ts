@@ -58,8 +58,8 @@ export function requiresTwoPilots(aircraftType: string | undefined | null): bool
  * the one that makes a flight multi-pilot on its own (`isMultiPilotFlight`).
  */
 export const ADDITIONAL_CREW_ROLES: { value: AdditionalCrew["role"]; label: string }[] = [
-  { value: "Relief Pilot", label: "Relief pilot" },
-  { value: "Check Airman", label: "Check pilot" },
+  { value: "Relief Pilot", label: "Relief Pilot" },
+  { value: "Check Airman", label: "Check Pilot" },
   { value: "Instructor", label: "Instructor" },
   { value: "Examiner", label: "Examiner" },
   { value: "Observer", label: "Observer" },

@@ -45,7 +45,7 @@ export function CrewFormBody({
       ? "Captain — logged PIC"
       : seat === "first_officer"
         ? `First Officer — ${pfRole} when flying`
-        : "Not set"
+        : "Not Set"
 
   return (
     <div className="space-y-4">
@@ -91,12 +91,12 @@ export function CrewFormBody({
         </div>
 
         <ToggleRow
-          label="This is Me"
+          label="This Is Me"
           // Said under the switch rather than as a warning paragraph: with the
           // card always editable, that paragraph sat on every other person's
           // card permanently.
           description={
-            !formData.isMe && existingSelfId ? "Your own card. Turning this on moves it here." : "Your own card"
+            !formData.isMe && existingSelfId ? "Moves your own card here." : "Your own card"
           }
           checked={formData.isMe}
           onCheckedChange={handleIsMeChange}
@@ -113,7 +113,7 @@ export function CrewFormBody({
             className="flex items-center justify-between px-4 py-3.5 row-divider hover:bg-secondary/50"
           >
             <span>
-              <span className="block text-foreground">Seat and logged role</span>
+              <span className="block text-foreground">Seat and Logged Role</span>
               <span className="block text-xs text-muted-foreground">
                 {seatLabel}. Set in Settings › Logging.
               </span>
@@ -187,7 +187,7 @@ function OrganizationField({ value, onChange }: { value: string; onChange: (v: s
       {matches.length > 0 && (
         <div className="px-4 pb-3 row-divider">
           <SuggestionList
-            label="Matching airlines"
+            label="Matching Airlines"
             items={matches.map((a) => ({
               key: `${a.icao}|${a.iata}|${a.name}`,
               title: a.name,

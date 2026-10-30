@@ -752,7 +752,7 @@ export default function AirportsPage() {
                     </p>
                     <Button variant="outline" size="sm" onClick={handleAddClick}>
                       <Plus className="h-4 w-4 mr-1" />
-                      Add airport
+                      Add Airport
                     </Button>
                   </div>
                 )}
@@ -804,7 +804,7 @@ export default function AirportsPage() {
                       onClick={handleAddClick}
                     >
                       <Plus className="h-4 w-4 mr-1" />
-                      Add airport
+                      Add Airport
                     </Button>
                   </div>
                 )}

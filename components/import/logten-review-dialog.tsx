@@ -63,13 +63,13 @@ export function LogtenReviewDialog({
     if (!plan) return [];
     return [
       { label: "Flights", value: plan.summary.flightsToCreate },
-      { label: "Simulator sessions", value: plan.summary.simulatorsToCreate },
-      { label: "Flights completed", value: plan.summary.flightsToUpdate },
-      { label: "Already in logbook", value: plan.summary.flightsDuplicate },
+      { label: "Simulator Sessions", value: plan.summary.simulatorsToCreate },
+      { label: "Flights Completed", value: plan.summary.flightsToUpdate },
+      { label: "Already in Logbook", value: plan.summary.flightsDuplicate },
       { label: "Crew", value: plan.summary.crewToCreate },
-      { label: "Crew updated", value: plan.summary.crewToUpdate },
+      { label: "Crew Updated", value: plan.summary.crewToUpdate },
       { label: "Aircraft", value: plan.summary.aircraftToCreate },
-      { label: "Aircraft updated", value: plan.summary.aircraftToUpdate },
+      { label: "Aircraft Updated", value: plan.summary.aircraftToUpdate },
     ].filter((row) => row.value > 0);
   }, [plan]);
 

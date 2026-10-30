@@ -39,10 +39,10 @@ import { isValidHHMM } from "@/lib/utils/time";
 const DUTY_TYPES: { value: DutyType; label: string }[] = [
   { value: "standby", label: "Standby" },
   { value: "training", label: "Training" },
-  { value: "ground", label: "Ground duty" },
+  { value: "ground", label: "Ground Duty" },
   { value: "positioning", label: "Positioning" },
   { value: "leave", label: "Leave" },
-  { value: "off", label: "Day off" },
+  { value: "off", label: "Day Off" },
 ];
 
 /** Kinds that occupy a window of the day rather than the whole of it. */
@@ -193,7 +193,7 @@ export function DutyDetailPanel({
             label="End"
             value={end}
             onChange={(v) => set("end", v)}
-            description="An end earlier than the start means the next day."
+            description="Before the start means the next day."
             required
           />
         </FormSection>

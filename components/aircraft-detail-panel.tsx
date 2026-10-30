@@ -286,14 +286,14 @@ function AircraftNowSection({ registration }: { registration: string }) {
   return (
     <FormSection title="Now">
       <CheckRow
-        label="Last flight"
+        label="Last Flight"
         value={whereaboutsValue(state, separator)}
         loading={state?.status === "loading"}
         onCheck={() => void check()}
       />
       {next && (
         <SettingsRow
-          label="Next flight"
+          label="Next Flight"
           value={[
             next.flightNumber,
             next.destination && `to ${next.destination.iata || next.destination.icao}`,

@@ -93,7 +93,7 @@ const BUCKET_META: Record<
     hint: "The report differs from what you have. Tick what to take.",
   },
   decided: {
-    label: "Earlier decisions",
+    label: "Earlier Decisions",
     tone: "consult",
     selectable: true,
     hint: "You already answered these, so they were left alone. Tick one only if you want to change your mind.",
@@ -413,7 +413,7 @@ export function ImportReviewModalV2({
                 to two lines and pushed the tabs (and the whole list) down. */}
             <DialogHeader className="flex-row items-baseline gap-x-3 gap-y-0 space-y-0 px-4 pt-4 sm:px-6 sm:pt-5">
               <DialogTitle className="shrink-0 text-base">
-                Review import
+                Review Import
               </DialogTitle>
               <DialogDescription className="min-w-0 flex-1 truncate text-right text-xs tabular-nums">
                 {plan.dateRange.start} – {plan.dateRange.end}
