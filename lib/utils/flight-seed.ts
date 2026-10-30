@@ -1,16 +1,16 @@
 /**
- * What a looked-up flight may write onto a flight record by itself — the
- * pilot never asked for it, so the rules are narrow:
+ * What a looked-up flight may write onto a flight record. The pilot asks for
+ * it (the flight form's Lookup), and the rules are still narrow:
  *
- * - only a BLANK field is written; anything the pilot (or an import) put
- *   there stays;
- * - only that day's schedule (`basis: "scheduled"`) writes anything
- *   unprompted — a `usual` suggestion is another day's times, and scheduled
- *   times feed the FDP plan, so it is offered and applied only when the pilot
- *   says so (`includeAircraft: false` then, because another day's aeroplane is
- *   not this day's);
- * - a record whose route already DISAGREES with the suggestion takes nothing:
- *   the number or the date is not the flight the pilot means;
+ * - only a BLANK field is written, or one the PREVIOUS lookup wrote and the
+ *   pilot has not touched since (`lookupPatch`) — so 288 then 289 moves the
+ *   route with the number, while anything the pilot (or an import) put there
+ *   stays until they choose to replace it;
+ * - the aeroplane only from that day's schedule (`basis: "scheduled"`): a
+ *   `usual` answer is another day's times moved onto this one, and another
+ *   day's aeroplane is not this day's;
+ * - a record whose route DISAGREES with the answer takes nothing unless the
+ *   pilot says replace: the number or the date is not the flight they mean;
  * - a simulator, a signed or a locked record takes nothing;
  * - never OUT/OFF/ON/IN: FR24's observed times are not the company's record.
  *
@@ -31,6 +31,17 @@ export type SeedField =
   | "arrivalIata"
   | "scheduledOut"
   | "scheduledIn"
+
+export const SEED_FIELDS: readonly SeedField[] = [
+  "aircraftReg",
+  "aircraftType",
+  "departureIcao",
+  "departureIata",
+  "arrivalIcao",
+  "arrivalIata",
+  "scheduledOut",
+  "scheduledIn",
+]
 
 const blank = (v: unknown) => v === undefined || v === null || v === ""
 const hhmm = (iso: string | null) => (iso ? iso.slice(11, 16) : "")
@@ -77,6 +88,54 @@ export function seedFromSuggestion(
     if (blank(flight.aircraftType) && s.typecode) patch.aircraftType = s.typecode
   }
   return patch
+}
+
+/** The values a lookup wrote onto a record, field by field. */
+export type LookupOwned = Partial<Record<SeedField, string>>
+
+/**
+ * An explicit lookup's patch. A field the previous lookup wrote (`previous`)
+ * and still holds that value is the lookup's, not the pilot's, so it counts as
+ * blank — and goes back to blank when this answer has nothing for it (289's
+ * aeroplane is not assigned yet; 288's must not stay). `conflicts` are the
+ * fields the pilot's OWN values keep from this answer: what "Replace" would
+ * write (`overwrite`).
+ */
+export function lookupPatch(
+  flight: Partial<FlightLog>,
+  s: FlightSuggestion,
+  previous: LookupOwned = {},
+  opts: { overwrite?: boolean } = {}
+): { patch: Partial<Pick<FlightLog, SeedField>>; conflicts: SeedField[] } {
+  if (!isSeedable(flight)) return { patch: {}, conflicts: [] }
+  const owned = (f: SeedField) => previous[f] !== undefined && (flight[f] ?? "") === previous[f]
+  const without = (drop: (f: SeedField) => boolean): Partial<FlightLog> => {
+    const copy: Partial<FlightLog> = { ...flight }
+    for (const f of SEED_FIELDS) if (drop(f)) copy[f] = ""
+    return copy
+  }
+  const everything = seedFromSuggestion(without(() => true), s)
+  const patch = opts.overwrite ? { ...everything } : seedFromSuggestion(without(owned), s)
+  for (const f of SEED_FIELDS) {
+    if (owned(f) && !(f in patch) && !blank(flight[f])) patch[f] = ""
+  }
+  const conflicts = opts.overwrite
+    ? []
+    : SEED_FIELDS.filter((f) => f in everything && !(f in patch) && (flight[f] ?? "") !== everything[f])
+  return { patch, conflicts }
+}
+
+/** What the lookup owns after `patch` was applied over `previous`. */
+export function ownedAfter(flight: Partial<FlightLog>, previous: LookupOwned, patch: Partial<Pick<FlightLog, SeedField>>): LookupOwned {
+  const next: LookupOwned = {}
+  for (const f of SEED_FIELDS) {
+    if (f in patch) {
+      if (patch[f]) next[f] = patch[f]
+    } else if (previous[f] !== undefined && (flight[f] ?? "") === previous[f]) {
+      next[f] = previous[f]
+    }
+  }
+  return next
 }
 
 const same = (a?: string, b?: string) => !!a && !!b && a.toUpperCase() === b.toUpperCase()

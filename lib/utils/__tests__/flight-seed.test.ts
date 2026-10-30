@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest"
 import type { FlightSuggestion } from "@/lib/lookup/flight-suggest"
-import { seedFromNextFlight, seedFromSuggestion, withAirlinePrefix } from "../flight-seed"
+import { lookupPatch, ownedAfter, seedFromNextFlight, seedFromSuggestion, withAirlinePrefix } from "../flight-seed"
 
 const TR288: FlightSuggestion = {
   flightNumber: "TR288",
@@ -65,6 +65,67 @@ describe("seeding a flight from its flight number and date", () => {
     expect(seedFromSuggestion({ date: "2026-10-30" }, TR288, { includeAircraft: false })).not.toHaveProperty("aircraftReg")
     // A day ahead whose aeroplane is not assigned yet fills the rest.
     expect(seedFromSuggestion({ date: "2026-10-30" }, { ...TR288, registration: "" })).toMatchObject({ scheduledOut: "02:25" })
+  })
+})
+
+describe("an explicit lookup over an earlier one", () => {
+  const TR289: FlightSuggestion = {
+    ...TR288,
+    flightNumber: "TR289",
+    origin: { icao: "RJBB", iata: "KIX", name: "Osaka Kansai" },
+    destination: { icao: "WSSS", iata: "SIN", name: "Singapore Changi" },
+    scheduledDeparture: "2026-10-30T10:00:00.000Z",
+    scheduledArrival: "2026-10-30T16:30:00.000Z",
+    registration: "",
+    typecode: "32Q",
+  }
+
+  it("288 then 289: what 288 wrote moves with the number, and 288's aeroplane goes", () => {
+    const blankFlight = { date: "2026-10-30", flightNumber: "TR288" }
+    const first = lookupPatch(blankFlight, TR288)
+    expect(first.conflicts).toEqual([])
+    const after288 = { ...blankFlight, ...first.patch, flightNumber: "TR289" }
+    const owned = ownedAfter(blankFlight, {}, first.patch)
+
+    const second = lookupPatch(after288, TR289, owned)
+    expect(second.patch).toEqual({
+      departureIcao: "RJBB",
+      departureIata: "KIX",
+      arrivalIcao: "WSSS",
+      arrivalIata: "SIN",
+      scheduledOut: "10:00",
+      scheduledIn: "16:30",
+      aircraftReg: "",
+      aircraftType: "",
+    })
+    expect(second.conflicts).toEqual([])
+  })
+
+  it("keeps what the pilot changed after the lookup, and offers it as a replacement", () => {
+    const first = lookupPatch({ date: "2026-10-30" }, TR288)
+    const owned = ownedAfter({ date: "2026-10-30" }, {}, first.patch)
+    const edited = { date: "2026-10-30", ...first.patch, scheduledOut: "02:40" }
+    const second = lookupPatch(edited, { ...TR288, scheduledDeparture: "2026-10-30T02:30:00.000Z" }, owned)
+    expect(second.patch).not.toHaveProperty("scheduledOut")
+    expect(second.conflicts).toEqual(["scheduledOut"])
+    expect(lookupPatch(edited, { ...TR288, scheduledDeparture: "2026-10-30T02:30:00.000Z" }, owned, { overwrite: true }).patch).toMatchObject({
+      scheduledOut: "02:30",
+    })
+  })
+
+  it("a route the pilot entered is another flight until they say replace", () => {
+    const own = { date: "2026-10-30", departureIcao: "WSSS", arrivalIcao: "VTBS" }
+    const looked = lookupPatch(own, TR288)
+    expect(looked.patch).toEqual({})
+    expect(looked.conflicts).toEqual(expect.arrayContaining(["arrivalIcao", "arrivalIata", "scheduledOut"]))
+    expect(lookupPatch(own, TR288, {}, { overwrite: true }).patch).toMatchObject({ arrivalIcao: "RJBB" })
+  })
+
+  it("usual times fill the route and times, never the aeroplane; nothing onto a locked entry", () => {
+    const usual = { ...TR288, basis: "usual" as const, basedOn: "2026-11-06", registration: "" }
+    expect(lookupPatch({ date: "2026-10-30" }, usual).patch).toMatchObject({ arrivalIcao: "RJBB", scheduledOut: "02:25" })
+    expect(lookupPatch({ date: "2026-10-30" }, usual).patch).not.toHaveProperty("aircraftReg")
+    expect(lookupPatch({ date: "2026-10-30", isLocked: true }, TR288)).toEqual({ patch: {}, conflicts: [] })
   })
 })
 

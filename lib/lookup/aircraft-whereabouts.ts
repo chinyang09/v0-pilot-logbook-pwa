@@ -117,5 +117,7 @@ export function whereaboutsLines(
   const gate = [inbound.arrivalGate && `Gate ${inbound.arrivalGate}`, inbound.arrivalTerminal && `T${inbound.arrivalTerminal.replace(/^T/i, "")}`]
     .filter(Boolean)
     .join(" ")
-  return { primary, secondary: [`${inbound.flightNumber || "Flight"}${from}`, gate].filter(Boolean).join(" · ") }
+  // The gate first: it is what a pilot walking in needs, and where a line is
+  // cut short (the duty band) it is the part that must survive.
+  return { primary, secondary: [gate, `${inbound.flightNumber || "Flight"}${from}`].filter(Boolean).join(" · ") }
 }

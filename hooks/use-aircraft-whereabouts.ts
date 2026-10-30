@@ -40,7 +40,7 @@ export function useAircraftWhereabouts(registration: string | undefined, atIso?:
 
 /** A whereabouts check as a row's value. `null` until checked. */
 export function whereaboutsValue(
-  state: WhereaboutsState | null,
+  state: WhereaboutsState | null | undefined,
   clockSeparator: "colon" | "none" = "colon"
 ): { primary: string; secondary?: string } | null {
   if (!state || state.status === "loading") return null

@@ -23,7 +23,8 @@ import {
   PenLine,
   Lock,
   X,
-  DoorOpen,
+  Search,
+  Loader2,
 } from "lucide-react";
 import { mutate } from "swr";
 import { CACHE_KEYS } from "@/hooks/data";
@@ -96,41 +97,44 @@ import type { EntryType } from "@/types/entities/flight.types";
 import type { DisplayPreferences } from "@/types/db/stores.types";
 import type { ExtractedFlightData } from "@/lib/ocr";
 import type { FlightSuggestion } from "@/lib/lookup/flight-suggest";
-import { isSeedable, seedFromSuggestion, withAirlinePrefix } from "@/lib/utils/flight-seed";
+import { isSeedable, lookupPatch, ownedAfter, withAirlinePrefix, type LookupOwned, type SeedField } from "@/lib/utils/flight-seed";
 import { getAirportDisplayCode } from "@/lib/utils/airport-display";
-import { useFlightSuggestion } from "@/hooks/use-flight-suggestion";
-import { gatesValue, useFlightGates } from "@/hooks/use-flight-gates";
-import { useAircraftWhereabouts, whereaboutsValue } from "@/hooks/use-aircraft-whereabouts";
-import { CheckRow } from "@/components/check-row";
-import { flightInstantMs } from "@/lib/airports/code-changes";
-import { useDayKey } from "@/hooks/use-day-key";
+import { canLookUp, useFlightLookup, type FlightLookupState } from "@/hooks/use-flight-suggestion";
+import { useAirlineCode } from "@/hooks/use-airline-code";
 
-/** "Scheduled SIN → KIX · 02:25Z–08:55Z · 9V-TNF" / "Usually SIN → KIX · 02:25Z–08:55Z". */
-function suggestionSummary(
-  s: FlightSuggestion,
+const EMPTY_OWNED: LookupOwned = {};
+
+/**
+ * What a lookup found, in one line: "Scheduled SIN → KIX · 02:25Z–08:55Z ·
+ * 9V-TNF", or "Usual times (6 Nov) SIN → KIX · 02:25Z–08:55Z" for a date past
+ * the published schedule — the times are that day's, moved onto this one.
+ */
+function lookupSummary(
+  state: FlightLookupState,
   airportPref: DisplayPreferences["airportIdentifier"],
   clockSeparator: DisplayPreferences["clockSeparator"]
-): string {
+): string[] {
+  const day = new Date(`${state.date}T00:00:00Z`).toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  });
+  if (state.status === "loading") return [`Looking up ${state.number}…`];
+  if (state.status === "missing") return [`No ${state.number} found on ${day}`, "it may not operate that day"];
+  if (state.status === "failed") return ["The lookup is unavailable right now", "try again later"];
+  const s = state.suggestion;
   const code = (a: FlightSuggestion["origin"]) => (a ? getAirportDisplayCode(a.icao, a.iata, airportPref) : "?");
   const clock = (iso: string | null) => (iso ? `${formatClockDisplay(iso.slice(11, 16), clockSeparator)}Z` : "");
   const times = [clock(s.scheduledDeparture), clock(s.scheduledArrival)].filter(Boolean).join("–");
   const route = `${code(s.origin)} → ${code(s.destination)}`;
-  return s.basis === "usual"
-    ? [`Usually ${route}`, times].filter(Boolean).join(" · ")
-    : [`Scheduled ${route}`, times, s.registration].filter(Boolean).join(" · ");
-}
-
-/**
- * Whether a flight is near enough to today (UTC) for its gates to be
- * published: the day before to two days ahead. `dayKey` is `useDayKey()`'s
- * "local|utc" pair, so the clock is never read during render.
- */
-function nearToday(date: string | undefined, dayKey: string): boolean {
-  const utc = dayKey.split("|")[1];
-  if (!date || !utc) return false;
-  const [y, m, d] = utc.split("-").map(Number);
-  const days = (Date.parse(`${date}T00:00:00Z`) - Date.UTC(y, m - 1, d)) / 86_400_000;
-  return days >= -1 && days <= 2;
+  if (s.basis === "usual") {
+    const based = s.basedOn
+      ? new Date(`${s.basedOn}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })
+      : "";
+    return [`Usual times${based ? ` (${based})` : ""}`, route, times].filter(Boolean);
+  }
+  return [`Scheduled ${route}`, times, s.registration].filter(Boolean);
 }
 
 // Swipeable row — thin wrapper over the shared SwipeableCard primitive so the
@@ -255,7 +259,7 @@ function AdditionalCrewRow({
  * the COMMITTED form state, and a transition commits within a frame or two of
  * the key — long before a tap on Back.
  */
-function useDraftText(value: string, commit: (next: string) => void) {
+function useDraftText(value: string, commit: (next: string) => void, prefill?: string) {
   const [draft, setDraft] = useState(value);
   const [focused, setFocused] = useState(false);
   const [awaiting, setAwaiting] = useState(false);
@@ -263,7 +267,9 @@ function useDraftText(value: string, commit: (next: string) => void) {
   return {
     value: focused || awaiting ? draft : value,
     onFocus: () => {
-      if (!awaiting) setDraft(value);
+      // An empty field may start with a prefix (the airline) — shown while
+      // focused, committed only once something is typed after it.
+      if (!awaiting) setDraft(value === "" && prefill ? prefill : value);
       setFocused(true);
     },
     onBlur: () => setFocused(false),
@@ -280,16 +286,22 @@ function DraftInput({
   value,
   onCommit,
   transform,
+  prefill,
+  ref,
   ...props
 }: Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange"> & {
   value: string;
   onCommit: (next: string) => void;
   transform?: (raw: string) => string;
+  /** Shown in an EMPTY field on focus, committed only once more is typed. */
+  prefill?: string;
+  ref?: React.Ref<HTMLInputElement>;
 }) {
-  const draft = useDraftText(value, onCommit);
+  const draft = useDraftText(value, onCommit, prefill);
   return (
     <input
       {...props}
+      ref={ref}
       value={draft.value}
       onFocus={draft.onFocus}
       onBlur={draft.onBlur}
@@ -1337,44 +1349,56 @@ function FlightFormImpl({
   );
 
   const commitRemarks = useCallback((v: string) => updateField("remarks", v), [updateField]);
-  // A number typed as digits alone takes the pilot's airline (288 → TR288).
-  const airline = preferences.logging.airline;
-  const commitFlightNumber = useCallback(
-    (v: string) => updateField("flightNumber", withAirlinePrefix(v, airline)),
-    [updateField, airline]
-  );
+  const commitFlightNumber = useCallback((v: string) => updateField("flightNumber", v), [updateField]);
+  // An empty Flight # starts with the pilot's airline when it is focused
+  // ("TR", cursor after it). Only typing commits it, so a pilot who clears the
+  // field and leaves it has an empty field — and one flying another airline's
+  // number just types over it.
+  const airline = useAirlineCode();
+  const flightNumberRef = useRef<HTMLInputElement>(null);
 
-  // Flight number + date → that flight (lib/lookup/flight-suggest.ts). Only a
-  // change the pilot makes asks: the pair a flight OPENED with never spends a
-  // lookup. That day's schedule fills BLANK fields by itself
-  // (lib/utils/flight-seed.ts); another day's times are only offered.
-  const lookupKey = `${formData.flightNumber || ""}|${formData.date || ""}`;
-  const [lookupOpened, setLookupOpened] = useState(() => ({ id: formData.id, key: lookupKey }));
-  if (lookupOpened.id !== formData.id) setLookupOpened({ id: formData.id, key: lookupKey });
-  const applySuggestion = useCallback((s: FlightSuggestion, includeAircraft = true) => {
-    setFormData((prev) => {
-      const patch = seedFromSuggestion(prev, s, { includeAircraft });
-      return Object.keys(patch).length ? { ...prev, ...patch } : prev;
-    });
-  }, []);
-  const flightLookup = useFlightSuggestion(
-    formData.flightNumber,
-    formData.date,
-    lookupOpened.id === formData.id && lookupKey !== lookupOpened.key && isSeedable(formData),
-    applySuggestion
+  // Flight number + date → that flight (lib/lookup/flight-suggest.ts), asked
+  // only on the Lookup button or Enter. The answer fills blanks and whatever
+  // the previous lookup wrote (lib/utils/flight-seed.ts `lookupPatch`), so
+  // 288 then 289 moves the route with the number; what the pilot entered
+  // stays, and "Replace" writes over it.
+  const [lookupOwned, setLookupOwned] = useState<{ id: string | undefined; owned: LookupOwned }>(() => ({
+    id: formData.id,
+    owned: {},
+  }));
+  const [lookupConflicts, setLookupConflicts] = useState<SeedField[]>([]);
+  const applyLookup = useCallback(
+    (s: FlightSuggestion, overwrite = false) => {
+      const prev = formDataRef.current;
+      const previous = lookupOwned.id === prev.id ? lookupOwned.owned : EMPTY_OWNED;
+      const { patch, conflicts } = lookupPatch(prev, s, previous, { overwrite });
+      setLookupOwned({ id: prev.id, owned: ownedAfter(prev, previous, patch) });
+      setLookupConflicts(conflicts);
+      if (Object.keys(patch).length) setFormData((current) => ({ ...current, ...patch }));
+    },
+    [lookupOwned]
   );
-  const usualOffer =
-    flightLookup.suggestion?.basis === "usual" &&
-    Object.keys(seedFromSuggestion(formData, flightLookup.suggestion, { includeAircraft: false })).length > 0;
-  const flightGates = useFlightGates(formData.flightNumber, formData.date, formData.scheduledOut);
-  const dayKey = useDayKey();
-  const nearNow = getEntryType(formData) !== "simulator" && nearToday(formData.date, dayKey);
-  // Where the aeroplane is before THIS departure — the flight bringing it in.
-  const departsAtMs = formData.date ? flightInstantMs(formData.date, formData.scheduledOut || formData.outTime) : null;
-  const inbound = useAircraftWhereabouts(
-    formData.aircraftReg,
-    departsAtMs !== null && (formData.scheduledOut || formData.outTime) ? new Date(departsAtMs).toISOString() : null
-  );
+  const flightLookup = useFlightLookup(applyLookup);
+  const [lookupFor, setLookupFor] = useState(formData.id);
+  if (lookupFor !== formData.id) {
+    setLookupFor(formData.id);
+    setLookupConflicts([]);
+    flightLookup.reset();
+  }
+  const runLookup = useCallback(() => {
+    // The input's own text: a keystroke's commit to the form is a transition
+    // and may not have landed when the button is pressed.
+    const typed = flightNumberRef.current?.value ?? formData.flightNumber ?? "";
+    const number = withAirlinePrefix(typed, airline);
+    if (number !== typed) updateField("flightNumber", number);
+    // The pilot's own scheduled OUT picks between two same-day departures; one
+    // the previous lookup wrote belongs to the previous number, not this one.
+    const ownOut =
+      lookupOwned.id === formData.id && lookupOwned.owned.scheduledOut === formData.scheduledOut ? undefined : formData.scheduledOut;
+    void flightLookup.run(number, formData.date || "", ownOut);
+  }, [airline, flightLookup, formData.date, formData.flightNumber, formData.id, formData.scheduledOut, lookupOwned, updateField]);
+  const lookupState = flightLookup.state;
+  const lookupEnabled = isSeedable(formData);
 
   // Handle OCR data extraction and populate form
   const handleOCRDataExtracted = useCallback((data: ExtractedFlightData) => {
@@ -2061,29 +2085,64 @@ function FlightFormImpl({
           <SwipeableRow onClear={() => clearField("flightNumber")}>
             <SettingsRow label="Flight #">
               <DraftInput
+                ref={flightNumberRef}
                 type="text"
-                className="text-right bg-transparent outline-none text-foreground w-32 placeholder:text-muted-foreground"
+                className="text-right bg-transparent outline-none text-foreground w-28 min-w-0 placeholder:text-muted-foreground"
                 placeholder="-"
                 aria-label="Flight number"
                 {...CODE_INPUT_PROPS}
                 value={formData.flightNumber || ""}
+                prefill={airline ?? undefined}
                 transform={toUpper}
                 onCommit={commitFlightNumber}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && lookupEnabled) {
+                    e.preventDefault();
+                    runLookup();
+                  }
+                }}
               />
+              {lookupEnabled && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 w-9 shrink-0 p-0 text-primary"
+                  aria-label="Look up this flight"
+                  disabled={!canLookUp(formData.flightNumber, formData.date) || lookupState?.status === "loading"}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    runLookup();
+                  }}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  {lookupState?.status === "loading" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                </Button>
+              )}
             </SettingsRow>
           </SwipeableRow>
 
-          {/* What the flight number names that day. That day's schedule has
-              already filled any blank row below; another day's times wait for
-              the pilot to take them. */}
-          {flightLookup.suggestion && (
-            <div className="flex min-h-11 items-center justify-between gap-3 px-4 py-1.5 row-divider" role="status">
-              <span className="min-w-0 truncate text-sm text-muted-foreground">
-                {suggestionSummary(flightLookup.suggestion, preferences.display.airportIdentifier, clockSeparator)}
+          {/* What the lookup found. It has already written the blanks (and
+              what the last lookup wrote); a value the pilot entered is kept
+              until they replace it. Wraps rather than truncating — it is the
+              one line that says what the rows below now hold. */}
+          {lookupState && (
+            <div className="flex min-h-11 items-center justify-between gap-3 px-4 py-2 row-divider" role="status">
+              <span className="min-w-0 text-sm text-muted-foreground">
+                {[
+                  ...lookupSummary(lookupState, preferences.display.airportIdentifier, clockSeparator),
+                  ...(lookupState.status === "found" && lookupConflicts.length > 0 ? ["your entries differ"] : []),
+                ].map((part, i) => (
+                  // Each part keeps together; the line wraps BETWEEN them, so a
+                  // registration or a route never breaks across lines.
+                  <span key={i} className="whitespace-nowrap">
+                    {i > 0 && " · "}
+                    {part}
+                  </span>
+                ))}
               </span>
-              {usualOffer && (
-                <Button size="sm" variant="outline" onClick={() => applySuggestion(flightLookup.suggestion!, false)}>
-                  Use
+              {lookupState.status === "found" && lookupConflicts.length > 0 && (
+                <Button size="sm" variant="outline" className="shrink-0" onClick={() => applyLookup(lookupState.suggestion, true)}>
+                  Replace
                 </Button>
               )}
             </div>
@@ -2142,28 +2201,6 @@ function FlightFormImpl({
               icon={<PlaneLanding className="h-4 w-4" />}
             />
           </SwipeableRow>
-
-          {/* Checked on a tap and never stored: a gate is published late and
-              moves, and an aeroplane's whereabouts move by the minute. Offered
-              only around today, when either can be known. */}
-          {nearNow && !!formData.flightNumber && (
-            <CheckRow
-              label="Gates"
-              value={gatesValue(flightGates.state)}
-              loading={flightGates.state?.status === "loading"}
-              onCheck={() => void flightGates.check()}
-              icon={<DoorOpen className="h-4 w-4" />}
-            />
-          )}
-          {nearNow && !!formData.aircraftReg && (
-            <CheckRow
-              label="Inbound"
-              value={whereaboutsValue(inbound.state, clockSeparator)}
-              loading={inbound.state?.status === "loading"}
-              onCheck={() => void inbound.check()}
-              icon={<Plane className="h-4 w-4" />}
-            />
-          )}
 
           <SwipeableRow onClear={() => clearField("reportTime")}>
             <TimeRow

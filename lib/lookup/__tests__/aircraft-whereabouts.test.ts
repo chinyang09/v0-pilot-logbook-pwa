@@ -75,7 +75,7 @@ describe("aircraft whereabouts", () => {
     const landed = { ...movementOf(DAY[1]), arrivalGate: "D41", arrivalTerminal: "1" }
     expect(whereaboutsLines(at(landed), Date.parse("2026-10-30T03:30:00Z"))).toEqual({
       primary: "Landed 03:00Z · 30m ago",
-      secondary: "TR289 from DPS · Gate D41 T1",
+      secondary: "Gate D41 T1 · TR289 from DPS",
     })
     const airborne = { ...landed, status: "airborne" as const, actualArrival: null, arrival: "2026-10-30T03:00:00.000Z", arrivalGate: "", arrivalTerminal: "" }
     expect(whereaboutsLines(at(airborne), Date.parse("2026-10-30T02:30:00Z"), "none")?.primary).toBe("Landing 0300Z · in 30m")

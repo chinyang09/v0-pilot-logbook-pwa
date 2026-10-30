@@ -7,25 +7,23 @@
  * (`addFleetAircraftToDatabase` — one write, and a registration already here
  * is left as it is). Type data (DOC 8643) is read once per type.
  *
- * Lives under the add-aircraft form, so it is reached the same way on a phone
- * and in the detail panel.
+ * The add-aircraft form's "By fleet" mode. The fleet is fetched when the mode
+ * opens with the pilot's airline already filled in (opening it IS the
+ * request), and otherwise only on Find or Enter — never per keystroke.
  */
 
 import { useCallback, useEffect, useState } from "react"
 import { mutate } from "swr"
-import { Loader2 } from "lucide-react"
+import { Loader2, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { FormSection } from "@/components/ui/form-section"
-import { SettingsRow } from "@/components/ui/settings-row"
 import { lookup } from "@/lib/lookup/client"
 import type { Fr24Fleet } from "@/lib/fr24/types"
 import { addFleetAircraftToDatabase, batchGetAircraftByRegistrations } from "@/lib/db"
 import { getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
 import { CACHE_KEYS } from "@/hooks/data"
 import { normalizeRegistration } from "@/lib/utils/string"
-import { usePreferences } from "@/components/providers/preferences-provider"
-
-const SETTLE_MS = 500
+import { useAirlineCode } from "@/hooks/use-airline-code"
 
 type FleetState =
   | { status: "done"; fleet: Fr24Fleet; onDevice: Set<string> }
@@ -33,17 +31,24 @@ type FleetState =
   | { status: "failed" }
 
 export function AirlineFleetSection({ onAdded }: { onAdded?: (count: number) => void }) {
-  // Starts at the pilot's own airline (Settings › Logging), when one is set.
-  const { preferences } = usePreferences()
-  const [code, setCode] = useState(preferences.logging.airline ?? "")
-  const key = /^[A-Z0-9]{2,3}$/.test(code.trim().toUpperCase()) ? code.trim().toUpperCase() : null
+  // Starts at the pilot's own airline (Settings › Logging, or their card's company).
+  const airline = useAirlineCode()
+  const [typed, setTyped] = useState<string | null>(null)
+  const code = typed ?? airline ?? ""
+  const valid = (c: string) => (/^[A-Z0-9]{2,3}$/.test(c.trim().toUpperCase()) ? c.trim().toUpperCase() : null)
+  // The code last asked for (Find or Enter) — until then, the airline the
+  // mode opened with: opening "By fleet" is the request for it.
+  const [asked, setAsked] = useState<string | null>(null)
+  const key = asked ?? (typed === null && airline ? valid(airline) : null)
   const [result, setResult] = useState<{ key: string; value: FleetState } | null>(null)
   const [adding, setAdding] = useState<string | null>(null)
+
+  const find = () => setAsked(valid(code))
 
   useEffect(() => {
     if (!key) return
     let cancelled = false
-    const timer = setTimeout(async () => {
+    void (async () => {
       const answer = await lookup.airlineFleet(key)
       if (cancelled) return
       if (!answer.ok) {
@@ -55,10 +60,9 @@ export function AirlineFleetSection({ onAdded }: { onAdded?: (count: number) => 
       if (cancelled) return
       const onDevice = new Set([...held.values()].map((a) => normalizeRegistration(a.registration)))
       setResult({ key, value: { status: "done", fleet: answer.data, onDevice } })
-    }, SETTLE_MS)
+    })()
     return () => {
       cancelled = true
-      clearTimeout(timer)
     }
   }, [key])
 
@@ -106,13 +110,44 @@ export function AirlineFleetSection({ onAdded }: { onAdded?: (count: number) => 
   )
 
   return (
-    <FormSection title="Add a fleet" className="mb-6">
-      <SettingsRow label="Airline" value={code} onChange={setCode} placeholder="e.g. TR or TGW" uppercase />
-      {loading && (
-        <div className="flex items-center gap-2 px-4 py-2.5 row-divider text-xs text-muted-foreground">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          Finding the fleet…
+    <FormSection title="Fleet" className="mb-6">
+      <div className="flex items-center justify-between gap-3 px-4 py-2 row-divider">
+        <label htmlFor="fleet-airline" className="shrink-0 text-foreground">
+          Airline
+        </label>
+        <div className="flex min-w-0 items-center gap-1">
+          <input
+            id="fleet-airline"
+            value={code}
+            onChange={(e) => setTyped(e.target.value.toUpperCase())}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                find()
+              }
+            }}
+            placeholder="e.g. TR or TGW"
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck={false}
+            className="w-28 min-w-0 bg-transparent text-right uppercase text-muted-foreground outline-none placeholder:text-muted-foreground/50"
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-9 w-9 shrink-0 p-0 text-primary"
+            aria-label="Find this airline's fleet"
+            disabled={!valid(code) || loading}
+            onClick={find}
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+          </Button>
         </div>
+      </div>
+      {!key && !loading && (
+        <p className="px-4 py-2.5 row-divider text-xs text-muted-foreground">
+          Enter an airline&apos;s code and Find to list its fleet by type.
+        </p>
       )}
       {state?.status === "missing" && (
         <p className="px-4 py-2.5 row-divider text-xs text-muted-foreground">No fleet found for {key}.</p>
