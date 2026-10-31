@@ -756,6 +756,12 @@ keeps the precedence flight number → full route → arrival+reg → departure+
 the time distance compares actual-vs-actual AND scheduled-vs-scheduled and
 takes whichever agrees better, so an unflown leg still pairs on its schedule.
 
+**A flight number matches on its digits, leading zeros dropped, unless two
+IATA designators disagree** (`sameFlightNumber`): `TR0288` is `TR288`, and a
+logged `SQ288` (positioned on another carrier) is not the report's `TR288`
+however well the day lines up. An ICAO callsign or a bare number names no
+carrier and is let through (`flight-number-match.test.ts`).
+
 > Do **not** go back to "first unclaimed flight on this route". The crew
 > logbook report has **no flight-number column**, so on a day that repeats a
 > route (SIN→PEN→SIN→PEN→SIN) the answer then depends purely on the order the
@@ -3998,7 +4004,10 @@ part). `simulateScenario` had its own `dutyMinutes > maxFdpMinutes`, which
 flagged every standby after the hypothetical duty (its maximum is 0) and any
 duty ending inside its post-flight half hour, and its "affected" set grew as it
 was walked, so every later duty's existing problem was reported as the
-scenario's (`scenario.test.ts`).
+scenario's (`scenario.test.ts`). The FDP chart's tooltip reads the same rule
+(`TimelineDataPoint.fdpExceeded`) and prints the FDP against its maximum
+(`fdpHours`) on its own row — "Duty 12:40/12:15" in red, for an FDP of 12:10,
+was the duty compared with a limit it is not measured against.
 
 ### OCR engine
 

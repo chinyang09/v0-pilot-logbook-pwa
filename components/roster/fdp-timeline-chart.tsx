@@ -429,11 +429,19 @@ export function FDPTimelineChart({
               {data.dutyHours > 0 && (
                 <div className="flex justify-between gap-4">
                   <span className="text-muted-foreground">Duty</span>
-                  <span className={cn("font-medium tabular-nums", data.maxFdpHours && data.dutyHours > data.maxFdpHours && "text-status-error")}>
-                    {formatHoursHM(data.dutyHours)}{data.maxFdpHours ? `/${formatHoursHM(data.maxFdpHours)}` : ""}
-                  </span>
+                  <span className="font-medium tabular-nums">{formatHoursHM(data.dutyHours)}</span>
                 </div>
               )}
+              {/* The FDP against its maximum — not the duty, which runs on past
+                  the last on-blocks by the post-flight checks. */}
+              {data.fdpHours != null && data.maxFdpHours ? (
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">FDP</span>
+                  <span className={cn("font-medium tabular-nums", data.fdpExceeded && "text-status-error")}>
+                    {formatHoursHM(data.fdpHours)}/{formatHoursHM(data.maxFdpHours)}
+                  </span>
+                </div>
+              ) : null}
               {data.flightHours > 0 && (
                 <div className="flex justify-between gap-4">
                   <span className="text-muted-foreground">Flight</span>

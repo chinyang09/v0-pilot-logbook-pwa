@@ -1754,6 +1754,13 @@ export interface TimelineDataPoint {
   dutyHours: number                 // Daily duty hours
   flightHours: number               // Daily flight hours
   maxFdpHours: number | null        // Max FDP for this duty (null if no duty)
+  /** The duty's FLIGHT duty period is over its maximum (`isDutyExceedingLimits`).
+   *  Not `dutyHours > maxFdpHours`: the duty runs on past the FDP by the
+   *  post-flight checks, and a standby has no FDP at all. */
+  fdpExceeded: boolean
+  /** That flight duty period's length (`fdpMinutesOf`), null where there is
+   *  no FDP (a standby, a gap day). */
+  fdpHours: number | null
   rolling14DayDuty: number          // Rolling 14-day cumulative duty
   rolling28DayDuty: number          // Rolling 28-day cumulative duty
   rolling28DayFlight: number        // Rolling 28-day cumulative flight
@@ -1866,6 +1873,8 @@ export function generateTimelineData(
           dutyHours: dp.dutyMinutes / 60,
           flightHours: dp.flightMinutes / 60,
           maxFdpHours: dp.maxFdpMinutes / 60,
+          fdpExceeded: isDutyExceedingLimits(dp, limits).exceedsFDP,
+          fdpHours: dp.dutyKind === "standby" || !(dp.maxFdpMinutes > 0) ? null : fdpMinutesOf(dp) / 60,
           rolling14DayDuty: stats14.dutyHours,
           rolling28DayDuty: stats28.dutyHours,
           rolling28DayFlight: stats28.flightHours,
@@ -1887,6 +1896,8 @@ export function generateTimelineData(
         dutyHours: 0,
         flightHours: 0,
         maxFdpHours: null,
+        fdpExceeded: false,
+        fdpHours: null,
         rolling14DayDuty: stats14.dutyHours,
         rolling28DayDuty: stats28.dutyHours,
         rolling28DayFlight: stats28.flightHours,

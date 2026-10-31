@@ -58,6 +58,9 @@ describe("simulateScenario — FDP violations", () => {
     expect(sb.maxFdpMinutes).toBe(0)
     const r = simulateScenario([sb], [add("a", "2026-09-02", "00:00", "08:00")], DEFAULT_FTL_LIMITS)
     expect(r.violations.filter((v) => v.type === "fdp")).toEqual([])
+    const sbPoint = r.timelineData.find((p) => p.date === "2026-09-03")!
+    expect(sbPoint.fdpExceeded).toBe(false)
+    expect(sbPoint.fdpHours).toBeNull()
   })
 
   it("measures the FDP to the last on-blocks, not the debrief", () => {
@@ -66,10 +69,15 @@ describe("simulateScenario — FDP violations", () => {
     // Debrief 20 minutes past the maximum: the FDP ended 10 minutes inside it.
     const inside = simulateScenario([], [add("a", "2026-09-02", "00:00", hhmm(max + 20))], DEFAULT_FTL_LIMITS)
     expect(inside.violations.filter((v) => v.type === "fdp")).toEqual([])
+    // …and the chart's point says the same: FDP 10 minutes inside, not over.
+    const point = inside.timelineData.find((p) => p.date === "2026-09-02")!
+    expect(point.fdpExceeded).toBe(false)
+    expect(Math.round((point.fdpHours ?? 0) * 60)).toBe(max - 10)
     // 40 minutes past: the FDP is 10 minutes over.
     const over = simulateScenario([], [add("a", "2026-09-02", "00:00", hhmm(max + 40))], DEFAULT_FTL_LIMITS)
     const fdp = over.violations.filter((v) => v.type === "fdp")
     expect(fdp).toHaveLength(1)
+    expect(over.timelineData.find((p) => p.date === "2026-09-02")?.fdpExceeded).toBe(true)
     expect(Math.round(fdp[0].projected * 60)).toBe(max + 10)
   })
 
