@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { buildPlannedDuties } from "../planned-duties"
+import { buildPlannedDuties, upcomingPlannedDuties } from "../planned-duties"
 import { deriveDutyStatus } from "../duty-status"
 import type { FlightLog } from "@/types/entities/flight.types"
 
@@ -527,5 +527,28 @@ describe("the next duty carries its own rest arithmetic", () => {
     // duties at 03:06. Rest is measured from the latter.
     expect(s.lastDuty!.endMs).toBe(Date.parse("2026-08-16T02:36:00Z"))
     expect(s.lastDuty!.debriefMs).toBe(Date.parse("2026-08-16T03:06:00Z"))
+  })
+})
+
+describe("upcomingPlannedDuties — the duties ahead, from the flight rows", () => {
+  const tomorrowA = flight({ id: "tr120", date: "2026-08-15", flightNumber: "TR120", departureIcao: "WSSS", arrivalIcao: "VTCC", outTime: "", inTime: "", scheduledOut: "03:00", scheduledIn: "05:55", blockTime: "" })
+  const tomorrowB = flight({ id: "tr121", date: "2026-08-15", flightNumber: "TR121", departureIcao: "VTCC", arrivalIcao: "WSSS", outTime: "", inTime: "", scheduledOut: "07:00", scheduledIn: "09:50", blockTime: "" })
+  const nextWeek = flight({ id: "tr130", date: "2026-08-21", flightNumber: "TR130", outTime: "", inTime: "", scheduledOut: "12:00", scheduledIn: "14:55", blockTime: "" })
+  const now = Date.parse("2026-08-14T12:00:00Z")
+
+  it("reaches as far ahead as the logbook has sectors, as future duties", () => {
+    const ahead = upcomingPlannedDuties([flown, scheduled, tomorrowA, tomorrowB, nextWeek], now)
+    expect(ahead.map((d) => [d.date, d.sectorCount, d.isFuture])).toEqual([
+      ["2026-08-15", 2, true],
+      ["2026-08-21", 1, true],
+    ])
+  })
+
+  it("leaves out a part-flown duty — the one in progress — and one already reported for", () => {
+    const morning = Date.parse("2026-08-14T01:00:00Z")
+    expect(upcomingPlannedDuties([flown, scheduled], morning)).toEqual([])
+    const unflownToday = flight({ id: "tr140", outTime: "", inTime: "", scheduledOut: "14:00", scheduledIn: "16:00", blockTime: "" })
+    expect(upcomingPlannedDuties([unflownToday], now)).toHaveLength(1)
+    expect(upcomingPlannedDuties([unflownToday], Date.parse("2026-08-14T13:30:00Z"))).toEqual([])
   })
 })

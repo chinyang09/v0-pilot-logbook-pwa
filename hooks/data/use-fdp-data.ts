@@ -2,7 +2,8 @@
 
 import { useMemo, useState, useEffect } from "react"
 import { useFlights } from "./use-flights"
-import { buildPlannedDuties } from "@/lib/utils/dashboard/planned-duties"
+import { hhmmToMinutes } from "@/lib/utils/time"
+import { buildPlannedDuties, upcomingPlannedDuties } from "@/lib/utils/dashboard/planned-duties"
 import {
   applyAcclimatisation,
   truncateActivatedStandby,
@@ -130,7 +131,24 @@ function computeFDPResult(
     // standby that was called out is cut back to the following duty's report.
     // Left whole, those hours are counted twice — once at 20% as standby and
     // again in full as the duty they turned into.
-    const merged = truncateActivatedStandby(mergeDutyPeriods(logbookDPs, scheduleDPs))
+    //
+    // The duties AHEAD come from the flight rows too (`upcomingPlannedDuties`):
+    // rostered flights are scheduled logbook rows, not schedule entries, so
+    // without them the next duty, the forecast and para 4's look-ahead saw
+    // nothing past today. A date the roster already carries a flight duty for
+    // (an older import) keeps that one.
+    const plannedDPs = buildPlannedDuties(flights)
+    const rosteredFlightDates = new Set(
+      scheduleDPs.filter((dp) => !dp.dutyKind || dp.dutyKind === "flight").map((dp) => dp.date)
+    )
+    const ahead = upcomingPlannedDuties(flights, Date.now(), plannedDPs).filter(
+      (dp) => !rosteredFlightDates.has(dp.date)
+    )
+    const merged = truncateActivatedStandby(
+      [...mergeDutyPeriods(logbookDPs, scheduleDPs), ...ahead].sort(
+        (a, b) => a.date.localeCompare(b.date) || hhmmToMinutes(a.reportTime) - hhmmToMinutes(b.reportTime)
+      )
+    )
     // Correct each duty's FDP table against the crew member's ACTUAL
     // acclimatised zone, which only the whole timeline can tell us — a duty
     // period is built before anything knows the three-nights history that
@@ -173,7 +191,7 @@ function computeFDPResult(
     const value: FDPResult = {
       allDutyPeriods: withRest,
       scheduleDutyPeriods: scheduleDPs,
-      plannedDutyPeriods: buildPlannedDuties(flights),
+      plannedDutyPeriods: plannedDPs,
       pastDuties,
       futureDuties,
       cumulativeLimits,

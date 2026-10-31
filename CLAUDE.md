@@ -942,7 +942,10 @@ table's PRIMARY KEYS (Dexie walks those off the index without deserialising a
 record), matched on `normalizeRegistration`. `matchRegistrationKeys` is the
 pure half, so the rule is tested without IndexedDB.
 
-**A soft-deleted reference aircraft must not answer a lookup.** Neither the
+**A soft-deleted reference aircraft must not answer a lookup — or a search.**
+`searchAircraftFromDB` walked every row and showed a binned aircraft in the
+aircraft page's search, where tapping it opened nothing (the list it is
+selected from leaves it out). Neither the
 single nor the batch lookup filtered `deletedAt`, so a deleted aircraft read as
 a live local hit: it stayed invisible in the list AND the enrichment chain
 never asked the network for it again, which made it impossible to re-import.
@@ -993,6 +996,12 @@ convention, never the default.
   SIC whatever the card says today. Every caller resolves the convention FOR
   THE FLIGHT'S DATE (`nonPicPfRoleOf(card, fallback, date)` / `pfRoleOn`) —
   new flights, the PF switch, both imports.
+- **A schedule report carries no PF/PM, and its sectors are created PF** —
+  so the role follows the convention for the leg's date
+  (`importedSectorRole`), never the seat alone. It took the seat alone, and
+  every rostered leg of a first officer who logs PICUS came in "PF, P2". A
+  re-import offers to put such a flight right, judging the role against the
+  PF the flight already holds (the report has none to offer).
 - **An import keeps PF and role a PAIR.** Audited against the owner's eCrew
   report, 13 flights carried a role that contradicted their own PF/PM: a PF/PM
   change turned down at one import was remembered and withheld at the next,
@@ -1273,6 +1282,17 @@ leg and a finished duty.
 
 A plan duty with NO logbook counterpart at all is also picked up, which is
 every duty's first hour — the pilot has reported and nothing has landed yet.
+
+**The duties AHEAD join the pipeline from the flight rows**
+(`upcomingPlannedDuties`): every planned duty none of whose sectors has flown
+and whose report is still to come, marked `isFuture`. Rostered flights are
+scheduled LOGBOOK rows (`scheduleEntries` holds non-flight duties only), and
+the pipeline builds duties from flown flights, so nothing past today reached
+it: the FDP page read "Next · None scheduled" over a week of rostered
+sectors, and the forecast, the chart's projection and para 4's look-ahead saw
+no duty ahead. Future duties never reach the cumulative limits (those read
+`!isFuture`). A part-flown duty is left to the dashboard's own plan; a date
+an older import put a schedule FLIGHT duty on keeps that one.
 
 #### The FDP ends at the last ON-BLOCKS, not at the debrief
 

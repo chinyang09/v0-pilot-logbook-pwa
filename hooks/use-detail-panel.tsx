@@ -211,6 +211,8 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
    * on the page they came from.
    */
   const arrivedBaseRef = useRef<string | null>(null)
+  /** A base whose selection `backFromDetail` clears once the page has left it. */
+  const clearOnLeaveRef = useRef<string | null>(null)
   const backClearedRef = useRef(false)
   /**
    * True from the moment we route a selection until `searchParams` catches up.
@@ -256,6 +258,12 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
     lastPathnameRef.current = pathname
     if (prevBase !== currentBase) {
       pushedBaseRef.current = null
+      if (prevBase && clearOnLeaveRef.current === prevBase) {
+        clearOnLeaveRef.current = null
+        setSelections(p => (p[prevBase] == null ? p : { ...p, [prevBase]: null }))
+        setExplicitBases(p => (p[prevBase] ? { ...p, [prevBase]: false } : p))
+        saveSelection(prevBase, null)
+      }
       // Arrived with a selection, from a top-level PAGE. A redirect route
       // (`/flights/<id>` → `/logbook?selected=<id>`, `/crew/<id>`) is not a
       // page anyone was on, and may be the very first entry of the session —
@@ -347,13 +355,14 @@ export function DetailPanelProvider({ children }: DetailPanelProviderProps) {
       return
     }
     // Opened from another page: go back to it. This page's selection is
-    // cleared as well, so a kept-alive page (the logbook) does not reopen the
-    // record the next time its tab is tapped.
+    // cleared too, so a kept-alive page (the logbook) does not reopen the
+    // record the next time its tab is tapped — but only once the page has
+    // CHANGED. Cleared first, the overlay closed onto this page's own list
+    // (Settings) for the frames before the back landed: a flash of a page the
+    // pilot never visited.
     arrivedBaseRef.current = null
     pushedBaseRef.current = null
-    setSelections((p) => (p[currentBase] == null ? p : { ...p, [currentBase]: null }))
-    setExplicitBases((p) => (p[currentBase] ? { ...p, [currentBase]: false } : p))
-    saveSelection(currentBase, null)
+    clearOnLeaveRef.current = currentBase
     router.back()
   }, [currentBase, router, setSelectedId])
 

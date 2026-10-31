@@ -96,6 +96,10 @@ export async function searchAircraftFromDB(
 
   await referenceDb.aircraftDatabase
     .each((record) => {
+      // A binned aircraft is in Recently Deleted, not the fleet: it matched
+      // here and appeared in the search, and tapping it opened nothing,
+      // because the list it would be selected from leaves it out.
+      if (record.deletedAt != null) return
       const ac = parseRecordData(record)
       if (!ac) return
 
@@ -410,12 +414,6 @@ export async function addAircraftToDatabase(
   })
 }
 
-export async function getAircraftFromDatabase(
-  registration: string
-): Promise<AircraftReference | undefined> {
-  return referenceDb.aircraftDatabase.get(registration.toUpperCase())
-}
-
 /**
  * SOFT delete — the entry goes to Recently Deleted for 30 days.
  *
@@ -513,15 +511,6 @@ export async function getAircraftTypeIndex(): Promise<Map<string, NormalizedAirc
     if (key) index.set(key, parsed)
   }
   return index
-}
-
-export async function hasAircraftInDatabase(
-  registration: string
-): Promise<boolean> {
-  const aircraft = await referenceDb.aircraftDatabase.get(
-    registration.toUpperCase()
-  )
-  return !!aircraft
 }
 
 /**

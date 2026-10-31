@@ -898,6 +898,20 @@ function diffSectorVsFlight(
     if (nextRole !== flight.pilotRole) {
       changes.push({ field: "pilotRole", from: flight.pilotRole, to: nextRole });
     }
+  } else if (sector.isPilotFlying === undefined && flight.pilotRole && typeof flight.pilotFlying === "boolean") {
+    // A SCHEDULE report says nothing about who flew, so judge the role against
+    // the PF the flight already holds. Imports used to create every schedule
+    // leg as PF + SIC whatever the pilot's convention, and with no PF in the
+    // report nothing ever came back to put those right.
+    const nextRole = settledRole({
+      currentRole: flight.pilotRole,
+      pilotFlying: flight.pilotFlying,
+      convention,
+      onDate: conventionOnDate,
+    });
+    if (nextRole !== flight.pilotRole) {
+      changes.push({ field: "pilotRole", from: flight.pilotRole, to: nextRole });
+    }
   }
 
   // Logbook fields — only flag when sector carries a non-zero value AND the

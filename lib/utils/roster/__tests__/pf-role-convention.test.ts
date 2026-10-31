@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from "vitest";
 import { reconcileRoster, type ParsedSector } from "../reconciler";
-import { nonPicPfRoleOf, pfRoleOn, seatOf, settledRole, withLoggingPreferences } from "../pilot-role";
+import { importedSectorRole, nonPicPfRoleOf, pfRoleOn, seatOf, settledRole, withLoggingPreferences } from "../pilot-role";
 import type { FlightLog } from "../../../../types/entities/flight.types";
 
 const CHECKOUT = "2025-07-27";
@@ -215,3 +215,26 @@ describe("withLoggingPreferences — the convention is a USER setting, not a fix
     expect(nonPicPfRoleOf(self, undefined, "2020-01-01")).toBe("PICUS");
   });
 });
+
+describe("a schedule report (no PF/PM in it)", () => {
+  it("creates a flown leg in the pilot's convention, not PF + SIC", () => {
+    const base = { reportSaysPic: false, reportSaysNotPic: false, pilotFlying: true }
+    expect(importedSectorRole({ ...base, seat: "first_officer", nonPicPfRole: "PICUS" })).toBe("PICUS")
+    expect(importedSectorRole({ ...base, seat: "first_officer", nonPicPfRole: "SIC" })).toBe("SIC")
+    expect(importedSectorRole({ ...base, seat: "captain", nonPicPfRole: "PICUS" })).toBe("PIC")
+  })
+
+  it("follows the report where it names the commander", () => {
+    const base = { pilotFlying: true, seat: "captain" as const, nonPicPfRole: "PICUS" as const }
+    expect(importedSectorRole({ ...base, reportSaysPic: true, reportSaysNotPic: false })).toBe("PIC")
+    expect(importedSectorRole({ ...base, reportSaysPic: false, reportSaysNotPic: true })).toBe("PICUS")
+    expect(importedSectorRole({ ...base, reportSaysPic: false, reportSaysNotPic: true, pilotFlying: false })).toBe("SIC")
+  })
+
+  it("offers to put right a PF + SIC leg an earlier import left, judged on the flight's own PF", () => {
+    expect(roleChange(flight({ pilotFlying: true, pilotRole: "SIC" }), sector()).role).toBe("PICUS")
+    // Before the check-out SIC is right, and a monitored leg is left alone.
+    expect(roleChange(flight({ date: "2025-06-21", pilotFlying: true, pilotRole: "SIC" }), sector({ date: "2025-06-21" })).role).toBeUndefined()
+    expect(roleChange(flight({ pilotFlying: false, pilotRole: "SIC" }), sector()).role).toBeUndefined()
+  })
+})
