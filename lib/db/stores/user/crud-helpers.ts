@@ -45,11 +45,6 @@ export function isLiveEntity<T extends SyncableEntity>(entity: T): boolean {
   return entity.deletedAt == null
 }
 
-/** In Recently Deleted and still restorable. */
-export function isDeletedEntity<T extends SyncableEntity>(entity: T): boolean {
-  return entity.deletedAt != null && isWithinRetention(entity.deletedAt, Date.now(), DELETED_RETENTION_MS)
-}
-
 /**
  * Deterministic last-write-wins comparison — see `lib/sync/authorship.ts`,
  * which the server uses too, so both ends always agree on the winner.
@@ -180,19 +175,6 @@ export async function putManyWithSync<T extends SyncableEntity>(
   )
 
   return rows.map((row) => row.data)
-}
-
-/** Single-row form of `putManyWithSync`, for a call site that has just one. */
-export async function putWithSync<T extends SyncableEntity>(
-  table: Table<T>,
-  tableName: SyncableTableName,
-  entity: T,
-  type: "create" | "update" = "create"
-): Promise<T> {
-  const [written] = await putManyWithSync(table, tableName, [entity], type)
-  // Nothing changed, so nothing was written: the entity as it stands is the
-  // current row.
-  return written ?? entity
 }
 
 /**

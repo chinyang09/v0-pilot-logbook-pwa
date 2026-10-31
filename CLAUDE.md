@@ -19,7 +19,7 @@ Deployed on **Vercel** and synced from [v0.app](https://v0.app/chat/eXgJay4h1Jy)
 | Cloud DB | MongoDB 6 |
 | Auth | WebAuthn passkeys + TOTP 2FA |
 | Data Fetching | SWR + Dexie React hooks |
-| Forms | Custom hooks (`useFormSubmit`, `useCrewForm`) — no form library |
+| Forms | Custom hooks (`useCrewForm`, `useDraft`) — no form library |
 | OCR | PP-OCRv4 models (`@gutenye/ocr-models`) on ONNX Runtime — our own pipeline, `lib/ocr/engine/` |
 | Charts | Recharts |
 | Package Manager | pnpm (not npm) |
@@ -48,7 +48,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 
 | Area | What it pins down |
 |---|---|
-| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp, and that the single-pass timeline sums and acclimatisation equal their per-item definitions |
+| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp, that the single-pass timeline sums and acclimatisation equal their per-item definitions, the rolling windows in six time zones, and the Quick Check's violations |
 | `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation, and a REAL schedule PDF (`fixtures/schedule-oct-2026-local-base.pdf`) run through the actual extractor |
 | `lib/utils/parsers/shared/__tests__/pooled-map.test.ts` | the bounded fan-out both enrichment chains end in |
 | `lib/lookup/__tests__/search-candidates.test.ts`, `lib/lookup/__tests__/composite.test.ts`, `app/api/lookup/__tests__/` | search candidates — airframe and live-flight hits, exact / begins / inside ranking, one row per tail, airport codes off the label; the composed `aircraft/candidates` asking the flight history only for a whole registration search missed, and `exact=1` answering 404 only when every source answered; the door's sign-in rule over both kinds of route; enrichment never taking a near miss |
@@ -3428,7 +3428,7 @@ identity and will loop forever on a fresh object).
 
 ### Forms
 
-Forms use lightweight custom hooks (`hooks/use-form-submit.ts`, `hooks/use-crew-form.tsx`) for submission/loading/error state rather than a form library. Validation is hand-rolled where needed. There is no React Hook Form or Zod dependency.
+Forms use lightweight custom hooks (`hooks/use-crew-form.tsx`, `useDraft` for a draft over a live record) rather than a form library. Validation is hand-rolled where needed. There is no React Hook Form or Zod dependency.
 
 ### API Routes
 
@@ -3982,13 +3982,23 @@ crew logbook and `DEFAULT_FTL_LIMITS` carries the flight-crew figures — do not
   "on reaching the designated accommodation". The app has no idea when a crew
   member reached their hotel, so it models the first limb only.
 
-#### Still deferred — rolling-window date handling
+#### Rolling windows are whole UTC DAYS (settled 31 Oct 2026)
 
-`calculateRollingStats` parses duty dates with `new Date(dp.date + "T00:00:00")`
-(runtime-local), while callers build the as-of date in UTC
-(`generateTimelineData`, `simulateScenario`, `simulateHypotheticalDuty`) or in
-local (`forecastExceedances`). For a non-UTC user a duty on the window boundary
-can be silently included or excluded. Settle on one date convention end to end.
+`calculateRollingStats` and the timeline's index take the window as the
+`days` UTC dates ending on the as-of instant's UTC date — the clock a duty's
+`date` is keyed on. They compared each duty's LOCAL midnight against UTC-built
+as-of instants, so in Singapore every 14/28/365-day window on the FDP chart
+and in the Quick Check lost its oldest day (a duty 13 days back fell out of
+the 14-day total), and west of UTC the forecast's local as-of gained one.
+`timeline-data.test.ts` runs the windows under six zones (`process.env.TZ`).
+
+**The Quick Check reads FDP violations through `isDutyExceedingLimits`**, and
+FDP through `fdpMinutesOf` (report → last on-blocks, plus para 10(b)'s spent
+part). `simulateScenario` had its own `dutyMinutes > maxFdpMinutes`, which
+flagged every standby after the hypothetical duty (its maximum is 0) and any
+duty ending inside its post-flight half hour, and its "affected" set grew as it
+was walked, so every later duty's existing problem was reported as the
+scenario's (`scenario.test.ts`).
 
 ### OCR engine
 

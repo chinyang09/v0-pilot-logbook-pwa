@@ -33,9 +33,11 @@ interface QuickCheckPanelProps {
   onScenarioResult?: (result: ScenarioResult | null) => void
 }
 
+/** Tomorrow's UTC date — the Quick Check's fields are UTC. Stepping the LOCAL
+ *  date and then reading the UTC one gave today, east of UTC before 08:00. */
 function tomorrow(): string {
   const d = new Date()
-  d.setDate(d.getDate() + 1)
+  d.setUTCDate(d.getUTCDate() + 1)
   return d.toISOString().split("T")[0]
 }
 

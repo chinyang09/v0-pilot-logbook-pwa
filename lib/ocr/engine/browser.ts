@@ -68,10 +68,6 @@ export function primeBrowserModels(): Promise<void> {
   return primed
 }
 
-export function browserModelsLoaded(): boolean {
-  return modelsPromise !== null
-}
-
 /**
  * The photo as RGBA at `OCR_MAX_SIDE`, straight from the browser's decoder —
  * no JPEG round trip. `createImageBitmap` applies the EXIF orientation

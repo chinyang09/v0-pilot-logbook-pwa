@@ -337,23 +337,3 @@ export async function ensureOCRModelsCached(): Promise<{
     }, 60000)
   })
 }
-
-/**
- * Check server OCR availability
- */
-export async function checkServerOCRAvailability(): Promise<boolean> {
-  if (!isOnline()) return false
-
-  try {
-    const response = await fetch("/api/ocr", {
-      method: "GET",
-    })
-
-    if (!response.ok) return false
-
-    const data = await response.json()
-    return data.available === true
-  } catch {
-    return false
-  }
-}
