@@ -21,6 +21,7 @@
  * "not found".
  */
 
+import { readEnvelope, setQuery } from "@/lib/fr24/envelope"
 import type { Fr24Result } from "@/lib/fr24/types"
 import type { LookupRoute, LookupRoutes } from "./types"
 
@@ -48,10 +49,7 @@ export async function lookupFromEdge<R extends LookupRoute>(
   const origin = handoffOrigin(options.request)
   if (!origin) return { ok: false, status: 0, error: "No origin to reach the lookup route" }
 
-  const url = new URL(`/api/lookup/${route}`, origin)
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== "") url.searchParams.set(key, String(value))
-  }
+  const url = setQuery(new URL(`/api/lookup/${route}`, origin), params)
 
   const headers: Record<string, string> = { accept: "application/json" }
   const secret = process.env.FR24_PROXY_SECRET
@@ -67,16 +65,9 @@ export async function lookupFromEdge<R extends LookupRoute>(
       cache: "no-store",
       signal: AbortSignal.timeout(options.timeoutMs ?? HANDOFF_TIMEOUT_MS),
     })
-    const body = (await response.json().catch(() => null)) as
-      | { ok?: boolean; data?: unknown; source?: string; error?: string }
-      | null
-    if (response.ok && body?.ok === true) {
-      return { ok: true, status: response.status, data: body.data as LookupRoutes[R], source: body.source ?? "" }
-    }
     // A non-JSON answer is deployment protection's sign-in page or a platform
     // error — the lookup was not made, so it reads as 502, never as 404.
-    const status = body && response.status >= 400 ? response.status : 502
-    return { ok: false, status, error: body?.error || `HTTP ${response.status}` }
+    return readEnvelope<LookupRoutes[R]>(response.status, await response.json().catch(() => null))
   } catch (err) {
     return { ok: false, status: 0, error: `${(err as Error).name}: ${(err as Error).message}` }
   }

@@ -132,7 +132,7 @@ function DetailPanelContent() {
  *   < 720px: Mobile — single panel + bottom pill + overlay sidebar
  */
 function AppShellContent({ children }: AppShellProps) {
-  const { selectedId, setSelectedId, selectionExplicit } = useDetailPanel()
+  const { selectedId, setSelectedId, backFromDetail, selectionExplicit } = useDetailPanel()
   const isDesktop = useIsDesktop()
   const hydrated = useHydrated()
   // Sidebar UI (pill↔sidebar morph) exists only at the desktop-pill tier —
@@ -485,12 +485,11 @@ function AppShellContent({ children }: AppShellProps) {
               {/* Back button — flush left */}
               <GlassIconButton
                 ariaLabel="Back"
-                // Just clear the selection — the detail panel provider owns
-                // the URL and the history entry it pushed when this opened, and
-                // consumes it with router.back(). Rewriting the URL here with
-                // replaceState left that entry stranded, so the next system
-                // back press did nothing.
-                onClick={() => setSelectedId(null)}
+                // The provider owns the URL and the history entry it pushed when
+                // this opened, and consumes it with router.back(); rewriting
+                // the URL here left that entry stranded. A detail opened FROM
+                // ANOTHER PAGE goes back to that page, not onto this one's list.
+                onClick={backFromDetail}
               >
                   <ChevronLeft className="h-5 w-5" />
               </GlassIconButton>

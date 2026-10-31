@@ -410,7 +410,7 @@ export function AirportNewForm({
                 or keep typing.
               </div>
               <SuggestionList
-                label="Matching airports"
+                label="Matching Airports"
                 items={candidates.map((c) => ({
                   key: c.icao,
                   title: c.icao,

@@ -9,37 +9,37 @@
  */
 
 const FIELD_LABELS: Record<string, string> = {
-  flightNumber: "Flight number",
+  flightNumber: "Flight Number",
   date: "Date",
   outTime: "OUT",
   offTime: "OFF",
   onTime: "ON",
   inTime: "IN",
-  scheduledOut: "Scheduled out",
-  scheduledIn: "Scheduled in",
+  scheduledOut: "Scheduled Out",
+  scheduledIn: "Scheduled In",
   reportTime: "Report",
-  blockTime: "Block time",
-  flightTime: "Flight time",
+  blockTime: "Block Time",
+  flightTime: "Flight Time",
   dayTime: "Day",
   nightTime: "Night",
   aircraftReg: "Registration",
-  aircraftType: "Aircraft type",
+  aircraftType: "Aircraft Type",
   departureIcao: "Departure (ICAO)",
   arrivalIcao: "Arrival (ICAO)",
   departureIata: "Departure (IATA)",
   arrivalIata: "Arrival (IATA)",
-  pilotFlying: "Pilot flying",
+  pilotFlying: "Pilot Flying",
   pilotRole: "Role",
-  dayTakeoffs: "Day takeoffs",
-  nightTakeoffs: "Night takeoffs",
-  dayLandings: "Day landings",
-  nightLandings: "Night landings",
+  dayTakeoffs: "Day Takeoffs",
+  nightTakeoffs: "Night Takeoffs",
+  dayLandings: "Day Landings",
+  nightLandings: "Night Landings",
   picName: "PIC",
   sicName: "SIC",
   remarks: "Remarks",
 }
 
-/** The pilot-facing name of a flight field; an unknown key is spelled out ("someField" → "Some field"). */
+/** The pilot-facing name of a flight field; an unknown key is spelled out ("someField" → "Some Field"). */
 export function flightFieldLabel(field: string): string {
   const known = FIELD_LABELS[field]
   if (known) return known
@@ -48,5 +48,5 @@ export function flightFieldLabel(field: string): string {
     .replace(/[_-]+/g, " ")
     .trim()
     .toLowerCase()
-  return words ? words[0].toUpperCase() + words.slice(1) : field
+  return words ? words.replace(/\b[a-z]/g, (c) => c.toUpperCase()) : field
 }

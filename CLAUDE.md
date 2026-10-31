@@ -19,7 +19,7 @@ Deployed on **Vercel** and synced from [v0.app](https://v0.app/chat/eXgJay4h1Jy)
 | Cloud DB | MongoDB 6 |
 | Auth | WebAuthn passkeys + TOTP 2FA |
 | Data Fetching | SWR + Dexie React hooks |
-| Forms | Custom hooks (`useFormSubmit`, `useCrewForm`) — no form library |
+| Forms | Custom hooks (`useCrewForm`, `useDraft`) — no form library |
 | OCR | PP-OCRv4 models (`@gutenye/ocr-models`) on ONNX Runtime — our own pipeline, `lib/ocr/engine/` |
 | Charts | Recharts |
 | Package Manager | pnpm (not npm) |
@@ -48,7 +48,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 
 | Area | What it pins down |
 |---|---|
-| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp, and that the single-pass timeline sums and acclimatisation equal their per-item definitions |
+| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp, that the single-pass timeline sums and acclimatisation equal their per-item definitions, the rolling windows in six time zones, and the Quick Check's violations |
 | `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation, and a REAL schedule PDF (`fixtures/schedule-oct-2026-local-base.pdf`) run through the actual extractor |
 | `lib/utils/parsers/shared/__tests__/pooled-map.test.ts` | the bounded fan-out both enrichment chains end in |
 | `lib/lookup/__tests__/search-candidates.test.ts`, `lib/lookup/__tests__/composite.test.ts`, `app/api/lookup/__tests__/` | search candidates — airframe and live-flight hits, exact / begins / inside ranking, one row per tail, airport codes off the label; the composed `aircraft/candidates` asking the flight history only for a whole registration search missed, and `exact=1` answering 404 only when every source answered; the door's sign-in rule over both kinds of route; enrichment never taking a near miss |
@@ -598,7 +598,17 @@ Aircraft and airport reference data is managed through a multi-tier lookup and e
   2026 and left the Worker open — after a deploy, `/probe` without the header
   must answer 401.
   404 means a source answered and has no such thing (manual entry); 502 means
-  every source failed (try later) — callers must not treat them alike. The
+  every source failed (try later) — callers must not treat them alike. Every
+  hop reads that envelope through ONE function, `readEnvelope`
+  (`lib/fr24/envelope.ts`) — the Worker client, the Node → Edge hand-off and
+  the browser each parsed it by hand, and the browser read an answer that was
+  not the envelope (a deploy's HTML 404, a sign-in page) as "not found". It is
+  502. The door lets the browser keep an answer for a minute, except the ones
+  that move by the minute (`LIVE_ROUTES`: gates, whereabouts, boards, airport
+  details, the live feed) — kept, the duty band's refresh read the same gate
+  back from the HTTP cache. The shared pool answers a MongoDB failure 503,
+  which `lookup.pool*` turns into `null` ("not asked"), not `{}` ("nobody has
+  it"). The
   Worker's legacy passthroughs (`/v1/search/web/find`,
   `/airports/traffic-stats/`) stay so the app and the Worker can deploy in
   either order. Server code calls it through `callFr24Worker`
@@ -663,14 +673,14 @@ one looks it up in full like a typed code.
 | | Source | Rule |
 |---|---|---|
 | a flight from its number + date (`flight/suggest`, `lib/lookup/flight-suggest.ts`) | the number's list (`/flight`): a week ahead SCHEDULED, a week back flown; the registration appears on the day the aeroplane is assigned | `basis: "scheduled"` is that UTC date's row; past the list, `"usual"` moves the nearest day's times onto the date and NEVER carries its registration |
-| filling the form (`lib/utils/flight-seed.ts` `lookupPatch`, `useFlightLookup`) | — | asked ONLY on the form's Lookup button (or Enter in Flight #) — it used to ask by itself once the number settled, a lookup per pause while typing. Writes BLANK fields and whatever the PREVIOUS lookup wrote that the pilot has not touched since (`ownedAfter`), so 288 then 289 moves the route and times with the number and clears 288's aeroplane; anything the pilot entered is kept, and "Replace" writes over it. A `usual` answer fills route and times (the pilot asked; the status line says "Usual times (6 Nov)") but never the aeroplane; never OOOI, never a simulator, signed or locked entry. The status line wraps between its parts (`whitespace-nowrap` per part), never inside a registration |
-| gates (`flight/gates`, `useDutyLookups`) | the tracked flight's `info`, else the departures board at the origin and the arrivals board at the destination, from an hour before | NOT in the flight form (it is for logging): drawn on the dashboard's sector chain, under each stop, asked by itself while the duty is within 18h of now and the page is on screen, every 15 min, with a refresh; never stored (a gate is published late and moves); "" until published is an answer, an unreadable board a failure |
+| filling the form (`lib/utils/flight-seed.ts` `lookupPatch`, `useFlightLookup`) | — | asked ONLY on the form's Lookup button (or Enter in Flight #) — it used to ask by itself once the number settled, a lookup per pause while typing. An answer is applied only while the form still holds the number and date it was asked for (`sameFlightNumber`) — one landing after the pilot moved on is dropped, and the status line hides once either changes. Writes BLANK fields and whatever the PREVIOUS lookup wrote that the pilot has not touched since (`ownedAfter`), so 288 then 289 moves the route and times with the number and clears 288's aeroplane; anything the pilot entered is kept, and "Replace" writes over it. Replace is offered only where the pilot's OWN non-blank value differs — a blank is filled, and a value that merely completes theirs (the IATA of their ICAO, the type of their registration) is filled too; "9VTNF" and "wsss" are not differences. It is read off the form AS IT STANDS (`lookupDiffers`), not stored when the answer came, so it follows edits; the line names the rows ("Kept yours: Aircraft, To") under the summary, never beside it A `usual` answer fills route and times (the pilot asked; the status line says "Usual times (6 Nov)") but never the aeroplane; never OOOI, never a simulator, signed or locked entry. The status line wraps between its parts (`whitespace-nowrap` per part), never inside a registration |
+| gates (`flight/gates`, `useDutyLookups`) | the tracked flight's `info`, else the departures board at the origin and the arrivals board at the destination, from an hour before | NOT in the flight form (it is for logging): drawn on the dashboard's sector chain, under each stop, asked ONLY while the page is on screen and the duty within 18h of now (no SWR key otherwise, so coming back asks about the duty as it now stands — deduplicated to 5 min — instead of showing a stale "nothing yet"), every 15 min while it stays up, with a refresh; never stored (a gate is published late and moves). The duty's legs end at the first 8h on the ground (`dutyFlights` — 18h can reach the next duty's first sector). The line under the chain (`describeDuty`, `lib/utils/dashboard/duty-line.ts`) never calls a failure "not published yet": checking / not checked / unavailable / not published are four different sentences |
 | a fleet (`airline/fleet`, `AirlineFleetSection`, the add-aircraft form's **By fleet** mode) | the airline's fleet page, by type | By registration is the default; By fleet asks for the pilot's airline when it opens, and otherwise only on Find / Enter — never per keystroke. Add writes a whole type in one `bulkPut` (`addFleetAircraftToDatabase`); a registration already held is left as it is |
 | the network (`airline/routes`, `airline/routes/from`) | the routes page's `arrRoutes`; a map pin's per-airport JSON | in the door, nothing reads them yet — the destination seeding they enable is on hold |
-| where the aeroplane is (`aircraft/whereabouts`, `lib/lookup/aircraft-whereabouts.ts`) | the registration's list: the last flight it DEPARTS on before `at` (our departure, or now) — landed / airborne / not yet left — and the one after; the inbound's ARRIVAL gate from the live flight, else the arrivals board | the duty band's line under the chain for the duty's FIRST leg (`useDutyLookups`, legs in FLOWN order — `sortFlights` is newest first), the duty panel, and the aircraft panel's **Now** section (on a tap); "9V-NCA · Landed 03:00Z · 30m ago · Gate D41 T1 · TR289 from DPS" — the gate before the flight, so a cut-short line keeps it; never stored; a departure within 20 min of `at` is our own flight pushing back, not the inbound |
+| where the aeroplane is (`aircraft/whereabouts`, `lib/lookup/aircraft-whereabouts.ts`) | the registration's list: the last flight it DEPARTS on before `at` (our departure, or now) — landed / airborne / not yet left — and the one after; the inbound's ARRIVAL gate from the live flight, else the arrivals board | the duty band's line under the chain for the NEXT LEG STILL TO FLY (`inboundLeg` — on duty a later leg can be another tail; legs in FLOWN order, `sortFlights` is newest first), the duty panel, and the aircraft panel's **Now** section (on a tap); "9V-NCA · Landed 03:00Z · 30m ago · TR289 from DPS" — the inbound's arrival gate is said only while the leg's OWN departure gate is not yet published (it is drawn under the stop, and in the panel's Gates row; saying it twice was the owner's report), and then it comes first so a cut-short line keeps it; never stored; a departure within 20 min of `at` is our own flight pushing back, not the inbound |
 | the missing sector (`seedDerivedLeg`, `seedFromNextFlight`) | what the aeroplane flies after the leg a Next Leg / Return was made from (`aircraft/whereabouts` at that leg's arrival) | fills the new leg's blanks — number, far end, scheduled times — only when that flight leaves from this leg's departure airport; may move the DERIVED leg's date a day on (an overnight return), only while it records no times |
-| the pilot's airline (`useAirlineCode`: Settings › Logging › Airline, `logging_airline`, else the SELF card's company through the airline list) | the airline list (`lib/airlines/airlines.ts`, `/airlines`, kept 30 days in localStorage) | an EMPTY Flight # starts with it on focus (`DraftInput`'s `prefill`, committed only once something is typed — clearing it leaves the field empty); Lookup prefixes a digits-only number (`withAirlinePrefix`); By fleet starts with it. A crew card's company field lists airlines as it is typed and a pick writes the standard name |
-| gates from the dashboard | the duty band's sector chain | the chain still opens `duty:<start ms>` (`DutyFlightsPanel`: each leg's Gates, the first leg's Inbound, Open flight) on the SAME cache as the band (`lookup:duty:` key), so either refreshes both. Measured at 360×780 with gates and the inbound line: no page scroll |
+| the pilot's airline (`useAirlineCode`: Settings › Logging › Airline, `logging_airline`, else the SELF card's company through the airline list) | the airline list (`lib/airlines/airlines.ts`, `/airlines`, kept 30 days in localStorage) | an EMPTY Flight # starts with it on focus (`DraftInput`'s `prefill`, committed only once something is typed — clearing it leaves the field empty; not on a simulator). A LETTER typed first replaces it and a digit is added to it (`afterPrefill`), so typing "TR288" out of habit or pasting it is not "TRTR288"; Lookup prefixes a digits-only number (`withAirlinePrefix`); By fleet starts with it. A crew card's company field lists airlines as it is typed and a pick writes the standard name |
+| gates from the dashboard | the duty band's sector chain | the chain still opens `duty:<start ms>` (`DutyFlightsPanel`: each leg's Gates, the next leg's Inbound, Open flight) on the SAME cache as the band (`lookup:duty:` key), so either refreshes both. Measured at 360×780 with gates and the inbound line: no page scroll |
 | the import cross-check (`aircraft-cross-check.ts`) | `flight/suggest` per touched flight, a week back to a day ahead, ≤ 24, nearest today first | a flight logged on another aeroplane than that day's SCHEDULED one gets an `aircraft_mismatch` NOTE (`aircraft-check:<flight>`, once; resolves itself when they agree) — never a change |
 
 The flight number's list, the boards and the per-airport timetable all reach
@@ -745,6 +755,12 @@ scored `tier × 10000 + |Δout| + |Δin|` and claimed cheapest-first. The tier
 keeps the precedence flight number → full route → arrival+reg → departure+reg;
 the time distance compares actual-vs-actual AND scheduled-vs-scheduled and
 takes whichever agrees better, so an unflown leg still pairs on its schedule.
+
+**A flight number matches on its digits, leading zeros dropped, unless two
+IATA designators disagree** (`sameFlightNumber`): `TR0288` is `TR288`, and a
+logged `SQ288` (positioned on another carrier) is not the report's `TR288`
+however well the day lines up. An ICAO callsign or a bare number names no
+carrier and is let through (`flight-number-match.test.ts`).
 
 > Do **not** go back to "first unclaimed flight on this route". The crew
 > logbook report has **no flight-number column**, so on a day that repeats a
@@ -2073,10 +2089,17 @@ or a dialog over the list.
   `desktop-layout.tsx`: "Select a crew member", "Select a deleted item"),
   not "Select an item".
 - **Every record is edited IN PLACE** — always editable, Cancel / Save in the
-  header only once something differs. Crew was the one record behind a
-  read-only view and an Edit button; it is a `DetailFormPanel` now, with the
-  person's name as its title, and `useCrewForm` derives `isDirty` from the
-  form against the stored card.
+  header only once something differs. Crew and aircraft were the records
+  behind a read-only view and an Edit button; both are `DetailFormPanel`s now,
+  titled with the person's name / the registration, with `isDirty` derived
+  from the form against the stored record (the aircraft form follows the
+  stored record for every field not touched). The AIRPORT panel reads only,
+  and is the same pieces: `DetailFormPanel` (`dirty={false}`), `FormSection` +
+  `ReadOnlyRow`, its favourite an `ActionRow` ("Add to Favorites"), not cards
+  of its own. `/aircraft/<reg>` and `/airports/<icao>` are REDIRECTS to the
+  list with `?selected=` on every width, as `/flights/<id>` is on a tablet —
+  on a phone they drew a second copy of each panel, which drifted (an Edit
+  button, "Mark as Favourite").
 - **The title follows you up into the bar** (`useCollapsingTitle`,
   `lib/layout/header-title.ts`, `HeaderTitle`). Once the large title has
   scrolled under the header, a small copy (15px semibold) fades in IN the
@@ -3012,6 +3035,15 @@ identical:
   chip), grow the HIT AREA with an `after:` pseudo-element on the
   `relative` control instead of the box — the logbook depends on every card
   being one height.
+- **Labels are Title Case** — a row's label, an option, a section title, a
+  tab, a button: "Pilot Flying", "New Flights Start As", "Add Duty", with
+  short articles and prepositions lower inside ("Add a Duty", "Nothing to
+  Compare"). Helper text under a label and a question in a dialog are
+  sentences. Helper text is ONE short line where it can be ("Prefixes flight
+  numbers: 288 → TR288.") — the label already names the thing.
+- **A short code field is sized to its code** (`SettingsRow`'s `maxLength`):
+  a text input claims ~200px, which squeezed the Airline row's helper text
+  into a narrower column than every other row's.
 - **A licence-record choice is readable on BOTH sides.** `OptionPair` and the
   import card's role chooser were 8–11px with the unselected side at 45%
   opacity — the value a pilot may want back was the one they could not read.
@@ -3180,6 +3212,16 @@ Next.js wraps pages in internal `LayoutRouter` components that unmount contents 
   would auto-open the full-screen mobile overlay when the viewport crosses
   below 720px (iPad Split View / resize). Only real user taps use the default
   explicit path
+- **A detail opened FROM ANOTHER PAGE goes back to that page** (`backFromDetail`,
+  the phone overlay's Back). The crew card's "Seat and logged role" opens
+  `/settings?selected=logging`, a note's Open flight `/logbook?selected=<id>`;
+  Back used to close the detail onto THAT page's list — Settings, the logbook —
+  a parent the pilot never visited. The provider marks a base arrived at with
+  `?selected=` already in the URL from a top-level page (`arrivedBaseRef`; a
+  redirect route like `/flights/<id>` is not one, and may be the session's
+  first entry), and its Back is `router.back()`, clearing that page's
+  selection so a kept-alive tab does not reopen the record later. Only the
+  Back button: a programmatic close (a delete, a cancel) stays on the page
 - **System back undoes the last move.** OPENING a detail — meaning `?selected=`
   is not already in the URL — PUSHES it (`history.pushState`, see below); the param going away again is
   what closes it. "Is a detail open" must be read off the URL, NOT off the
@@ -3399,7 +3441,7 @@ identity and will loop forever on a fresh object).
 
 ### Forms
 
-Forms use lightweight custom hooks (`hooks/use-form-submit.ts`, `hooks/use-crew-form.tsx`) for submission/loading/error state rather than a form library. Validation is hand-rolled where needed. There is no React Hook Form or Zod dependency.
+Forms use lightweight custom hooks (`hooks/use-crew-form.tsx`, `useDraft` for a draft over a live record) rather than a form library. Validation is hand-rolled where needed. There is no React Hook Form or Zod dependency.
 
 ### API Routes
 
@@ -3724,11 +3766,31 @@ any other. That was the whole reason for tracking it.
 
 #### The roster page is CALENDAR FIRST
 
-`app/(app)/roster/page.tsx` is a month (`RosterMonth`) over an agenda
-(`RosterAgenda`) that runs **soonest first** from the selected day — today
-unless another is tapped. It used to be every imported date newest-first with
-the calendar behind a toggle, so the next duty, which is what a roster is
-opened for, sat at the far end of the history.
+`app/(app)/roster/page.tsx` is a month (`RosterMonth`) STUCK under the header
+over an agenda (`RosterAgenda`) of EVERY rostered day in date order
+(`rosterAgenda` — plus today and a day the pilot tapped, even when empty). It
+is the logbook's calendar and list: a tapped day scrolls to just under the
+month (`scrollToDay`), and scrolling moves the month's selection to the day at
+the top (`onTopDayChange`). It used to rebuild the agenda FROM the tapped day,
+so every day before it vanished; before that it was every imported date
+newest-first with the calendar behind a toggle.
+
+- **Stuck, and covered above.** The month is `position: sticky` at
+  `--chrome-top`, and once stuck its `::before` paints the header band above
+  it (`.roster-month-sticky[data-stuck]`) — rows pass UNDER the month and would
+  otherwise reappear above it. The page holds `useFloatingPanelUnderHeader`
+  while active, so the tap band and the fade's tail leave the month's controls
+  alone.
+- **A scroll the page started is not the pilot's.** `scrollToDay` marks the
+  scroll programmatic until no scroll event has come for `SETTLE_MS`, or the
+  selection would walk through every day on the way. And the effect that
+  scrolls to a TARGET is not keyed on the selection: the selection follows the
+  scroll, and re-running on it snapped the list back to the last tapped day.
+- **Rows arriving above the top day do not move it** (a sync, a tapped empty
+  day): the offsets are exact (fixed heights), so the shift is one
+  `scrollTop` write. A tail spacer lets the LAST day reach the top.
+- No Currencies / Discrepancies / FDP links under the month — they are in the
+  nav.
 
 - Each cell names what the day IS (`SBY1`, `OFF`, `TR602`, `SIM`) — two labels
   and a count. A dot only said "busy" and had to be tapped to be read.
@@ -3745,7 +3807,7 @@ opened for, sat at the far end of the history.
 - The header's Add duty pre-fills the selected day, and an empty day's own
   "Add duty" pre-fills THAT day (`onAddDuty(dayKey)` — it used to add to the
   selected day whichever empty day was tapped).
-- The agenda runs to the end of the roster (no fixed day count) and is
+- The agenda runs the whole roster and is
   VIRTUALIZED (`RosterAgenda`, `@tanstack/react-virtual`) on the page's own
   scroller, with the logbook's rules: every row kind has a FIXED height
   (`HEADER_H` 36, `ITEM_H` 64 — a 58px card and its gap), nothing is measured,
@@ -3933,13 +3995,26 @@ crew logbook and `DEFAULT_FTL_LIMITS` carries the flight-crew figures — do not
   "on reaching the designated accommodation". The app has no idea when a crew
   member reached their hotel, so it models the first limb only.
 
-#### Still deferred — rolling-window date handling
+#### Rolling windows are whole UTC DAYS (settled 31 Oct 2026)
 
-`calculateRollingStats` parses duty dates with `new Date(dp.date + "T00:00:00")`
-(runtime-local), while callers build the as-of date in UTC
-(`generateTimelineData`, `simulateScenario`, `simulateHypotheticalDuty`) or in
-local (`forecastExceedances`). For a non-UTC user a duty on the window boundary
-can be silently included or excluded. Settle on one date convention end to end.
+`calculateRollingStats` and the timeline's index take the window as the
+`days` UTC dates ending on the as-of instant's UTC date — the clock a duty's
+`date` is keyed on. They compared each duty's LOCAL midnight against UTC-built
+as-of instants, so in Singapore every 14/28/365-day window on the FDP chart
+and in the Quick Check lost its oldest day (a duty 13 days back fell out of
+the 14-day total), and west of UTC the forecast's local as-of gained one.
+`timeline-data.test.ts` runs the windows under six zones (`process.env.TZ`).
+
+**The Quick Check reads FDP violations through `isDutyExceedingLimits`**, and
+FDP through `fdpMinutesOf` (report → last on-blocks, plus para 10(b)'s spent
+part). `simulateScenario` had its own `dutyMinutes > maxFdpMinutes`, which
+flagged every standby after the hypothetical duty (its maximum is 0) and any
+duty ending inside its post-flight half hour, and its "affected" set grew as it
+was walked, so every later duty's existing problem was reported as the
+scenario's (`scenario.test.ts`). The FDP chart's tooltip reads the same rule
+(`TimelineDataPoint.fdpExceeded`) and prints the FDP against its maximum
+(`fdpHours`) on its own row — "Duty 12:40/12:15" in red, for an FDP of 12:10,
+was the duty compared with a limit it is not measured against.
 
 ### OCR engine
 
@@ -4953,6 +5028,7 @@ When making changes, be aware of these high-impact files:
 - Do not clear a retention stamp (`deletedAt`, `acceptedAt`) by setting it `undefined` — `/api/sync/bulk` `$set`s only the keys the payload carries and `JSON.stringify` drops undefined ones, so the server's stamp survives and the next pull undoes the undo. Write `null` and test with `== null`
 - Do not rebuild `normalizeFlightFromServer` as an explicit field allowlist — it must spread the server record first, or every field added since it was written is dropped on the way back down (that is how `entryType`/`isSimulator` were being lost)
 - Do not write `?selected=` through the ROUTER (`router.push`/`router.replace`) — use `window.history.pushState`/`replaceState`, which Next keeps `useSearchParams` in step with. A router navigation for a query change asks the server for the route's payload and commits the history entry only when it returns: measured ~1.5s after the tap on the dev server, so a back gesture in that window had nothing to pop and left the section, every flight opened was a server request, and opening a detail needed the network in an offline-first app. A change of PATHNAME still goes through the router
+- Do not wire a detail's Back to `setSelectedId(null)` — that closes onto the CURRENT page's list, and a detail opened from another page (a link carrying `?selected=`) must go back to the page it came from. The overlay's Back is `backFromDetail`; a link that opens another page's detail needs nothing more than its `?selected=`
 - Do not open a detail with a REPLACE — an explicit open must PUSH, or the system back gesture skips the whole section instead of closing the detail. Decide "is it already open" from the URL, not the stored selection (a section keeps its selection while closed). And do not make the "re-sync `?selected=`" effect unconditional: it runs in the same commit as both the open and the back-clear, and will replace the pushed entry / put the param straight back
 - Do not remove `overflow-anchor: none` from the logbook scroller — growing the top spacer is how the floating panels push the list, and scroll anchoring exists to cancel exactly that (it bumps `scrollTop` to keep the view still). With it on, the calendar only pushed the list when it was already scrolled to the top, and the compensating adjustment read as a downward scroll that hid the nav pill
 - Do not give the calendar's collapse and the list spacer separate animations — they share `PANEL_MOTION`, or the panel opens and the list catches up afterwards as a visible second stage. The calendar stays MOUNTED at `height: 0` so its natural height is measurable and the collapse is a px transition the spacer can match

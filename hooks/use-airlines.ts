@@ -16,8 +16,9 @@ const NONE: Fr24Airline[] = []
 export function useAirlines(enabled = true): Fr24Airline[] {
   const { data } = useSWR(enabled ? "lookup:airlines" : null, () => loadAirlines(), {
     revalidateOnFocus: false,
-    revalidateOnReconnect: false,
-    revalidateIfStale: false,
+    // A remount asks again: free once the list is in memory, and how a list
+    // that came back empty (offline) is picked up later.
+    revalidateOnReconnect: true,
   })
   return data ?? NONE
 }

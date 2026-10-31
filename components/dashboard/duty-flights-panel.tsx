@@ -2,7 +2,8 @@
 
 /**
  * The duty the legal page's sector chain draws, in the DETAIL panel: each of
- * its flights with its gates, and where the aeroplane for the first leg is.
+ * its flights with its gates, and where the aeroplane for the next leg to fly
+ * is.
  * The same answer the duty band shows (`useDutyLookups`, one cache); a tap on
  * either row asks again. Nothing is stored.
  */
@@ -15,18 +16,25 @@ import { CheckRow } from "@/components/check-row"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { gatesValue } from "@/hooks/use-flight-gates"
 import { whereaboutsValue } from "@/hooks/use-aircraft-whereabouts"
-import { useDutyLookups } from "@/hooks/use-duty-lookups"
+import { useDutyLookups, type DutyLookups } from "@/hooks/use-duty-lookups"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { getAirportDisplayCode } from "@/lib/utils/airport-display"
+import { inboundLeg } from "@/lib/utils/dashboard/duty-flights"
+
+/** Whether a leg's departure gate is published — and so shown in its Gates row. */
+function departureGateShown(lookups: DutyLookups, flightId: string): boolean {
+  const g = lookups.gates[flightId]
+  return g?.status === "done" && !!g.gates.departure.gate
+}
 
 export function DutyFlightsPanel({ atMs }: { atMs: number }) {
   const { preferences } = usePreferences()
   const pref = preferences.display.airportIdentifier
   const separator = preferences.display.clockSeparator
   const { setSelectedId } = useDetailPanel()
-  const { legs, lookups, loading, refresh } = useDutyLookups(atMs, { auto: true })
+  const { legs, lookups, loading, refresh } = useDutyLookups(atMs, { active: true })
   const day = new Date(atMs).toISOString().slice(0, 10)
-  const inboundLeg = legs.find((f) => f.aircraftReg)
+  const inboundFlight = inboundLeg(legs)
 
   return (
     <DetailFormPanel title={`Duty · ${day}`} dirty={false} canSave={false} saving={false} onSave={() => {}} onCancel={() => {}}>
@@ -38,11 +46,13 @@ export function DutyFlightsPanel({ atMs }: { atMs: number }) {
         </FormSection>
       ) : (
         <>
-          {inboundLeg && (
-            <FormSection title={`Aircraft · ${inboundLeg.aircraftReg}`}>
+          {inboundFlight && (
+            <FormSection title={`Aircraft · ${inboundFlight.aircraftReg} · before ${inboundFlight.flightNumber || "departure"}`}>
               <CheckRow
                 label="Inbound"
-                value={lookups ? whereaboutsValue(lookups.inbound, separator) : null}
+                // The leg's own Gates row below says the gate once it is
+                // published; the inbound's arrival gate stands in until then.
+                value={lookups ? whereaboutsValue(lookups.inbound, separator, { gate: !departureGateShown(lookups, inboundFlight.id) }) : null}
                 loading={loading}
                 onCheck={refresh}
                 icon={<Plane className="h-4 w-4" />}
@@ -65,7 +75,7 @@ export function DutyFlightsPanel({ atMs }: { atMs: number }) {
                   )}
                 </FormSection>
                 <ActionStack>
-                  <ActionRow label="Open flight" onClick={() => setSelectedId(flight.id)} />
+                  <ActionRow label="Open Flight" onClick={() => setSelectedId(flight.id)} />
                 </ActionStack>
               </div>
             )

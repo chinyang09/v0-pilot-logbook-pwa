@@ -64,7 +64,7 @@ export function AlertsDropdown() {
         className="menu-surface w-72 rounded-[18px] border-0 bg-[var(--glass-base)] p-2 shadow-[var(--glass-shadow)]"
       >
         <div className="px-2 pb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Import notes
+          Import Notes
         </div>
         {count === 0 ? (
           <div className="px-2 py-6 text-center text-sm text-muted-foreground">

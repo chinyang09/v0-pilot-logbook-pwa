@@ -518,22 +518,22 @@ export default function LogbookPage() {
       hasActiveFilters && flights.length > 0 ? (
         <EmptyState
           icon={SearchX}
-          title="No matching flights"
-          description="Every search term has to match. Remove one, or clear the search."
+          title="No Matching Flights"
+          description="Every term must match."
           action={
             <Button variant="outline" size="sm" onClick={clearAllFilters}>
-              Clear search
+              Clear Search
             </Button>
           }
         />
       ) : (
         <EmptyState
           icon={Plane}
-          title="No flights logged"
-          description="Add one by hand, or bring in your history with the upload button: a crew logbook report, a schedule, or a LogTen Pro export."
+          title="No Flights Logged"
+          description="Add one, or import a report or LogTen export."
           action={
             <Button variant="outline" size="sm" onClick={handleAddFlight}>
-              <Plus className="mr-1 h-4 w-4" /> Add flight
+              <Plus className="mr-1 h-4 w-4" /> Add Flight
             </Button>
           }
         />

@@ -143,7 +143,7 @@ export const TIME_CATEGORIES: TimeCategory[] = [
       // Case G: designation P/UT, entered in the Dual column.
       CAAS: { label: "Dual", designation: "P/UT", full: "Pilot under instruction" },
       EASA: { label: "Dual", full: "Dual instruction received" },
-      FAA: { label: "Dual received", full: "Training received from an authorized instructor" },
+      FAA: { label: "Dual Received", full: "Training received from an authorized instructor" },
     },
     recognisedBy: ["CAAS", "EASA", "FAA"],
   },
@@ -155,7 +155,7 @@ export const TIME_CATEGORIES: TimeCategory[] = [
     names: {
       CAAS: { label: "Instructor", full: "Flight instruction given" },
       EASA: { label: "Instructor", full: "Flight instruction given" },
-      FAA: { label: "Dual given", full: "Flight instruction given" },
+      FAA: { label: "Dual Given", full: "Flight instruction given" },
     },
     recognisedBy: ["CAAS", "EASA", "FAA"],
   },

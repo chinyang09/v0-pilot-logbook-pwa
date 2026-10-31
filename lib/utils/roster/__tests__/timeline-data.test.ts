@@ -86,3 +86,35 @@ describe("generateTimelineData — rolling sums", () => {
     expect(points.find((p) => p.date === "2026-12-31")?.dateLabel).toBe("31 Dec")
   })
 })
+
+/**
+ * The windows are whole UTC days, the clock a duty's `date` is keyed on. They
+ * compared each duty's LOCAL midnight against UTC as-of instants, so in
+ * Singapore every 14/28/365-day window lost its oldest day — a duty 13 days
+ * back was dropped from the 14-day total, which under-states the limit.
+ * Node re-reads `process.env.TZ`, so each zone is exercised in this process.
+ */
+describe("rolling windows are the same in every time zone", () => {
+  const ZONES = ["UTC", "Asia/Singapore", "Asia/Kolkata", "America/New_York", "Pacific/Kiritimati", "Pacific/Pago_Pago"]
+  const saved = process.env.TZ
+  const dps = [duty("2026-08-01", 600, 300), duty("2026-07-31", 120, 60), duty("2026-08-14", 60, 30)]
+
+  for (const zone of ZONES) {
+    it(`counts the 14 days ending on the as-of day in ${zone}`, () => {
+      process.env.TZ = zone
+      try {
+        // 1 Aug is the 14th day back from 14 Aug (inclusive); 31 Jul is the 15th.
+        expect(calculateRollingStats(dps, new Date("2026-08-14T23:59:59Z"), 14, LIMITS).dutyHours).toBe(11)
+        expect(calculateRollingStats(dps, new Date("2026-08-14T00:00:00Z"), 14, LIMITS).dutyHours).toBe(11)
+        expect(calculateRollingStats(dps, new Date("2026-08-14T23:59:59Z"), 28, LIMITS).dutyHours).toBe(13)
+        const point = generateTimelineData(dps, LIMITS).find((p) => p.date === "2026-08-14")
+        expect(point?.rolling14DayDuty).toBe(11)
+        expect(point?.rolling28DayFlight).toBe(6.5)
+        // A duty dated the day AFTER the as-of day is never in the window.
+        expect(calculateRollingStats(dps, new Date("2026-07-31T23:59:59Z"), 14, LIMITS).dutyHours).toBe(2)
+      } finally {
+        process.env.TZ = saved
+      }
+    })
+  }
+})

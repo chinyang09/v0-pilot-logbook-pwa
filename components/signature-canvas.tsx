@@ -529,7 +529,7 @@ export function SignatureCanvas({
             Signing Crew Member
           </Label>
           <ChoicePicker
-            label="Signing crew member"
+            label="Signing Crew Member"
             value={selectedCrewId}
             options={flightCrew.map((crew) => ({ value: crew.id, label: crew.name, hint: crew.role.toUpperCase() }))}
             onValueChange={handleCrewChange}

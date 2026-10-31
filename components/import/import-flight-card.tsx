@@ -320,7 +320,7 @@ function PilotFlyingChoice({
     <div className="mt-1.5 rounded-lg border border-border/60 bg-muted/30 px-2 py-1.5">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Pilot flying
+          Pilot Flying
         </span>
         <OptionPair
           left={{ caption: "Recorded", value: pfLabel(pfDiff.from) }}

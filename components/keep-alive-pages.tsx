@@ -34,7 +34,7 @@ class PageErrorBoundary extends Component<
       return (
         <ErrorScreen
           error={this.state.error}
-          title="Page failed to load"
+          title="Page Failed to Load"
           message="This page encountered an error. Please reload the app."
         />
       )

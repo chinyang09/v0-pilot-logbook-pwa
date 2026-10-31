@@ -446,8 +446,29 @@ function diffCrewSeat(
 // Matching helpers
 // ============================================================
 
+/**
+ * The flight number's digits, with no leading zeros: a report or a hand entry
+ * may write `TR0288` for `TR288`, and as different keys the two never matched
+ * (a create beside the flight that was already there).
+ */
 function normalizeFlightNumber(fn: string): string {
-  return fn.replace(/\D/g, "");
+  return fn.replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+}
+
+/**
+ * The same flight number — the digits agree, and the airline prefixes do not
+ * contradict each other. Digits alone matched a logged `SQ288` (a sector
+ * positioned on another carrier) to the report's `TR288` on the same day, as
+ * the strongest tier. Only two IATA designators can contradict: an ICAO
+ * callsign (`TGW288`) or a digits-only number says nothing about the carrier.
+ */
+export function sameFlightNumber(a: string, b: string): boolean {
+  const digits = normalizeFlightNumber(a || "");
+  if (!digits || digits !== normalizeFlightNumber(b || "")) return false;
+  const prefix = (fn: string) => /^[A-Z]+/i.exec(fn.trim())?.[0].toUpperCase() ?? "";
+  const pa = prefix(a);
+  const pb = prefix(b);
+  return !(pa.length === 2 && pb.length === 2 && pa !== pb);
 }
 
 function isAirlineFlight(flightNumber: string): boolean {
@@ -479,11 +500,7 @@ function dateInRange(
 function matchTier(sector: ParsedSector, flight: FlightLog): number | null {
   if (flight.date !== sector.date) return null;
 
-  const sectorNumber = normalizeFlightNumber(sector.flightNumber || "");
-  if (
-    sectorNumber &&
-    normalizeFlightNumber(flight.flightNumber) === sectorNumber
-  ) {
+  if (sameFlightNumber(sector.flightNumber || "", flight.flightNumber || "")) {
     return 0;
   }
 

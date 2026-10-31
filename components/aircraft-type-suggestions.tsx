@@ -14,7 +14,7 @@ export function AircraftTypeSuggestions({
 }) {
   return (
     <SuggestionList
-      label="Matching aircraft types"
+      label="Matching Aircraft Types"
       items={results.map((type) => ({
         key: type.designator,
         title: type.designator,

@@ -49,7 +49,10 @@ export function loadAirlines(nowMs = Date.now()): Promise<Fr24Airline[]> {
     } catch {
       // Offline or the door refused: fall through to the stale copy.
     }
-    return (memory = stored?.rows ?? [])
+    // Nothing fetched: answer the stale copy, but do not hold an EMPTY answer
+    // in memory, or a session that started offline never gets the list.
+    if (stored?.rows.length) return (memory = stored.rows)
+    return []
   })().finally(() => {
     inFlight = null
   })

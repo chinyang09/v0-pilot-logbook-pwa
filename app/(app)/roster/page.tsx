@@ -3,11 +3,11 @@
 /**
  * The roster, CALENDAR FIRST.
  *
- * A month on top — each day says what it is (SBY, OFF, TR602) — and under it
- * the agenda, day by day and SOONEST FIRST from the day selected (today unless
- * you pick another). The old page was a newest-first list of every date ever
- * imported with the calendar behind a toggle, so the next duty — the one thing
- * a roster is opened for — sat at the far end of the history.
+ * A month on top — each day says what it is (SBY, OFF, TR602) — STUCK under
+ * the header, and under it the agenda, every rostered day in date order. A
+ * tapped day scrolls to just under the month and scrolling moves the month's
+ * selection to the day at the top — the logbook's calendar and list. It used
+ * to rebuild the agenda from the tapped day, so the days before it were gone.
  *
  * The roster shows the logbook's flights alongside its own duties: a roster
  * without its flights is half a roster. They stay the logbook's —
@@ -19,13 +19,12 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import { usePathname } from "next/navigation"
 import { mutate } from "swr"
-import Link from "next/link"
 import { PageContainer } from "@/components/page-container"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { useSessionState } from "@/hooks/use-session-state"
 import { GlassButtonGroup, GlassIconButton } from "@/components/ui/glass-icon-button"
-import { Plus, Shield, AlertCircle, TrendingUp } from "lucide-react"
-import { useScheduleEntries, useDiscrepancyCounts, useFlights, refreshAllData, CACHE_KEYS } from "@/hooks/data"
+import { Plus } from "lucide-react"
+import { useScheduleEntries, useFlights, refreshAllData, CACHE_KEYS } from "@/hooks/data"
 import { FlightForm } from "@/components/flight-form"
 import { syncService } from "@/lib/sync"
 import { usePageActive } from "@/hooks/use-page-active"
@@ -38,11 +37,12 @@ import { PanelLoading } from "@/components/ui/page-loading"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { RosterMonth } from "@/components/roster/roster-month"
-import { RosterAgenda } from "@/components/roster/roster-agenda"
+import { RosterAgenda, type RosterAgendaHandle } from "@/components/roster/roster-agenda"
+import { useFloatingPanelUnderHeader } from "@/lib/layout/panel-mode"
 import { deleteScheduleEntry, restoreScheduleEntry } from "@/lib/db"
 import { showUndoToast } from "@/lib/utils/undo-toast"
 import { standbyActivation } from "@/lib/utils/roster/standby-activation"
-import { agendaFrom, buildRosterDays, dayKeyAt } from "@/lib/utils/roster/roster-days"
+import { rosterAgenda, buildRosterDays, dayKeyAt } from "@/lib/utils/roster/roster-days"
 import type { ScheduleEntry } from "@/types/entities/roster.types"
 
 /** The phone's "a new one is open" selection — never stored (see use-detail-panel). */
@@ -50,17 +50,13 @@ const NEW_SENTINEL = "__new__"
 /** A logbook flight opened from the agenda — namespaced, as a duty id could collide. */
 const FLIGHT_PREFIX = "flight:"
 
-const QUICK_LINK =
-  "flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-xs font-medium transition-colors hover:bg-secondary active:bg-secondary"
-
 export default function RosterPage() {
   const { preferences } = usePreferences()
   const display = preferences.display
   const zulu = display.useZuluTime ?? true
 
   const { scheduleEntries, isLoading: entriesLoading, refresh: refreshEntries } = useScheduleEntries()
-  const { counts: discrepancyCounts } = useDiscrepancyCounts()
-  const { flights } = useFlights()
+  const { flights, isLoading: flightsLoading } = useFlights()
 
   // "Today" moves on when the page comes back into view — it is keep-alive,
   // so a value taken once at mount would still say yesterday tomorrow.
@@ -70,12 +66,24 @@ export default function RosterPage() {
   const [storedSelection, setSelectedKey] = useSessionState<string | null>("roster:selectedDate", null)
   const selectedKey = storedSelection ?? todayKey
 
+  // A day the pilot TAPPED stays in the list even when empty (it says
+  // "Nothing rostered" and offers Add Duty). It is not the selection, which
+  // also follows the scroll: a quiet day leaving the list as it scrolled past
+  // would move every row under the reader.
+  const [pinnedKey, setPinnedKey] = useState<string | null>(storedSelection)
+
   const days = useMemo(() => buildRosterDays(scheduleEntries, flights, { zulu }), [scheduleEntries, flights, zulu])
-  // Every rostered day from the selected one on — the list is virtualised, so
-  // there is no reason left to stop at a month.
-  const agenda = useMemo(() => agendaFrom(days, selectedKey, Infinity), [days, selectedKey])
-  // The page's scroller, which the virtualised agenda shares with the month.
+  const agenda = useMemo(
+    () => rosterAgenda(days, pinnedKey ? [todayKey, pinnedKey] : [todayKey]),
+    [days, todayKey, pinnedKey]
+  )
+  // The page's scroller, which the virtualised agenda shares with the month,
+  // and the month itself, stuck under the header.
   const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null)
+  const [stickyEl, setStickyEl] = useState<HTMLElement | null>(null)
+  const agendaRef = useRef<RosterAgendaHandle>(null)
+  // Where to scroll once the list has the day in it (a tap may add the row).
+  const [scrollTarget, setScrollTarget] = useState<{ key: string; behavior: ScrollBehavior } | null>(null)
 
   // A duty opens in the DETAIL panel — beside the month on a tablet, the
   // full-screen overlay on a phone — the way a flight opens in the logbook.
@@ -129,19 +137,58 @@ export default function RosterPage() {
     return map
   }, [scheduleEntries, flights])
 
-  const selectDay = useCallback((key: string) => setSelectedKey(key), [setSelectedKey])
-  const selectToday = useCallback(() => setSelectedKey(null), [setSelectedKey])
+  const goTo = useCallback(
+    (key: string, opts: { pin?: boolean } = {}) => {
+      setSelectedKey(key === todayKey ? null : key)
+      if (opts.pin) setPinnedKey(key)
+      setScrollTarget({ key, behavior: "smooth" })
+    },
+    [todayKey, setSelectedKey]
+  )
+  const selectDay = useCallback((key: string) => goTo(key, { pin: true }), [goTo])
+  const selectToday = useCallback(() => goTo(todayKey), [goTo, todayKey])
+  // The list scrolled a different day to the top: the month follows it.
+  const followTopDay = useCallback(
+    (key: string) => setSelectedKey(key === todayKey ? null : key),
+    [todayKey, setSelectedKey]
+  )
 
-  // A month step lands on today when that month holds it, else on the 1st —
-  // so the agenda under the new month starts where the month does.
+  // A month step lands on today when that month holds it, else on its first
+  // rostered day, else on the 1st (shown empty, with Add Duty).
   const stepMonth = useCallback(
     (delta: number) => {
       const anchor = parseYMDLocal(selectedKey)
       const first = formatLocalYMD(new Date(anchor.getFullYear(), anchor.getMonth() + delta, 1))
-      setSelectedKey(first.slice(0, 7) === todayKey.slice(0, 7) ? null : first)
+      const month = first.slice(0, 7)
+      if (month === todayKey.slice(0, 7)) return goTo(todayKey)
+      const busy = [...days.keys()].filter((k) => k.startsWith(month)).sort()[0]
+      if (busy) goTo(busy)
+      else goTo(first, { pin: true })
     },
-    [selectedKey, todayKey, setSelectedKey]
+    [selectedKey, todayKey, days, goTo]
   )
+
+  // Scroll once the list holds the day: after the commit that may have added
+  // its row. The first time, once the data has landed, to the day the page
+  // opens on — instantly, as a list opens where it is.
+  // NOT keyed on the selection: it follows the scroll, and re-running on it
+  // scrolled the list straight back to the last tapped day.
+  const openedRef = useRef(false)
+  const openKeyRef = useRef(selectedKey)
+  useEffect(() => {
+    openKeyRef.current = selectedKey
+  }, [selectedKey])
+  const dataReady = !entriesLoading && !flightsLoading
+  useEffect(() => {
+    if (!scrollEl || !stickyEl || !dataReady) return
+    if (!openedRef.current) {
+      openedRef.current = true
+      agendaRef.current?.scrollToDay(openKeyRef.current, "instant")
+      return
+    }
+    if (!scrollTarget) return
+    agendaRef.current?.scrollToDay(scrollTarget.key, scrollTarget.behavior)
+  }, [scrollTarget, scrollEl, stickyEl, dataReady])
 
   // Keep-alive: only the active tab owns the header actions; re-activation
   // refreshes the schedule and moves "today" on.
@@ -150,6 +197,9 @@ export default function RosterPage() {
     whenIdle(refreshEntries)
   }, [refreshEntries])
   const isActive = usePageActive("/roster", onActivated)
+  // The month sits under the action buttons: the header's tap-to-top band and
+  // the fade's tail would otherwise take its controls' taps and dim its top.
+  useFloatingPanelUnderHeader(isActive)
   // The pathname moves in the same render as a selection, the active-route
   // store a commit later — gate the panel on both (the dashboard's rule).
   const onRoster = usePathname() === "/roster"
@@ -257,49 +307,38 @@ export default function RosterPage() {
 
   return (
     <>
-      <PageContainer title="Roster" mainRef={setScrollEl}>
-        <div className="mx-auto max-w-2xl space-y-4 px-panel pt-4">
-          <RosterMonth
-            selectedKey={selectedKey}
-            todayKey={todayKey}
-            days={days}
-            onSelect={selectDay}
-            onStep={stepMonth}
-            onToday={selectToday}
-          />
-
-          {nothingYet && (
-            <p className="px-1 text-sm text-muted-foreground">
-              Import a schedule report with the upload button above, or add a duty by hand.
-            </p>
-          )}
-
-          <nav aria-label="Related" className="flex flex-wrap gap-2 ">
-            <Link href="/currencies" className={QUICK_LINK}>
-              <Shield className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span>Currencies</span>
-            </Link>
-            <Link href="/discrepancies" className={QUICK_LINK}>
-              <AlertCircle className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span>Discrepancies</span>
-              {discrepancyCounts.unresolved > 0 && (
-                <span className="shrink-0 rounded-full bg-secondary px-1.5 text-[10px] font-semibold tabular-nums">
-                  {discrepancyCounts.unresolved}
-                </span>
-              )}
-            </Link>
-            <Link href="/fdp" className={QUICK_LINK}>
-              <TrendingUp className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span>FDP</span>
-            </Link>
-          </nav>
+      <PageContainer title="Roster" mainRef={setScrollEl} scrollRestoreKey={null}>
+        <div className="mx-auto max-w-2xl px-panel">
+          {/* Stuck under the header; the list scrolls beneath it. Once stuck,
+              its ::before covers the header band above it, or rows passing
+              under the month would show again above it. */}
+          <div
+            ref={setStickyEl}
+            className="roster-month-sticky sticky z-10 bg-background pb-1 pt-4"
+            style={{ top: "var(--chrome-top)" }}
+          >
+            <RosterMonth
+              selectedKey={selectedKey}
+              todayKey={todayKey}
+              days={days}
+              onSelect={selectDay}
+              onStep={stepMonth}
+              onToday={selectToday}
+            />
+            {nothingYet && (
+              <p className="px-1 pt-3 text-sm text-muted-foreground">Import a schedule or add a duty.</p>
+            )}
+          </div>
 
           <RosterAgenda
+            controlRef={agendaRef}
             agenda={agenda}
             todayKey={todayKey}
             display={display}
             activations={activations}
             scrollElement={scrollEl}
+            stickyElement={stickyEl}
+            onTopDayChange={followTopDay}
             onOpenFlight={openFlight}
             // Lit only where the panel beside the roster shows it.
             selectedId={isDesktop ? selectedId : null}
@@ -307,7 +346,6 @@ export default function RosterPage() {
             onDeleteDuty={handleDeleteDuty}
             onAddDuty={addDutyOn}
           />
-
         </div>
       </PageContainer>
 

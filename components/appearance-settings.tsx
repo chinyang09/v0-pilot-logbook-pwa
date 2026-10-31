@@ -83,7 +83,7 @@ export function AppearanceSettings() {
       <div>
         <h2 className="text-lg font-semibold">Appearance</h2>
         <p className="text-sm text-muted-foreground">
-          Light or dark, and the colours the app is drawn in. Stored on this device, so it works offline.
+          Mode and colours, for this device.
         </p>
       </div>
 
@@ -248,7 +248,7 @@ function CustomPaletteEditor({ initial, onCommit }: { initial: PaletteSeed; onCo
   )
 
   return (
-    <FormSection title="Custom palette">
+    <FormSection title="Custom Palette">
       <div className="divide-y divide-border">
         <EditorRow label="Accent" swatch={accentSwatch}>
           <input
@@ -277,7 +277,7 @@ function CustomPaletteEditor({ initial, onCommit }: { initial: PaletteSeed; onCo
           </div>
         </EditorRow>
 
-        <EditorRow label="Background tint" swatch={groundSwatch}>
+        <EditorRow label="Background Tint" swatch={groundSwatch}>
           <input
             type="range"
             min={0}
@@ -309,7 +309,7 @@ function CustomPaletteEditor({ initial, onCommit }: { initial: PaletteSeed; onCo
           </div>
         </EditorRow>
 
-        <EditorRow label="Dark ground">
+        <EditorRow label="Dark Ground">
           <div className="flex gap-1.5" role="group" aria-label="Dark ground depth">
             {DEPTHS.map((d) => (
               <button
@@ -324,11 +324,11 @@ function CustomPaletteEditor({ initial, onCommit }: { initial: PaletteSeed; onCo
             ))}
           </div>
           <p className="mt-1.5 text-xs text-muted-foreground">
-            Black puts out the least light — best for night flying and OLED screens.
+            Black is darkest — best at night.
           </p>
         </EditorRow>
 
-        <EditorRow label="Start from">
+        <EditorRow label="Start From">
           <div className="flex flex-wrap gap-1.5">
             {PALETTE_PRESETS.map((preset) => (
               <button
@@ -344,8 +344,7 @@ function CustomPaletteEditor({ initial, onCommit }: { initial: PaletteSeed; onCo
         </EditorRow>
 
         <p className="px-4 py-3 text-xs text-muted-foreground">
-          Text and the accent are kept readable automatically: whatever you choose, they are adjusted to meet
-          contrast minimums on every surface.
+          Text and accent stay readable whatever you choose.
         </p>
       </div>
     </FormSection>

@@ -15,7 +15,7 @@
 
 import type { Fr24Flight } from "@/lib/fr24/types"
 import { formatClockDisplay } from "@/lib/utils/time"
-import type { SuggestedAirport } from "./flight-suggest"
+import { suggestedAirport, type SuggestedAirport } from "./flight-suggest"
 
 export interface AircraftMovement {
   flightNumber: string
@@ -41,9 +41,6 @@ export interface AircraftWhereabouts {
   next: AircraftMovement | null
 }
 
-const airportOf = (a: Fr24Flight["origin"]): SuggestedAirport | null =>
-  a && (a.icao || a.iata) ? { icao: a.icao, iata: a.iata, name: a.name } : null
-
 /** When a flight left or leaves: actual, then estimated, then scheduled. */
 export function departureMs(f: Fr24Flight): number | null {
   const iso = f.actualDeparture ?? f.estimatedDeparture ?? f.scheduledDeparture
@@ -54,8 +51,8 @@ export function movementOf(f: Fr24Flight): AircraftMovement {
   const status = f.actualArrival ? "landed" : f.actualDeparture || f.live ? "airborne" : "scheduled"
   return {
     flightNumber: f.flightNumber,
-    origin: airportOf(f.origin),
-    destination: airportOf(f.destination),
+    origin: suggestedAirport(f.origin),
+    destination: suggestedAirport(f.destination),
     scheduledDeparture: f.scheduledDeparture,
     scheduledArrival: f.scheduledArrival,
     actualDeparture: f.actualDeparture,
@@ -99,7 +96,8 @@ function span(ms: number): string {
 export function whereaboutsLines(
   w: AircraftWhereabouts,
   nowMs: number,
-  clockSeparator: "colon" | "none" = "colon"
+  clockSeparator: "colon" | "none" = "colon",
+  opts: { gate?: boolean } = {}
 ): { primary: string; secondary: string } | null {
   const inbound = w.inbound
   if (!inbound) return null
@@ -114,7 +112,7 @@ export function whereaboutsLines(
           : `Landing ${clock}${at !== null ? ` · in ${span(at - nowMs)}` : ""}`
         : `Due ${clock} · not departed yet`
   const from = inbound.origin ? ` from ${inbound.origin.iata || inbound.origin.icao}` : ""
-  const gate = [inbound.arrivalGate && `Gate ${inbound.arrivalGate}`, inbound.arrivalTerminal && `T${inbound.arrivalTerminal.replace(/^T/i, "")}`]
+  const gate = opts.gate === false ? "" : [inbound.arrivalGate && `Gate ${inbound.arrivalGate}`, inbound.arrivalTerminal && `T${inbound.arrivalTerminal.replace(/^T/i, "")}`]
     .filter(Boolean)
     .join(" ")
   // The gate first: it is what a pilot walking in needs, and where a line is

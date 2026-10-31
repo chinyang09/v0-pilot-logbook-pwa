@@ -78,7 +78,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ results })
   } catch (error) {
+    // Not "nobody has it": the pool could not be read. The client answers
+    // null for this (`lookup.pool*`), and the caller goes on to the gateway.
     console.error("[Aircraft Pool] MongoDB error:", error)
-    return NextResponse.json({ results: {} })
+    return NextResponse.json({ error: "Pool unavailable" }, { status: 503 })
   }
 }

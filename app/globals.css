@@ -1824,3 +1824,19 @@ textarea:focus-within {
   border: 2px solid rgba(0, 0, 0, 0.28);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
 }
+
+/* The roster's month, stuck under the header (app/(app)/roster/page.tsx).
+   Once stuck, it covers the header band above it too: the agenda's rows pass
+   UNDER the month, and without the cover they would show again above it. */
+.roster-month-sticky::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 100%;
+  height: var(--chrome-top);
+  background: var(--background);
+  display: none;
+}
+.roster-month-sticky[data-stuck]::before {
+  display: block;
+}

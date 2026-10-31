@@ -1237,6 +1237,11 @@ function dateToDays(dateStr: string): number {
   return Math.floor(d.getTime() / 86400000)
 }
 
+/** The UTC day number of an instant — the same scale as `dateToDays`. */
+function utcDayOf(ms: number): number {
+  return Math.floor(ms / 86400000)
+}
+
 /** The inverse of `dateToDays` — needed to name the day a wrapped debrief
  *  actually falls on. */
 function daysToDate(days: number): string {
@@ -1468,12 +1473,15 @@ export function calculateRollingStats(
   days: number,
   limits: FTLLimits
 ): RollingPeriodStats {
-  const toDate = new Date(fromDate)
-  toDate.setDate(toDate.getDate() - days)
-
+  // The window is `days` whole UTC DAYS ending on the as-of instant's UTC day
+  // — the clock a duty's `date` is keyed on. It used to compare each duty's
+  // LOCAL midnight against UTC-built as-of instants, so east of UTC (the
+  // owner's UTC+8) every window lost its oldest day, and west of UTC a local
+  // as-of instant gained a day: the permissive direction both times.
+  const asOfDay = utcDayOf(fromDate.getTime())
   const periodsInRange = dutyPeriods.filter((dp) => {
-    const dpDate = new Date(dp.date + "T00:00:00")
-    return dpDate <= fromDate && dpDate > toDate
+    const day = dateToDays(dp.date)
+    return day <= asOfDay && day > asOfDay - days
   })
 
   // Para 12 counts duty hours — but para 6(7) counts only 20% of home standby
@@ -1620,7 +1628,7 @@ export function forecastExceedances(
   const futureDPs = dutyPeriods.filter((dp) => dp.isFuture)
 
   for (const futureDp of futureDPs) {
-    const asOfDate = new Date(futureDp.date + "T23:59:59")
+    const asOfDate = new Date(futureDp.date + "T23:59:59Z")
     // Include all duties up to and including this future date
     const dpsUpToDate = dutyPeriods.filter(
       (dp) => dp.date <= futureDp.date
@@ -1681,6 +1689,24 @@ export function forecastExceedances(
 // ============================================
 
 /**
+ * A duty's FLIGHT duty period, in minutes: report to the last on-blocks
+ * (`fdpEndTime`), plus whatever para 10(b) had already spent before the crew
+ * member reported (`fdpElapsedAtReport`). The duty period runs on past it by
+ * para 7(2)'s post-flight checks, which are duty but not FLIGHT duty — so
+ * comparing `dutyMinutes` with the maximum flagged a duty that ended within
+ * half an hour of its limit as exceeded. With no last on-blocks recorded the
+ * duty length stands in for it: the conservative reading.
+ */
+export function fdpMinutesOf(dp: DutyPeriod): number {
+  if (!dp.fdpEndTime || !dp.reportTime) return dp.dutyMinutes
+  let span = hhmmToMinutes(dp.fdpEndTime) - hhmmToMinutes(dp.reportTime)
+  if (span < 0) span += 1440
+  // A last on-blocks that reads as later than the debrief is a wrapped clock
+  // the span above cannot see — never claim more FDP than the duty holds.
+  return Math.min(span, dp.dutyMinutes) + (dp.fdpElapsedAtReport ?? 0)
+}
+
+/**
  * Check if a single duty period exceeds FDP or single duty limits
  */
 export function isDutyExceedingLimits(
@@ -1708,7 +1734,7 @@ export function isDutyExceedingLimits(
   // A duty carrying no computed maximum has nothing to be checked against —
   // reading 0 as a limit would make every such duty an exceedance.
   const exceedsFDP =
-    dutyPeriod.maxFdpMinutes > 0 && dutyPeriod.dutyMinutes > dutyPeriod.maxFdpMinutes
+    dutyPeriod.maxFdpMinutes > 0 && fdpMinutesOf(dutyPeriod) > dutyPeriod.maxFdpMinutes
   const exceedsDuty = dutyHours > limits.maxSingleDutyHours
 
   return {
@@ -1728,6 +1754,13 @@ export interface TimelineDataPoint {
   dutyHours: number                 // Daily duty hours
   flightHours: number               // Daily flight hours
   maxFdpHours: number | null        // Max FDP for this duty (null if no duty)
+  /** The duty's FLIGHT duty period is over its maximum (`isDutyExceedingLimits`).
+   *  Not `dutyHours > maxFdpHours`: the duty runs on past the FDP by the
+   *  post-flight checks, and a standby has no FDP at all. */
+  fdpExceeded: boolean
+  /** That flight duty period's length (`fdpMinutesOf`), null where there is
+   *  no FDP (a standby, a gap day). */
+  fdpHours: number | null
   rolling14DayDuty: number          // Rolling 14-day cumulative duty
   rolling28DayDuty: number          // Rolling 28-day cumulative duty
   rolling28DayFlight: number        // Rolling 28-day cumulative flight
@@ -1784,30 +1817,28 @@ export function generateTimelineData(
   // same bounds, read off a sorted index instead of filtering every duty
   // period three times for every day. That was O(days × duties) Date parses —
   // ~40s at a 4× CPU throttle on a long logbook, in the dashboard's first
-  // render. `dayMs` is the same local-midnight parse the filter used, and it
+  // render. `dayNums` is the same UTC day number the filter uses, and it
   // rises with `date`, so each window is a contiguous run of `indexed`.
   // A date that does not parse never matched the filter's comparisons, so it
   // is left out of the index rather than breaking its ordering.
-  const indexed = sorted.filter((dp) => !Number.isNaN(new Date(dp.date + "T00:00:00").getTime()))
-  const dayMs = indexed.map((dp) => new Date(dp.date + "T00:00:00").getTime())
+  const indexed = sorted.filter((dp) => !Number.isNaN(dateToDays(dp.date)))
+  const dayNums = indexed.map((dp) => dateToDays(dp.date))
   // First index whose value is > bound (both arrays are non-decreasing).
   const upperBound = (bound: number) => {
     let lo = 0
-    let hi = dayMs.length
+    let hi = dayNums.length
     while (lo < hi) {
       const mid = (lo + hi) >> 1
-      if (dayMs[mid] <= bound) lo = mid + 1
+      if (dayNums[mid] <= bound) lo = mid + 1
       else hi = mid
     }
     return lo
   }
   // Summed in array order, exactly as the filter + reduce did.
-  const windowHours = (end: number, asOf: Date, days: number) => {
-    const from = new Date(asOf)
-    from.setDate(from.getDate() - days)
+  const windowHours = (end: number, asOfDay: number, days: number) => {
     let duty = 0
     let flight = 0
-    for (let i = upperBound(from.getTime()); i < end; i++) {
+    for (let i = upperBound(asOfDay - days); i < end; i++) {
       duty += indexed[i].countedDutyMinutes ?? indexed[i].dutyMinutes
       flight += indexed[i].flightMinutes
     }
@@ -1823,15 +1854,15 @@ export function generateTimelineData(
   let dayStartMs = Date.parse(startDate + "T00:00:00Z")
 
   while (currentDate <= endDate) {
-    const asOfDate = new Date(dayStartMs + 86_399_000)
+    const asOfDay = utcDayOf(dayStartMs)
     const dpsOnDate = dpsByDate.get(currentDate)
 
     // Rolling stats for this date, over the DPs up to and including it
     while (upToDate < indexed.length && indexed[upToDate].date <= currentDate) upToDate++
-    const end = Math.min(upToDate, upperBound(asOfDate.getTime()))
-    const stats14 = windowHours(end, asOfDate, 14)
-    const stats28 = windowHours(end, asOfDate, 28)
-    const stats365 = windowHours(end, asOfDate, 365)
+    const end = Math.min(upToDate, upperBound(asOfDay))
+    const stats14 = windowHours(end, asOfDay, 14)
+    const stats28 = windowHours(end, asOfDay, 28)
+    const stats365 = windowHours(end, asOfDay, 365)
 
     if (dpsOnDate) {
       // Duty day(s) — create a point per DP on this date
@@ -1842,6 +1873,8 @@ export function generateTimelineData(
           dutyHours: dp.dutyMinutes / 60,
           flightHours: dp.flightMinutes / 60,
           maxFdpHours: dp.maxFdpMinutes / 60,
+          fdpExceeded: isDutyExceedingLimits(dp, limits).exceedsFDP,
+          fdpHours: dp.dutyKind === "standby" || !(dp.maxFdpMinutes > 0) ? null : fdpMinutesOf(dp) / 60,
           rolling14DayDuty: stats14.dutyHours,
           rolling28DayDuty: stats28.dutyHours,
           rolling28DayFlight: stats28.flightHours,
@@ -1863,6 +1896,8 @@ export function generateTimelineData(
         dutyHours: 0,
         flightHours: 0,
         maxFdpHours: null,
+        fdpExceeded: false,
+        fdpHours: null,
         rolling14DayDuty: stats14.dutyHours,
         rolling28DayDuty: stats28.dutyHours,
         rolling28DayFlight: stats28.flightHours,
@@ -2080,152 +2115,6 @@ export function calculateRestUntilLegal(
 }
 
 // ============================================
-// Quick Check — hypothetical duty simulation
-// ============================================
-
-export interface QuickCheckInput {
-  date: string           // YYYY-MM-DD
-  reportTime: string     // HH:MM
-  debriefTime: string    // HH:MM
-  flightMinutes: number
-  sectorCount: number
-}
-
-export interface QuickCheckResult {
-  restBefore: {
-    compliant: boolean
-    restMinutes: number
-    requiredRestMinutes: number
-    rule: RestPeriodInfo["rule"]
-  } | null
-  duty14Days: { projected: number; limit: number; compliant: boolean }
-  duty28Days: { projected: number; limit: number; compliant: boolean }
-  flight28Days: { projected: number; limit: number; compliant: boolean }
-  flight365Days: { projected: number; limit: number; compliant: boolean }
-  maxFdp: { dutyMinutes: number; maxFdpMinutes: number; compliant: boolean }
-  overallCompliant: boolean
-}
-
-/**
- * Simulate adding a hypothetical duty period to the existing data
- * and check all regulatory limits. Used for "quick check" legality
- * when a pilot is asked to accept an ad-hoc flight or swap.
- */
-export function simulateHypotheticalDuty(
-  existingDPs: DutyPeriod[],
-  hypothetical: QuickCheckInput,
-  limits: FTLLimits
-): QuickCheckResult {
-  // Build a temporary DutyPeriod from the hypothetical input
-  const reportMin = hhmmToMinutes(hypothetical.reportTime)
-  let debriefMin = hhmmToMinutes(hypothetical.debriefTime)
-  if (debriefMin <= reportMin) debriefMin += 1440 // crosses midnight
-
-  const dutyMinutes = debriefMin - reportMin
-
-  // Report time is in UTC — convert to local for FDP table lookup (default
-  // SGT). A hypothetical duty has no delay to account for, so the stated
-  // report time IS the basis.
-  const depTzOffset = 8
-  const localReportTime = toLocalClock(reportMin, depTzOffset)
-
-  const fdpResult = deriveMaxFDP({
-    reportTime: hypothetical.reportTime,
-    fdpStartLocal: localReportTime,
-    sectorCount: hypothetical.sectorCount,
-    departureTimezoneOffset: depTzOffset,
-  })
-
-  const hypotheticalDP: DutyPeriod = {
-    id: "__quick_check__",
-    date: hypothetical.date,
-    reportTime: hypothetical.reportTime,
-    debriefTime: hypothetical.debriefTime,
-    dutyMinutes,
-    flightMinutes: hypothetical.flightMinutes,
-    sectorCount: hypothetical.sectorCount,
-    maxFdpMinutes: fdpResult.maxFdpMinutes,
-    fdpExtensionUsed: false,
-    fdpTableUsed: fdpResult.tableUsed,
-    fdpStartLocal: localReportTime,
-    departureTimezoneOffset: depTzOffset,
-    source: "schedule",
-    isFuture: true,
-    scheduleEntryIds: [],
-    flightIds: [],
-  }
-
-  // Insert into existing DPs and sort chronologically
-  const allDPs = [...existingDPs.filter((dp) => !dp.isFuture), hypotheticalDP]
-    .sort((a, b) => a.date.localeCompare(b.date))
-
-  // Rest period check — find the DP immediately before the hypothetical
-  const hypoIndex = allDPs.findIndex((dp) => dp.id === "__quick_check__")
-  let restCheck: QuickCheckResult["restBefore"] = null
-
-  if (hypoIndex > 0) {
-    const prevDP = allDPs[hypoIndex - 1]
-    const rest = calculateRestPeriod(hypotheticalDP, prevDP)
-    restCheck = {
-      compliant: rest.compliant,
-      restMinutes: rest.restMinutes,
-      requiredRestMinutes: rest.requiredRestMinutes,
-      rule: rest.rule,
-    }
-  }
-
-  // Rolling stats including hypothetical
-  const asOfDate = new Date(hypothetical.date + "T23:59:59Z")
-  const stats14 = calculateRollingStats(allDPs, asOfDate, 14, limits)
-  const stats28 = calculateRollingStats(allDPs, asOfDate, 28, limits)
-  const stats365 = calculateRollingStats(allDPs, asOfDate, 365, limits)
-
-  const duty14 = {
-    projected: stats14.dutyHours,
-    limit: limits.maxDuty14Days,
-    compliant: stats14.dutyHours <= limits.maxDuty14Days,
-  }
-  const duty28 = {
-    projected: stats28.dutyHours,
-    limit: limits.maxDuty28Days,
-    compliant: stats28.dutyHours <= limits.maxDuty28Days,
-  }
-  const flight28 = {
-    projected: stats28.flightHours,
-    limit: limits.maxFlight28Days,
-    compliant: stats28.flightHours <= limits.maxFlight28Days,
-  }
-  const flight365 = {
-    projected: stats365.flightHours,
-    limit: limits.maxFlight365Days,
-    compliant: stats365.flightHours <= limits.maxFlight365Days,
-  }
-  const maxFdpCheck = {
-    dutyMinutes,
-    maxFdpMinutes: fdpResult.maxFdpMinutes,
-    compliant: dutyMinutes <= fdpResult.maxFdpMinutes,
-  }
-
-  const overallCompliant =
-    (restCheck === null || restCheck.compliant) &&
-    duty14.compliant &&
-    duty28.compliant &&
-    flight28.compliant &&
-    flight365.compliant &&
-    maxFdpCheck.compliant
-
-  return {
-    restBefore: restCheck,
-    duty14Days: duty14,
-    duty28Days: duty28,
-    flight28Days: flight28,
-    flight365Days: flight365,
-    maxFdp: maxFdpCheck,
-    overallCompliant,
-  }
-}
-
-// ============================================
 // Scenario Simulation — multi-change what-if analysis
 // ============================================
 
@@ -2322,6 +2211,9 @@ export function simulateScenario(
         fdpExtensionUsed: false,
         fdpTableUsed: fdpRes.tableUsed,
         fdpStartLocal: localRepTime,
+        // The pilot states the DEBRIEF; the FDP ended para 7(2)'s post-flight
+        // checks before it, at the last on-blocks.
+        fdpEndTime: minutesToHHMM((((debriefMin - DEBRIEF_BUFFER_MINUTES) % 1440) + 1440) % 1440),
         departureTimezoneOffset: depTzOffset,
         source: "schedule",
         isFuture: true,
@@ -2346,15 +2238,14 @@ export function simulateScenario(
   const violations: ScenarioViolation[] = []
   const affectedDates = new Set([...modifiedDates, ...removedDates])
 
-  // Also mark dates immediately after a modified/removed date as affected (rest impact)
-  for (const dp of withRest) {
-    const dpIdx = withRest.indexOf(dp)
-    if (dpIdx > 0) {
-      const prevDp = withRest[dpIdx - 1]
-      if (affectedDates.has(prevDp.date)) {
-        affectedDates.add(dp.date)
-      }
-    }
+  // Also mark the duty immediately after a modified/removed date as affected
+  // (its rest is measured from the changed one). Only the CHANGED dates seed
+  // it: marking as it walked let each newly marked duty mark the next, so
+  // every duty after the first change was "affected" and any problem it
+  // already had was reported as the scenario's.
+  const changedDates = new Set(affectedDates)
+  for (let i = 1; i < withRest.length; i++) {
+    if (changedDates.has(withRest[i - 1].date)) affectedDates.add(withRest[i].date)
   }
 
   for (const dp of withRest) {
@@ -2371,13 +2262,15 @@ export function simulateScenario(
       })
     }
 
-    // FDP check
-    if (dp.dutyMinutes > dp.maxFdpMinutes) {
+    // FDP check — the one rule (`isDutyExceedingLimits`): a standby has no
+    // FDP (its maximum is 0, which read as a limit flagged every standby), and
+    // the FDP ends at the last on-blocks, not the debrief.
+    if (isDutyExceedingLimits(dp, limits).exceedsFDP) {
       violations.push({
         date: dp.date,
         type: "fdp",
         label: "FDP exceeded",
-        projected: dp.dutyMinutes / 60,
+        projected: fdpMinutesOf(dp) / 60,
         limit: dp.maxFdpMinutes / 60,
       })
     }
@@ -2416,24 +2309,6 @@ export function simulateScenario(
   }
 }
 
-/**
- * Get compliance status from utilization percentage
- */
-export function getComplianceStatus(utilizationPercent: number): {
-  status: "ok" | "warning" | "critical" | "exceeded"
-  color: string
-  label: string
-} {
-  if (utilizationPercent >= 100) {
-    return { status: "exceeded", color: "text-red-500", label: "Exceeded" }
-  } else if (utilizationPercent >= 90) {
-    return { status: "critical", color: "text-orange-500", label: "Critical" }
-  } else if (utilizationPercent >= 75) {
-    return { status: "warning", color: "text-yellow-500", label: "Warning" }
-  } else {
-    return { status: "ok", color: "text-green-500", label: "OK" }
-  }
-}
 
 
 // ============================================

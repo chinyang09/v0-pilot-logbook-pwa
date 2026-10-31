@@ -4,7 +4,7 @@ import { CODE_INPUT_PROPS } from "@/lib/utils/input-props";
 import type React from "react";
 import { ScrollIndicator } from "@/components/ui/scroll-indicator";
 
-import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, useId, startTransition, memo } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, useId, startTransition, memo, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { userDb } from "@/lib/db/user-db";
@@ -96,13 +96,19 @@ import { ChoicePicker, type MenuOption } from "@/components/ui/option-menu";
 import type { EntryType } from "@/types/entities/flight.types";
 import type { DisplayPreferences } from "@/types/db/stores.types";
 import type { ExtractedFlightData } from "@/lib/ocr";
-import type { FlightSuggestion } from "@/lib/lookup/flight-suggest";
-import { isSeedable, lookupPatch, ownedAfter, withAirlinePrefix, type LookupOwned, type SeedField } from "@/lib/utils/flight-seed";
+import { normalizeFlightNumber, type FlightSuggestion } from "@/lib/lookup/flight-suggest";
+import { afterPrefill, isSeedable, lookupPatch, ownedAfter, withAirlinePrefix, type LookupOwned, type SeedField } from "@/lib/utils/flight-seed";
 import { getAirportDisplayCode } from "@/lib/utils/airport-display";
 import { canLookUp, useFlightLookup, type FlightLookupState } from "@/hooks/use-flight-suggestion";
 import { useAirlineCode } from "@/hooks/use-airline-code";
 
 const EMPTY_OWNED: LookupOwned = {};
+
+/** Two spellings of one flight number — "288" with the airline, "TR0288", "TR288". */
+function sameFlightNumber(a: string | undefined, b: string | undefined, airline: string | null): boolean {
+  const norm = (n: string | undefined) => normalizeFlightNumber(withAirlinePrefix(n || "", airline));
+  return !!a && !!b && norm(a) === norm(b);
+}
 
 /**
  * What a lookup found, in one line: "Scheduled SIN → KIX · 02:25Z–08:55Z ·
@@ -135,6 +141,18 @@ function lookupSummary(
     return [`Usual times${based ? ` (${based})` : ""}`, route, times].filter(Boolean);
   }
   return [`Scheduled ${route}`, times, s.registration].filter(Boolean);
+}
+
+/** The rows a lookup's conflicting fields belong to, named as the form names them. */
+const CONFLICT_ROWS: [string, SeedField[]][] = [
+  ["Aircraft", ["aircraftReg", "aircraftType"]],
+  ["From", ["departureIcao", "departureIata"]],
+  ["To", ["arrivalIcao", "arrivalIata"]],
+  ["Scheduled Out", ["scheduledOut"]],
+  ["Scheduled In", ["scheduledIn"]],
+];
+function conflictLabels(fields: SeedField[]): string[] {
+  return CONFLICT_ROWS.filter(([, of]) => of.some((f) => fields.includes(f))).map(([label]) => label);
 }
 
 // Swipeable row — thin wrapper over the shared SwipeableCard primitive so the
@@ -218,7 +236,7 @@ function AdditionalCrewRow({
   return (
     <div className="flex items-center justify-between gap-3 px-4 py-1 row-divider">
       <ChoicePicker
-        label="Crew role"
+        label="Crew Role"
         value={role}
         options={ADDITIONAL_CREW_ROLES}
         onValueChange={onRoleChange}
@@ -273,7 +291,8 @@ function useDraftText(value: string, commit: (next: string) => void, prefill?: s
       setFocused(true);
     },
     onBlur: () => setFocused(false),
-    change: (next: string) => {
+    change: (typed: string) => {
+      const next = afterPrefill(draft, typed, prefill);
       setDraft(next);
       setAwaiting(true);
       startTransition(() => commit(next));
@@ -1366,23 +1385,23 @@ function FlightFormImpl({
     id: formData.id,
     owned: {},
   }));
-  const [lookupConflicts, setLookupConflicts] = useState<SeedField[]>([]);
   const applyLookup = useCallback(
     (s: FlightSuggestion, overwrite = false) => {
       const prev = formDataRef.current;
+      // An answer that lands after the pilot moved on — another number,
+      // another date, another flight open — is not about this record.
+      if (prev.date !== s.date || !sameFlightNumber(prev.flightNumber, s.flightNumber, airline)) return;
       const previous = lookupOwned.id === prev.id ? lookupOwned.owned : EMPTY_OWNED;
-      const { patch, conflicts } = lookupPatch(prev, s, previous, { overwrite });
+      const { patch } = lookupPatch(prev, s, previous, { overwrite });
       setLookupOwned({ id: prev.id, owned: ownedAfter(prev, previous, patch) });
-      setLookupConflicts(conflicts);
       if (Object.keys(patch).length) setFormData((current) => ({ ...current, ...patch }));
     },
-    [lookupOwned]
+    [lookupOwned, airline]
   );
   const flightLookup = useFlightLookup(applyLookup);
   const [lookupFor, setLookupFor] = useState(formData.id);
   if (lookupFor !== formData.id) {
     setLookupFor(formData.id);
-    setLookupConflicts([]);
     flightLookup.reset();
   }
   const runLookup = useCallback(() => {
@@ -1397,8 +1416,23 @@ function FlightFormImpl({
       lookupOwned.id === formData.id && lookupOwned.owned.scheduledOut === formData.scheduledOut ? undefined : formData.scheduledOut;
     void flightLookup.run(number, formData.date || "", ownOut);
   }, [airline, flightLookup, formData.date, formData.flightNumber, formData.id, formData.scheduledOut, lookupOwned, updateField]);
-  const lookupState = flightLookup.state;
+  // The status line speaks for the number and date it was asked about; once
+  // either changes it has nothing to say until the pilot asks again.
+  const lookupState =
+    flightLookup.state &&
+    flightLookup.state.date === formData.date &&
+    sameFlightNumber(formData.flightNumber, flightLookup.state.number, airline)
+      ? flightLookup.state
+      : null;
   const lookupEnabled = isSeedable(formData);
+  // What the pilot's OWN values say differently from the answer, read off the
+  // form as it stands — so an edit after the lookup (agreeing or not) moves
+  // the Replace offer with it, rather than a list taken when the answer came.
+  const lookupDiffers = useMemo(() => {
+    if (lookupState?.status !== "found") return [];
+    const owned = lookupOwned.id === formData.id ? lookupOwned.owned : EMPTY_OWNED;
+    return conflictLabels(lookupPatch(formData, lookupState.suggestion, owned).conflicts);
+  }, [lookupState, lookupOwned, formData]);
 
   // Handle OCR data extraction and populate form
   const handleOCRDataExtracted = useCallback((data: ExtractedFlightData) => {
@@ -2092,7 +2126,7 @@ function FlightFormImpl({
                 aria-label="Flight number"
                 {...CODE_INPUT_PROPS}
                 value={formData.flightNumber || ""}
-                prefill={airline ?? undefined}
+                prefill={getEntryType(formData) === "simulator" ? undefined : airline ?? undefined}
                 transform={toUpper}
                 onCommit={commitFlightNumber}
                 onKeyDown={(e) => {
@@ -2126,24 +2160,29 @@ function FlightFormImpl({
               until they replace it. Wraps rather than truncating — it is the
               one line that says what the rows below now hold. */}
           {lookupState && (
-            <div className="flex min-h-11 items-center justify-between gap-3 px-4 py-2 row-divider" role="status">
-              <span className="min-w-0 text-sm text-muted-foreground">
-                {[
-                  ...lookupSummary(lookupState, preferences.display.airportIdentifier, clockSeparator),
-                  ...(lookupState.status === "found" && lookupConflicts.length > 0 ? ["your entries differ"] : []),
-                ].map((part, i) => (
-                  // Each part keeps together; the line wraps BETWEEN them, so a
-                  // registration or a route never breaks across lines.
-                  <span key={i} className="whitespace-nowrap">
-                    {i > 0 && " · "}
-                    {part}
-                  </span>
+            <div className="px-4 py-2.5 row-divider" role="status">
+              <p className="text-sm text-muted-foreground">
+                {lookupSummary(lookupState, preferences.display.airportIdentifier, clockSeparator).map((part, i) => (
+                  // Each part keeps together; the line breaks after a "·", so
+                  // a registration or a route never splits across lines.
+                  <Fragment key={i}>
+                    {i > 0 && "\u00a0· "}
+                    <span className="whitespace-nowrap">{part}</span>
+                  </Fragment>
                 ))}
-              </span>
-              {lookupState.status === "found" && lookupConflicts.length > 0 && (
-                <Button size="sm" variant="outline" className="shrink-0" onClick={() => applyLookup(lookupState.suggestion, true)}>
-                  Replace
-                </Button>
+              </p>
+              {lookupDiffers.length > 0 && (
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <span className="min-w-0 text-xs text-muted-foreground">Kept yours: {lookupDiffers.join(", ")}</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0"
+                    onClick={() => lookupState?.status === "found" && applyLookup(lookupState.suggestion, true)}
+                  >
+                    Replace
+                  </Button>
+                </div>
               )}
             </div>
           )}
@@ -2526,7 +2565,7 @@ function FlightFormImpl({
               rules. "Examiner" used to be offered too; it is not a role the
               record can hold, so choosing it filed the hours under nothing. */}
           <ChoicePicker
-            label="Pilot role"
+            label="Pilot Role"
             value={formPilotRole}
             options={PILOT_ROLE_OPTIONS(authority)}
             onValueChange={(role) => updateField("pilotRole", role)}
@@ -2606,7 +2645,7 @@ function FlightFormImpl({
             >
               <div className="flex items-center gap-2 flex-1">
                 <ChoicePicker
-                  label="Approach type"
+                  label="Approach Type"
                   value={approach.type}
                   options={approachTypeOptions(approach.type)}
                   onValueChange={(type) => updateApproach(approach.id, { type: type as Approach["type"] })}

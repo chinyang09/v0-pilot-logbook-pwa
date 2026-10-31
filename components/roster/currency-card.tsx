@@ -26,7 +26,7 @@ import { formatYMDMedium as formatDate } from "@/lib/utils/date"
  */
 const STATUS: Record<CurrencyStatus, { icon: typeof ShieldCheck; text: string; label: string }> = {
   valid: { icon: ShieldCheck, text: "text-status-valid", label: "Valid" },
-  warning: { icon: ShieldAlert, text: "text-status-warning", label: "Expiring soon" },
+  warning: { icon: ShieldAlert, text: "text-status-warning", label: "Expiring Soon" },
   critical: { icon: ShieldAlert, text: "text-status-critical", label: "Critical" },
   expired: { icon: ShieldX, text: "text-status-error", label: "Expired" },
 }

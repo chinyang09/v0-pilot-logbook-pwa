@@ -772,7 +772,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
               {emptyState ?? (
                 <EmptyState
                   icon={Plane}
-                  title="No flights logged"
+                  title="No Flights Logged"
                   description="Add your first flight to get started"
                 />
               )}

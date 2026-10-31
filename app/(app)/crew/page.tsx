@@ -702,22 +702,22 @@ export default function CrewPage() {
             debouncedSearchQuery.trim() ? (
               <EmptyState
                 icon={User}
-                title="No crew match"
+                title="No Crew Match"
                 description={`Nobody called “${debouncedSearchQuery.trim()}”. Add them as a new crew member?`}
                 action={
                   <Button onClick={handleAddCrew} variant="outline" size="sm">
-                    <Plus className="mr-1 h-4 w-4" /> Add crew member
+                    <Plus className="mr-1 h-4 w-4" /> Add Crew Member
                   </Button>
                 }
               />
             ) : (
               <EmptyState
                 icon={User}
-                title="No crew yet"
-                description="Crew are added as you log flights and import reports, or add one by hand."
+                title="No Crew Yet"
+                description="Added as you log and import, or add one."
                 action={
                   <Button onClick={handleAddCrew} variant="outline" size="sm">
-                    <Plus className="mr-1 h-4 w-4" /> Add crew member
+                    <Plus className="mr-1 h-4 w-4" /> Add Crew Member
                   </Button>
                 }
               />

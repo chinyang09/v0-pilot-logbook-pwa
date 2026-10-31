@@ -80,7 +80,7 @@ export default function AccountPage() {
     // while its session stayed perfectly valid.
     if (typeof navigator !== "undefined" && !navigator.onLine) {
       await appAlert({
-        title: "You're offline",
+        title: "You're Offline",
         message: "Signing out of all devices needs a connection. Try again once you're back online.",
       })
       return
@@ -98,7 +98,7 @@ export default function AccountPage() {
       }).catch(() => null)
       if (!res?.ok) {
         await appAlert({
-          title: "Couldn't sign out your other devices",
+          title: "Couldn't Sign Out Your Other Devices",
           message: "Nothing was changed. Check your connection and try again.",
         })
         return
@@ -125,7 +125,7 @@ export default function AccountPage() {
     } catch (error) {
       console.error("[Account] sign out failed:", error)
       await appAlert({
-        title: "Couldn't sign out",
+        title: "Couldn't Sign Out",
         message: "Something went wrong. Check your connection and try again.",
       })
     } finally {
@@ -145,11 +145,11 @@ export default function AccountPage() {
           : `${passkeyCount} · ${deviceHasPasskey(profile?.passkeys, myDeviceId) ? "this device has one" : "none on this device"}`,
     },
     sessions: {
-      label: "Active sessions",
+      label: "Active Sessions",
       icon: MonitorSmartphone,
       summary: sessionsLoading && sessions.length === 0 ? "" : `${sessions.length} signed in`,
     },
-    install: { label: "Install app", icon: Download, summary: "Home screen, works offline" },
+    install: { label: "Install App", icon: Download, summary: "Home screen, works offline" },
   }
 
   return (
@@ -200,7 +200,7 @@ export default function AccountPage() {
               has to sign in again. */}
           {logoutArmed ? (
             <CountdownConfirmButton
-              label="Cancel sign out"
+              label="Cancel Sign Out"
               icon={<LogOut className="h-4 w-4" />}
               onConfirm={() => {
                 setLogoutArmed(false)

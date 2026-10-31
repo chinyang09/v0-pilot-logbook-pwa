@@ -1,16 +1,14 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-import { ScrollIndicator } from "@/components/ui/scroll-indicator"
-import { Button } from "@/components/ui/button"
+import { Star } from "lucide-react"
+import { DetailFormPanel } from "@/components/ui/detail-form-panel"
+import { FormSection } from "@/components/ui/form-section"
+import { ReadOnlyRow } from "@/components/ui/settings-row"
+import { ActionRow, ActionStack } from "@/components/ui/action-row"
+import { usePreferences } from "@/components/providers/preferences-provider"
+import { formatClockDisplay } from "@/lib/utils/time"
 import { getAirportByIcao, getAirportLocalTime, toggleAirportFavorite, type Airport } from "@/lib/db"
-import {
-  MapPin,
-  Globe,
-  Mountain,
-  Clock,
-  Star,
-} from "lucide-react"
 
 interface AirportDetailPanelProps {
   icao: string
@@ -41,11 +39,13 @@ export function AirportDetailPanel({ icao, onBack, onToggleFavorite }: AirportDe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [icao])
 
-  // Dynamic local time calculation
+  // The airport's clock now, punctuated as every clock in the app is
+  // (`clockSeparator`) — "14:05 (GMT+8)".
+  const separator = usePreferences().preferences.display.clockSeparator
   const timeInfo = useMemo(() => {
     if (!airport) return null
-    return getAirportLocalTime(airport.tz)
-  }, [airport])
+    return getAirportLocalTime(airport.tz).replace(/^(\d{2}:\d{2})/, (hhmm) => formatClockDisplay(hhmm, separator))
+  }, [airport, separator])
 
   const handleToggleFavorite = async () => {
     if (!airport) return
@@ -72,104 +72,38 @@ export function AirportDetailPanel({ icao, onBack, onToggleFavorite }: AirportDe
     )
   }
 
+  const location = [airport.city, airport.state].filter(Boolean).join(", ")
   return (
-    <div className="h-full relative flex flex-col">
-      {/* Scrollable Content */}
-      <div className="flex-1 overflow-auto overscroll-contain scrollbar-hide">
-        <ScrollIndicator />
-        <div className="h-chrome-top" />
-        <div className="px-panel pt-4">
-          {/* Airport header */}
-          <div className="bg-card border border-border rounded-lg p-4 shadow-sm">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <span className="text-3xl font-bold tracking-tighter text-foreground">
-                  {airport.icao}
-                </span>
-                {airport.iata && (
-                  <span className="text-xl font-medium text-muted-foreground">
-                    / {airport.iata}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <h2 className="text-xl font-semibold text-foreground mb-1 leading-tight">
-              {airport.name}
-            </h2>
-
-            <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-              <MapPin className="h-3.5 w-3.5" />
-              <span>
-                {airport.city}
-                {airport.state ? `, ${airport.state}` : ""} — {airport.country}
-              </span>
-            </div>
-          </div>
-
-          {/* Information Grid */}
-          <div className="grid grid-cols-1 gap-4 mt-4">
-            {/* Local Time Card */}
-            <div className="bg-card border border-border rounded-lg p-4 flex items-center gap-4">
-              <div className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center">
-                <Clock className="h-5 w-5 text-secondary-foreground" />
-              </div>
-              <div>
-                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Current Local Time
-                </div>
-                <div className="text-lg font-bold text-foreground">
-                  {timeInfo}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  Timezone: {airport.tz}
-                </div>
-              </div>
-            </div>
-
-            {/* Location details */}
-            <div className="bg-card border border-border rounded-lg p-4 space-y-4">
-              <h3 className="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-2">
-                Technical Data
-              </h3>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                    <Globe className="h-3 w-3" /> Coordinates
-                  </div>
-                  <div className="text-sm bg-muted/50 p-1.5 rounded text-center">
-                    {airport.latitude.toFixed(4)}, {airport.longitude.toFixed(4)}
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                    <Mountain className="h-3 w-3" /> Elevation
-                  </div>
-                  <div className="text-sm bg-muted/50 p-1.5 rounded text-center">
-                    {airport.elevation} FT
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Action Bar */}
-          <div className="pt-4 flex gap-2">
-            <Button
-              className="flex-1 gap-2"
-              variant={airport.isFavorite ? "default" : "outline"}
-              onClick={handleToggleFavorite}
-              aria-pressed={!!airport.isFavorite}
-            >
-              <Star className={`h-4 w-4 ${airport.isFavorite ? "fill-current" : ""}`} />
-              {airport.isFavorite ? "Favourited" : "Mark as Favourite"}
-            </Button>
-          </div>
-        </div>
-        <div className="h-chrome-bottom" />
-      </div>
-    </div>
+    <DetailFormPanel
+      title={airport.iata ? `${airport.icao} / ${airport.iata}` : airport.icao}
+      dirty={false}
+      canSave={false}
+      saving={false}
+      onSave={() => {}}
+      onCancel={() => {}}
+    >
+      <FormSection>
+        <ReadOnlyRow label="Name" value={airport.name} />
+        <ReadOnlyRow label="Location" value={[location, airport.country].filter(Boolean).join(" — ")} />
+      </FormSection>
+      <FormSection title="Time">
+        <ReadOnlyRow label="Local Time" value={timeInfo ?? ""} />
+        <ReadOnlyRow label="Timezone" value={airport.tz} />
+      </FormSection>
+      <FormSection title="Position">
+        <ReadOnlyRow
+          label="Coordinates"
+          value={`${airport.latitude.toFixed(4)}, ${airport.longitude.toFixed(4)}`}
+        />
+        <ReadOnlyRow label="Elevation" value={`${airport.elevation} ft`} />
+      </FormSection>
+      <ActionStack>
+        <ActionRow
+          label={airport.isFavorite ? "Remove from Favorites" : "Add to Favorites"}
+          icon={<Star className={airport.isFavorite ? "fill-current" : undefined} />}
+          onClick={handleToggleFavorite}
+        />
+      </ActionStack>
+    </DetailFormPanel>
   )
 }

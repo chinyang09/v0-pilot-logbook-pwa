@@ -23,8 +23,8 @@ import { DetailFormPanel } from "@/components/ui/detail-form-panel"
 const noop = () => {}
 
 const MODE_TABS: SegmentedTab<"add" | "swap">[] = [
-  { value: "add", label: "Add a duty" },
-  { value: "swap", label: "Swap / remove" },
+  { value: "add", label: "Add a Duty" },
+  { value: "swap", label: "Swap / Remove" },
 ]
 
 interface QuickCheckPanelProps {
@@ -33,9 +33,11 @@ interface QuickCheckPanelProps {
   onScenarioResult?: (result: ScenarioResult | null) => void
 }
 
+/** Tomorrow's UTC date — the Quick Check's fields are UTC. Stepping the LOCAL
+ *  date and then reading the UTC one gave today, east of UTC before 08:00. */
 function tomorrow(): string {
   const d = new Date()
-  d.setDate(d.getDate() + 1)
+  d.setUTCDate(d.getUTCDate() + 1)
   return d.toISOString().split("T")[0]
 }
 
@@ -225,7 +227,7 @@ export function QuickCheckPanel({
     // to draw its own title bar with a "View Chart" button, which on a phone
     // did what Back does and on a tablet pointed at the chart beside it.
     <DetailFormPanel
-      title="Legality check"
+      title="Legality Check"
       dirty={false}
       canSave={false}
       saving={false}
@@ -358,7 +360,7 @@ export function QuickCheckPanel({
         {/* Action buttons */}
         <div className="flex gap-1.5">
           <Button onClick={addChange} variant="outline" size="sm" className="flex-1 h-9 text-xs">
-            <Plus className="h-3 w-3 mr-1" /> Another duty
+            <Plus className="h-3 w-3 mr-1" /> Another Duty
           </Button>
           <Button onClick={handleCheck} size="sm" className="flex-1 h-9 text-xs">
             Check Legality

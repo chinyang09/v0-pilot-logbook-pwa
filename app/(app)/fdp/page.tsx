@@ -277,7 +277,7 @@ export default function FDPPage() {
                 </div>
                 <div className="border-l border-border pl-2.5 flex-1">
                   <span className="text-[9px] uppercase tracking-wider text-muted-foreground block leading-none">
-                    Rest since last duty
+                    Rest Since Last Duty
                   </span>
                   <span className="text-sm font-semibold tabular-nums text-foreground mt-0.5 block leading-none">
                     {formatMinutesHM(restHadMinutes)}
@@ -294,7 +294,7 @@ export default function FDPPage() {
           <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1">
             <div className="flex items-center gap-1">
               <AlertTriangle className="h-3 w-3 text-status-critical" />
-              <span className="text-[10px] text-status-critical">Breach forecast</span>
+              <span className="text-[10px] text-status-critical">Breach Forecast</span>
             </div>
           </div>
         )}
@@ -317,8 +317,8 @@ export default function FDPPage() {
         ) : !isLoading ? (
           <EmptyState
             icon={TrendingUp}
-            title="No duty periods yet"
-            description="Import schedule or log flights to see FDP compliance."
+            title="No Duty Periods Yet"
+            description="Log or import flights to see FDP."
           />
         ) : null}
       </div>

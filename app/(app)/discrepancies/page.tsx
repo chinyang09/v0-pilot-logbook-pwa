@@ -88,19 +88,19 @@ const NUMERIC_FIELDS = new Set([
 
 const EMPTY_STATES: Record<FilterType, { title: string; description: string }> = {
   comparisons: {
-    title: "Nothing to compare",
+    title: "Nothing to Compare",
     description:
-      "Your pilot-flying and day/night entries match every report imported so far.",
+      "Your entries match every imported report.",
   },
   accepted: {
-    title: "Nothing accepted",
+    title: "Nothing Accepted",
     description:
-      "When you take the company's figure over your own, it stays here for 90 days so you can put yours back.",
+      "Company figures you take stay here for 90 days.",
   },
   notes: {
-    title: "No notes",
+    title: "No Notes",
     description:
-      "Duplicates, skipped reports and missing sectors show up here after an import.",
+      "Import duplicates and gaps show up here.",
   },
 }
 

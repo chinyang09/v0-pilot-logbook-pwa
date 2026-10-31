@@ -102,4 +102,13 @@ describe("GET /api/lookup/[...path]", () => {
     const body = await (await call(["nope"], { "x-lookup-secret": "s3cret" }, "")).json()
     expect(body.routes).toEqual(expect.arrayContaining(["search", "aircraft/candidates", "airport/candidates"]))
   })
+
+  it("keeps an ordinary answer for a minute and a minute-by-minute one not at all", async () => {
+    const settled = await call(["aircraft"], { "x-lookup-secret": "s3cret" })
+    expect(settled.headers.get("cache-control")).toBe("private, max-age=60")
+    routes["https://gw.test/"] = () => json({ ok: true, source: "airport.json", data: { flights: [] } })
+    const board = await call(["airport", "schedule"], { "x-lookup-secret": "s3cret" }, "?code=SIN")
+    expect(board.status).toBe(200)
+    expect(board.headers.get("cache-control")).toBe("no-store")
+  })
 })

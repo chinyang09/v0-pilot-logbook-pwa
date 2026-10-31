@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest"
 import type { FlightSuggestion } from "@/lib/lookup/flight-suggest"
-import { lookupPatch, ownedAfter, seedFromNextFlight, seedFromSuggestion, withAirlinePrefix } from "../flight-seed"
+import { afterPrefill, lookupPatch, ownedAfter, seedFromNextFlight, seedFromSuggestion, withAirlinePrefix } from "../flight-seed"
 
 const TR288: FlightSuggestion = {
   flightNumber: "TR288",
@@ -117,8 +117,24 @@ describe("an explicit lookup over an earlier one", () => {
     const own = { date: "2026-10-30", departureIcao: "WSSS", arrivalIcao: "VTBS" }
     const looked = lookupPatch(own, TR288)
     expect(looked.patch).toEqual({})
-    expect(looked.conflicts).toEqual(expect.arrayContaining(["arrivalIcao", "arrivalIata", "scheduledOut"]))
+    // Only what the pilot actually wrote differs; a blank is not a difference.
+    expect(looked.conflicts).toEqual(["arrivalIcao"])
     expect(lookupPatch(own, TR288, {}, { overwrite: true }).patch).toMatchObject({ arrivalIcao: "RJBB" })
+  })
+
+  it("a blank that completes the pilot's own entry is filled, and spelling is not a difference", () => {
+    const own = { date: "2026-10-30", departureIcao: "wsss", arrivalIata: "KIX", aircraftReg: "9VTNF", scheduledOut: "02:25" }
+    const looked = lookupPatch(own, TR288)
+    expect(looked.conflicts).toEqual([])
+    expect(looked.patch).toMatchObject({ departureIata: "SIN", arrivalIcao: "RJBB", aircraftType: TR288.typecode })
+    expect(looked.patch).not.toHaveProperty("aircraftReg")
+    expect(looked.patch).not.toHaveProperty("departureIcao")
+  })
+
+  it("another aeroplane the pilot entered is a difference; its type is not filled from the other one", () => {
+    const looked = lookupPatch({ date: "2026-10-30", aircraftReg: "9V-OFH" }, TR288)
+    expect(looked.conflicts).toEqual(["aircraftReg"])
+    expect(looked.patch).not.toHaveProperty("aircraftType")
   })
 
   it("usual times fill the route and times, never the aeroplane; nothing onto a locked entry", () => {
@@ -173,5 +189,21 @@ describe("seeding a derived leg from what the aeroplane flies next", () => {
     expect(withAirlinePrefix("12a", "TR")).toBe("TR12A")
     expect(withAirlinePrefix("SQ288", "TR")).toBe("SQ288")
     expect(withAirlinePrefix("288", null)).toBe("288")
+  })
+})
+
+describe("the airline shown in an empty Flight #", () => {
+  it("is added to digits and replaced by a designator", () => {
+    expect(afterPrefill("TR", "TR2", "TR")).toBe("TR2")
+    // Typing the code out of habit, one key at a time, and pasting it whole.
+    expect(afterPrefill("TR", "TRT", "TR")).toBe("T")
+    expect(afterPrefill("TR", "TRTR288", "TR")).toBe("TR288")
+    expect(afterPrefill("TR", "TRSQ12", "TR")).toBe("SQ12")
+  })
+
+  it("leaves everything else as typed", () => {
+    expect(afterPrefill("TR2", "TR28", "TR")).toBe("TR28")
+    expect(afterPrefill("TR", "T", "TR")).toBe("T")
+    expect(afterPrefill("TR", "TRS", undefined)).toBe("TRS")
   })
 })

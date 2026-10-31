@@ -3,17 +3,14 @@
 import { AircraftTypeSuggestions } from "@/components/aircraft-type-suggestions"
 import { CODE_INPUT_PROPS } from "@/lib/utils/input-props"
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
-import { ScrollIndicator } from "@/components/ui/scroll-indicator"
 import { Input } from "@/components/ui/input"
-import { GlassTextButton } from "@/components/ui/glass-icon-button"
+import { DetailFormPanel } from "@/components/ui/detail-form-panel"
 import { SettingsRow } from "@/components/ui/settings-row"
 import { FormSection } from "@/components/ui/form-section"
-import { useRegisterDetailActions } from "@/hooks/use-page-actions"
 import {
   addCustomAircraftToDatabase,
   type NormalizedAircraft,
 } from "@/lib/db/stores/reference/aircraft.store"
-import { Loader2 } from "lucide-react"
 import { submitAircraftToServer } from "@/lib/submissions/submit"
 import { getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
 import type { AircraftType } from "@/types/entities/aircraft-type.types"
@@ -32,17 +29,30 @@ interface AircraftDetailPanelProps {
   onBack?: () => void
 }
 
-export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDetailPanelProps) {
+type AircraftFields = { registration: string; typecode: string; icao24: string; operator: string }
+
+const fieldsOf = (a: NormalizedAircraft): AircraftFields => ({
+  registration: a.registration,
+  typecode: a.typecode || "",
+  icao24: a.icao24 || "",
+  operator: a.operator || "",
+})
+
+const FIELD_KEYS = ["registration", "typecode", "icao24", "operator"] as const
+
+/**
+ * An aircraft in the detail panel — the same `DetailFormPanel` a crew card, a
+ * currency or a duty opens in: the registration as the title, every field
+ * editable in place, and Cancel / Save in the header only once something
+ * differs from the stored record. It was the last record behind a read-only
+ * view and an Edit button.
+ */
+export function AircraftDetailPanel({ aircraft, onUpdated }: AircraftDetailPanelProps) {
   const [typeInfo, setTypeInfo] = useState<AircraftType | null>(null)
-  const [isEditing, setIsEditing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
 
-  const [formData, setFormData] = useState({
-    registration: aircraft.registration,
-    typecode: aircraft.typecode || "",
-    icao24: aircraft.icao24 || "",
-    operator: aircraft.operator || "",
-  })
+  const stored = useMemo(() => fieldsOf(aircraft), [aircraft])
+  const [formData, setFormData] = useState<AircraftFields>(stored)
 
   const {
     typeSearchQuery, setTypeSearchQuery,
@@ -51,27 +61,27 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
     handleSelectType, resetTypeSearch,
   } = useAircraftTypeSearch()
 
-  // Reset all transient state when aircraft identity changes (hot-swap)
-  const prevRegRef = useRef(aircraft.registration);
+  // Follow the record underneath the form (a sync, an enrichment landing):
+  // every field the pilot has not touched takes the stored value, and an edit
+  // in progress is kept. Another aircraft (hot-swap) starts clean.
+  const baseRef = useRef(stored)
+  const prevRegRef = useRef(aircraft.registration)
   useEffect(() => {
-    if (aircraft.registration === prevRegRef.current) return;
-    prevRegRef.current = aircraft.registration;
-    setIsEditing(false);
-    setIsSaving(false);
-    resetTypeSearch();
-  }, [aircraft.registration, resetTypeSearch]);
-
-  // Update form data from props when not editing (reactive from SWR)
-  useEffect(() => {
-    if (!isEditing) {
-      setFormData({
-        registration: aircraft.registration,
-        typecode: aircraft.typecode || "",
-        icao24: aircraft.icao24 || "",
-        operator: aircraft.operator || "",
-      })
+    const base = baseRef.current
+    baseRef.current = stored
+    if (aircraft.registration !== prevRegRef.current) {
+      prevRegRef.current = aircraft.registration
+      setFormData(stored)
+      setIsSaving(false)
+      resetTypeSearch()
+      return
     }
-  }, [aircraft, isEditing])
+    setFormData((prev) => {
+      const next = { ...prev }
+      for (const k of FIELD_KEYS) if (prev[k] === base[k]) next[k] = stored[k]
+      return next
+    })
+  }, [stored, aircraft.registration, resetTypeSearch])
 
   // Look up ICAO type info from Dexie
   useEffect(() => {
@@ -83,18 +93,17 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
     }
   }, [aircraft.typecode])
 
-  const updateField = useCallback(
-    (field: string, value: string) => {
-      setFormData((prev) => ({ ...prev, [field]: value }))
-    },
-    []
-  )
+  const updateField = useCallback((field: keyof AircraftFields, value: string) => {
+    setFormData((prev) => ({ ...prev, [field]: value }))
+  }, [])
 
   // Wrap handleSelectType to also update formData
   const onSelectType = useCallback((type: AircraftType) => {
     handleSelectType(type)
     setFormData((prev) => ({ ...prev, typecode: type.designator }))
   }, [handleSelectType])
+
+  const isDirty = FIELD_KEYS.some((k) => formData[k].trim() !== stored[k].trim())
 
   const handleSave = async () => {
     if (!formData.registration.trim()) return
@@ -123,7 +132,7 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
       })
 
       setSelectedType(null)
-      setIsEditing(false)
+      setShowTypeSearch(false)
       onUpdated?.()
     } catch (error) {
       console.error("Failed to save aircraft:", error)
@@ -133,142 +142,99 @@ export function AircraftDetailPanel({ aircraft, onUpdated, onBack }: AircraftDet
   }
 
   const handleCancel = () => {
-    setFormData({
-      registration: aircraft.registration,
-      typecode: aircraft.typecode || "",
-      icao24: aircraft.icao24 || "",
-      operator: aircraft.operator || "",
-    })
+    setFormData(stored)
     setSelectedType(null)
-    setIsEditing(false)
+    setShowTypeSearch(false)
   }
 
   const displayType = selectedType || typeInfo
-
-  // Stable refs for handlers to avoid re-render loops
-  const saveRef = useRef(handleSave)
-  saveRef.current = handleSave
-  const cancelRef = useRef(handleCancel)
-  cancelRef.current = handleCancel
-
-  // Register detail panel actions for the floating glass bar
-  const detailActions = useMemo(() => {
-    return isEditing ? (
-      <>
-        <GlassTextButton onClick={() => cancelRef.current()}>
-          Cancel
-        </GlassTextButton>
-        <GlassTextButton
-          primary
-          disabled={!formData.registration.trim() || isSaving}
-          onClick={() => saveRef.current()}
-        >
-          {isSaving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Save"}
-        </GlassTextButton>
-      </>
-    ) : (
-      <GlassTextButton primary onClick={() => setIsEditing(true)}>
-        Edit
-      </GlassTextButton>
-    )
-  }, [isEditing, isSaving, formData.registration])
-
-  useRegisterDetailActions(detailActions, true)
+  const canSave = !!formData.registration.trim()
 
   return (
-    <div className="h-full relative flex flex-col">
-      <div className="flex-1 overflow-y-auto overscroll-contain scrollbar-hide">
-        <ScrollIndicator />
-        <div className="h-chrome-top" />
-        <div className="px-panel pt-4 space-y-4">
-          <FormSection title="Details">
-            <SettingsRow
-              label="Registration"
-              value={formData.registration}
-              onChange={(value) => updateField("registration", value)}
-              placeholder="e.g. 9V-TNK"
-              readOnly={!isEditing}
-              uppercase
+    <DetailFormPanel
+      title={aircraft.registration || "Aircraft"}
+      dirty={isDirty}
+      canSave={canSave}
+      saving={isSaving}
+      status={canSave ? null : "A registration is needed to save."}
+      onSave={() => void handleSave()}
+      onCancel={handleCancel}
+    >
+      <FormSection title="Details">
+        <SettingsRow
+          label="Registration"
+          value={formData.registration}
+          onChange={(value) => updateField("registration", value)}
+          placeholder="e.g. 9V-TNK"
+          uppercase
+        />
+
+        <div className="px-4 py-3.5 row-divider">
+          <div className="flex items-center justify-between">
+            <span className="text-foreground">Type Code</span>
+            <Input
+              value={formData.typecode}
+              {...CODE_INPUT_PROPS}
+              aria-label="Type code"
+              onChange={(e) => {
+                const val = e.target.value.toUpperCase()
+                updateField("typecode", val)
+                setTypeSearchQuery(val)
+                setShowTypeSearch(true)
+                if (!val) setSelectedType(null)
+              }}
+              onFocus={() => {
+                if (formData.typecode && !typeSearchQuery) setTypeSearchQuery(formData.typecode)
+              }}
+              placeholder="e.g. A359"
+              className="text-right border-0 bg-transparent dark:bg-transparent shadow-none rounded-none md:text-base h-auto p-0 w-auto max-w-[150px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0 uppercase"
             />
-
-            {isEditing ? (
-              <div className="px-4 py-3.5 row-divider">
-                <div className="flex items-center justify-between">
-                  <span className="text-foreground">Type Code</span>
-                  <Input
-                    value={formData.typecode}
-                    {...CODE_INPUT_PROPS}
-                    aria-label="Type code"
-                    onChange={(e) => {
-                      const val = e.target.value.toUpperCase()
-                      updateField("typecode", val)
-                      setTypeSearchQuery(val)
-                      setShowTypeSearch(true)
-                      if (!val) setSelectedType(null)
-                    }}
-                    onFocus={() => {
-                      if (formData.typecode) {
-                        setTypeSearchQuery(formData.typecode)
-                        setShowTypeSearch(true)
-                      }
-                    }}
-                    placeholder="e.g. A359"
-                    className="text-right border-0 bg-transparent dark:bg-transparent shadow-none rounded-none md:text-base h-auto p-0 w-auto max-w-[150px] text-muted-foreground placeholder:text-muted-foreground/50 focus-visible:ring-0 uppercase"
-                  />
-                </div>
-                {showTypeSearch && (
-                  <AircraftTypeSuggestions results={typeSearchResults} onSelect={onSelectType} />
-                )}
-              </div>
-            ) : (
-              <SettingsRow label="Type Code" value={formData.typecode} readOnly />
-            )}
-
-            <SettingsRow
-              label="ICAO24"
-              value={formData.icao24}
-              onChange={(value) => updateField("icao24", value)}
-              placeholder="Hex address"
-              readOnly={!isEditing}
-            />
-            <SettingsRow
-              label="Operator"
-              value={formData.operator}
-              onChange={(value) => updateField("operator", value)}
-              placeholder="Operator"
-              readOnly={!isEditing}
-            />
-          </FormSection>
-
-          {/* Where it is now — checked on a tap, never stored. */}
-          {aircraft.registration && <AircraftNowSection registration={aircraft.registration} />}
-
-          {displayType ? (
-            <FormSection title="Type Information">
-              <SettingsRow label="Description" value={displayType.description} readOnly />
-              <SettingsRow label="WTC" value={displayType.wtc} readOnly />
-              <SettingsRow label="WTG" value={displayType.wtg} readOnly />
-              <SettingsRow label="Manufacturer" value={displayType.manufacturer} readOnly />
-              <SettingsRow
-                label="Category"
-                value={`${displayType.category} · ${displayType.engineCount} × ${displayType.engineType}`}
-                readOnly
-              />
-            </FormSection>
-          ) : (
-            (aircraft.shortDescription || aircraft.wtc || aircraft.wtg || aircraft.manufacturerCode) && (
-              <FormSection title="Type Information">
-                {aircraft.shortDescription && <SettingsRow label="Description" value={aircraft.shortDescription} readOnly />}
-                {aircraft.wtc && <SettingsRow label="WTC" value={aircraft.wtc} readOnly />}
-                {aircraft.wtg && <SettingsRow label="WTG" value={aircraft.wtg} readOnly />}
-                {aircraft.manufacturerCode && <SettingsRow label="Manufacturer" value={aircraft.manufacturerCode} readOnly />}
-              </FormSection>
-            )
+          </div>
+          {showTypeSearch && (
+            <AircraftTypeSuggestions results={typeSearchResults} onSelect={onSelectType} />
           )}
         </div>
-        <div className="h-chrome-bottom" />
-      </div>
-    </div>
+
+        <SettingsRow
+          label="ICAO24"
+          value={formData.icao24}
+          onChange={(value) => updateField("icao24", value)}
+          placeholder="Hex address"
+        />
+        <SettingsRow
+          label="Operator"
+          value={formData.operator}
+          onChange={(value) => updateField("operator", value)}
+          placeholder="Operator"
+        />
+      </FormSection>
+
+      {/* Where it is now — checked on a tap, never stored. */}
+      {aircraft.registration && <AircraftNowSection registration={aircraft.registration} />}
+
+      {displayType ? (
+        <FormSection title="Type Information">
+          <SettingsRow label="Description" value={displayType.description} readOnly />
+          <SettingsRow label="WTC" value={displayType.wtc} readOnly />
+          <SettingsRow label="WTG" value={displayType.wtg} readOnly />
+          <SettingsRow label="Manufacturer" value={displayType.manufacturer} readOnly />
+          <SettingsRow
+            label="Category"
+            value={`${displayType.category} · ${displayType.engineCount} × ${displayType.engineType}`}
+            readOnly
+          />
+        </FormSection>
+      ) : (
+        (aircraft.shortDescription || aircraft.wtc || aircraft.wtg || aircraft.manufacturerCode) && (
+          <FormSection title="Type Information">
+            {aircraft.shortDescription && <SettingsRow label="Description" value={aircraft.shortDescription} readOnly />}
+            {aircraft.wtc && <SettingsRow label="WTC" value={aircraft.wtc} readOnly />}
+            {aircraft.wtg && <SettingsRow label="WTG" value={aircraft.wtg} readOnly />}
+            {aircraft.manufacturerCode && <SettingsRow label="Manufacturer" value={aircraft.manufacturerCode} readOnly />}
+          </FormSection>
+        )
+      )}
+    </DetailFormPanel>
   )
 }
 
@@ -286,14 +252,14 @@ function AircraftNowSection({ registration }: { registration: string }) {
   return (
     <FormSection title="Now">
       <CheckRow
-        label="Last flight"
+        label="Last Flight"
         value={whereaboutsValue(state, separator)}
         loading={state?.status === "loading"}
         onCheck={() => void check()}
       />
       {next && (
         <SettingsRow
-          label="Next flight"
+          label="Next Flight"
           value={[
             next.flightNumber,
             next.destination && `to ${next.destination.iata || next.destination.icao}`,

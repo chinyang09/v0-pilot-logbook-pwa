@@ -219,7 +219,7 @@ async function loadBinned(): Promise<Binned[]> {
       id: c.id,
       kind: "crew",
       deletedAt: c.deletedAt ?? 0,
-      title: c.name || "Crew member",
+      title: c.name || "Crew Member",
       subtitle: [c.crewId, c.roles?.join(", ")].filter(Boolean).join(" · "),
       details: filled([
         ["Name", c.name],
@@ -367,13 +367,13 @@ export default function RecentlyDeletedPage() {
           <FormSection title="Deleted">
             <ReadOnlyRow label="On" value={STAMP.format(new Date(selected.deletedAt))} />
             <ReadOnlyRow
-              label="Kept for"
+              label="Kept For"
               value={retentionLabel(selected.deletedAt, Date.now(), DELETED_RETENTION_MS)}
             />
           </FormSection>
           <ActionStack>
             <ActionRow label="Restore" primary onClick={() => restoreSelected(selected)} />
-            <ActionRow label="Delete forever" destructive onClick={() => destroySelected(selected)} />
+            <ActionRow label="Delete Forever" destructive onClick={() => destroySelected(selected)} />
           </ActionStack>
         </DetailFormPanel>
       ) : null
@@ -506,8 +506,8 @@ export default function RecentlyDeletedPage() {
         {isEmpty && (
           <EmptyState
             icon={Trash2}
-            title="Nothing deleted"
-            description="Anything you delete is kept here for 30 days so you can put it back."
+            title="Nothing Deleted"
+            description="Deleted items stay here for 30 days."
           />
         )}
       </div>

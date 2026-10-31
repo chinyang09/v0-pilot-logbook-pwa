@@ -1,179 +1,23 @@
-"use client";
+"use client"
 
-import { useMemo, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { PageContainer } from "@/components/page-container";
-import { SyncStatus } from "@/components/sync-status";
-import { useAirportByIcao } from "@/hooks/data";
-// Added getAirportLocalTime from your new lib
-import { getAirportLocalTime } from "@/lib/db";
-import {
-  ArrowLeft,
-  MapPin,
-  Globe,
-  Mountain,
-  Clock,
-  Loader2,
-  Star, // Added for Favorites
-  History, // Added for Recents
-} from "lucide-react";
-import { useRouter, useParams } from "next/navigation";
-import { useIsDesktop } from "@/hooks/use-is-desktop";
+import { useEffect } from "react"
+import { useParams, useRouter } from "next/navigation"
+import { PageLoading } from "@/components/ui/page-loading"
 
-export default function AirportDetailPage() {
-  const params = useParams();
-  const icao = params.icao as string;
-  const router = useRouter();
-  const isDesktop = useIsDesktop();
-  // One airport by its key — not the whole ~29k-row table to find it.
-  const found = useAirportByIcao(icao);
-  const isLoading = found === undefined;
+/**
+ * An old deep link to one airport. Every airport opens in the airports page's
+ * DETAIL panel — beside the list on a tablet, the overlay on a phone — so this
+ * route only hands the code over as `?selected=`. It used to draw its own copy
+ * of the panel on a phone, with its own cards and a "Mark as Favourite" button.
+ */
+export default function AirportDetailRedirect() {
+  const params = useParams()
+  const router = useRouter()
+  const icao = ((params.icao as string) || "").toUpperCase()
 
-  // When switching to desktop view, redirect to airports page with selection
   useEffect(() => {
-    if (isDesktop && icao) {
-      router.replace(`/airports?selected=${encodeURIComponent(icao)}`);
-    }
-  }, [isDesktop, icao, router]);
+    router.replace(icao ? `/airports?selected=${encodeURIComponent(icao)}` : "/airports")
+  }, [icao, router])
 
-  const airport = found ?? null;
-
-  // Dynamic local time calculation
-  const timeInfo = useMemo(() => {
-    if (!airport) return null;
-    return getAirportLocalTime(airport.tz);
-  }, [airport]);
-
-  if (isLoading) {
-    return (
-      <div className="h-[100dvh] bg-background flex items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  return (
-    <PageContainer
-      header={
-        <header className="bg-background/30 backdrop-blur-xl border-b border-border/50 z-50">
-          <div className="container mx-auto px-3">
-            <div className="flex items-center justify-between h-12">
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => router.back()}
-                  aria-label="Back"
-                  className="h-9 w-9 p-0"
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                </Button>
-                <h1 className="text-lg font-semibold uppercase">
-                  {airport ? airport.icao : "Airport"}
-                </h1>
-              </div>
-              <div className="flex items-center gap-2">
-                <SyncStatus />
-              </div>
-            </div>
-          </div>
-        </header>
-      }
-    >
-      <div className="container mx-auto px-3 pt-3">
-        {!airport ? (
-          <p className="text-center text-muted-foreground py-12">
-            Airport {icao.toUpperCase()} not found
-          </p>
-        ) : (
-          <div className="space-y-4">
-            {/* Airport header */}
-            <div className="bg-card border border-border rounded-lg p-4 shadow-sm">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-3xl font-bold tracking-tighter text-foreground">
-                    {airport.icao}
-                  </span>
-                  {airport.iata && (
-                    <span className="text-xl font-medium text-muted-foreground">
-                      / {airport.iata}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <h2 className="text-xl font-semibold text-foreground mb-1 leading-tight">
-                {airport.name}
-              </h2>
-
-              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                <MapPin className="h-3.5 w-3.5" />
-                <span>
-                  {airport.city}
-                  {airport.state ? `, ${airport.state}` : ""} —{" "}
-                  {airport.country}
-                </span>
-              </div>
-            </div>
-
-            {/* Information Grid */}
-            <div className="grid grid-cols-1 gap-4">
-              {/* Local Time Card */}
-              <div className="bg-card border border-border rounded-lg p-4 flex items-center gap-4">
-                <div className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center">
-                  <Clock className="h-5 w-5 text-secondary-foreground" />
-                </div>
-                <div>
-                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Current Local Time
-                  </div>
-                  <div className="text-lg font-bold text-foreground">
-                    {timeInfo}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    Timezone: {airport.tz}
-                  </div>
-                </div>
-              </div>
-
-              {/* Location details */}
-              <div className="bg-card border border-border rounded-lg p-4 space-y-4">
-                <h3 className="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-2">
-                  Technical Data
-                </h3>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                      <Globe className="h-3 w-3" /> Coordinates
-                    </div>
-                    <div className="text-sm bg-muted/50 p-1.5 rounded text-center">
-                      {airport.latitude.toFixed(4)},{" "}
-                      {airport.longitude.toFixed(4)}
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                      <Mountain className="h-3 w-3" /> Elevation
-                    </div>
-                    <div className="text-sm bg-muted/50 p-1.5 rounded text-center">
-                      {airport.elevation} FT
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Action Bar (Optional) */}
-            <div className="pt-2 flex gap-2">
-              <Button className="flex-1 gap-2" variant="outline">
-                <Star className="h-4 w-4" /> Mark as Favourite
-              </Button>
-            </div>
-          </div>
-        )}
-      </div>
-    </PageContainer>
-  );
+  return <PageLoading />
 }

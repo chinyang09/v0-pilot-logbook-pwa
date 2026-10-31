@@ -27,8 +27,8 @@ const STATE_WORD: Record<RequirementState, string> = {
 
 /** Where a requirement's link goes, in words. */
 function destination(href: string): string {
-  if (href.startsWith("/currencies")) return "Open currencies"
-  if (href.startsWith("/logbook")) return "Open logbook"
+  if (href.startsWith("/currencies")) return "Open Currencies"
+  if (href.startsWith("/logbook")) return "Open Logbook"
   if (href.startsWith("/fdp")) return "Open FDP"
   return "Open"
 }
@@ -49,7 +49,7 @@ export function RequirementDetailPanel({ requirement }: { requirement: Requireme
       <FormSection>
         <ReadOnlyRow label="Status" value={STATE_WORD[state]} />
         <ReadOnlyRow label="Reads" value={value} />
-        {action && <ReadOnlyRow label="To do" value={action} />}
+        {action && <ReadOnlyRow label="To Do" value={action} />}
       </FormSection>
       {detail && detail.length > 0 && (
         <FormSection title="Detail">

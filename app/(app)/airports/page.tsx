@@ -19,6 +19,7 @@ import {
 import { syncService } from "@/lib/sync";
 import { submitAirportToServer } from "@/lib/submissions/submit";
 import { Star, Plus, MapPin, Loader2 } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -381,11 +382,10 @@ export default function AirportsPage() {
     }
 
     if (allSortedAirports.length === 0) {
-      setDetailContent(
-        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-          <p>No airports found</p>
-        </div>
-      );
+      // Blank, as on the aircraft and crew pages: the list itself says what is
+      // happening (the table is still being set up), and "No airports found"
+      // beside it contradicted that.
+      setDetailContent(<div className="h-full" />);
       return;
     }
 
@@ -752,7 +752,7 @@ export default function AirportsPage() {
                     </p>
                     <Button variant="outline" size="sm" onClick={handleAddClick}>
                       <Plus className="h-4 w-4 mr-1" />
-                      Add airport
+                      Add Airport
                     </Button>
                   </div>
                 )}
@@ -795,18 +795,16 @@ export default function AirportsPage() {
 
                 {/* Empty state — no local or online results */}
                 {filteredAirports.length === 0 && !isFr24Loading && !fr24Result && (
-                  <div className="flex flex-col items-center gap-3 py-8">
-                    <MapPin className="h-8 w-8 text-muted-foreground/50" />
-                    <p className="text-sm text-muted-foreground">No airports found</p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleAddClick}
-                    >
-                      <Plus className="h-4 w-4 mr-1" />
-                      Add airport
-                    </Button>
-                  </div>
+                  <EmptyState
+                    icon={MapPin}
+                    title="No Airport Match"
+                    description={`Nothing found for “${debouncedSearchQuery.trim()}”. Add it as a new airport?`}
+                    action={
+                      <Button variant="outline" size="sm" onClick={handleAddClick}>
+                        <Plus className="mr-1 h-4 w-4" /> Add Airport
+                      </Button>
+                    }
+                  />
                 )}
               </div>
             )}

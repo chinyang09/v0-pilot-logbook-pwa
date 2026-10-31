@@ -10,6 +10,7 @@
  * (`lib/lookup/handoff.ts`).
  */
 
+import { readEnvelope, setQuery } from "./envelope"
 import type { Fr24Result, Fr24Route, Fr24Routes } from "./types"
 
 const WORKER_TIMEOUT_MS = 12000
@@ -33,10 +34,7 @@ export async function fetchFr24Worker(
   const base = process.env.FR24_PROXY_URL
   if (!base) return { status: 0, body: null, error: "FR24_PROXY_URL is not set" }
 
-  const url = new URL(`${base.replace(/\/$/, "")}/${path}`)
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== "") url.searchParams.set(key, String(value))
-  }
+  const url = setQuery(new URL(`${base.replace(/\/$/, "")}/${path}`), params)
 
   const headers: Record<string, string> = { Accept: "application/json" }
   const secret = process.env.FR24_PROXY_SECRET
@@ -59,18 +57,14 @@ export async function fetchFr24Worker(
  *
  * A Worker deployment that predates the normalized routes answers them
  * `{ error: "Path not allowed" }` with a 400 — that comes back as
- * `status: 400`, and callers that have a legacy path fall back to it.
+ * `status: 400`. An answer that is not JSON at all is 502 (`readEnvelope`).
  */
 export async function callFr24Worker<R extends Fr24Route>(
   route: R,
   params: Record<string, string | number | undefined>,
   timeoutMs = WORKER_TIMEOUT_MS
 ): Promise<Fr24Result<Fr24Routes[R]>> {
-  const { status, body: raw, error } = await fetchFr24Worker(route, params, timeoutMs)
+  const { status, body, error } = await fetchFr24Worker(route, params, timeoutMs)
   if (error) return { ok: false, status, error }
-  const body = raw as { ok?: boolean; data?: unknown; source?: string; error?: string } | null
-  if (status >= 200 && status < 300 && body?.ok === true) {
-    return { ok: true, status, data: body.data as Fr24Routes[R], source: body.source ?? "" }
-  }
-  return { ok: false, status, error: body?.error || `HTTP ${status}` }
+  return readEnvelope<Fr24Routes[R]>(status, body)
 }

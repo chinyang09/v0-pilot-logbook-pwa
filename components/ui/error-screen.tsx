@@ -53,14 +53,14 @@ export function ErrorScreen({
                 onClick={onRetry}
                 className="control-surface h-9 rounded-full px-4 text-sm font-medium"
               >
-                Try again
+                Try Again
               </button>
             )}
             <button
               onClick={() => window.location.reload()}
               className="control-surface control-surface-primary h-9 rounded-full px-4 text-sm font-semibold"
             >
-              Reload app
+              Reload App
             </button>
           </div>
         </div>

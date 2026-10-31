@@ -37,19 +37,25 @@ export function AirlineFleetSection({ onAdded }: { onAdded?: (count: number) => 
   const code = typed ?? airline ?? ""
   const valid = (c: string) => (/^[A-Z0-9]{2,3}$/.test(c.trim().toUpperCase()) ? c.trim().toUpperCase() : null)
   // The code last asked for (Find or Enter) — until then, the airline the
-  // mode opened with: opening "By fleet" is the request for it.
-  const [asked, setAsked] = useState<string | null>(null)
-  const key = asked ?? (typed === null && airline ? valid(airline) : null)
+  // mode opened with: opening "By fleet" is the request for it. Each Find is
+  // its own request (`n`): keyed on the code alone, Find after a failure
+  // asked nothing, so a fleet that could not be loaded could not be retried.
+  const [asked, setAsked] = useState<{ code: string; n: number } | null>(null)
+  const askedCode = asked?.code ?? (typed === null && airline ? valid(airline) : null)
+  const key = askedCode ? `${askedCode}#${asked?.n ?? 0}` : null
   const [result, setResult] = useState<{ key: string; value: FleetState } | null>(null)
   const [adding, setAdding] = useState<string | null>(null)
 
-  const find = () => setAsked(valid(code))
+  const find = () => {
+    const c = valid(code)
+    if (c) setAsked((prev) => ({ code: c, n: (prev?.n ?? 0) + 1 }))
+  }
 
   useEffect(() => {
-    if (!key) return
+    if (!key || !askedCode) return
     let cancelled = false
     void (async () => {
-      const answer = await lookup.airlineFleet(key)
+      const answer = await lookup.airlineFleet(askedCode)
       if (cancelled) return
       if (!answer.ok) {
         setResult({ key, value: answer.status === 404 ? { status: "missing" } : { status: "failed" } })
@@ -64,7 +70,7 @@ export function AirlineFleetSection({ onAdded }: { onAdded?: (count: number) => 
     return () => {
       cancelled = true
     }
-  }, [key])
+  }, [key, askedCode])
 
   const state = key && result?.key === key ? result.value : null
   const loading = !!key && !state
@@ -146,14 +152,14 @@ export function AirlineFleetSection({ onAdded }: { onAdded?: (count: number) => 
       </div>
       {!key && !loading && (
         <p className="px-4 py-2.5 row-divider text-xs text-muted-foreground">
-          Enter an airline&apos;s code and Find to list its fleet by type.
+          Enter an airline code, then Find.
         </p>
       )}
       {state?.status === "missing" && (
-        <p className="px-4 py-2.5 row-divider text-xs text-muted-foreground">No fleet found for {key}.</p>
+        <p className="px-4 py-2.5 row-divider text-xs text-muted-foreground">No fleet found for {askedCode}.</p>
       )}
       {state?.status === "failed" && (
-        <p className="px-4 py-2.5 row-divider text-xs text-muted-foreground">The fleet could not be loaded. Try again later.</p>
+        <p className="px-4 py-2.5 row-divider text-xs text-muted-foreground">The fleet could not be loaded. Find to try again.</p>
       )}
       {state?.status === "done" &&
         state.fleet.types.map((type) => {

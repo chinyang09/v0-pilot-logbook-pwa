@@ -60,6 +60,7 @@ export function SettingsRow({
   required = false,
   uppercase = false,
   swipeToClear = true,
+  maxLength,
 }: {
   label: string
   /** Optional small muted line under the label. */
@@ -75,6 +76,9 @@ export function SettingsRow({
   required?: boolean
   uppercase?: boolean
   swipeToClear?: boolean
+  /** A short code ("TR"): the input is sized to it, so the label and its
+   *  description keep the row's width instead of a text field's ~200px. */
+  maxLength?: number
 }) {
   const editable = !readOnly && !!onChange
   const wrapped = editable && swipeToClear
@@ -103,6 +107,8 @@ export function SettingsRow({
           // (the Switch and Select rows below say the same thing).
           aria-label={label}
           aria-required={required || undefined}
+          maxLength={maxLength}
+          style={maxLength ? { width: `${maxLength + 2}ch` } : undefined}
           {...(uppercase ? CODE_INPUT_PROPS : null)}
           className={cn(
             // Blend the input into the row: no box/shadow/border, and keep the

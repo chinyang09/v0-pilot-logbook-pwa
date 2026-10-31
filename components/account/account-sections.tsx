@@ -241,7 +241,7 @@ function ProfileSection() {
               >
                 <div className="space-y-4 border-t border-border/60 pt-3">
                   <div className="space-y-1.5">
-                    <Label htmlFor="new-callsign" className="text-xs text-muted-foreground">New callsign</Label>
+                    <Label htmlFor="new-callsign" className="text-xs text-muted-foreground">New Callsign</Label>
                     <Input
                       id="new-callsign"
                       value={newCallsign}
@@ -296,7 +296,7 @@ function ProfileSection() {
                       disabled={!newCallsign.trim() || totpCode.length !== 6 || isChangingCallsign || isPasskeyVerifying}
                     >
                       {isChangingCallsign && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
-                      Save with code
+                      Save With Code
                     </Button>
                   </div>
 
@@ -328,7 +328,7 @@ function ProfileSection() {
           {/* Always render so the value loading in doesn't shove other rows
               down (no cascade). */}
           <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Member since</span>
+            <span className="text-sm text-muted-foreground">Member Since</span>
             {profile?.createdAt ? (
               <span className="text-sm">{formatDate(profile.createdAt)}</span>
             ) : (
@@ -606,7 +606,7 @@ function PasskeysSection() {
                 ) : (
                   <Plus className="h-4 w-4 mr-2" />
                 )}
-                Add passkey for this device
+                Add Passkey for This Device
               </Button>
             )}
           </div>
@@ -657,7 +657,7 @@ function SessionsSection() {
   }
 
   return (
-    <Pane title="Active sessions">
+    <Pane title="Active Sessions">
       <FormSection>
         <div className="py-1">
           {isLoading && sessions.length === 0 && (
@@ -735,14 +735,14 @@ function InstallSection() {
 
   if (platform === "installed") {
     return (
-      <Pane title="Install app">
+      <Pane title="Install App">
         <p className="px-1 text-sm text-muted-foreground">You are using the installed app.</p>
       </Pane>
     )
   }
 
   return (
-    <Pane title="Install app">
+    <Pane title="Install App">
       <p className="px-1 text-sm text-muted-foreground">
         Installed, the logbook opens from your home screen like any other app and works offline.
       </p>
@@ -750,7 +750,7 @@ function InstallSection() {
           install dialog. Everywhere else the page can only describe it. */}
       {platform === "prompt" && canPrompt ? (
         <Button className="w-full" onClick={install}>
-          Install app
+          Install App
         </Button>
       ) : platform === "ios" ? (
         <FormSection title="On iPhone or iPad">
@@ -765,7 +765,7 @@ function InstallSection() {
           </Step>
         </FormSection>
       ) : (
-        <FormSection title="From your browser">
+        <FormSection title="From Your Browser">
           <Step n={1}>
             Tap the <MoreVertical className="h-4 w-4 inline text-muted-foreground" /> menu in your browser
           </Step>
