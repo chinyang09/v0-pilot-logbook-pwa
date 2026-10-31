@@ -9,117 +9,93 @@ import { useCrewForm } from "@/hooks/use-crew-form";
 import { CrewFormBody } from "@/components/crew-form-body";
 import { ChevronLeft, Loader2 } from "lucide-react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
-import { useIsDesktop } from "@/hooks/use-is-desktop";
 import { assignCrewToFlight } from "@/lib/db";
 import { syncService } from "@/lib/sync";
 
+/**
+ * `/crew/<id>` is an old deep link: every crew card opens in the crew page's
+ * DETAIL panel — beside the list on a tablet, the overlay on a phone — so it
+ * only hands the id over as `?selected=` (and `/crew/new` as `?new=1`), as
+ * `/aircraft/<reg>` and `/airports/<icao>` do. On a phone it used to draw a
+ * second copy of the card with its own header buttons.
+ *
+ * The one flow that keeps a page is creating a crew member FROM A FLIGHT's
+ * crew picker (`?field=`): it returns to the flight with the new card seated.
+ */
 export default function CrewDetailPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const id = params.id as string;
-  const isNew = id === "new";
   const fieldType = searchParams.get("field");
+  const router = useRouter();
+  const pickerCreate = id === "new" && !!fieldType;
+
+  useEffect(() => {
+    if (pickerCreate || !id) return;
+    router.replace(id === "new" ? "/crew?new=1" : `/crew?selected=${encodeURIComponent(id)}`);
+  }, [pickerCreate, id, router]);
+
+  if (!pickerCreate) return <PageLoading />;
+  return <PickerCreateCrew fieldType={fieldType} />;
+}
+
+function PickerCreateCrew({ fieldType }: { fieldType: string }) {
+  const searchParams = useSearchParams();
   const returnUrl = searchParams.get("return") || "/logbook";
   const flightId = searchParams.get("flightId");
   const router = useRouter();
-  const isDesktop = useIsDesktop();
-
-  // When switching to desktop view, redirect to the crew page: an existing
-  // crew becomes a selection; a non-picker "new" becomes the detail-panel
-  // create flow (?new=1). Covers deep links and a window resized from mobile
-  // to desktop mid-create (which otherwise showed the form in both panels).
-  useEffect(() => {
-    if (!isDesktop || !id) return;
-    if (isNew) {
-      if (!fieldType) router.replace("/crew?new=1");
-    } else {
-      router.replace(`/crew?selected=${encodeURIComponent(id)}`);
-    }
-  }, [isDesktop, isNew, fieldType, id, router]);
 
   const form = useCrewForm({
-    id,
-    isNew,
+    id: "new",
+    isNew: true,
     onSaved: (saved) => {
-      if (fieldType && flightId && saved) {
-        // Created from a flight's crew picker: put them on the flight, then
-        // step back past the picker to the form (form → picker → new).
+      if (!saved) return;
+      if (flightId) {
+        // Put them on the flight, then step back past the picker to the form
+        // (form → picker → new).
         void assignCrewToFlight(flightId, fieldType, saved)
           .then(() => syncService.notifyDataChange())
           .catch((error) => console.error("Failed to update flight with crew:", error))
           .finally(() => window.history.go(-2));
-      } else if (fieldType && saved) {
-        const params = new URLSearchParams();
-        params.set("field", fieldType);
-        params.set("crewId", saved.id);
-        params.set("crewName", saved.isMe ? "Self" : saved.name);
-        router.push(`${returnUrl}?${params.toString()}`);
-      } else if (isNew) {
-        router.push("/crew");
+      } else {
+        const next = new URLSearchParams();
+        next.set("field", fieldType);
+        next.set("crewId", saved.id);
+        next.set("crewName", saved.isMe ? "Self" : saved.name);
+        router.push(`${returnUrl}?${next.toString()}`);
       }
     },
   });
-  const { crew, isLoading, isDirty, isSaving, formData } = form;
+  const { isLoading, isSaving, isDirty, formData } = form;
 
-  // Latest handlers/state behind a ref (synced in an effect, read only inside
-  // event handlers) so the memoised glass actions stay stable across keystrokes.
-  const latestRef = useRef({
-    save: form.handleSave,
-    reset: form.resetForm,
-    isNew,
-    isDirty,
-    hasCrew: !!crew,
-  });
+  // The latest save behind a ref, so the memoised glass actions stay stable
+  // across keystrokes.
+  const saveRef = useRef(form.handleSave);
   useEffect(() => {
-    latestRef.current = {
-      save: form.handleSave,
-      reset: form.resetForm,
-      isNew,
-      isDirty,
-      hasCrew: !!crew,
-    };
+    saveRef.current = form.handleSave;
   });
 
-  const handleCancel = useCallback(() => {
-    const l = latestRef.current;
-    if (l.isNew) {
-      router.back();
-    } else if (l.isDirty && l.hasCrew) {
-      l.reset();
-    } else {
-      router.back();
-    }
-  }, [router]);
+  const back = useCallback(() => router.back(), [router]);
+  const canSave = !!formData.name.trim();
 
-  // Floating glass header actions — same system as every other page (no
-  // embedded page header). Changed/new: Cancel + Save; otherwise just Back —
-  // the card is edited in place, like every other record.
-  const actions = useMemo(() => {
-    if (isDirty) {
-      return (
+  // Back while untouched; Cancel + Save once something is typed — the same
+  // header a detail form carries.
+  const actions = useMemo(
+    () =>
+      isDirty ? (
         <>
-          <GlassTextButton onClick={handleCancel}>
-            Cancel
-          </GlassTextButton>
-          <GlassTextButton
-            primary
-            disabled={!formData.name.trim() || isSaving}
-            onClick={() => latestRef.current.save()}
-          >
+          <GlassTextButton onClick={back}>Cancel</GlassTextButton>
+          <GlassTextButton primary disabled={!canSave || isSaving} onClick={() => saveRef.current()}>
             {isSaving ? <Loader2 className="h-5 w-5 animate-spin" /> : "Save"}
           </GlassTextButton>
         </>
-      );
-    }
-    return (
-      <>
-        <GlassIconButton ariaLabel="Back" onClick={handleCancel}>
+      ) : (
+        <GlassIconButton ariaLabel="Back" onClick={back}>
           <ChevronLeft className="h-5 w-5" />
         </GlassIconButton>
-      </>
-    );
-  }, [isDirty, isSaving, formData.name, handleCancel]);
-
+      ),
+    [isDirty, canSave, isSaving, back]
+  );
   useRegisterMainActions(actions, true);
 
   if (isLoading) {
@@ -131,21 +107,15 @@ export default function CrewDetailPage() {
   }
 
   return (
-    <PageContainer>
-      <div className="container mx-auto px-2 pt-4">
-        {!isNew && !crew ? (
-          <p className="text-center text-muted-foreground py-12">
-            Crew member not found
-          </p>
-        ) : (
-          <CrewFormBody
-            formData={formData}
-            existingSelfId={form.existingSelfId}
-            updateField={form.updateField}
-            handleIsMeChange={form.handleIsMeChange}
-            toggleRole={form.toggleRole}
-          />
-        )}
+    <PageContainer title="New Crew Member">
+      <div className="space-y-4 px-panel pt-4">
+        <CrewFormBody
+          formData={formData}
+          existingSelfId={form.existingSelfId}
+          updateField={form.updateField}
+          handleIsMeChange={form.handleIsMeChange}
+          toggleRole={form.toggleRole}
+        />
       </div>
     </PageContainer>
   );

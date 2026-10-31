@@ -2,7 +2,7 @@
 
 import { AircraftTypeSuggestions } from "@/components/aircraft-type-suggestions"
 import { AirlineFleetSection } from "@/components/airline-fleet-section"
-import { SegmentedTabs, type SegmentedTab } from "@/components/import/segmented-tabs"
+import { SegmentedTabs, type SegmentedTab } from "@/components/ui/segmented-tabs"
 import { SuggestionList } from "@/components/ui/suggestion-list"
 import { normalizeRegistration } from "@/lib/utils/string"
 import { lookup } from "@/lib/lookup/client"

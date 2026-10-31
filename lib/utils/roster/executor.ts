@@ -13,7 +13,7 @@
  *     honoring manualOverrides natively
  */
 
-import { nonPicPfRoleOf, seatOf } from "@/lib/utils/roster/pilot-role";
+import { importedSectorRole, nonPicPfRoleOf, seatOf } from "@/lib/utils/roster/pilot-role";
 import type {
   PlannedImport,
   AcceptableOperation,
@@ -181,23 +181,13 @@ async function hydrateFlightFromSector(
   // schedule-only imports default to true (no actuals to infer from).
   const pilotFlying = sector.isPilotFlying ?? true;
 
-  // Role assignment:
-  //   user is PIC                       → PIC
-  //   user not PIC, is PF               → PICUS or SIC (per preference)
-  //   user not PIC, is PM (not flying)  → SIC
-  //   user role unknown (no sector hint)→ user's primary role from profile
-  let pilotRole: FlightLog["pilotRole"];
-  if (isUserPic) {
-    pilotRole = "PIC";
-  } else if (sector.isUserPic === false || sector.isPilotFlying !== undefined) {
-    // Logbook-derived path: we know the user's flying status.
-    pilotRole = pilotFlying
-      ? nonPicPfRoleOf(currentUser, importDefaults.nonPicPfRole, sector.date)
-      : "SIC";
-  } else {
-    // No sector hint: the seat on the pilot's own crew card decides.
-    pilotRole = seatOf(currentUser) === "captain" ? "PIC" : "SIC";
-  }
+  const pilotRole: FlightLog["pilotRole"] = importedSectorRole({
+    reportSaysPic: isUserPic,
+    reportSaysNotPic: sector.isUserPic === false,
+    pilotFlying,
+    seat: seatOf(currentUser),
+    nonPicPfRole: nonPicPfRoleOf(currentUser, importDefaults.nonPicPfRole, sector.date),
+  });
 
   // Remarks belong to the user. We only carry through what the source report
   // actually said (the logbook's remarks column); we no longer synthesise

@@ -1,8 +1,9 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
+import { PanelMessage } from "@/components/ui/page-loading"
 import { Star } from "lucide-react"
-import { DetailFormPanel } from "@/components/ui/detail-form-panel"
+import { ReadingPanel } from "@/components/ui/detail-form-panel"
 import { FormSection } from "@/components/ui/form-section"
 import { ReadOnlyRow } from "@/components/ui/settings-row"
 import { ActionRow, ActionStack } from "@/components/ui/action-row"
@@ -66,22 +67,16 @@ export function AirportDetailPanel({ icao, onBack, onToggleFavorite }: AirportDe
 
   if (!airport) {
     return (
-      <div className="h-full flex items-center justify-center text-muted-foreground">
-        Airport {icao.toUpperCase()} not found
-      </div>
+      <PanelMessage
+        title={`${icao.toUpperCase()} Not Found`}
+        description="It is not in this device's airport list. Add it with the + button."
+      />
     )
   }
 
   const location = [airport.city, airport.state].filter(Boolean).join(", ")
   return (
-    <DetailFormPanel
-      title={airport.iata ? `${airport.icao} / ${airport.iata}` : airport.icao}
-      dirty={false}
-      canSave={false}
-      saving={false}
-      onSave={() => {}}
-      onCancel={() => {}}
-    >
+    <ReadingPanel title={airport.iata ? `${airport.icao} / ${airport.iata}` : airport.icao}>
       <FormSection>
         <ReadOnlyRow label="Name" value={airport.name} />
         <ReadOnlyRow label="Location" value={[location, airport.country].filter(Boolean).join(" — ")} />
@@ -104,6 +99,6 @@ export function AirportDetailPanel({ icao, onBack, onToggleFavorite }: AirportDe
           onClick={handleToggleFavorite}
         />
       </ActionStack>
-    </DetailFormPanel>
+    </ReadingPanel>
   )
 }

@@ -32,7 +32,7 @@ import {
   RadialBlurBackdrop,
 } from "@/components/ui/chrome-overlays";
 import { cn } from "@/lib/utils";
-import { SegmentedTabs } from "./segmented-tabs";
+import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 import type {
   LogtenImportPlan,
   LogtenTimeReference,

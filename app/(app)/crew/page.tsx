@@ -1,6 +1,7 @@
 "use client";
 
 import type React from "react";
+import { recentlyUsedKeys } from "@/lib/utils/recently-used";
 import { useState, useMemo, useRef, useEffect, useCallback, memo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCalibratedRowHeight, useRemeasureOnCalibration } from "@/hooks/use-calibrated-row";
@@ -211,18 +212,7 @@ export default function CrewPage() {
   // Derive recently used crew from flights (most recent first)
   const recentlyUsedCrew = useMemo(() => {
     if (flights.length === 0 || personnel.length === 0) return [];
-    const seen = new Set<string>();
-    const recentIds: string[] = [];
-    for (const flight of flights) {
-      for (const crewId of [flight.picId, flight.sicId]) {
-        if (crewId && !seen.has(crewId)) {
-          seen.add(crewId);
-          recentIds.push(crewId);
-          if (recentIds.length >= 10) break;
-        }
-      }
-      if (recentIds.length >= 10) break;
-    }
+    const recentIds = recentlyUsedKeys(flights, (f) => [f.picId, f.sicId]);
     const recent: (typeof personnel)[0][] = [];
     for (const id of recentIds) {
       const found = personnel.find((p) => p.id === id);
@@ -382,10 +372,15 @@ export default function CrewPage() {
       return;
     }
 
-    if (selectedCrew) {
+    // A selection with no card behind it (a link to a card deleted or not
+    // synced here) opens the panel too, which then SAYS so — as a missing
+    // flight does — rather than leaving an empty pane, or on a phone an
+    // overlay with nothing in it.
+    const openId = selectedCrew?.id ?? (selectedCrewId && selectedCrewId !== NEW_SENTINEL ? selectedCrewId : null);
+    if (openId) {
       setDetailContent(
         <CrewDetailPanel
-          crewId={selectedCrew.id}
+          crewId={openId}
           onUpdated={() => mutate(CACHE_KEYS.personnel)}
           onBack={() => setSelectedCrewId(null)}
         />
@@ -533,15 +528,19 @@ export default function CrewPage() {
     router.prefetch("/crew/new");
   }, [router]);
 
-  // ?new=1 — set when /crew/new detects a desktop viewport (deep link, or a
-  // window resized mid-create) and redirects here so the create form lives in
-  // the detail panel instead of the main panel.
+  // ?new=1 — `/crew/new` outside the crew picker hands over here, so the
+  // create form opens in the detail panel (the overlay on a phone) like any
+  // other crew card, rather than as a page of its own.
   const wantsNew = searchParams.get("new") === "1";
   useEffect(() => {
     if (!wantsNew) return;
-    router.replace("/crew", { scroll: false });
-    if (isDesktop) openCreatePanel();
-  }, [wantsNew, isDesktop, router, openCreatePanel]);
+    // Through history, not the router: the overlay's own `?selected=` write
+    // lands on top of this URL, and a router navigation still in flight would
+    // leave `?new=1` under it.
+    window.history.replaceState(window.history.state, "", "/crew");
+    openCreatePanel();
+    if (!isDesktop) setSelectedCrewId(NEW_SENTINEL);
+  }, [wantsNew, isDesktop, openCreatePanel, setSelectedCrewId]);
 
   const handleToggleFavorite = useCallback(async (crewId: string) => {
     const crew = personnel.find((p) => p.id === crewId);

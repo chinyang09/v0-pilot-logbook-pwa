@@ -942,7 +942,10 @@ table's PRIMARY KEYS (Dexie walks those off the index without deserialising a
 record), matched on `normalizeRegistration`. `matchRegistrationKeys` is the
 pure half, so the rule is tested without IndexedDB.
 
-**A soft-deleted reference aircraft must not answer a lookup.** Neither the
+**A soft-deleted reference aircraft must not answer a lookup — or a search.**
+`searchAircraftFromDB` walked every row and showed a binned aircraft in the
+aircraft page's search, where tapping it opened nothing (the list it is
+selected from leaves it out). Neither the
 single nor the batch lookup filtered `deletedAt`, so a deleted aircraft read as
 a live local hit: it stayed invisible in the list AND the enrichment chain
 never asked the network for it again, which made it impossible to re-import.
@@ -993,6 +996,12 @@ convention, never the default.
   SIC whatever the card says today. Every caller resolves the convention FOR
   THE FLIGHT'S DATE (`nonPicPfRoleOf(card, fallback, date)` / `pfRoleOn`) —
   new flights, the PF switch, both imports.
+- **A schedule report carries no PF/PM, and its sectors are created PF** —
+  so the role follows the convention for the leg's date
+  (`importedSectorRole`), never the seat alone. It took the seat alone, and
+  every rostered leg of a first officer who logs PICUS came in "PF, P2". A
+  re-import offers to put such a flight right, judging the role against the
+  PF the flight already holds (the report has none to offer).
 - **An import keeps PF and role a PAIR.** Audited against the owner's eCrew
   report, 13 flights carried a role that contradicted their own PF/PM: a PF/PM
   change turned down at one import was remembered and withheld at the next,
@@ -1273,6 +1282,17 @@ leg and a finished duty.
 
 A plan duty with NO logbook counterpart at all is also picked up, which is
 every duty's first hour — the pilot has reported and nothing has landed yet.
+
+**The duties AHEAD join the pipeline from the flight rows**
+(`upcomingPlannedDuties`): every planned duty none of whose sectors has flown
+and whose report is still to come, marked `isFuture`. Rostered flights are
+scheduled LOGBOOK rows (`scheduleEntries` holds non-flight duties only), and
+the pipeline builds duties from flown flights, so nothing past today reached
+it: the FDP page read "Next · None scheduled" over a week of rostered
+sectors, and the forecast, the chart's projection and para 4's look-ahead saw
+no duty ahead. Future duties never reach the cumulative limits (those read
+`!isFuture`). A part-flown duty is left to the dashboard's own plan; a date
+an older import put a schedule FLIGHT duty on keeps that one.
 
 #### The FDP ends at the last ON-BLOCKS, not at the debrief
 
@@ -2094,12 +2114,14 @@ or a dialog over the list.
   titled with the person's name / the registration, with `isDirty` derived
   from the form against the stored record (the aircraft form follows the
   stored record for every field not touched). The AIRPORT panel reads only,
-  and is the same pieces: `DetailFormPanel` (`dirty={false}`), `FormSection` +
+  and is the same pieces: `ReadingPanel`, `FormSection` +
   `ReadOnlyRow`, its favourite an `ActionRow` ("Add to Favorites"), not cards
-  of its own. `/aircraft/<reg>` and `/airports/<icao>` are REDIRECTS to the
+  of its own. `/aircraft/<reg>`, `/airports/<icao>` and `/crew/<id>` are REDIRECTS to the
   list with `?selected=` on every width, as `/flights/<id>` is on a tablet —
   on a phone they drew a second copy of each panel, which drifted (an Edit
-  button, "Mark as Favourite").
+  button, "Mark as Favourite"). `/crew/new` keeps a page only for the crew
+  PICKER (`?field=`), which returns to the flight with the card seated; any
+  other `/crew/new` opens the create form in the panel (`?new=1`).
 - **The title follows you up into the bar** (`useCollapsingTitle`,
   `lib/layout/header-title.ts`, `HeaderTitle`). Once the large title has
   scrolled under the header, a small copy (15px semibold) fades in IN the
@@ -2120,8 +2142,17 @@ or a dialog over the list.
   in Active sessions — and the all-devices one sat above the sections as the
   first thing on the page. The app says "sign out" everywhere, never "log
   out".
-- **A panel that only READS is still a `DetailFormPanel`** (`dirty={false}`):
-  one title, one scroller, the chrome spacers — and no header buttons.
+- **A panel that only READS is still a `DetailFormPanel`** — through
+  `ReadingPanel` (same file): one title, an optional one-line `description`,
+  one scroller, the chrome spacers — and no header buttons. Settings' sections
+  (which save each change as it is made) are ReadingPanels too; they had a
+  wrapper and a smaller heading of their own, and their title never followed
+  the reader up into the header.
+- **A record that is not there SAYS so** (`PanelMessage`,
+  `components/ui/page-loading.tsx`): a title, the reason, a way on if there
+  is one. A selection with nothing behind it (a link to a card deleted or not
+  synced here) still opens the panel — flight, crew, aircraft, airport alike
+  — rather than an empty pane, or on a phone an overlay with nothing in it.
 - **Actions inside a panel are `ActionRow`s** (`components/ui/action-row.tsx`):
   a row in a grouped section with the label in the accent or red, never a
   full-width filled button.
@@ -5160,7 +5191,7 @@ When making changes, be aware of these high-impact files:
 - Do not ask an online lookup per keystroke or by itself on a form — a flight is looked up on the Lookup button (or Enter), a fleet on opening By fleet or on Find. And do not put Gates or Inbound back in the flight form: the form is for logging; they live on the dashboard's duty band and its panel (`useDutyLookups`, one cache). A lookup over an earlier one replaces what the EARLIER LOOKUP wrote (`lookupPatch`'s `previous`), never what the pilot entered — that is "Replace"
 - Do not take the first result of an aircraft or airport search as THE answer — a partial registration ("9VB") is a question. Only a candidate marked `exact` fills a form, an import or a submission by itself; anything else is listed for the pilot to choose, or is no match
 - Do not hand the year wheel a new options array per render — `yearOptions` keeps the SAME array while the range holds, and the range is anchored on TODAY (widened only when the viewed year falls outside). Anchored on the viewed year, every year spun rebuilt ~75 rows
-- Do not put a segmented choice back as a pair of filled rectangles — it is `SegmentedTabs` (glass, a sliding indicator, `h-9` segments), as in the import dialogs and the Quick Check. And measure its segments from ONE ResizeObserver: reading `offsetLeft` in a ref callback that is rebuilt on every selection forced a layout per tap and attached a new observer to every segment each time, never disconnecting the old ones
+- Do not put a segmented choice back as a pair of filled rectangles — it is `SegmentedTabs` (glass, a sliding indicator, `h-9` segments), as in the import dialogs, the Quick Check and the custom palette's vividness and depth (`components/ui/segmented-tabs.tsx`). And measure its segments from ONE ResizeObserver: reading `offsetLeft` in a ref callback that is rebuilt on every selection forced a layout per tap and attached a new observer to every segment each time, never disconnecting the old ones
 - Do not put an action back on the card surface (`bg-secondary`, `bg-card`, `bg-muted`) or give it a rectangle's corners — a thing you press is a CAPSULE or circle on `.control-surface`, a thing you read is a rounded rectangle. On the card surface the context preview's action row read as more card. And do not use the REAL glass (`GlassContainer`) for an action that sits over a scrim, a row or a panel: the painted surface is the same look with no `backdrop-filter`, and these pop in on exactly the frames a readback would cost most
 - Do not group header controls page by page — a header is VIEW (search, calendar, period) → TOOLS (import, Quick Check, alerts, read-from-photo) → CREATE (+, alone and last), one capsule per role, with a page switch first and detail commits (Cancel / Save / Edit, Back) one capsule each (`glass-icon-button.tsx`). And do not add a Refresh button: every list follows every write and every sync, so it re-reads the same rows, and it reads as "sync" — which is the cloud in the nav
 - Do not give the context preview's compact body `layout="position"` — it is the one block that exists in BOTH states, so it takes a FULL `layout`. Its height is unchanged either way, which makes its delta scaleX only: the row's content is condensed at the first frame and relaxes out as the card widens. `layout="position"` cancels the horizontal scale too, which lays it out at the RESTING width from frame one and lets the card clip it — on a tablet the arrival time and ICAO are missing until the card widens past them. The detail and the actions DO take `layout="position"`; they exist only while open. And keep the lift a static shadow on its own PROJECTED (`layout`) node faded by opacity, outside the clip: an interpolated `boxShadow` is rebuilt as a string every frame, and `overflow: hidden` on an ancestor eats a shadow entirely

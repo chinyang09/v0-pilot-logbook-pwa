@@ -1,6 +1,7 @@
 /**
- * Glass segmented tabs — the import dialogs' bucket switcher and the Quick
- * Check's mode switch.
+ * Glass segmented tabs — THE segmented choice: the import dialogs' bucket
+ * switcher, the Quick Check's mode, the discrepancy tabs, the add-aircraft
+ * mode, and the custom palette's vividness and depth.
  *
  * Built on `GlassContainer` so it reads as the same material as the nav pill
  * and the floating action buttons, rather than as loose chips. The active

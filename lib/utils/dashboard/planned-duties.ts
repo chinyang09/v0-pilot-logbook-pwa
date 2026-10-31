@@ -31,6 +31,7 @@ import {
   mergeAdjacentDutyPeriods,
 } from "@/lib/utils/roster/fdp-calculator"
 import { isLiveFlight } from "@/lib/db/stores/user/flights.store"
+import { isFlownFlight } from "@/lib/utils/flight-calculations"
 
 /**
  * Duty periods covering every sector of a day — flown and still-scheduled
@@ -64,4 +65,37 @@ export function buildPlannedDuties(flights: FlightLog[]): DutyPeriod[] {
     id: `planned-${dp.id}`,
     source: "schedule",
   }))
+}
+
+/**
+ * The duties still AHEAD, from the flight rows: every planned duty none of
+ * whose sectors has flown yet and whose report is after `nowMs`, marked
+ * `isFuture`.
+ *
+ * Rostered FLIGHTS live in the logbook as scheduled rows, not in
+ * `scheduleEntries` (which holds standby, ground, leave and off only), and the
+ * pipeline builds duty periods from FLOWN flights. So nothing ahead of today
+ * reached it: the FDP page's banner read "Next · None scheduled" over a week of
+ * rostered sectors, and the forecast and para 4's look-ahead never saw the
+ * duty they were meant to look at. These join the timeline as future duties —
+ * never the cumulative limits, which read only what has been flown.
+ *
+ * A part-flown duty is left out: it is the duty in progress, which the
+ * dashboard reads from its own plan (`deriveDutyStatus`).
+ */
+export function upcomingPlannedDuties(
+  flights: FlightLog[],
+  nowMs: number,
+  planned: DutyPeriod[] = buildPlannedDuties(flights)
+): DutyPeriod[] {
+  const flown = new Set<string>()
+  for (const f of flights) if (isFlownFlight(f)) flown.add(f.id)
+  const ahead: DutyPeriod[] = []
+  for (const dp of planned) {
+    if (dp.flightIds.some((id) => flown.has(id))) continue
+    const reportMs = Date.parse(`${dp.date}T${dp.reportTime}:00Z`)
+    if (!Number.isFinite(reportMs) || reportMs <= nowMs) continue
+    ahead.push({ ...dp, isFuture: true })
+  }
+  return ahead
 }

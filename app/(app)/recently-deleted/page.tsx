@@ -39,7 +39,7 @@ import { SwipeableCard } from "@/components/swipeable-card"
 import { FlightCardBody } from "@/components/flight-card-body"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { useDBReady } from "@/hooks/data"
-import { DetailFormPanel } from "@/components/ui/detail-form-panel"
+import { ReadingPanel } from "@/components/ui/detail-form-panel"
 import { FormSection } from "@/components/ui/form-section"
 import { ReadOnlyRow } from "@/components/ui/settings-row"
 import { ActionRow, ActionStack } from "@/components/ui/action-row"
@@ -339,15 +339,7 @@ export default function RecentlyDeletedPage() {
   useEffect(() => {
     setDetailContent(
       selected ? (
-        <DetailFormPanel
-          key={binKey(selected)}
-          title={selected.title || "Deleted item"}
-          dirty={false}
-          canSave={false}
-          saving={false}
-          onSave={() => {}}
-          onCancel={() => {}}
-        >
+        <ReadingPanel key={binKey(selected)} title={selected.title || "Deleted Item"}>
           {selected.flight && (
             <div className="rounded-xl border bg-card px-3 py-1 opacity-60">
               <FlightCardBody
@@ -375,7 +367,7 @@ export default function RecentlyDeletedPage() {
             <ActionRow label="Restore" primary onClick={() => restoreSelected(selected)} />
             <ActionRow label="Delete Forever" destructive onClick={() => destroySelected(selected)} />
           </ActionStack>
-        </DetailFormPanel>
+        </ReadingPanel>
       ) : null
     )
   }, [selected, preferences.display, restoreSelected, destroySelected, setDetailContent])

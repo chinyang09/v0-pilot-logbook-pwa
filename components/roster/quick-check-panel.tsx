@@ -17,10 +17,9 @@ import { simulateScenario } from "@/lib/utils/roster/fdp-calculator"
 import type { ScenarioChange, ScenarioResult } from "@/lib/utils/roster/fdp-calculator"
 import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
 import type { DutyPeriod, FTLLimits } from "@/types/entities/roster.types"
-import { SegmentedTabs, type SegmentedTab } from "@/components/import/segmented-tabs"
-import { DetailFormPanel } from "@/components/ui/detail-form-panel"
+import { SegmentedTabs, type SegmentedTab } from "@/components/ui/segmented-tabs"
+import { ReadingPanel } from "@/components/ui/detail-form-panel"
 
-const noop = () => {}
 
 const MODE_TABS: SegmentedTab<"add" | "swap">[] = [
   { value: "add", label: "Add a Duty" },
@@ -226,14 +225,7 @@ export function QuickCheckPanel({
     // header once scrolled away), one scroller, the chrome spacers. It used
     // to draw its own title bar with a "View Chart" button, which on a phone
     // did what Back does and on a tablet pointed at the chart beside it.
-    <DetailFormPanel
-      title="Legality Check"
-      dirty={false}
-      canSave={false}
-      saving={false}
-      onSave={noop}
-      onCancel={noop}
-    >
+    <ReadingPanel title="Legality Check">
       <div className="space-y-3">
         {/* Mode selector — the app's segmented control, not two filled
             rectangles. And named for what each mode DOES to the roster: it
@@ -414,6 +406,6 @@ export function QuickCheckPanel({
           </div>
         )}
       </div>
-    </DetailFormPanel>
+    </ReadingPanel>
   )
 }

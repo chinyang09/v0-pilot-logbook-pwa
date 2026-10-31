@@ -13,6 +13,8 @@
  */
 
 import { useMemo, useRef, useState, type ReactNode } from "react"
+import { ReadingPanel } from "@/components/ui/detail-form-panel"
+import { SegmentedTabs } from "@/components/ui/segmented-tabs"
 import { useTheme } from "next-themes"
 import { Check, Laptop, Moon, Sun, SlidersHorizontal } from "lucide-react"
 import { FormSection } from "@/components/ui/form-section"
@@ -43,6 +45,8 @@ const VIVIDNESS: Array<{ label: string; chroma: number }> = [
   { label: "Vivid", chroma: 0.18 },
 ]
 
+const VIVIDNESS_TABS = VIVIDNESS.map((v) => ({ value: v.label, label: v.label }))
+
 const DEPTHS: Array<{ value: DarkDepth; label: string }> = [
   { value: "dim", label: "Dim" },
   { value: "deep", label: "Deep" },
@@ -51,11 +55,6 @@ const DEPTHS: Array<{ value: DarkDepth; label: string }> = [
 
 /** How long a slider has to rest before the value is written to the preference. */
 const COMMIT_DELAY_MS = 400
-
-const SEGMENT =
-  "flex-1 h-9 rounded-lg text-sm font-medium transition-colors border border-transparent"
-const SEGMENT_ON = "bg-primary/15 text-primary border-primary/40"
-const SEGMENT_OFF = "text-muted-foreground hover:bg-secondary"
 
 export function AppearanceSettings() {
   const { preferences, updateDisplay } = usePreferences()
@@ -79,13 +78,7 @@ export function AppearanceSettings() {
   }
 
   return (
-    <div className="px-panel py-4 space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Appearance</h2>
-        <p className="text-sm text-muted-foreground">
-          Mode and colours, for this device.
-        </p>
-      </div>
+    <ReadingPanel title="Appearance" description="Mode and colours, for this device.">
 
       <FormSection title="Mode">
         <div className="grid grid-cols-3 gap-2 p-3">
@@ -146,7 +139,7 @@ export function AppearanceSettings() {
           onCommit={(seed) => updateDisplay({ palette: CUSTOM_PALETTE_ID, customPalette: seed })}
         />
       )}
-    </div>
+    </ReadingPanel>
   )
 }
 
@@ -262,18 +255,12 @@ function CustomPaletteEditor({ initial, onCommit }: { initial: PaletteSeed; onCo
             className="palette-range"
             style={{ backgroundImage: hueTrack(0.68, 0.14) }}
           />
-          <div className="mt-2 flex gap-1.5" role="group" aria-label="Accent vividness">
-            {VIVIDNESS.map((v) => (
-              <button
-                key={v.label}
-                type="button"
-                aria-pressed={vividness.label === v.label}
-                onClick={() => change({ accentChroma: v.chroma })}
-                className={cn(SEGMENT, vividness.label === v.label ? SEGMENT_ON : SEGMENT_OFF)}
-              >
-                {v.label}
-              </button>
-            ))}
+          <div className="mt-2">
+            <SegmentedTabs
+              tabs={VIVIDNESS_TABS}
+              value={vividness.label}
+              onChange={(label) => change({ accentChroma: VIVIDNESS.find((v) => v.label === label)!.chroma })}
+            />
           </div>
         </EditorRow>
 
@@ -310,19 +297,7 @@ function CustomPaletteEditor({ initial, onCommit }: { initial: PaletteSeed; onCo
         </EditorRow>
 
         <EditorRow label="Dark Ground">
-          <div className="flex gap-1.5" role="group" aria-label="Dark ground depth">
-            {DEPTHS.map((d) => (
-              <button
-                key={d.value}
-                type="button"
-                aria-pressed={draft.depth === d.value}
-                onClick={() => change({ depth: d.value })}
-                className={cn(SEGMENT, draft.depth === d.value ? SEGMENT_ON : SEGMENT_OFF)}
-              >
-                {d.label}
-              </button>
-            ))}
-          </div>
+          <SegmentedTabs tabs={DEPTHS} value={draft.depth} onChange={(depth) => change({ depth })} />
           <p className="mt-1.5 text-xs text-muted-foreground">
             Black is darkest — best at night.
           </p>

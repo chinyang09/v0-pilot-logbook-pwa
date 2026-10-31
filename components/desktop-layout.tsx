@@ -64,6 +64,8 @@ const DETAIL_PLACEHOLDER: Record<string, string> = {
   "/discrepancies": "Select a comparison or a note",
   "/fdp": "Open the Quick Check",
   "/recently-deleted": "Select a deleted item",
+  "/settings": "Select a section",
+  "/account": "Select a section",
 }
 function detailPlaceholder(pathname: string | null): string {
   return (pathname && DETAIL_PLACEHOLDER[pathname]) || "Select an item to view details"

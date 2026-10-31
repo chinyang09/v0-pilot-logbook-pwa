@@ -279,14 +279,12 @@ export {
   formatAircraft,
   // CRUD
   addAircraftToDatabase,
-  getAircraftFromDatabase,
   deleteAircraftFromDatabase,
   restoreAircraftInDatabase,
   permanentlyDeleteAircraftFromDatabase,
   purgeExpiredDeletedAircraftReferences,
   getDeletedAircraftReferences,
   getAllAircraftFromDatabase,
-  hasAircraftInDatabase,
   // Custom entries & sync
   addCustomAircraftToDatabase,
   bulkUpsertAircraftReferences,

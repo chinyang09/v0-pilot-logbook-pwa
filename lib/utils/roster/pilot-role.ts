@@ -188,6 +188,39 @@ export function settledRole({
   return currentRole;
 }
 
+/**
+ * The role an IMPORTED sector is created with.
+ *
+ * - The report names this pilot as commander, or the seat on the logging
+ *   profile is captain with nothing in the report saying otherwise: PIC.
+ * - Otherwise the role follows pilot-flying and the pilot's convention FOR THE
+ *   LEG'S DATE: flown → `nonPicPfRole` on that date, monitoring → SIC.
+ *
+ * A schedule report carries no PF/PM, so its sectors are created as PF; they
+ * used to take the role from the seat alone, which is SIC for a first officer
+ * — "PF, P2" on every leg, whatever Settings › Logging said.
+ */
+export function importedSectorRole({
+  reportSaysPic,
+  reportSaysNotPic,
+  pilotFlying,
+  seat,
+  nonPicPfRole,
+}: {
+  /** The report names this pilot as the commander. */
+  reportSaysPic: boolean;
+  /** The report says this pilot was NOT the commander. */
+  reportSaysNotPic: boolean;
+  pilotFlying: boolean;
+  seat: Seat | null;
+  /** The convention resolved for the leg's date (`nonPicPfRoleOf(…, date)`). */
+  nonPicPfRole: NonPicPfRole;
+}): PilotRole {
+  if (reportSaysPic) return "PIC";
+  if (!reportSaysNotPic && seat === "captain") return "PIC";
+  return pilotFlying ? nonPicPfRole : "SIC";
+}
+
 /** The role a flight takes from the pilot's seat and who had the controls. */
 export function roleForSeat(
   seat: Seat,

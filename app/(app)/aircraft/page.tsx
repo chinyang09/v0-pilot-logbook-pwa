@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, useCallback, useMemo, memo } from "react"
+import { recentlyUsedKeys } from "@/lib/utils/recently-used"
 import type React from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useVirtualizer } from "@tanstack/react-virtual"
@@ -40,7 +41,7 @@ import { usePageActive } from "@/hooks/use-page-active"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassSearchButton } from "@/components/ui/glass-search-button"
 import { GlassIconButton } from "@/components/ui/glass-icon-button"
-import { PanelLoading } from "@/components/ui/page-loading"
+import { PanelLoading, PanelMessage } from "@/components/ui/page-loading"
 
 // Memoized swipeable aircraft card (matches crew card pattern)
 interface AircraftCardProps {
@@ -213,15 +214,7 @@ export default function AircraftPage() {
   // Derive recently used from actual flights (most recent first) — stable, no jump on click
   const recentlyUsed = useMemo(() => {
     if (flights.length === 0 || allAircraft.length === 0) return []
-    const seen = new Set<string>()
-    const recentRegs: string[] = []
-    for (const flight of flights) {
-      if (flight.aircraftReg && !seen.has(flight.aircraftReg.toUpperCase())) {
-        seen.add(flight.aircraftReg.toUpperCase())
-        recentRegs.push(flight.aircraftReg.toUpperCase())
-        if (recentRegs.length >= 10) break
-      }
-    }
+    const recentRegs = recentlyUsedKeys(flights, (f) => [f.aircraftReg?.toUpperCase()])
     // ONE pass to index, then O(1) per lookup. This was a `find` per recent
     // registration — up to ten scans of the whole aircraft table, each
     // uppercasing every row, in a memo that re-runs whenever `flights` changes.
@@ -465,6 +458,15 @@ export default function AircraftPage() {
           aircraft={selectedAircraft}
           onUpdated={refreshAircraft}
           onBack={() => setSelectedAircraftReg(null)}
+        />
+      )
+    } else if (selectedAircraftReg && selectedAircraftReg !== NEW_SENTINEL) {
+      // A link to an aircraft not on this device says so, as a missing flight
+      // or crew card does, instead of an empty pane.
+      setDetailContent(
+        <PanelMessage
+          title={`${selectedAircraftReg.toUpperCase()} Not Found`}
+          description="It is not in this device's aircraft list. Add it with the + button."
         />
       )
     } else {

@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { ScrollIndicator } from "@/components/ui/scroll-indicator"
+import { ReadingPanel } from "@/components/ui/detail-form-panel"
 import { useCallback, useEffect, useState } from "react"
 import { usePersonnel } from "@/hooks/data/use-crew"
 import { pickSelfCard } from "@/lib/utils/self-card"
@@ -74,21 +74,6 @@ const SECTIONS: SectionDef[] = [
   { key: "duty", label: "Duty Time Defaults", icon: Plane, description: "Report and debrief times" },
 ]
 
-// ─── Detail panel wrapper with frosted header ───────────────
-
-function SettingsDetailPanel({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="h-full relative">
-      <div className="h-full overflow-auto overscroll-contain scrollbar-hide">
-        <ScrollIndicator />
-        <div className="h-chrome-top" />
-        {children}
-        <div className="h-chrome-bottom" />
-      </div>
-    </div>
-  )
-}
-
 // ─── Detail panel content for each section ──────────────────
 
 /**
@@ -111,13 +96,7 @@ function LoggingSection({ preferences, updateLogging }: {
   const authority = preferences.logging.authority
 
   return (
-    <div className="px-panel py-4 space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Logging</h2>
-        <p className="text-sm text-muted-foreground">
-          How new and imported flights are logged. Synced to every device.
-        </p>
-      </div>
+    <ReadingPanel title="Logging" description="How new and imported flights are logged. Synced to every device.">
       <FormSection>
         <SelectRow<LogbookAuthority>
           label="Logbook Rules"
@@ -179,7 +158,7 @@ function LoggingSection({ preferences, updateLogging }: {
           ]}
         />
       </FormSection>
-    </div>
+    </ReadingPanel>
   )
 }
 
@@ -223,11 +202,7 @@ function NavigationSection({ preferences, updateNavigation }: {
   updateNavigation: ReturnType<typeof usePreferences>["updateNavigation"]
 }) {
   return (
-    <div className="px-panel py-4 space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Navigation</h2>
-        <p className="text-sm text-muted-foreground">Up to 4 tabs in the tab bar.</p>
-      </div>
+    <ReadingPanel title="Navigation" description="Up to 4 tabs in the tab bar.">
       <FormSection>
         <div className="p-3">
           <SortableNavList
@@ -237,7 +212,7 @@ function NavigationSection({ preferences, updateNavigation }: {
           />
         </div>
       </FormSection>
-    </div>
+    </ReadingPanel>
   )
 }
 
@@ -246,11 +221,7 @@ function DisplaySection({ preferences, updateDisplay }: {
   updateDisplay: ReturnType<typeof usePreferences>["updateDisplay"]
 }) {
   return (
-    <div className="px-panel py-4 space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Display Options</h2>
-        <p className="text-sm text-muted-foreground">How times, airports and coordinates appear.</p>
-      </div>
+    <ReadingPanel title="Display Options" description="How times, airports and coordinates appear.">
 
       <FormSection>
         <SelectRow<DisplayPreferences["timeFormat"]>
@@ -302,7 +273,7 @@ function DisplaySection({ preferences, updateDisplay }: {
           ]}
         />
       </FormSection>
-    </div>
+    </ReadingPanel>
   )
 }
 
@@ -311,13 +282,7 @@ function AutoFillSection({ preferences, updateAutoFill }: {
   updateAutoFill: ReturnType<typeof usePreferences>["updateAutoFill"]
 }) {
   return (
-    <div className="px-panel py-4 space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Auto-Fill Time Fields</h2>
-        <p className="text-sm text-muted-foreground">
-          Times filled in for you. What you enter is never overwritten.
-        </p>
-      </div>
+    <ReadingPanel title="Auto-Fill Fields" description="Times filled in for you. What you enter is never overwritten.">
       <FormSection>
         {TIME_CATEGORIES.map((category) => (
           <ToggleRow
@@ -329,7 +294,7 @@ function AutoFillSection({ preferences, updateAutoFill }: {
           />
         ))}
       </FormSection>
-    </div>
+    </ReadingPanel>
   )
 }
 
@@ -339,11 +304,7 @@ function DutyTimeSection({ preferences, updateDutyTimeDefaults }: {
 }) {
   const regulation = preferences.dutyTimeDefaults.regulationType ?? "CAAS"
   return (
-    <div className="px-panel py-4 space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Duty Time Defaults</h2>
-        <p className="text-sm text-muted-foreground">Used to work out duty periods.</p>
-      </div>
+    <ReadingPanel title="Duty Time Defaults" description="Used to work out duty periods.">
 
       <FormSection>
         <SelectRow<"CAAS" | "FAA" | "EASA">
@@ -370,7 +331,7 @@ function DutyTimeSection({ preferences, updateDutyTimeDefaults }: {
           onCommit={(minutesAfterIn) => updateDutyTimeDefaults({ minutesAfterIn })}
         />
       </FormSection>
-    </div>
+    </ReadingPanel>
   )
 }
 
@@ -425,24 +386,19 @@ export default function SettingsPage() {
   const renderSection = useCallback((key: SectionKey) => {
     const section = SECTIONS.find((s) => s.key === key)
     if (!section) return null
-    const wrap = (content: React.ReactNode) => (
-      <SettingsDetailPanel>
-        {content}
-      </SettingsDetailPanel>
-    )
     switch (key) {
       case "appearance":
-        return wrap(<AppearanceSettings />)
+        return <AppearanceSettings />
       case "logging":
-        return wrap(<LoggingSection preferences={preferences} updateLogging={prefs.updateLogging} />)
+        return <LoggingSection preferences={preferences} updateLogging={prefs.updateLogging} />
       case "navigation":
-        return wrap(<NavigationSection preferences={preferences} updateNavigation={prefs.updateNavigation} />)
+        return <NavigationSection preferences={preferences} updateNavigation={prefs.updateNavigation} />
       case "display":
-        return wrap(<DisplaySection preferences={preferences} updateDisplay={prefs.updateDisplay} />)
+        return <DisplaySection preferences={preferences} updateDisplay={prefs.updateDisplay} />
       case "autofill":
-        return wrap(<AutoFillSection preferences={preferences} updateAutoFill={prefs.updateAutoFill} />)
+        return <AutoFillSection preferences={preferences} updateAutoFill={prefs.updateAutoFill} />
       case "duty":
-        return wrap(<DutyTimeSection preferences={preferences} updateDutyTimeDefaults={prefs.updateDutyTimeDefaults} />)
+        return <DutyTimeSection preferences={preferences} updateDutyTimeDefaults={prefs.updateDutyTimeDefaults} />
       default:
         return null
     }
@@ -461,11 +417,9 @@ export default function SettingsPage() {
       // breakpoint (iPad Split View / window resize).
       setSelectedId("appearance", { explicit: false })
     } else if (!sectionKey) {
-      setDetailContent(
-        <div className="flex items-center justify-center h-full text-muted-foreground">
-          <p>Select a setting to configure</p>
-        </div>
-      )
+      // Nothing chosen (a phone, where no panel shows beside the list): the
+      // shell's own placeholder answers.
+      setDetailContent(null)
     }
   }, [selectedId, isDesktop, renderSection, setDetailContent, setSelectedId])
 
