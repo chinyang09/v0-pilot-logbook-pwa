@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
+import { recentlyUsedKeys } from "@/lib/utils/recently-used";
 import type React from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCalibratedRowHeight, useRemeasureOnCalibration } from "@/hooks/use-calibrated-row";
@@ -230,18 +231,7 @@ export default function AirportsPage() {
   // Derive recently used airports from flights (most recent first)
   const recentAirports = useMemo(() => {
     if (flights.length === 0 || airports.length === 0) return [];
-    const seen = new Set<string>();
-    const recentIcaoList: string[] = [];
-    for (const flight of flights) {
-      for (const icao of [flight.departureIcao, flight.arrivalIcao]) {
-        if (icao && !seen.has(icao.toUpperCase())) {
-          seen.add(icao.toUpperCase());
-          recentIcaoList.push(icao.toUpperCase());
-          if (recentIcaoList.length >= 10) break;
-        }
-      }
-      if (recentIcaoList.length >= 10) break;
-    }
+    const recentIcaoList = recentlyUsedKeys(flights, (f) => [f.departureIcao?.toUpperCase(), f.arrivalIcao?.toUpperCase()]);
     // Indexed lookup, not a scan. This was `airports.find(…)` per recent code —
     // up to ten passes over the whole ~10k reference table, each uppercasing
     // every row, inside a memo that re-runs whenever `flights` changes (so:
@@ -389,10 +379,14 @@ export default function AirportsPage() {
       return;
     }
 
-    if (selectedAirport) {
+    // A link to an airport not in the list still opens the panel, which looks
+    // it up and SAYS it is not there — as a missing flight or crew card does.
+    const openIcao =
+      selectedAirport?.icao ?? (selectedAirportIcao && selectedAirportIcao !== NEW_SENTINEL ? selectedAirportIcao : null);
+    if (openIcao) {
       setDetailContent(
         <AirportDetailPanel
-          icao={selectedAirport.icao}
+          icao={openIcao}
           onBack={() => setSelectedAirportIcao(null)}
           onToggleFavorite={(ic) =>
             mutateAirports((prev) =>

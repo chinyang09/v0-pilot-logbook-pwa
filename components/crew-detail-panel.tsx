@@ -1,6 +1,7 @@
 "use client"
 
 import { DetailFormPanel } from "@/components/ui/detail-form-panel"
+import { PanelMessage } from "@/components/ui/page-loading"
 import { useCrewForm } from "@/hooks/use-crew-form"
 import { CrewFormBody } from "@/components/crew-form-body"
 import type { Personnel } from "@/types/entities/crew.types"
@@ -36,9 +37,10 @@ export function CrewDetailPanel({ crewId, isNew = false, onUpdated, onCancelNew 
 
   if (!crew && !isNew) {
     return (
-      <div className="h-full flex items-center justify-center text-muted-foreground">
-        Crew member not found
-      </div>
+      <PanelMessage
+        title="Crew Member Not Found"
+        description="It may have been deleted on another device, or not synced to this one yet."
+      />
     )
   }
 

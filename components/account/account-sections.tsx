@@ -35,7 +35,7 @@ import { useInstallOffer } from "@/components/pwa-install-prompt"
 import { SwipeableCard } from "@/components/swipeable-card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { DetailFormPanel } from "@/components/ui/detail-form-panel"
+import { ReadingPanel } from "@/components/ui/detail-form-panel"
 import { FormSection } from "@/components/ui/form-section"
 import { Input } from "@/components/ui/input"
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp"
@@ -63,22 +63,6 @@ const QRCodeSVG = dynamic(() => import("qrcode.react").then((m) => m.QRCodeSVG),
 })
 
 export type AccountSectionKey = "profile" | "passkeys" | "sessions" | "install"
-
-/** A section's pane: title, scroller, chrome spacers. Nothing to save. */
-function Pane({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <DetailFormPanel
-      title={title}
-      dirty={false}
-      canSave={false}
-      saving={false}
-      onSave={() => {}}
-      onCancel={() => {}}
-    >
-      {children}
-    </DetailFormPanel>
-  )
-}
 
 /** Copy-to-clipboard with a brief tick, keyed so each button flips on its own. */
 function useCopy() {
@@ -209,7 +193,7 @@ function ProfileSection() {
   }
 
   return (
-    <Pane title="Profile">
+    <ReadingPanel title="Profile">
       <FormSection>
         <div className="px-4 py-3 space-y-3">
           {/* Callsign row with inline edit */}
@@ -400,7 +384,7 @@ function ProfileSection() {
           </AnimatePresence>
         </div>
       </FormSection>
-    </Pane>
+    </ReadingPanel>
   )
 }
 
@@ -537,7 +521,7 @@ function PasskeysSection() {
   }
 
   return (
-    <Pane title="Passkeys">
+    <ReadingPanel title="Passkeys">
       <FormSection>
         <div className="py-1">
           {isLoading && !profile && (
@@ -613,7 +597,7 @@ function PasskeysSection() {
         </div>
       </FormSection>
       <p className="px-1 text-xs text-muted-foreground">Swipe a passkey to remove it. The last one cannot be removed.</p>
-    </Pane>
+    </ReadingPanel>
   )
 }
 
@@ -657,7 +641,7 @@ function SessionsSection() {
   }
 
   return (
-    <Pane title="Active Sessions">
+    <ReadingPanel title="Active Sessions">
       <FormSection>
         <div className="py-1">
           {isLoading && sessions.length === 0 && (
@@ -713,7 +697,7 @@ function SessionsSection() {
         </div>
       </FormSection>
       <p className="px-1 text-xs text-muted-foreground">Swipe a session to sign that device out.</p>
-    </Pane>
+    </ReadingPanel>
   )
 }
 
@@ -735,14 +719,14 @@ function InstallSection() {
 
   if (platform === "installed") {
     return (
-      <Pane title="Install App">
+      <ReadingPanel title="Install App">
         <p className="px-1 text-sm text-muted-foreground">You are using the installed app.</p>
-      </Pane>
+      </ReadingPanel>
     )
   }
 
   return (
-    <Pane title="Install App">
+    <ReadingPanel title="Install App">
       <p className="px-1 text-sm text-muted-foreground">
         Installed, the logbook opens from your home screen like any other app and works offline.
       </p>
@@ -774,7 +758,7 @@ function InstallSection() {
           </Step>
         </FormSection>
       )}
-    </Pane>
+    </ReadingPanel>
   )
 }
 

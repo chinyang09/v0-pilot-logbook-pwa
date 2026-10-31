@@ -1,6 +1,7 @@
 "use client";
 
 import { CODE_INPUT_PROPS } from "@/lib/utils/input-props";
+import { PanelMessage } from "@/components/ui/page-loading";
 import type React from "react";
 import { ScrollIndicator } from "@/components/ui/scroll-indicator";
 
@@ -2027,21 +2028,20 @@ function FlightFormImpl({
   const binned = !editingFlight && liveFlight != null && liveFlight.deletedAt != null;
   if (missing || binned) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 px-panel pt-chrome pb-chrome text-center">
-        <p className="text-base font-semibold">
-          {binned ? "This flight is in the Bin" : "Flight not found"}
-        </p>
-        <p className="max-w-xs text-sm text-muted-foreground">
-          {binned
+      <PanelMessage
+        title={binned ? "This flight is in the Bin" : "Flight not found"}
+        description={
+          binned
             ? "Restore it from the Bin to view or edit it again."
-            : "It may have been deleted on another device, or not synced to this one yet."}
-        </p>
+            : "It may have been deleted on another device, or not synced to this one yet."
+        }
+      >
         {binned && (
           <Button variant="secondary" className="h-10" onClick={() => router.push("/recently-deleted")}>
             Open Bin
           </Button>
         )}
-      </div>
+      </PanelMessage>
     );
   }
 

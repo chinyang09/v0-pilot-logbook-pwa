@@ -25,7 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { SegmentedTabs } from "./segmented-tabs";
+import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 import {
   MODAL_SCRIM,
   ChromeFade,

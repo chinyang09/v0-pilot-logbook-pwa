@@ -31,10 +31,13 @@ export function DetailFormPanel({
   onSave,
   onCancel,
   saveLabel = "Save",
+  description,
   children,
 }: {
   /** What the pane is — "New Currency", "Medical". */
   title: string
+  /** One line under the title saying what the pane is for. */
+  description?: string
   /** Something to save or throw away. A clean form shows no buttons at all. */
   dirty: boolean
   canSave: boolean
@@ -84,6 +87,7 @@ export function DetailFormPanel({
           <h2 ref={titleRef} className="px-1 text-xl font-semibold">
             {title}
           </h2>
+          {description && <p className="-mt-3 px-1 text-sm text-muted-foreground">{description}</p>}
           {error ? (
             <p className="px-1 text-sm text-destructive" role="alert">
               {error}
@@ -101,5 +105,36 @@ export function DetailFormPanel({
         <div className="h-chrome-bottom" />
       </div>
     </div>
+  )
+}
+
+const noop = () => {}
+
+/**
+ * A pane that only READS (or saves each change as it is made, as Settings
+ * does): the same title, scroller and chrome spacers as a form, and no header
+ * buttons. Six callers each passed `dirty={false}` and four no-op handlers.
+ */
+export function ReadingPanel({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description?: string
+  children: ReactNode
+}) {
+  return (
+    <DetailFormPanel
+      title={title}
+      description={description}
+      dirty={false}
+      canSave={false}
+      saving={false}
+      onSave={noop}
+      onCancel={noop}
+    >
+      {children}
+    </DetailFormPanel>
   )
 }

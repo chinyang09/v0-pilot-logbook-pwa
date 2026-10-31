@@ -9,7 +9,7 @@
  */
 
 import { DoorOpen, Plane } from "lucide-react"
-import { DetailFormPanel } from "@/components/ui/detail-form-panel"
+import { ReadingPanel } from "@/components/ui/detail-form-panel"
 import { FormSection } from "@/components/ui/form-section"
 import { ActionRow, ActionStack } from "@/components/ui/action-row"
 import { CheckRow } from "@/components/check-row"
@@ -37,7 +37,7 @@ export function DutyFlightsPanel({ atMs }: { atMs: number }) {
   const inboundFlight = inboundLeg(legs)
 
   return (
-    <DetailFormPanel title={`Duty · ${day}`} dirty={false} canSave={false} saving={false} onSave={() => {}} onCancel={() => {}}>
+    <ReadingPanel title={`Duty · ${day}`}>
       {legs.length === 0 ? (
         <FormSection>
           <p className="px-4 py-3.5 text-sm text-muted-foreground">
@@ -82,6 +82,6 @@ export function DutyFlightsPanel({ atMs }: { atMs: number }) {
           })}
         </>
       )}
-    </DetailFormPanel>
+    </ReadingPanel>
   )
 }

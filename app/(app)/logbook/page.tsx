@@ -257,23 +257,14 @@ export default function LogbookPage() {
         return
       }
 
-      const monthFlights = flights.filter((f) => {
-        const date = parseDateLocal(f.date)
-        return date.getFullYear() === year && date.getMonth() === month
-      })
-
-      if (monthFlights.length > 0) {
-        // Sort by date (newest first), then by time within the same date (latest first)
-        const sortedFlights = [...monthFlights].sort((a, b) => {
-          const dateComparison = parseDateLocal(b.date).getTime() - parseDateLocal(a.date).getTime()
-          if (dateComparison !== 0) return dateComparison
-          // Within same date, sort by outTime (latest first)
-          const timeA = a.outTime || "00:00"
-          const timeB = b.outTime || "00:00"
-          return timeB.localeCompare(timeA)
-        })
-        flightListRef.current?.scrollToFlight(sortedFlights[0].id)
-      }
+      // The list is already in its order, newest first (`getAllFlights`), so
+      // the month's newest flight is the first whose date carries the month.
+      // It used to filter every flight through a Date and re-sort them on each
+      // step of a swipe or a wheel spin — and by OUT alone, so it could pick a
+      // different leg from the one the list shows first.
+      const prefix = `${year}-${String(month + 1).padStart(2, "0")}-`
+      const newest = flights.find((f) => f.date.startsWith(prefix))
+      if (newest) flightListRef.current?.scrollToFlight(newest.id)
     },
     [flights],
   )

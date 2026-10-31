@@ -12,7 +12,7 @@
  */
 
 import { useRouter } from "next/navigation"
-import { DetailFormPanel } from "@/components/ui/detail-form-panel"
+import { ReadingPanel } from "@/components/ui/detail-form-panel"
 import { FormSection } from "@/components/ui/form-section"
 import { ReadOnlyRow } from "@/components/ui/settings-row"
 import { ActionRow, ActionStack } from "@/components/ui/action-row"
@@ -38,14 +38,7 @@ export function RequirementDetailPanel({ requirement }: { requirement: Requireme
   const { label, state, value, detail, action, href } = requirement
 
   return (
-    <DetailFormPanel
-      title={label}
-      dirty={false}
-      canSave={false}
-      saving={false}
-      onSave={() => {}}
-      onCancel={() => {}}
-    >
+    <ReadingPanel title={label}>
       <FormSection>
         <ReadOnlyRow label="Status" value={STATE_WORD[state]} />
         <ReadOnlyRow label="Reads" value={value} />
@@ -61,6 +54,6 @@ export function RequirementDetailPanel({ requirement }: { requirement: Requireme
       <ActionStack>
         <ActionRow label={destination(href)} onClick={() => router.push(href)} />
       </ActionStack>
-    </DetailFormPanel>
+    </ReadingPanel>
   )
 }
