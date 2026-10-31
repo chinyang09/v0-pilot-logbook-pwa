@@ -27,8 +27,8 @@ const STATE_WORD: Record<RequirementState, string> = {
 
 /** Where a requirement's link goes, in words. */
 function destination(href: string): string {
-  if (href.startsWith("/currencies")) return "Open currencies"
-  if (href.startsWith("/logbook")) return "Open logbook"
+  if (href.startsWith("/currencies")) return "Open Currencies"
+  if (href.startsWith("/logbook")) return "Open Logbook"
   if (href.startsWith("/fdp")) return "Open FDP"
   return "Open"
 }

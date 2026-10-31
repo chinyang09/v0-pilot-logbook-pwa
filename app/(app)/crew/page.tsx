@@ -706,7 +706,7 @@ export default function CrewPage() {
                 description={`Nobody called “${debouncedSearchQuery.trim()}”. Add them as a new crew member?`}
                 action={
                   <Button onClick={handleAddCrew} variant="outline" size="sm">
-                    <Plus className="mr-1 h-4 w-4" /> Add crew member
+                    <Plus className="mr-1 h-4 w-4" /> Add Crew Member
                   </Button>
                 }
               />
@@ -717,7 +717,7 @@ export default function CrewPage() {
                 description="Added as you log and import, or add one."
                 action={
                   <Button onClick={handleAddCrew} variant="outline" size="sm">
-                    <Plus className="mr-1 h-4 w-4" /> Add crew member
+                    <Plus className="mr-1 h-4 w-4" /> Add Crew Member
                   </Button>
                 }
               />

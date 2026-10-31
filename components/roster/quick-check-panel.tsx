@@ -360,7 +360,7 @@ export function QuickCheckPanel({
         {/* Action buttons */}
         <div className="flex gap-1.5">
           <Button onClick={addChange} variant="outline" size="sm" className="flex-1 h-9 text-xs">
-            <Plus className="h-3 w-3 mr-1" /> Another duty
+            <Plus className="h-3 w-3 mr-1" /> Another Duty
           </Button>
           <Button onClick={handleCheck} size="sm" className="flex-1 h-9 text-xs">
             Check Legality

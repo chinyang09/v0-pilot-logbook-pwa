@@ -148,7 +148,7 @@ export function CurrencyDetailPanel({
 
   return (
     <DetailFormPanel
-      title={isNew ? "New currency" : currency.description}
+      title={isNew ? "New Currency" : currency.description}
       dirty={isNew || dirty}
       canSave={!blockedReason}
       saving={saving}

@@ -45,7 +45,7 @@ export function CrewDetailPanel({ crewId, isNew = false, onUpdated, onCancelNew 
   const canSave = !!formData.name.trim()
   return (
     <DetailFormPanel
-      title={isNew ? "New crew member" : crew?.name || "Crew member"}
+      title={isNew ? "New Crew Member" : crew?.name || "Crew Member"}
       dirty={isDirty}
       canSave={canSave}
       saving={isSaving}

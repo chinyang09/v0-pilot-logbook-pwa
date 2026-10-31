@@ -533,7 +533,7 @@ export default function LogbookPage() {
           description="Add one, or import a report or LogTen export."
           action={
             <Button variant="outline" size="sm" onClick={handleAddFlight}>
-              <Plus className="mr-1 h-4 w-4" /> Add flight
+              <Plus className="mr-1 h-4 w-4" /> Add Flight
             </Button>
           }
         />

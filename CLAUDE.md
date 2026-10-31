@@ -2089,10 +2089,17 @@ or a dialog over the list.
   `desktop-layout.tsx`: "Select a crew member", "Select a deleted item"),
   not "Select an item".
 - **Every record is edited IN PLACE** — always editable, Cancel / Save in the
-  header only once something differs. Crew was the one record behind a
-  read-only view and an Edit button; it is a `DetailFormPanel` now, with the
-  person's name as its title, and `useCrewForm` derives `isDirty` from the
-  form against the stored card.
+  header only once something differs. Crew and aircraft were the records
+  behind a read-only view and an Edit button; both are `DetailFormPanel`s now,
+  titled with the person's name / the registration, with `isDirty` derived
+  from the form against the stored record (the aircraft form follows the
+  stored record for every field not touched). The AIRPORT panel reads only,
+  and is the same pieces: `DetailFormPanel` (`dirty={false}`), `FormSection` +
+  `ReadOnlyRow`, its favourite an `ActionRow` ("Add to Favorites"), not cards
+  of its own. `/aircraft/<reg>` and `/airports/<icao>` are REDIRECTS to the
+  list with `?selected=` on every width, as `/flights/<id>` is on a tablet —
+  on a phone they drew a second copy of each panel, which drifted (an Edit
+  button, "Mark as Favourite").
 - **The title follows you up into the bar** (`useCollapsingTitle`,
   `lib/layout/header-title.ts`, `HeaderTitle`). Once the large title has
   scrolled under the header, a small copy (15px semibold) fades in IN the

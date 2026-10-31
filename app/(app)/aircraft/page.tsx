@@ -743,9 +743,8 @@ export default function AircraftPage() {
       mainRef={scrollContainerCallbackRef}
     >
       {isLoading ? (
-        <div className="flex flex-col items-center justify-center py-24 gap-3 p-4">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="text-muted-foreground text-sm">Loading...</p>
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
       ) : (
         <div>
@@ -856,18 +855,16 @@ export default function AircraftPage() {
 
                   {/* Empty state — no local or online results */}
                   {filteredAircraft.length === 0 && !isFr24Loading && fr24Results.length === 0 && (
-                    <div className="flex flex-col items-center gap-3 py-8">
-                      <Plane className="h-8 w-8 text-muted-foreground/50" />
-                      <p className="text-sm text-muted-foreground">No aircraft found</p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleAddClick}
-                      >
-                        <Plus className="h-4 w-4 mr-1" />
-                        Add Aircraft
-                      </Button>
-                    </div>
+                    <EmptyState
+                      icon={Plane}
+                      title="No Aircraft Match"
+                      description={`Nothing registered as “${debouncedSearchQuery.trim()}”. Add it as a new aircraft?`}
+                      action={
+                        <Button variant="outline" size="sm" onClick={handleAddClick}>
+                          <Plus className="mr-1 h-4 w-4" /> Add Aircraft
+                        </Button>
+                      }
+                    />
                   )}
                 </div>
               )}

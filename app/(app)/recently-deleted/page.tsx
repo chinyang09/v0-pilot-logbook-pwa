@@ -219,7 +219,7 @@ async function loadBinned(): Promise<Binned[]> {
       id: c.id,
       kind: "crew",
       deletedAt: c.deletedAt ?? 0,
-      title: c.name || "Crew member",
+      title: c.name || "Crew Member",
       subtitle: [c.crewId, c.roles?.join(", ")].filter(Boolean).join(" · "),
       details: filled([
         ["Name", c.name],

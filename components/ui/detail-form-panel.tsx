@@ -33,7 +33,7 @@ export function DetailFormPanel({
   saveLabel = "Save",
   children,
 }: {
-  /** What the pane is — "New currency", "Medical". */
+  /** What the pane is — "New Currency", "Medical". */
   title: string
   /** Something to save or throw away. A clean form shows no buttons at all. */
   dirty: boolean

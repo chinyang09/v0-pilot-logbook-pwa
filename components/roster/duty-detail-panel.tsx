@@ -149,7 +149,7 @@ export function DutyDetailPanel({
 
   return (
     <DetailFormPanel
-      title={isNew ? "New duty" : entry.dutyCode || "Duty"}
+      title={isNew ? "New Duty" : entry.dutyCode || "Duty"}
       dirty={isNew || dirty}
       canSave={!blockedReason}
       saving={saving}

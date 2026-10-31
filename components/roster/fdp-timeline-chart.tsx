@@ -14,7 +14,7 @@ import {
   Area,
 } from "recharts"
 import { Card, CardContent } from "@/components/ui/card"
-import { ZoomIn, ZoomOut, RotateCcw, X } from "lucide-react"
+import { ZoomIn, ZoomOut, RotateCcw, X, Loader2 } from "lucide-react"
 
 // Custom inline icons for the multi/single toggle — tailored shapes that
 // visually communicate "stacked rolling areas" vs "single rolling area".
@@ -947,7 +947,7 @@ export function FDPTimelineChart({
           </div>
           {!mounted ? (
             <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">
-              <div className="h-5 w-5 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin" />
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : safeTimelineData.length === 0 ? (
             <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">

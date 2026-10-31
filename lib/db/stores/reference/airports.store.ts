@@ -401,8 +401,10 @@ export function getAirportLocalTime(tz: string): string {
     const offsetStr = tzOffsetName(tz, "shortOffset", now) || "UTC"
     const timeStr = tzFormatter(
       tz,
-      { hour: "2-digit", minute: "2-digit" },
-      "hhmm",
+      // 24-hour, like every other clock in the app: an en-US formatter's
+      // default cycle is 12-hour, so this read "05:36 PM".
+      { hour: "2-digit", minute: "2-digit", hourCycle: "h23" },
+      "hhmm23",
     ).format(now)
 
     return `${timeStr} (${offsetStr})`
