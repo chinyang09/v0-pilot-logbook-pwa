@@ -4052,7 +4052,7 @@ was the duty compared with a limit it is not measured against.
 | | Answers | Shape |
 |---|---|---|
 | the rolling chart (`fdp-timeline-chart.tsx`) | how close am I to a limit | a running total per day, against the limit lines |
-| the duty timeline (`duty-timeline.tsx`, `lib/utils/roster/duty-timeline.ts`) | how much have I flown, how much duty, how much rest between | every duty a BLOCK on one continuous time axis, its sectors inside it, the rest as the gaps |
+| the duty timeline (`duty-timeline.tsx`, `lib/utils/roster/duty-timeline.ts`) | how much have I flown, how much duty, how much rest between — and where it departed from the schedule | a GANTT chart on a time axis, three lanes: DUTY (sign-on → sign-off), FLIGHT (each sector's block, airborne inside it), REST (the gap between flight duties) |
 
 - **Flown and planned are two series, split AT TODAY.** Each rolling key is
   written twice (`<key>__flown` up to and including today, `<key>__planned`
@@ -4070,14 +4070,37 @@ was the duty compared with a limit it is not measured against.
 - **The timeline's blocks come from the same duty periods the limits were
   computed from** (`allDutyPeriods`, flown + `upcomingPlannedDuties`), and the
   rest is the pipeline's own `restBefore` where it has one, so the two can
-  never disagree. A sector is drawn on actual OUT/IN, else scheduled. Zoom is
-  3 days / week / 2 weeks; it scrolls sideways and renders only the days and
-  blocks within a view either side. The figures over it (`summarizeTimeline`)
-  count only the part of a duty inside the view, flight time pro-rated, so
-  two adjacent views never count one duty twice.
-- **A tapped block expands IN PLACE, under the strip** — an exception to
-  Main / Detail, because the FDP page gives the detail panel to the Quick
-  Check only and the owner asked for "expand".
+  never disagree. A rest bar runs from when the rest COMMENCED (an hour after
+  sign-off) to the next sign-on, with a tick where the required rest ends and
+  the shortfall hatched red past the sign-on. It runs through an un-called
+  standby and ignores a ground duty, as the pipeline's does. Training and
+  ground duties come from the roster (`scheduleEntries`, UTC only — a local
+  frame is left out rather than drawn a timezone wrong): the pipeline does not
+  count them, but they are duty and are drawn, hatched like a standby.
+- **Actual over scheduled.** Each lane draws what HAPPENED, with the
+  SCHEDULED span as a thin grey baseline under it — a sector's scheduled
+  OUT→IN, a duty's rostered window (an hour before the first scheduled OUT to
+  half an hour after the last scheduled IN) — so a delay is a visible offset
+  between two bars. Inside a duty the sectors are drawn, block lighter and
+  airborne (OFF→ON) solid, so the ground part of the duty is the fill between
+  them. Anything still to come is the dashed planned yellow, and carries no
+  baseline (it IS the schedule). A baseline under 8px is left out: at 28 days
+  it is a dot, not a span.
+- **Swipe to move, pinch to zoom.** 24 hours / 7 days / 28 days, from the tabs
+  or a pinch (two fingers on the chart; ctrl-wheel for a trackpad), holding
+  the time under the pinch still. The scroller is `touch-action: pan-x pan-y`
+  and the pinch listener is native and non-passive, or the browser zooms the
+  page instead. Only what is within a view either side is rendered. Every tap
+  target is at least 28px wide (`hit`), centred on a narrower bar, and the
+  whole lane tall. The figures over it (`summarizeTimeline`) count only the
+  part of a duty inside the view, flight time pro-rated, so two adjacent views
+  never count one duty twice.
+- **A tapped duty or sector opens its sign-on, sign-off (each with the
+  schedule where it differs) and sectors; a tapped rest opens its length,
+  requirement and the duties BEFORE and AFTER it**, each a row that selects
+  that duty and scrolls it into view. Both expand IN PLACE, under the chart —
+  an exception to Main / Detail, because the FDP page gives the detail panel
+  to the Quick Check only and the owner asked for "expand".
 
 ### OCR engine
 

@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest"
 import { buildDutyTimeline, summarizeTimeline } from "../duty-timeline"
-import type { DutyPeriod } from "@/types/entities/roster.types"
+import type { DutyPeriod, ScheduleEntry } from "@/types/entities/roster.types"
 import type { FlightLog } from "@/types/entities/flight.types"
 
 const H = 3_600_000
@@ -79,9 +79,22 @@ describe("buildDutyTimeline", () => {
     })
     const third = duty({ id: "d3", date: "2026-11-05", reportTime: "03:00" })
     const [, b2, b3] = buildDutyTimeline([third, first, second], new Map())
-    expect(b2.restBefore).toEqual({ minutes: 870, requiredMinutes: 720, compliant: true })
-    // 2026-11-04 09:30 → 2026-11-05 03:00: 17h30, no requirement known.
-    expect(b3.restBefore).toEqual({ minutes: 17.5 * 60, requiredMinutes: null, compliant: null })
+    expect(b2.restBefore).toEqual({
+      startMs: at("2026-11-04T01:00:00Z") - 870 * 60_000,
+      minutes: 870,
+      requiredMinutes: 720,
+      compliant: true,
+      previousId: "d1",
+    })
+    // 2026-11-04 09:30 → 2026-11-05 03:00 is 17h30; rest commences an hour
+    // after free of all duties, so 16h30, no requirement known.
+    expect(b3.restBefore).toEqual({
+      startMs: at("2026-11-04T10:30:00Z"),
+      minutes: 16.5 * 60,
+      requiredMinutes: null,
+      compliant: null,
+      previousId: "d2",
+    })
   })
 
   it("flies nothing on a standby and carries no type for a positioning sector", () => {
@@ -92,6 +105,65 @@ describe("buildDutyTimeline", () => {
     expect(sby.flightMinutes).toBe(0)
     expect(carried.sectors[0].positioning).toBe(true)
     expect(carried.types).toEqual([])
+  })
+})
+
+describe("planned against actual", () => {
+  it("draws the scheduled block beneath a late one, and the duty as rostered", () => {
+    const late = flight({ id: "l", outTime: "02:25", offTime: "02:40", onTime: "04:50", inTime: "05:00" })
+    const [b] = buildDutyTimeline([duty({ id: "d", flightIds: ["l"] })], new Map([["l", late]]))
+    const s = b.sectors[0]
+    expect(s.outMs).toBe(at("2026-11-03T02:25:00Z"))
+    expect(s.scheduled).toEqual({ startMs: at("2026-11-03T02:00:00Z"), endMs: at("2026-11-03T04:30:00Z") })
+    expect(s.airborne).toEqual({ startMs: at("2026-11-03T02:40:00Z"), endMs: at("2026-11-03T04:50:00Z") })
+    // An hour before the scheduled OUT to half an hour after the scheduled IN.
+    expect(b.planned).toEqual({ startMs: at("2026-11-03T01:00:00Z"), endMs: at("2026-11-03T05:00:00Z") })
+  })
+
+  it("keeps a scheduled OUT before midnight UTC on the day before an actual just after it", () => {
+    const f = flight({ id: "m", outTime: "00:10", inTime: "02:40", scheduledOut: "23:50", scheduledIn: "02:20" })
+    const [b] = buildDutyTimeline([duty({ id: "d", reportTime: "23:10", flightIds: ["m"] })], new Map([["m", f]]))
+    expect(b.sectors[0].scheduled).toEqual({ startMs: at("2026-11-02T23:50:00Z"), endMs: at("2026-11-03T02:20:00Z") })
+  })
+
+  it("has no plan for a sector without a schedule, and no airborne span without OFF/ON", () => {
+    const f = flight({ id: "h", scheduledOut: "", scheduledIn: "" })
+    const [b] = buildDutyTimeline([duty({ id: "d", flightIds: ["h"] })], new Map([["h", f]]))
+    expect(b.sectors[0].scheduled).toBeNull()
+    expect(b.sectors[0].airborne).toBeNull()
+    expect(b.planned).toBeNull()
+  })
+})
+
+describe("ground duties", () => {
+  const entry = (over: Partial<ScheduleEntry>): ScheduleEntry =>
+    ({
+      id: "g",
+      date: "2026-11-04",
+      timeReference: "UTC",
+      reportTime: "01:00",
+      debriefTime: "05:00",
+      dutyType: "training",
+      dutyCode: "EBT1",
+      sectors: [],
+      crew: [],
+      importedAt: 0,
+      ...over,
+    }) as ScheduleEntry
+
+  it("draws a UTC training or ground duty in the duty lane, and no rest is measured from it", () => {
+    const blocks = buildDutyTimeline(
+      [duty({ id: "d1" }), duty({ id: "d2", date: "2026-11-05" })],
+      new Map(),
+      [entry({}), entry({ id: "o", dutyType: "off" }), entry({ id: "lb", timeReference: "LOCAL_BASE" })],
+    )
+    expect(blocks.map((b) => b.id)).toEqual(["d1", "g", "d2"])
+    const g = blocks[1]
+    expect(g.kind).toBe("ground")
+    expect(g.code).toBe("EBT1")
+    expect(g.dutyMinutes).toBe(240)
+    expect(g.restBefore).toBeNull()
+    expect(blocks[2].restBefore?.previousId).toBe("d1")
   })
 })
 

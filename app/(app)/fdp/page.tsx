@@ -21,6 +21,7 @@ import { FDPTimelineChart } from "@/components/roster/fdp-timeline-chart"
 import { DutyTimeline } from "@/components/roster/duty-timeline"
 import { buildDutyTimeline } from "@/lib/utils/roster/duty-timeline"
 import { useFlights } from "@/hooks/data/use-flights"
+import { useScheduleEntries } from "@/hooks/data/use-schedule"
 import { QuickCheckPanel } from "@/components/roster/quick-check-panel"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useMainPanelFullWidth } from "@/lib/layout/panel-mode"
@@ -92,12 +93,14 @@ export default function FDPPage() {
     isLoading,
   } = useFDPData()
   const timelineData = useFDPTimeline(allDutyPeriods)
-  // The duty timeline draws each duty's sectors, so it needs the rows they name.
+  // The duty timeline draws each duty's sectors, so it needs the rows they
+  // name, and the roster for the ground duties the pipeline does not count.
   const { flights } = useFlights()
+  const { scheduleEntries } = useScheduleEntries()
   const dutyBlocks = useMemo(() => {
     const byId = new Map(flights.map((f) => [f.id, f]))
-    return buildDutyTimeline(allDutyPeriods, byId)
-  }, [allDutyPeriods, flights])
+    return buildDutyTimeline(allDutyPeriods, byId, scheduleEntries)
+  }, [allDutyPeriods, flights, scheduleEntries])
 
   const { preferences } = usePreferences()
   const activeRule: RegulationType = preferences.dutyTimeDefaults?.regulationType ?? "CAAS"
