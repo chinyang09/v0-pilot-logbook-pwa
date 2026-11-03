@@ -48,7 +48,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 
 | Area | What it pins down |
 |---|---|
-| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp, that the single-pass timeline sums and acclimatisation equal their per-item definitions, the rolling windows in six time zones, and the Quick Check's violations |
+| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp, that the single-pass timeline sums and acclimatisation equal their per-item definitions, the rolling windows in six time zones, the duty timeline's blocks and range totals, and the Quick Check's violations |
 | `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation, and a REAL schedule PDF (`fixtures/schedule-oct-2026-local-base.pdf`) run through the actual extractor |
 | `lib/utils/parsers/shared/__tests__/pooled-map.test.ts` | the bounded fan-out both enrichment chains end in |
 | `lib/lookup/__tests__/search-candidates.test.ts`, `lib/lookup/__tests__/composite.test.ts`, `app/api/lookup/__tests__/` | search candidates — airframe and live-flight hits, exact / begins / inside ranking, one row per tail, airport codes off the label; the composed `aircraft/candidates` asking the flight history only for a whole registration search missed, and `exact=1` answering 404 only when every source answered; the door's sign-in rule over both kinds of route; enrichment never taking a near miss |
@@ -2083,7 +2083,7 @@ or a dialog over the list.
 | roster, currencies | month + agenda / the list | the duty / currency form (`DetailFormPanel`); a roster FLIGHT (`FlightForm`) |
 | discrepancies | comparisons, notes | a comparison's FLIGHT (`FlightForm`); a note and its Resolve (`DiscrepancyDetailPanel`) |
 | recently deleted | the bin | what the item was, how long it is kept, Restore / Delete forever |
-| FDP | the timeline chart, at FULL width | the Quick Check, only while it is open |
+| FDP | the rolling chart and the duty timeline, at FULL width | the Quick Check, only while it is open (a duty block expands IN PLACE — see "The FDP page") |
 | account, settings | the sections | the section |
 | dashboard | legal / summary | a requirement cell (`RequirementDetailPanel`); a period flight (`FlightForm`) |
 
@@ -4046,6 +4046,84 @@ scenario's (`scenario.test.ts`). The FDP chart's tooltip reads the same rule
 (`TimelineDataPoint.fdpExceeded`) and prints the FDP against its maximum
 (`fdpHours`) on its own row — "Duty 12:40/12:15" in red, for an FDP of 12:10,
 was the duty compared with a limit it is not measured against.
+
+### The FDP page — two charts, two questions (Nov 2026)
+
+| | Answers | Shape |
+|---|---|---|
+| the rolling chart (`fdp-timeline-chart.tsx`) | how close am I to a limit | a running total per day, against the limit lines |
+| the duty timeline (`duty-timeline.tsx`, `lib/utils/roster/duty-timeline.ts`) | how long each duty, flight and rest was — and whether it BUST a limit or MET its minimum | a GANTT chart on a time axis, ONE DECK per duty: the duty bar (sign-on → sign-off) with each sector's block time drawn INSIDE it, and the rest before it decked directly underneath (no gap) — the minimum required, then the rest as provided to the sign-on; each labelled with its duration |
+
+- **Flown and planned are two series, split AT TODAY.** Each rolling key is
+  written twice (`<key>__flown` up to and including today, `<key>__planned`
+  from today on, so the two meet), the planned one dashed in
+  `FDP_COLORS.planned` — the yellow the Quick Check's scenario uses. The
+  colours live in `components/roster/fdp-colors.ts`, shared by both charts.
+  The daily bars are gone: they restated the running total's steps.
+- **The x-axis is `allowDuplicatedCategory={false}`.** Recharts' category axis
+  defaults to allowing duplicates, and then a `ReferenceLine x=` /
+  `ReferenceArea x1=` cannot find its category by value — the Today line and
+  the rest-violation columns silently drew nothing.
+- **The default window is anchored on TODAY** (two weeks ahead of it where the
+  data reaches), not on the last data point — with the roster ahead in the
+  pipeline the last point is weeks out and today fell off the left edge.
+- **The timeline's blocks come from the same duty periods the limits were
+  computed from** (`allDutyPeriods`, flown + `upcomingPlannedDuties`), and the
+  rest is the pipeline's own `restBefore` where it has one, so the two can
+  never disagree. A rest bar runs from when the rest COMMENCED (an hour after
+  sign-off) to the next sign-on, with a tick where the required rest ends and
+  the shortfall hatched red past the sign-on. It runs through an un-called
+  standby and ignores a ground duty, as the pipeline's does. Training and
+  ground duties come from the roster (`scheduleEntries`, UTC only — a local
+  frame is left out rather than drawn a timezone wrong): the pipeline does not
+  count them, but they are duty and are drawn, hatched like a standby.
+- **A limit is GEOMETRY, not a colour** (the owner's layout, Nov 2026). There
+  are no lane names on the left and no limit colours in the key — the room
+  goes to the timeline. A duty still to come (rostered, or a what-if) carries
+  its maximum as a DOTTED outline from sign-on to the latest sign-off it
+  allows (`latestSignOffMs` = sign-off + the FDP still in hand, so para 10(b)
+  and the post-flight half hour need no special case); a FLOWN duty draws no
+  maximum (`showMax`) — its record is the fact — and only the part past it,
+  if any, is struck red. The rest row shows the minimum (`minimumEndMs`)
+  solid, then the rest beyond it light; a minimum that runs past the next
+  sign-on is struck red there, directly under the duty that came too soon.
+  A line under the figures still says it in words ("1 duty over the FDP
+  limit · 2 rests short", or "Within limits · every rest met"), and a label's
+  figure goes red only for a real breach. Labels say the duty's duration
+  (with its flight time, and "max x" on a planned duty, where they fit), a
+  sector's block time inside it at 24 hours, and a rest's length ("· min"
+  or "· need" where it fits) — placed left to right and dropped when one
+  would overlap the last. Anything still to come is the dashed planned
+  yellow; every other day is banded so a day reads as a column.
+- **The axis is as good as endless, and Now brings it back.** It runs three
+  years either side of the logbook (and now), capped at `MAX_INNER_PX`
+  around now at the finest scale; only what is within a view either side is
+  drawn, so its length costs nothing. A jump of more than a few views is
+  instant, a short one smooth.
+- **The Quick Check draws on it.** `simulateScenario` returns the duties as
+  the what-if leaves them (`dutyPeriods`, rest recomputed) and the ids it
+  took out; the page builds blocks from them (`TimelineScenario`). An added
+  duty (`SCENARIO_DUTY_PREFIX`) is the what-if orange (`FDP_COLORS.scenario`,
+  shared with the rolling chart) with its flying drawn as one span from the
+  end of the pre-flight checks; a removed one is a dashed outline where it
+  was; a strip names the result with a Clear, and the view moves to the
+  first change. Closing the Quick Check KEEPS the what-if on both charts —
+  on a phone the check covers them, so going back is how it is read.
+- **Swipe to move, pinch to zoom.** 24 hours / 7 days / 28 days, from the tabs
+  or a pinch (two fingers on the chart; ctrl-wheel for a trackpad), holding
+  the time under the pinch still. The scroller is `touch-action: pan-x pan-y`
+  and the pinch listener is native and non-passive, or the browser zooms the
+  page instead. Every tap target is at least 28px wide (`hit`), centred on
+  a narrower bar: the duty's covers its label and bar, the rest's its bar
+  and label. The figures over it (`summarizeTimeline`) count only the
+  part of a duty inside the view, flight time pro-rated, so two adjacent views
+  never count one duty twice.
+- **A tapped duty or sector opens its sign-on, sign-off (each with the
+  schedule where it differs) and sectors; a tapped rest opens its length,
+  requirement and the duties BEFORE and AFTER it**, each a row that selects
+  that duty and scrolls it into view. Both expand IN PLACE, under the chart —
+  an exception to Main / Detail, because the FDP page gives the detail panel
+  to the Quick Check only and the owner asked for "expand".
 
 ### OCR engine
 

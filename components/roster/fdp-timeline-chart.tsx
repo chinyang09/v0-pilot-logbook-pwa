@@ -3,14 +3,12 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import {
   ComposedChart,
-  Bar,
   XAxis,
   YAxis,
   Tooltip,
   ReferenceLine,
   ReferenceArea,
   ResponsiveContainer,
-  Cell,
   Area,
 } from "recharts"
 import { Card, CardContent } from "@/components/ui/card"
@@ -31,6 +29,7 @@ const SingleSelectIcon = ({ className }: { className?: string }) => (
 import { useTheme } from "next-themes"
 import { cn } from "@/lib/utils"
 import type { TimelineDataPoint } from "@/lib/utils/roster/fdp-calculator"
+import { FDP_COLORS } from "@/components/roster/fdp-colors"
 import type { FTLLimits, CapacityRemaining, ForecastResult } from "@/types/entities/roster.types"
 
 type ChartView = "duty14" | "duty28" | "flight28" | "flight365"
@@ -40,8 +39,6 @@ interface ViewConfig {
   label: string
   rollingKey: keyof TimelineDataPoint
   limitValue: number
-  barKey: keyof TimelineDataPoint
-  barLabel: string
   rollingLabel: string
   unit: string
   color: string
@@ -51,24 +48,32 @@ interface ViewConfig {
 // Orange (#d68a3e) is reserved for scenario "what-if" change highlighting, so
 // flight365 uses a slate-cyan that does not conflict with orange.
 const VIEW_COLORS: Record<string, string> = {
-  duty14: "#6b8eae",   // muted steel blue
+  duty14: FDP_COLORS.duty,   // muted steel blue
   duty28: "#8a7aa5",   // muted purple
-  flight28: "#5a9478", // muted sage green
+  flight28: FDP_COLORS.flight, // muted sage green
   flight365: "#6fa3b0",// muted slate-cyan (distinct from orange)
 }
 
 /** The most points the overview strip draws — see `overviewData`. */
 const OVERVIEW_POINTS = 240
 
-// Semantic colors for data bars and compliance indicators (hex for SVG compatibility)
+// Semantic colors for compliance indicators (hex for SVG compatibility)
 const COLORS = {
-  dutyBar: "#6b8eae",     // muted blue for duty hours bars
-  flightBar: "#8a7e4a",   // muted warm khaki for flight hours bars
-  restBar: "#4a8870",     // muted green for rest hours bars
-  violation: "#b04e3a",   // muted red
+  violation: FDP_COLORS.violation,
   warning90: "#b08040",   // muted amber for 90% line
-  scenario: "#d68a3e",    // muted orange — scenario/what-if change highlight
+  scenario: FDP_COLORS.scenario, // muted orange — scenario/what-if change highlight
+  /**
+   * What is PLANNED — every day after today. The rolling line changes colour
+   * at today, the way the Quick Check's what-if paints over the flown line, so
+   * the flown total and the roster's projection of it read as two things. It
+   * used to be one line under a faint dimming, which disappeared on a phone.
+   */
+  planned: FDP_COLORS.planned,
 }
+
+/** The suffixes the sliced data carries a rolling value under, either side of today. */
+const FLOWN = "__flown"
+const PLANNED = "__planned"
 
 interface FDPTimelineChartProps {
   timelineData: TimelineDataPoint[]
@@ -247,8 +252,6 @@ export function FDPTimelineChart({
         label: "14D Duty",
         rollingKey: "rolling14DayDuty" as keyof TimelineDataPoint,
         limitValue: limits.maxDuty14Days,
-        barKey: "dutyHours" as keyof TimelineDataPoint,
-        barLabel: "Duty",
         rollingLabel: "14D",
         unit: "h",
         color: VIEW_COLORS.duty14,
@@ -258,8 +261,6 @@ export function FDPTimelineChart({
         label: "28D Duty",
         rollingKey: "rolling28DayDuty" as keyof TimelineDataPoint,
         limitValue: limits.maxDuty28Days,
-        barKey: "dutyHours" as keyof TimelineDataPoint,
-        barLabel: "Duty",
         rollingLabel: "28D",
         unit: "h",
         color: VIEW_COLORS.duty28,
@@ -269,8 +270,6 @@ export function FDPTimelineChart({
         label: "28D Flight",
         rollingKey: "rolling28DayFlight" as keyof TimelineDataPoint,
         limitValue: limits.maxFlight28Days,
-        barKey: "flightHours" as keyof TimelineDataPoint,
-        barLabel: "Flight",
         rollingLabel: "28D",
         unit: "h",
         color: VIEW_COLORS.flight28,
@@ -280,8 +279,6 @@ export function FDPTimelineChart({
         label: "12M Flight",
         rollingKey: "rolling365DayFlight" as keyof TimelineDataPoint,
         limitValue: limits.maxFlight365Days,
-        barKey: "flightHours" as keyof TimelineDataPoint,
-        barLabel: "Flight",
         rollingLabel: "12M",
         unit: "h",
         color: VIEW_COLORS.flight365,
@@ -510,12 +507,6 @@ export function FDPTimelineChart({
     }))
   }, [scenarioTimelineData])
 
-  // Unique bar keys across selected views
-  const uniqueBarKeys = useMemo(() => {
-    const keys = new Set(selectedNonRestViews.map((v) => v.barKey))
-    return Array.from(keys) as (keyof TimelineDataPoint)[]
-  }, [selectedNonRestViews])
-
   // Y-axis domain for multi-select — tight 5% headroom above the hard limit
   // (limits are the compliance ceiling; we don't need more than a sliver above).
   const yDomain = useMemo(() => {
@@ -539,21 +530,18 @@ export function FDPTimelineChart({
     prevDataLenRef.current = activeData.length
   }, [activeData.length, viewWindow])
 
-  // Smart default window: if the schedule extends into the future, show the
-  // last 28 days (working backward from latest). Otherwise (no schedule),
-  // anchor around today with 3 weeks historic + 1 week look-ahead.
+  // The default window keeps TODAY in view: four weeks with up to two of them
+  // ahead. It used to show the LAST 28 days of data whenever anything was
+  // rostered, so a roster reaching a month ahead opened on a window with no
+  // today in it — the "Today" line simply vanished.
   const defaultWindowRange = useMemo(() => {
     if (!activeData.length) return { start: 0, end: 0 }
     const lastIdx = activeData.length - 1
     const todayIdx = activeData.findIndex((d) => d.date === todayStr)
-    const hasFutureSchedule = todayIdx >= 0 && todayIdx < lastIdx
-    if (hasFutureSchedule) {
-      return { start: Math.max(0, lastIdx - (DEFAULT_WINDOW - 1)), end: lastIdx }
-    }
-    const anchor = todayIdx >= 0 ? todayIdx : lastIdx
-    const start = Math.max(0, anchor - 20) // 3 weeks back
-    const end = Math.min(lastIdx, anchor + 7) // 1 week ahead (clamped)
-    return { start, end }
+    const anchor = todayIdx >= 0 ? todayIdx : activeData[0].date > todayStr ? 0 : lastIdx
+    const end = Math.min(lastIdx, anchor + 13)
+    const start = Math.max(0, end - (DEFAULT_WINDOW - 1))
+    return { start, end: Math.min(lastIdx, start + DEFAULT_WINDOW - 1) }
   }, [activeData, todayStr])
 
   const slicedData = useMemo(() => {
@@ -574,26 +562,37 @@ export function FDPTimelineChart({
       hasScenario,
     })
 
+    // Each rolling value under two keys: up to today (flown) and from today
+    // (planned). Today carries both, so the two lines meet.
+    const split = base.map((d) => {
+      const out: Record<string, unknown> = { ...d }
+      for (const v of selectedNonRestViews) {
+        out[`${v.rollingKey}${FLOWN}`] = d.date <= todayStr ? d[v.rollingKey] : null
+        out[`${v.rollingKey}${PLANNED}`] = d.date >= todayStr ? d[v.rollingKey] : null
+      }
+      return out as typeof d
+    })
+
     // When a scenario is active, enrich each point with a per-view "scenario
     // change" field that carries the rolling value only for dates that are
     // modified/removed (plus one-day padding on each side so the overlaid area
     // has width and joins the base area smoothly at the boundaries).
-    if (!hasScenario) return base
+    if (!hasScenario) return split
     const changedDates = new Set<string>([
       ...(scenarioModifiedDates ?? []),
       ...(scenarioRemovedDates ?? []),
     ])
-    if (changedDates.size === 0) return base
+    if (changedDates.size === 0) return split
     // Expand: mark a point as "in-change-region" if the point itself OR either
     // neighbor is in changedDates. This guarantees the overlay segment spans
     // at least one full day of chart width and seams with the base area.
-    const inRegion = base.map((d, i) => {
+    const inRegion = split.map((d, i) => {
       if (changedDates.has(d.date)) return true
-      const prev = base[i - 1]
-      const next = base[i + 1]
+      const prev = split[i - 1]
+      const next = split[i + 1]
       return (prev && changedDates.has(prev.date)) || (next && changedDates.has(next.date))
     })
-    return base.map((d, i) => {
+    return split.map((d, i) => {
       const out: Record<string, unknown> = { ...d }
       if (inRegion[i]) {
         for (const v of selectedNonRestViews) {
@@ -606,7 +605,7 @@ export function FDPTimelineChart({
       }
       return out as typeof d
     })
-  }, [activeData, viewWindow, hasScenario, scenarioModifiedDates, scenarioRemovedDates, selectedNonRestViews, defaultWindowRange])
+  }, [activeData, viewWindow, hasScenario, scenarioModifiedDates, scenarioRemovedDates, selectedNonRestViews, defaultWindowRange, todayStr])
 
   // Effective window for gesture calculations — mirrors slicedData's default.
   const effectiveWindow = useMemo(() => {
@@ -995,6 +994,22 @@ export function FDPTimelineChart({
                   <RotateCcw className="h-3.5 w-3.5" />
                 </button>
               )}
+              {/* Which line is which, once the window reaches past today. */}
+              {slicedData.length > 0 && slicedData[slicedData.length - 1].date > todayStr && (
+                <div className="ml-auto flex items-center gap-2.5 pr-1 text-[10px] text-muted-foreground" aria-hidden>
+                  <span className="flex items-center gap-1">
+                    <span className="h-0.5 w-3 rounded-full" style={{ background: primaryView?.color ?? VIEW_COLORS.duty14 }} />
+                    Flown
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span
+                      className="h-0.5 w-3"
+                      style={{ backgroundImage: `linear-gradient(to right, ${COLORS.planned} 60%, transparent 60%)`, backgroundSize: "5px 2px" }}
+                    />
+                    Planned
+                  </span>
+                </div>
+              )}
               {hasScenario && onClearScenario && (
                 <button
                   onClick={onClearScenario}
@@ -1050,17 +1065,20 @@ export function FDPTimelineChart({
                       <stop offset="5%" stopColor={COLORS.scenario} stopOpacity={0.55} />
                       <stop offset="95%" stopColor={COLORS.scenario} stopOpacity={0.12} />
                     </linearGradient>
-                    {/* Future-region fade — left edge transitions from transparent
-                        to the dimmed overlay across the first 10% so the boundary
-                        with present-day data feels seamless instead of a hard step. */}
-                    <linearGradient id="future-fade" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0%" stopColor={isDark ? "#000" : "#fff"} stopOpacity={0} />
-                      <stop offset="10%" stopColor={isDark ? "#000" : "#fff"} stopOpacity={isDark ? 0.35 : 0.5} />
-                      <stop offset="100%" stopColor={isDark ? "#000" : "#fff"} stopOpacity={isDark ? 0.35 : 0.5} />
+                    {/* Planned — the rolling area past today, in the planned yellow. */}
+                    <linearGradient id="gradient-planned" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={COLORS.planned} stopOpacity={isSingleView ? 0.4 : 0.28} />
+                      <stop offset="95%" stopColor={COLORS.planned} stopOpacity={0.06} />
                     </linearGradient>
                   </defs>
                   <XAxis
                     dataKey="date"
+                    // Dates are unique, and saying so is what lets a reference
+                    // line or area find one: with duplicates allowed (the
+                    // default) the axis is positional and `x={todayStr}` matched
+                    // nothing — the Today line and the rest-violation columns
+                    // were never drawn.
+                    allowDuplicatedCategory={false}
                     tickFormatter={formatDateTick}
                     tick={axisTickStyle}
                     tickLine={false}
@@ -1127,22 +1145,6 @@ export function FDPTimelineChart({
                     />
                   )}
 
-                  {/* Future region overlay — progressive fade from today rightward. */}
-                  {(() => {
-                    const todayIdx = slicedData.findIndex((d) => d.date === todayStr)
-                    if (todayIdx >= 0 && todayIdx < slicedData.length - 1) {
-                      return (
-                        <ReferenceArea
-                          x1={slicedData[todayIdx].date}
-                          x2={slicedData[slicedData.length - 1].date}
-                          fill="url(#future-fade)"
-                          fillOpacity={1}
-                          strokeOpacity={0}
-                        />
-                      )
-                    }
-                    return null
-                  })()}
 
                   {/* Rest violation overlays — one red column per violation date.
                       Uses the same translucent-fill pattern as the future region
@@ -1170,13 +1172,30 @@ export function FDPTimelineChart({
                   {selectedNonRestViews.map((view) => (
                     <Area
                       key={`area-${view.key}`}
-                      dataKey={view.rollingKey}
+                      dataKey={`${view.rollingKey}${FLOWN}`}
                       fill={`url(#gradient-${view.key})`}
                       stroke={view.color}
                       strokeWidth={2}
                       dot={false}
                       activeDot={{ r: 4, fill: cc.card, stroke: view.color, strokeWidth: 2 }}
+                      connectNulls={false}
                       name={view.rollingLabel}
+                      isAnimationActive={false}
+                    />
+                  ))}
+                  {/* The same rolling value past today — planned, in yellow. */}
+                  {selectedNonRestViews.map((view) => (
+                    <Area
+                      key={`area-planned-${view.key}`}
+                      dataKey={`${view.rollingKey}${PLANNED}`}
+                      fill="url(#gradient-planned)"
+                      stroke={COLORS.planned}
+                      strokeWidth={2}
+                      strokeDasharray="5 3"
+                      dot={false}
+                      activeDot={{ r: 4, fill: cc.card, stroke: COLORS.planned, strokeWidth: 2 }}
+                      connectNulls={false}
+                      name={`${view.rollingLabel} planned`}
                       isAnimationActive={false}
                     />
                   ))}
@@ -1199,40 +1218,6 @@ export function FDPTimelineChart({
                       isAnimationActive={false}
                     />
                   ))}
-
-                  {/* Daily bars — duty: blue, flight: yellow, red when rolling exceeds limit */}
-                  {uniqueBarKeys.map((barKey) => {
-                    const barView = selectedNonRestViews.find((v) => v.barKey === barKey)!
-                    const barColor = barKey === "dutyHours" ? COLORS.dutyBar : COLORS.flightBar
-                    return (
-                      <Bar
-                        key={`bar-${barKey}`}
-                        dataKey={barKey}
-                        radius={[2, 2, 0, 0]}
-                        maxBarSize={uniqueBarKeys.length > 1 ? 12 : 16}
-                        name={barView.barLabel}
-                        isAnimationActive={false}
-                      >
-                        {slicedData.map((entry, index) => {
-                          const isModified = hasScenario && scenarioModifiedDates?.has(entry.date)
-                          const isRemoved = hasScenario && scenarioRemovedDates?.has(entry.date)
-                          // Red bar when rolling cumulative exceeds the limit for the active view
-                          const rollingValue = primaryView ? (entry[primaryView.rollingKey] as number) : 0
-                          const exceedsLimit = primaryView ? rollingValue > primaryView.limitValue : false
-                          const cellColor = isModified ? COLORS.scenario // orange for scenario additions/changes
-                            : isRemoved ? COLORS.violation // red for removed
-                              : exceedsLimit ? COLORS.violation // red for limit exceedance
-                                : barColor
-                          const cellOpacity = isRemoved ? 0.2
-                            : isModified ? 0.9
-                              : entry.isFuture ? 0.3 : 0.7
-                          return (
-                            <Cell key={index} fill={cellColor} opacity={cellOpacity} />
-                          )
-                        })}
-                      </Bar>
-                    )
-                  })}
                 </ComposedChart>
               </ResponsiveContainer>
             </div>

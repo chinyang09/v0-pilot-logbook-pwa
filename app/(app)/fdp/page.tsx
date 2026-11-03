@@ -18,6 +18,10 @@ import {
   type RegulationType,
 } from "@/types/entities/roster.types"
 import { FDPTimelineChart } from "@/components/roster/fdp-timeline-chart"
+import { DutyTimeline, type TimelineScenario } from "@/components/roster/duty-timeline"
+import { buildDutyTimeline } from "@/lib/utils/roster/duty-timeline"
+import { useFlights } from "@/hooks/data/use-flights"
+import { useScheduleEntries } from "@/hooks/data/use-schedule"
 import { QuickCheckPanel } from "@/components/roster/quick-check-panel"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useMainPanelFullWidth } from "@/lib/layout/panel-mode"
@@ -89,6 +93,15 @@ export default function FDPPage() {
     isLoading,
   } = useFDPData()
   const timelineData = useFDPTimeline(allDutyPeriods)
+  // The duty timeline draws each duty's sectors, so it needs the rows they
+  // name, and the roster for the ground duties the pipeline does not count.
+  const { flights } = useFlights()
+  const { scheduleEntries } = useScheduleEntries()
+  const flightsById = useMemo(() => new Map(flights.map((f) => [f.id, f])), [flights])
+  const dutyBlocks = useMemo(
+    () => buildDutyTimeline(allDutyPeriods, flightsById, scheduleEntries),
+    [allDutyPeriods, flightsById, scheduleEntries],
+  )
 
   const { preferences } = usePreferences()
   const activeRule: RegulationType = preferences.dutyTimeDefaults?.regulationType ?? "CAAS"
@@ -96,6 +109,16 @@ export default function FDPPage() {
   const { selectedId, setDetailContent, setSelectedId } = useDetailPanel()
   const [scenarioResult, setScenarioResult] = useState<ScenarioResult | null>(null)
   const [quickCheckOpen, setQuickCheckOpen] = useState(false)
+  // The Quick Check's what-if on the duty timeline: the roster as the
+  // scenario leaves it, rest recomputed, and the duties it took out.
+  const timelineScenario = useMemo<TimelineScenario | null>(() => {
+    if (!scenarioResult) return null
+    return {
+      blocks: buildDutyTimeline(scenarioResult.dutyPeriods, flightsById, scheduleEntries),
+      removed: dutyBlocks.filter((b) => scenarioResult.removedIds.has(b.id)),
+      problems: scenarioResult.violations.length,
+    }
+  }, [scenarioResult, flightsById, scheduleEntries, dutyBlocks])
 
   // Stable refs for detail panel setters — these change identity on every URL
   // update (setSelectedId is a useCallback with searchParams in deps, so
@@ -158,11 +181,12 @@ export default function FDPPage() {
   // Sync quickCheckOpen when selectedId is cleared externally (e.g., mobile back button).
   // Only fires on non-null → null transitions to avoid interfering with initial panel open
   // (where selectedId is still null while setSelectedId("legal-check") is queued).
+  // The what-if it checked STAYS on both charts until it is cleared there: on a
+  // phone the check covers the charts, so going back to them is how it is read.
   const prevSelectedIdRef = useRef(selectedId)
   useEffect(() => {
     if (prevSelectedIdRef.current !== null && selectedId === null && quickCheckOpen) {
       setQuickCheckOpen(false)
-      setScenarioResult(null)
     }
     prevSelectedIdRef.current = selectedId
   }, [selectedId, quickCheckOpen])
@@ -313,6 +337,14 @@ export default function FDPPage() {
               scenarioRemovedDates={scenarioResult?.removedDates}
               onClearScenario={() => setScenarioResult(null)}
             />
+          </ChartErrorBoundary>
+        ) : null}
+
+        {/* Each duty on one time axis: what was flown, the duty around it,
+            and the rest between. */}
+        {dutyBlocks.length > 0 ? (
+          <ChartErrorBoundary>
+            <DutyTimeline blocks={dutyBlocks} scenario={timelineScenario} onClearScenario={() => setScenarioResult(null)} />
           </ChartErrorBoundary>
         ) : !isLoading ? (
           <EmptyState

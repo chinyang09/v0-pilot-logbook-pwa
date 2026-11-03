@@ -2139,8 +2139,15 @@ export interface ScenarioViolation {
   limit: number
 }
 
+/** The id prefix of a duty the Quick Check ADDED — what the duty timeline marks. */
+export const SCENARIO_DUTY_PREFIX = "__scenario_"
+
 export interface ScenarioResult {
   timelineData: TimelineDataPoint[]
+  /** Every duty as the scenario leaves it, rest recomputed — the duty timeline draws these. */
+  dutyPeriods: DutyPeriod[]
+  /** The ids of the duties the scenario took out. */
+  removedIds: Set<string>
   violations: ScenarioViolation[]
   overallLegal: boolean
   /** Set of dates that were modified (added/affected by removal) */
@@ -2200,7 +2207,7 @@ export function simulateScenario(
       const maxFdpMinutes = fdpRes.maxFdpMinutes
 
       addedDPs.push({
-        id: `__scenario_${change.id}__`,
+        id: `${SCENARIO_DUTY_PREFIX}${change.id}__`,
         date: change.date,
         reportTime: change.reportTime,
         debriefTime: change.debriefTime,
@@ -2302,6 +2309,8 @@ export function simulateScenario(
 
   return {
     timelineData,
+    dutyPeriods: withRest,
+    removedIds,
     violations,
     overallLegal: violations.length === 0,
     modifiedDates,
