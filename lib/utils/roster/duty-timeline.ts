@@ -2,12 +2,12 @@
  * The duty timeline: a Gantt chart whose axis is time, in three lanes —
  *
  *   DUTY    sign-on → sign-off, every duty (flight, standby, ground)
- *   FLIGHT  each sector's block (OUT→IN), its airborne part (OFF→ON) inside it
+ *   FLIGHT  each sector's block time (OUT→IN)
  *   REST    the gap between consecutive duties
  *
- * — each drawn as ACTUAL with the PLANNED (scheduled) span beneath it as a
- * baseline, so a late sign-off, a delayed sector or a short rest is a visible
- * difference between two bars rather than a number to work out.
+ * — each labelled with its DURATION and judged against its LIMIT: a duty
+ * whose FDP runs past its Reg 14 maximum, and a rest short of what para 3/4
+ * required, are the two things the chart exists to make obvious.
  *
  * Built from the FDP pipeline's duty periods (flown, and — through
  * `upcomingPlannedDuties` — the ones still rostered) plus the flight rows they
@@ -17,10 +17,11 @@
  * duty, and a pilot reading the week needs to see them.
  */
 
-import type { DutyPeriod, ScheduleEntry } from "@/types/entities/roster.types"
+import { DEFAULT_FTL_LIMITS, type DutyPeriod, type ScheduleEntry } from "@/types/entities/roster.types"
 import type { FlightLog } from "@/types/entities/flight.types"
 import { isPositioningEntry } from "@/lib/utils/entry-type"
 import { hhmmToMinutes } from "@/lib/utils/time"
+import { fdpMinutesOf, isDutyExceedingLimits } from "@/lib/utils/roster/fdp-calculator"
 import {
   POST_FLIGHT_CHECK_MIN,
   PRE_FLIGHT_CHECK_MIN,
@@ -43,8 +44,6 @@ export interface TimelineSector {
   /** What is drawn: actual OUT→IN where recorded, scheduled otherwise. */
   outMs: number
   inMs: number
-  /** OFF→ON, when recorded — the airborne part of the block. */
-  airborne: Span | null
   /** The scheduled OUT→IN, when the row carries one. */
   scheduled: Span | null
   registration: string
@@ -83,6 +82,13 @@ export interface DutyBlock {
   isStandby: boolean
   /** Reg 14's maximum for this duty (minutes), 0 when none applies. */
   maxFdpMinutes: number
+  /** The FDP as the limits measure it — report to last on-blocks. */
+  fdpMinutes: number
+  /**
+   * Against its limit: `over` when the FDP (or a standby's own 18-hour cap)
+   * is exceeded, `near` within the last tenth of the FDP maximum.
+   */
+  limit: "over" | "near" | null
   /**
    * The rest before this duty — the regulation's figure where the pipeline
    * computed one (it commences an hour after free of all duties), else the
@@ -98,8 +104,28 @@ export interface RestBefore {
   minutes: number
   requiredMinutes: number | null
   compliant: boolean | null
+  /** `short` below the requirement, `tight` within an hour of it. */
+  status: "short" | "tight" | "ok" | null
   /** The duty the rest follows. */
   previousId: string
+}
+
+/** A rest within this much of its requirement is called tight. */
+const TIGHT_REST_MIN = 60
+/** An FDP within this share of its maximum is called near. */
+const NEAR_FDP_SHARE = 0.9
+
+function restStatus(minutes: number, required: number | null, compliant: boolean | null): RestBefore["status"] {
+  if (compliant === false) return "short"
+  if (required == null) return null
+  if (minutes < required) return "short"
+  return minutes - required < TIGHT_REST_MIN ? "tight" : "ok"
+}
+
+function limitOf(dp: DutyPeriod): DutyBlock["limit"] {
+  if (isDutyExceedingLimits(dp, DEFAULT_FTL_LIMITS).exceeds) return "over"
+  if (dp.dutyKind !== "standby" && dp.maxFdpMinutes > 0 && fdpMinutesOf(dp) >= dp.maxFdpMinutes * NEAR_FDP_SHARE) return "near"
+  return null
 }
 
 function instant(date: string, hhmm: string): number {
@@ -134,13 +160,6 @@ function sectorOf(f: FlightLog): TimelineSector | null {
     scheduled = { startMs: s, endMs: after(s + 1, f.date, f.scheduledIn) }
   }
 
-  let airborne: Span | null = null
-  if (f.outTime && f.offTime && f.onTime) {
-    const off = after(outMs, f.date, f.offTime)
-    const on = after(off, f.date, f.onTime)
-    if (on > off && on <= inMs + MIN) airborne = { startMs: off, endMs: on }
-  }
-
   return {
     id: f.id,
     flightNumber: f.flightNumber || "",
@@ -148,7 +167,6 @@ function sectorOf(f: FlightLog): TimelineSector | null {
     to: f.arrivalIcao || f.arrivalIata || "",
     outMs,
     inMs,
-    airborne,
     scheduled,
     registration: f.aircraftReg || "",
     type: f.aircraftType || "",
@@ -202,6 +220,8 @@ function groundBlock(e: ScheduleEntry, today: string): DutyBlock | null {
     isFuture: e.date > today,
     isStandby: false,
     maxFdpMinutes: 0,
+    fdpMinutes: 0,
+    limit: null,
     restBefore: null,
   }
 }
@@ -245,6 +265,8 @@ export function buildDutyTimeline(
       isFuture: dp.isFuture,
       isStandby: standby,
       maxFdpMinutes: dp.maxFdpMinutes || 0,
+      fdpMinutes: standby ? 0 : fdpMinutesOf(dp),
+      limit: limitOf(dp),
       restBefore: null,
     })
   }
@@ -270,11 +292,14 @@ export function buildDutyTimeline(
       const rp = restOf.get(b.id)
       const gap = Math.max(0, Math.round((b.startMs - previous.endMs) / MIN) - REST_STARTS_AFTER_DUTY_MIN)
       const minutes = rp ? rp.restMinutes : gap
+      const requiredMinutes = rp ? rp.requiredRestMinutes : null
+      const compliant = rp ? rp.compliant : null
       b.restBefore = {
         startMs: b.startMs - minutes * MIN,
         minutes,
-        requiredMinutes: rp ? rp.requiredRestMinutes : null,
-        compliant: rp ? rp.compliant : null,
+        requiredMinutes,
+        compliant,
+        status: restStatus(minutes, requiredMinutes, compliant),
         previousId: previous.id,
       }
     }
@@ -291,6 +316,8 @@ export interface TimelineSummary {
   /** The shortest rest that ENDS inside the range, and how many fell short. */
   shortestRestMinutes: number | null
   shortRests: number
+  /** Duties whose FDP (or standby cap) is exceeded. */
+  overLimit: number
   duties: number
 }
 
@@ -305,16 +332,18 @@ export function summarizeTimeline(blocks: readonly DutyBlock[], fromMs: number, 
   let duties = 0
   let shortest: number | null = null
   let shortRests = 0
+  let overLimit = 0
   for (const b of blocks) {
     if (b.endMs <= fromMs || b.startMs >= toMs) continue
     duties++
+    if (b.limit === "over") overLimit++
     const inside = Math.min(b.endMs, toMs) - Math.max(b.startMs, fromMs)
     const share = inside / (b.endMs - b.startMs)
     duty += inside / MIN
     flight += b.flightMinutes * share
     if (b.restBefore && b.startMs >= fromMs) {
       if (shortest === null || b.restBefore.minutes < shortest) shortest = b.restBefore.minutes
-      if (b.restBefore.compliant === false) shortRests++
+      if (b.restBefore.status === "short") shortRests++
     }
   }
   return {
@@ -322,6 +351,7 @@ export function summarizeTimeline(blocks: readonly DutyBlock[], fromMs: number, 
     dutyMinutes: Math.round(duty),
     shortestRestMinutes: shortest,
     shortRests,
+    overLimit,
     duties,
   }
 }

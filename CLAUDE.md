@@ -4052,7 +4052,7 @@ was the duty compared with a limit it is not measured against.
 | | Answers | Shape |
 |---|---|---|
 | the rolling chart (`fdp-timeline-chart.tsx`) | how close am I to a limit | a running total per day, against the limit lines |
-| the duty timeline (`duty-timeline.tsx`, `lib/utils/roster/duty-timeline.ts`) | how much have I flown, how much duty, how much rest between — and where it departed from the schedule | a GANTT chart on a time axis, three lanes: DUTY (sign-on → sign-off), FLIGHT (each sector's block, airborne inside it), REST (the gap between flight duties) |
+| the duty timeline (`duty-timeline.tsx`, `lib/utils/roster/duty-timeline.ts`) | how long each duty, flight and rest was — and whether it BUST a limit or MET its minimum | a GANTT chart on a time axis, three lanes: DUTY (sign-on → sign-off), FLIGHT (each sector's block time), REST (between flight duties); each bar labelled with its duration and coloured by its verdict |
 
 - **Flown and planned are two series, split AT TODAY.** Each rolling key is
   written twice (`<key>__flown` up to and including today, `<key>__planned`
@@ -4077,15 +4077,24 @@ was the duty compared with a limit it is not measured against.
   ground duties come from the roster (`scheduleEntries`, UTC only — a local
   frame is left out rather than drawn a timezone wrong): the pipeline does not
   count them, but they are duty and are drawn, hatched like a standby.
-- **Actual over scheduled.** Each lane draws what HAPPENED, with the
-  SCHEDULED span as a thin grey baseline under it — a sector's scheduled
-  OUT→IN, a duty's rostered window (an hour before the first scheduled OUT to
-  half an hour after the last scheduled IN) — so a delay is a visible offset
-  between two bars. Inside a duty the sectors are drawn, block lighter and
-  airborne (OFF→ON) solid, so the ground part of the duty is the fill between
-  them. Anything still to come is the dashed planned yellow, and carries no
-  baseline (it IS the schedule). A baseline under 8px is left out: at 28 days
-  it is a dot, not a span.
+- **It exists to answer two verdicts, so the bars carry them.** A duty whose
+  FDP (`fdpMinutesOf`, against `maxFdpMinutes`) — or a standby's 18-hour cap —
+  is exceeded is RED (`isDutyExceedingLimits`, the pipeline's own rule), one in
+  the last tenth of its maximum ORANGE; a rest below its requirement is RED
+  with the rest still owed hatched past the sign-on, one within an hour of it
+  ORANGE. Near is `--status-critical`, not `--status-warning`: amber sat next
+  to the planned yellow and read as the same thing, and the rolling chart
+  above marks 90% of a limit in the same orange. A line under the figures
+  says it in words ("1 duty over the FDP limit · 2 rests short", or "Within
+  limits · every rest met"). Every bar is labelled with its DURATION over it
+  (a short rest's says what it needed), placed left to right and dropped
+  when it would overlap the last, so a dense view never prints one label on
+  another. There is no airborne time and no scheduled baseline on the chart —
+  the owner found the first version hard to read, and both were what made it
+  so; the schedule is in the detail ("07:10Z · sched 07:00Z"). Anything still
+  to come is the dashed planned yellow; a rest still to come is dashed GREY,
+  because yellow on this chart means a planned duty. Every other day is
+  banded so a day reads as a column.
 - **Swipe to move, pinch to zoom.** 24 hours / 7 days / 28 days, from the tabs
   or a pinch (two fingers on the chart; ctrl-wheel for a trackpad), holding
   the time under the pinch still. The scroller is `touch-action: pan-x pan-y`

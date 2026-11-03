@@ -84,6 +84,7 @@ describe("buildDutyTimeline", () => {
       minutes: 870,
       requiredMinutes: 720,
       compliant: true,
+      status: "ok",
       previousId: "d1",
     })
     // 2026-11-04 09:30 → 2026-11-05 03:00 is 17h30; rest commences an hour
@@ -93,6 +94,7 @@ describe("buildDutyTimeline", () => {
       minutes: 16.5 * 60,
       requiredMinutes: null,
       compliant: null,
+      status: null,
       previousId: "d2",
     })
   })
@@ -115,7 +117,6 @@ describe("planned against actual", () => {
     const s = b.sectors[0]
     expect(s.outMs).toBe(at("2026-11-03T02:25:00Z"))
     expect(s.scheduled).toEqual({ startMs: at("2026-11-03T02:00:00Z"), endMs: at("2026-11-03T04:30:00Z") })
-    expect(s.airborne).toEqual({ startMs: at("2026-11-03T02:40:00Z"), endMs: at("2026-11-03T04:50:00Z") })
     // An hour before the scheduled OUT to half an hour after the scheduled IN.
     expect(b.planned).toEqual({ startMs: at("2026-11-03T01:00:00Z"), endMs: at("2026-11-03T05:00:00Z") })
   })
@@ -126,12 +127,31 @@ describe("planned against actual", () => {
     expect(b.sectors[0].scheduled).toEqual({ startMs: at("2026-11-02T23:50:00Z"), endMs: at("2026-11-03T02:20:00Z") })
   })
 
-  it("has no plan for a sector without a schedule, and no airborne span without OFF/ON", () => {
+  it("has no plan for a sector without a schedule", () => {
     const f = flight({ id: "h", scheduledOut: "", scheduledIn: "" })
     const [b] = buildDutyTimeline([duty({ id: "d", flightIds: ["h"] })], new Map([["h", f]]))
     expect(b.sectors[0].scheduled).toBeNull()
-    expect(b.sectors[0].airborne).toBeNull()
     expect(b.planned).toBeNull()
+  })
+})
+
+describe("against the limits", () => {
+  it("flags an FDP past its maximum, and one in its last tenth", () => {
+    const [over] = buildDutyTimeline([duty({ id: "o", fdpEndTime: "09:00", maxFdpMinutes: 450 })], new Map())
+    const [near] = buildDutyTimeline([duty({ id: "n", fdpEndTime: "09:00", maxFdpMinutes: 500 })], new Map())
+    const [fine] = buildDutyTimeline([duty({ id: "f", fdpEndTime: "09:00", maxFdpMinutes: 780 })], new Map())
+    expect(over.fdpMinutes).toBe(480)
+    expect([over.limit, near.limit, fine.limit]).toEqual(["over", "near", null])
+    expect(summarizeTimeline([over, fine], 0, Number.MAX_SAFE_INTEGER).overLimit).toBe(1)
+  })
+
+  it("calls a rest short below its requirement and tight within an hour of it", () => {
+    const rest = (restMinutes: number, compliant: boolean) =>
+      buildDutyTimeline(
+        [duty({ id: "a" }), duty({ id: "b", date: "2026-11-04", restBefore: { restMinutes, requiredRestMinutes: 720, compliant } as DutyPeriod["restBefore"] })],
+        new Map(),
+      )[1].restBefore?.status
+    expect([rest(700, false), rest(750, true), rest(900, true)]).toEqual(["short", "tight", "ok"])
   })
 })
 
@@ -182,7 +202,7 @@ describe("summarizeTimeline", () => {
 
   it("adds what the range holds and names the shortest rest and the short ones", () => {
     const s = summarizeTimeline(blocks, at("2026-11-02T00:00:00Z"), at("2026-11-06T00:00:00Z"))
-    expect(s).toEqual({ flightMinutes: 600, dutyMinutes: 1020, shortestRestMinutes: 600, shortRests: 1, duties: 2 })
+    expect(s).toEqual({ flightMinutes: 600, dutyMinutes: 1020, shortestRestMinutes: 600, shortRests: 1, overLimit: 0, duties: 2 })
   })
 
   it("counts only the part of a duty inside the range, never a duty twice", () => {

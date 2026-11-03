@@ -1,29 +1,31 @@
 "use client"
 
 /**
- * The duty timeline — a Gantt chart whose axis is TIME, in three lanes:
+ * The duty timeline — a Gantt chart whose axis is TIME, in three lanes, each
+ * bar labelled with how long it lasted and coloured by whether it is legal:
  *
- *            MON 3        TUE 4        WED 5
- *   DUTY     ▐█▓▓█▓▓█▌                 ▐▓▓█▓▓▌        sign-on → sign-off
- *            ▔▔▔▔▔▔▔                   ▔▔▔▔▔          as scheduled
- *   FLIGHT    ▐▓██▓▌ ▐▓██▓▌             ▐▓██▓▌        block, airborne inside
- *   REST              ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬|               rest, | = required
+ *            MON 3          TUE 4          WED 5
+ *   DUTY     ▐█████▌ 8:30                  ▐████▌ 7:00      sign-on → sign-off
+ *   FLIGHT    ▐██▌▐██▌ 4:00                 ▐█▌▐█▌ 3:30     block time
+ *   REST             ▬▬▬▬▬▬▬▬▬ 14:20 ▬▬▬▬▬▬▬               rest between duties
  *
- * Each lane draws what HAPPENED with what was SCHEDULED as a thin baseline
- * under it, so a late sign-off, a delayed sector or a short rest is a visible
- * difference between two bars. Duties still to come are drawn dashed in the
- * planned yellow, the same as the rolling chart above.
+ * The point is two verdicts a pilot should not have to work out: did a duty's
+ * FDP run past its Reg 14 maximum (red; amber in its last tenth), and did a
+ * rest reach what para 3/4 required (red when short, amber within an hour).
+ * Duties still to come are dashed in the planned yellow, as on the chart above.
  *
  * Swipe sideways to move along the dates; pinch (or the tabs) to step between
  * 24 hours, 7 days and 28 days. Tap a duty or a sector for its sign-on,
  * sign-off and sectors; tap a rest for the duties either side of it.
  *
  * Plain positioned elements, not a chart library, and only what is near the
- * view is rendered — a career is thousands of duties on one axis.
+ * view is rendered — a career is thousands of duties on one axis. Labels are
+ * placed left to right and one that would overlap the last is left out, so a
+ * dense view never prints a label on top of another.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { ChevronRight, X } from "lucide-react"
+import { AlertTriangle, CheckCircle2, ChevronRight, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { FormSection } from "@/components/ui/form-section"
 import { ReadOnlyRow } from "@/components/ui/settings-row"
@@ -32,7 +34,7 @@ import { usePreferences } from "@/components/providers/preferences-provider"
 import { FDP_COLORS } from "@/components/roster/fdp-colors"
 import { formatInstant, tzFormatter } from "@/lib/utils/tz-format"
 import { formatHHMMDisplay, minutesToHHMM } from "@/lib/utils/time"
-import { summarizeTimeline, type DutyBlock, type Span } from "@/lib/utils/roster/duty-timeline"
+import { summarizeTimeline, type DutyBlock, type RestBefore } from "@/lib/utils/roster/duty-timeline"
 
 const MIN = 60_000
 const HOUR = 60 * MIN
@@ -47,32 +49,41 @@ const ZOOMS: SegmentedTab<Zoom>[] = [
   { value: "28", label: "28 Days" },
 ]
 
-/** Geometry, px. Every lane is a caption line, the bar, then the baseline. */
+/** Geometry, px. Each lane is a label line over a bar. */
 const AXIS_H = 26
-const LANE_H = 44
-const REST_H = 40
-const LABEL_Y = 1
-const BAR_Y = 14
+const LANE_H = 46
+const LABEL_Y = 2
+const BAR_Y = 18
 const BAR_H = 20
-const BASE_Y = 37
-const BASE_H = 4
 const LANE_TOP = { duty: AXIS_H, flight: AXIS_H + LANE_H, rest: AXIS_H + 2 * LANE_H }
-const CHART_H = AXIS_H + 2 * LANE_H + REST_H
+const CHART_H = AXIS_H + 3 * LANE_H
 /** The "Now" chip sits under the day and hour labels, above the lanes. */
 const NOW_Y = 13
 /** The narrowest a tap target gets, centred on a bar narrower than it. */
 const HIT_MIN = 28
-/** A baseline narrower than this is a dot, not a span — it is left out. */
-const BASELINE_MIN = 8
+/** Labels are 11px semibold tabular figures; this is a character's width. */
+const CHAR_PX = 6.6
+const LABEL_GAP = 6
 
 /** A pinch has to change the finger spread this much to step the zoom. */
 const PINCH_STEP = 1.3
 /** A trackpad pinch (ctrl + wheel) accumulates this much delta per step. */
 const WHEEL_STEP = 60
 
-const REST_COLOR = "var(--muted-foreground)"
-const SHORT_COLOR = "var(--status-error)"
-const SCHEDULED_COLOR = "var(--muted-foreground)"
+const OVER = "var(--status-error)"
+// Orange, not amber: the planned yellow is already on this page, and the
+// rolling chart above marks 90% of a limit in this same colour.
+const NEAR = "var(--status-critical)"
+const REST_OK = "var(--muted-foreground)"
+
+/** A colour at a share of its strength — works for a hex and a CSS variable. */
+function tint(color: string, pct: number): string {
+  return `color-mix(in oklch, ${color} ${pct}%, transparent)`
+}
+
+function hatch(color: string): string {
+  return `repeating-linear-gradient(135deg, ${tint(color, 70)} 0 3px, ${tint(color, 20)} 3px 6px)`
+}
 
 type Selection = { kind: "duty" | "rest"; id: string } | null
 
@@ -330,37 +341,109 @@ export function DutyTimeline({ blocks }: { blocks: DutyBlock[] }) {
       ? `${fmt.dayMonth(viewFrom)} ${clock(viewFrom)} – ${fmt.dayMonth(viewTo)} ${clock(viewTo)}`
       : `${fmt.dayMonth(viewFrom)} – ${fmt.dayMonth(viewTo - 1)}`
 
+  // Each lane's labels, placed left to right; one that would overlap the
+  // last placed is left out. A label may be wider than its bar — it sits
+  // centred over it — so a duty a few pixels wide at 7 days still says how
+  // long it was.
+  const labels = useMemo(() => {
+    const out: Label[] = []
+    const lane = (items: Label[]) => {
+      items.sort((a, b) => a.x - b.x)
+      let right = -Infinity
+      for (const l of items) {
+        const half = (l.text.length * CHAR_PX) / 2
+        if (l.x - half < right + LABEL_GAP) continue
+        out.push(l)
+        right = l.x + half
+      }
+    }
+    const duty: Label[] = []
+    const flight: Label[] = []
+    const rest: Label[] = []
+    for (const b of visible) {
+      const left = xOf(b.startMs)
+      const w = xOf(b.endMs) - left
+      const dur = duration(b.dutyMinutes)
+      const name = b.kind === "flight" ? b.route : b.code
+      const long = `${dur} · ${name}`
+      duty.push({
+        key: `d${b.id}`,
+        lane: "duty",
+        x: left + w / 2,
+        text: name && w >= long.length * CHAR_PX + 8 ? long : b.kind === "flight" ? dur : `${b.code} ${dur}`,
+        tone: b.limit,
+      })
+
+      // Flight: each sector's block where it has room, else — when no
+      // sector does — the duty's total over the run of its sectors.
+      const flown = b.sectors.filter((s) => !s.positioning)
+      if (flown.length > 0) {
+        const each = flown.map((s) => ({ s, text: duration((s.inMs - s.outMs) / MIN) }))
+        const roomy = each.filter(({ s, text }) => xOf(s.inMs) - xOf(s.outMs) >= text.length * CHAR_PX + LABEL_GAP)
+        if (roomy.length > 0) {
+          for (const { s, text } of roomy) flight.push({ key: `f${s.id}`, lane: "flight", x: (xOf(s.outMs) + xOf(s.inMs)) / 2, text, tone: null })
+        } else {
+          const a = xOf(flown[0].outMs)
+          const z = xOf(flown[flown.length - 1].inMs)
+          flight.push({ key: `f${b.id}`, lane: "flight", x: (a + z) / 2, text: duration(b.flightMinutes), tone: null })
+        }
+      }
+
+      const r = b.restBefore
+      if (r) {
+        const a = xOf(r.startMs)
+        const z = xOf(b.startMs)
+        const dur = duration(r.minutes)
+        const need = r.requiredMinutes != null ? `${dur} · need ${duration(r.requiredMinutes)}` : dur
+        const tone = r.status === "short" ? "over" : r.status === "tight" ? "near" : null
+        rest.push({ key: `r${b.id}`, lane: "rest", x: (a + z) / 2, text: tone && z - a >= need.length * CHAR_PX + 8 ? need : dur, tone })
+      }
+    }
+    lane(duty)
+    lane(flight)
+    lane(rest)
+    return out
+  }, [visible, xOf, duration])
+
+  // The verdict for what is in view, said in words beside the figures.
+  const nearCount = useMemo(
+    () => blocks.filter((b) => b.startMs < viewTo && b.endMs > viewFrom && (b.limit === "near" || b.restBefore?.status === "tight")).length,
+    [blocks, viewFrom, viewTo],
+  )
+
   return (
     <FormSection title="Duty Timeline">
-      <div className="space-y-2 px-3 pb-3 pt-1">
+      <div className="space-y-2.5 px-3 pb-3 pt-1">
         <div className="flex">
           <SegmentedTabs tabs={ZOOMS} value={zoom} onChange={(z) => zoomTo(z)} />
         </div>
         <p className="px-1 text-xs font-medium text-muted-foreground tabular-nums">{rangeText}</p>
 
-        {/* The three questions, for what is in view. */}
-        <div className="grid grid-cols-3 gap-2">
-          <Figure value={duration(summary.flightMinutes)} caption="Flown" color={FDP_COLORS.flight} />
+        {/* How much, in view: flight, duty, and the shortest rest. */}
+        <div className="grid grid-cols-3 gap-2 px-1">
+          <Figure value={duration(summary.flightMinutes)} caption="Flight" color={FDP_COLORS.flight} />
           <Figure value={duration(summary.dutyMinutes)} caption="Duty" color={FDP_COLORS.duty} />
           <Figure
             value={summary.shortestRestMinutes == null ? "—" : duration(summary.shortestRestMinutes)}
-            caption={summary.shortRests > 0 ? `Shortest Rest · ${summary.shortRests} short` : "Shortest Rest"}
+            caption="Shortest Rest"
             alert={summary.shortRests > 0}
           />
         </div>
+        <Verdict over={summary.overLimit} short={summary.shortRests} near={nearCount} duties={summary.duties} />
 
-        <div className="flex overflow-hidden rounded-lg bg-muted/30">
+        <div className="flex overflow-hidden rounded-lg border border-border/60 bg-card">
           {/* Lane names: outside the scroller, so they stay put. */}
-          <div className="w-12 shrink-0 border-r border-border/60" aria-hidden>
+          <div className="w-14 shrink-0 border-r border-border/60" aria-hidden>
             <div style={{ height: AXIS_H }} />
-            {(["Duty", "Flight"] as const).map((name) => (
-              <div key={name} className="flex items-center px-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground" style={{ height: LANE_H }}>
+            {(["Duty", "Flight", "Rest"] as const).map((name, i) => (
+              <div
+                key={name}
+                className={cn("flex items-center px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground", i > 0 && "border-t border-border/50")}
+                style={{ height: LANE_H }}
+              >
                 {name}
               </div>
             ))}
-            <div className="flex items-center px-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground" style={{ height: REST_H }}>
-              Rest
-            </div>
           </div>
 
           <div
@@ -373,33 +456,37 @@ export function DutyTimeline({ blocks }: { blocks: DutyBlock[] }) {
           >
             {pxPerMs > 0 && (
               <div className="relative h-full" style={{ width: innerWidth }}>
-                {/* Lane dividers. */}
-                <div className="pointer-events-none absolute inset-x-0 border-t border-border/40" style={{ top: LANE_TOP.flight }} />
-                <div className="pointer-events-none absolute inset-x-0 border-t border-border/40" style={{ top: LANE_TOP.rest }} />
+                {/* Every other day banded, so a day reads as a column. */}
+                {axis.shown.map((d) =>
+                  Math.round((d - rangeStart) / DAY) % 2 === 1 ? (
+                    <div key={`band${d}`} className="pointer-events-none absolute bottom-0 bg-foreground/[0.04]" style={{ left: xOf(d), width: DAY * pxPerMs, top: AXIS_H }} />
+                  ) : null,
+                )}
+                <div className="pointer-events-none absolute inset-x-0 border-t border-border/50" style={{ top: LANE_TOP.duty }} />
+                <div className="pointer-events-none absolute inset-x-0 border-t border-border/50" style={{ top: LANE_TOP.flight }} />
+                <div className="pointer-events-none absolute inset-x-0 border-t border-border/50" style={{ top: LANE_TOP.rest }} />
 
-                {/* Minor ticks, then a rule at each midnight with the day above it. */}
                 {axis.ticks.map((t) => (
-                  <div key={t.ms} className="pointer-events-none absolute bottom-0 border-l border-border/25" style={{ left: xOf(t.ms), top: AXIS_H - 6 }}>
+                  <div key={t.ms} className="pointer-events-none absolute border-l border-border/30" style={{ left: xOf(t.ms), top: AXIS_H - 5, height: 5 }}>
                     {t.label && (
-                      <span className="absolute -translate-x-1/2 text-[10px] leading-[12px] tabular-nums text-muted-foreground/80" style={{ top: 1 - (AXIS_H - 6) }}>{t.label}</span>
+                      <span className="absolute -translate-x-1/2 text-[10px] leading-[12px] tabular-nums text-muted-foreground" style={{ top: 1 - (AXIS_H - 5) }}>
+                        {t.label}
+                      </span>
                     )}
                   </div>
                 ))}
-                {axis.shown.map((d, i) => {
-                  const labelled = axis.full || i % axis.every === 0
-                  return (
-                    <div key={d} className="pointer-events-none absolute inset-y-0 border-l border-border/60" style={{ left: xOf(d) }}>
-                      {labelled && (
-                        <span className="absolute left-1 top-px whitespace-nowrap text-[10px] font-medium uppercase leading-[12px] tracking-wide text-muted-foreground">
-                          {axis.full ? fmt.day(d) : fmt.dayNumber(d)}
-                        </span>
-                      )}
-                    </div>
-                  )
-                })}
+                {axis.shown.map((d, i) => (
+                  <div key={d} className="pointer-events-none absolute inset-y-0 border-l border-border/60" style={{ left: xOf(d) }}>
+                    {(axis.full || i % axis.every === 0) && (
+                      <span className="absolute left-1 top-px whitespace-nowrap text-[10px] font-semibold uppercase leading-[12px] tracking-wide text-muted-foreground">
+                        {axis.full ? fmt.day(d) : fmt.dayNumber(d)}
+                      </span>
+                    )}
+                  </div>
+                ))}
 
                 {visible.map((b) => (
-                  <DutyLanes
+                  <DutyBars
                     key={b.id}
                     block={b}
                     xOf={xOf}
@@ -408,14 +495,24 @@ export function DutyTimeline({ blocks }: { blocks: DutyBlock[] }) {
                     duration={duration}
                     dutySelected={selection?.kind === "duty" && selection.id === b.id}
                     restSelected={selection?.kind === "rest" && selection.id === b.id}
-                    onDuty={toggle}
+                    onSelect={toggle}
                   />
+                ))}
+
+                {labels.map((l) => (
+                  <span
+                    key={l.key}
+                    className="pointer-events-none absolute -translate-x-1/2 whitespace-nowrap text-[11px] font-semibold leading-[14px] tabular-nums"
+                    style={{ left: l.x, top: LANE_TOP[l.lane] + LABEL_Y, color: l.tone === "over" ? OVER : l.tone === "near" ? NEAR : "var(--foreground)" }}
+                  >
+                    {l.text}
+                  </span>
                 ))}
 
                 {/* Now — between what has happened and what is planned. */}
                 {nowMs > drawFrom && nowMs < drawTo && (
-                  <div className="pointer-events-none absolute bottom-0 z-10 border-l border-dashed border-foreground/70" style={{ left: xOf(nowMs), top: NOW_Y }}>
-                    <span className="absolute -left-3 top-0 rounded bg-foreground px-1 text-[9px] font-semibold uppercase leading-[12px] text-background">
+                  <div className="pointer-events-none absolute bottom-0 z-10 border-l-2 border-dashed border-foreground/60" style={{ left: xOf(nowMs), top: NOW_Y }}>
+                    <span className="absolute -left-3.5 top-0 rounded bg-foreground px-1 text-[9px] font-semibold uppercase leading-[12px] text-background">
                       Now
                     </span>
                   </div>
@@ -425,16 +522,16 @@ export function DutyTimeline({ blocks }: { blocks: DutyBlock[] }) {
           </div>
         </div>
 
-        {/* The key — colour is never the only carrier: planned is dashed,
-            scheduled is the thin bar beneath, a short rest is labelled. */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground" aria-hidden>
-          <Key swatch={<span className="h-2.5 w-3 rounded-sm border" style={{ borderColor: FDP_COLORS.duty, background: `${FDP_COLORS.duty}33` }} />} label="Duty" />
-          <Key swatch={<span className="h-2.5 w-3 rounded-sm" style={{ background: hatch(FDP_COLORS.duty) }} />} label="Ground / Standby" />
-          <Key swatch={<span className="h-2.5 w-3 rounded-sm" style={{ background: `${FDP_COLORS.flight}66` }} />} label="Block" />
-          <Key swatch={<span className="h-2.5 w-3 rounded-sm" style={{ background: FDP_COLORS.flight }} />} label="Airborne" />
-          <Key swatch={<span className="h-1 w-3 rounded-full" style={{ background: SCHEDULED_COLOR }} />} label="Scheduled" />
-          <Key swatch={<span className="h-2.5 w-3 rounded-sm border border-dashed" style={{ borderColor: FDP_COLORS.planned, background: `${FDP_COLORS.planned}33` }} />} label="Planned" />
-          <Key swatch={<span className="h-1.5 w-3 rounded-full" style={{ background: SHORT_COLOR }} />} label="Rest Short" />
+        {/* The key — colour is never the only carrier: planned is dashed, a
+            label says a short rest's requirement, the verdict line counts. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[11px] text-muted-foreground" aria-hidden>
+          <Key swatch={<span className="h-2.5 w-3.5 rounded-sm" style={{ background: tint(FDP_COLORS.duty, 85) }} />} label="Duty" />
+          <Key swatch={<span className="h-2.5 w-3.5 rounded-sm" style={{ background: hatch(FDP_COLORS.duty) }} />} label="Standby / Ground" />
+          <Key swatch={<span className="h-2.5 w-3.5 rounded-sm" style={{ background: tint(FDP_COLORS.flight, 85) }} />} label="Flight" />
+          <Key swatch={<span className="h-1.5 w-3.5 rounded-full" style={{ background: tint(REST_OK, 45) }} />} label="Rest" />
+          <Key swatch={<span className="h-2.5 w-3.5 rounded-sm border border-dashed" style={{ borderColor: FDP_COLORS.planned, background: tint(FDP_COLORS.planned, 30) }} />} label="Planned" />
+          <Key swatch={<span className="h-2.5 w-3.5 rounded-sm" style={{ background: NEAR }} />} label="Near Limit" />
+          <Key swatch={<span className="h-2.5 w-3.5 rounded-sm" style={{ background: OVER }} />} label="Over Limit / Short Rest" />
         </div>
 
         {selectedDuty && <DutyDetail block={selectedDuty} clock={clock} duration={duration} onClose={() => setSelection(null)} />}
@@ -453,18 +550,42 @@ export function DutyTimeline({ blocks }: { blocks: DutyBlock[] }) {
   )
 }
 
-function hatch(color: string): string {
-  return `repeating-linear-gradient(135deg, ${color}59 0 3px, ${color}1a 3px 6px)`
+interface Label {
+  key: string
+  lane: "duty" | "flight" | "rest"
+  x: number
+  text: string
+  tone: "over" | "near" | null
 }
 
 function Figure({ value, caption, color, alert }: { value: string; caption: string; color?: string; alert?: boolean }) {
   return (
     <div className="min-w-0">
-      <div className={cn("text-lg font-semibold leading-tight tabular-nums", alert && "text-status-error")} style={!alert && color ? { color } : undefined}>
+      <div className={cn("text-xl font-semibold leading-tight tabular-nums", alert && "text-status-error")} style={!alert && color ? { color } : undefined}>
         {value}
       </div>
-      <div className="truncate text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{caption}</div>
+      <div className="truncate text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{caption}</div>
     </div>
+  )
+}
+
+/** The view's verdict against the limits, in a sentence. */
+function Verdict({ over, short, near, duties }: { over: number; short: number; near: number; duties: number }) {
+  if (duties === 0) return <p className="px-1 text-xs text-muted-foreground">No duties in view.</p>
+  const bad = [over > 0 ? `${over} ${over === 1 ? "duty" : "duties"} over the FDP limit` : "", short > 0 ? `${short} rest${short === 1 ? "" : "s"} short` : ""].filter(Boolean)
+  if (bad.length > 0) {
+    return (
+      <p className="flex items-center gap-1.5 px-1 text-xs font-semibold text-status-error">
+        <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        {bad.join(" · ")}
+      </p>
+    )
+  }
+  return (
+    <p className={cn("flex items-center gap-1.5 px-1 text-xs font-medium", near > 0 ? "text-status-critical" : "text-muted-foreground")}>
+      {near > 0 ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden /> : <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-status-valid" aria-hidden />}
+      {near > 0 ? `Within limits · ${near} close to a limit` : "Within limits · every rest met"}
+    </p>
   )
 }
 
@@ -477,17 +598,6 @@ function Key({ swatch, label }: { swatch: React.ReactNode; label: string }) {
   )
 }
 
-/** The scheduled span, as the thin bar under a lane's actual one. */
-function Baseline({ span, top, xOf, wOf }: { span: Span; top: number; xOf: (ms: number) => number; wOf: (a: number, b: number) => number }) {
-  if (wOf(span.startMs, span.endMs) < BASELINE_MIN) return null
-  return (
-    <span
-      className="pointer-events-none absolute rounded-full opacity-60"
-      style={{ left: xOf(span.startMs), width: wOf(span.startMs, span.endMs), top: top + BASE_Y, height: BASE_H, background: SCHEDULED_COLOR }}
-    />
-  )
-}
-
 /** A tap target at least `HIT_MIN` wide, centred on the bar it opens. */
 function hit(left: number, width: number): { left: number; width: number; inset: number } {
   if (width >= HIT_MIN) return { left, width, inset: 0 }
@@ -495,24 +605,8 @@ function hit(left: number, width: number): { left: number; width: number; inset:
   return { left: left - pad, width: HIT_MIN, inset: pad }
 }
 
-/** A caption over a bar, while the bar is wide enough to hold it. */
-function Caption({ text, left, width, top, strong }: { text: string; left: number; width: number; top: number; strong?: boolean }) {
-  if (width < 30 || !text) return null
-  return (
-    <span
-      className={cn(
-        "pointer-events-none absolute truncate text-[10px] leading-[12px] tabular-nums",
-        strong ? "font-semibold text-foreground" : "text-muted-foreground",
-      )}
-      style={{ left, width, top: top + LABEL_Y }}
-    >
-      {text}
-    </span>
-  )
-}
-
-/** One duty across the three lanes: its block, its sectors, the rest before it. */
-function DutyLanes({
+/** One duty across the three lanes: its bar, its sectors, the rest before it. */
+function DutyBars({
   block: b,
   xOf,
   wOf,
@@ -520,7 +614,7 @@ function DutyLanes({
   duration,
   dutySelected,
   restSelected,
-  onDuty,
+  onSelect,
 }: {
   block: DutyBlock
   xOf: (ms: number) => number
@@ -529,112 +623,72 @@ function DutyLanes({
   duration: (min: number) => string
   dutySelected: boolean
   restSelected: boolean
-  onDuty: (kind: "duty" | "rest", id: string) => void
+  onSelect: (kind: "duty" | "rest", id: string) => void
 }) {
   const future = b.isFuture
-  const dutyColor = future ? FDP_COLORS.planned : FDP_COLORS.duty
+  const base = future ? FDP_COLORS.planned : FDP_COLORS.duty
+  const color = b.limit === "over" ? OVER : b.limit === "near" ? NEAR : base
   const flightColor = future ? FDP_COLORS.planned : FDP_COLORS.flight
   const left = xOf(b.startMs)
   const width = wOf(b.startMs, b.endMs)
-  const name = b.kind === "flight" ? b.route || "Duty" : b.code
-  const timeText = `${clock(b.startMs)}–${clock(b.endMs)}`
-  const dutyText = width >= 150 ? `${duration(b.dutyMinutes)} · ${name} · ${timeText}` : width >= 70 ? `${duration(b.dutyMinutes)} · ${name}` : duration(b.dutyMinutes)
-  const rest = b.restBefore
-  const short = rest?.compliant === false
-  const dutyHit = hit(left, width)
+  const h = hit(left, width)
+  const name = b.kind === "flight" ? b.route || "Duty" : b.kind === "standby" ? "Standby" : `Ground duty ${b.code}`
+  const ring = "ring-2 ring-primary ring-offset-1 ring-offset-card"
+  const verdict = b.limit === "over" ? ", over the FDP limit" : b.limit === "near" ? ", near the FDP limit" : ""
 
   return (
     <>
-      {/* DUTY — sign-on to sign-off; a flight duty shows its sectors inside, so
-          the ground part of the duty is the lighter fill between them. */}
-      {b.planned && !future && <Baseline span={b.planned} top={LANE_TOP.duty} xOf={xOf} wOf={wOf} />}
-      <Caption text={dutyText} left={left} width={Math.max(width, 0)} top={LANE_TOP.duty} strong={dutySelected} />
       <button
         type="button"
-        onClick={() => onDuty("duty", b.id)}
+        onClick={() => onSelect("duty", b.id)}
         aria-pressed={dutySelected}
-        aria-label={`${b.kind === "standby" ? "Standby" : b.kind === "ground" ? `Ground duty ${b.code}` : name}, ${timeText}, duty ${duration(b.dutyMinutes)}${b.kind === "flight" ? `, flight ${duration(b.flightMinutes)}` : ""}${future ? ", planned" : ""}`}
+        aria-label={`${name}, ${clock(b.startMs)}–${clock(b.endMs)}, duty ${duration(b.dutyMinutes)}${verdict}${future ? ", planned" : ""}`}
         className="absolute"
-        // The tap target is the whole lane's height, the bar is drawn inside it.
-        style={{ left: dutyHit.left, width: dutyHit.width, top: LANE_TOP.duty, height: LANE_H }}
+        style={{ left: h.left, width: h.width, top: LANE_TOP.duty, height: LANE_H }}
       >
         <span
-          className={cn(
-            "absolute overflow-hidden rounded-md border",
-            future && "border-dashed",
-            dutySelected && "ring-2 ring-primary ring-offset-1 ring-offset-card",
-          )}
+          className={cn("absolute rounded-md", future && "border-2 border-dashed", dutySelected && ring)}
           style={{
-            left: dutyHit.inset,
+            left: h.inset,
             top: BAR_Y,
             height: BAR_H,
             width,
-            borderColor: dutyColor,
-            background: b.kind === "flight" ? `${dutyColor}33` : hatch(dutyColor),
+            borderColor: color,
+            background: b.kind === "flight" ? tint(color, future ? 35 : 85) : hatch(color),
           }}
-        >
-          {b.sectors.map((s) =>
-            s.positioning ? (
-              <span
-                key={s.id}
-                className="absolute inset-y-1 rounded-sm border border-dashed"
-                style={{ left: xOf(s.outMs) - left, width: wOf(s.outMs, s.inMs), borderColor: flightColor }}
-              />
-            ) : (
-              <span key={s.id} className="absolute inset-y-0" style={{ left: xOf(s.outMs) - left, width: wOf(s.outMs, s.inMs), background: `${flightColor}80` }}>
-                {s.airborne && (
-                  <span className="absolute inset-y-0" style={{ left: xOf(s.airborne.startMs) - xOf(s.outMs), width: wOf(s.airborne.startMs, s.airborne.endMs), background: flightColor }} />
-                )}
-              </span>
-            ),
-          )}
-        </span>
+        />
       </button>
 
-      {/* FLIGHT — each sector's block, airborne inside it, schedule beneath. */}
       {b.sectors.map((s) => {
         const sl = xOf(s.outMs)
         const sw = wOf(s.outMs, s.inMs)
         const sh = hit(sl, sw)
         return (
-          <div key={s.id}>
-            {s.scheduled && !s.planned && <Baseline span={s.scheduled} top={LANE_TOP.flight} xOf={xOf} wOf={wOf} />}
-            <Caption text={sw >= 60 ? `${s.flightNumber} ${s.to}`.trim() : s.flightNumber} left={sl} width={sw} top={LANE_TOP.flight} />
-            <button
-              type="button"
-              onClick={() => onDuty("duty", b.id)}
-              aria-label={`${s.flightNumber || "Sector"} ${s.from}–${s.to}, ${clock(s.outMs)}–${clock(s.inMs)}${s.positioning ? ", positioning" : ""}${s.planned ? ", scheduled" : ""}`}
-              className="absolute"
-              style={{ left: sh.left, width: sh.width, top: LANE_TOP.flight, height: LANE_H }}
-            >
-              <span
-                className={cn(
-                  "absolute overflow-hidden rounded-md",
-                  (s.positioning || s.planned) && "border border-dashed",
-                  dutySelected && "ring-2 ring-primary ring-offset-1 ring-offset-card",
-                )}
-                style={{
-                  left: sh.inset,
-                  top: BAR_Y,
-                  height: BAR_H,
-                  width: sw,
-                  borderColor: flightColor,
-                  background: s.positioning ? "transparent" : s.airborne ? `${flightColor}66` : `${flightColor}${s.planned ? "4d" : "cc"}`,
-                }}
-              >
-                {!s.positioning && s.airborne && (
-                  <span className="absolute inset-y-0" style={{ left: xOf(s.airborne.startMs) - sl, width: wOf(s.airborne.startMs, s.airborne.endMs), background: flightColor }} />
-                )}
-              </span>
-            </button>
-          </div>
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => onSelect("duty", b.id)}
+            aria-label={`${s.flightNumber || "Sector"} ${s.from}–${s.to}, ${clock(s.outMs)}–${clock(s.inMs)}, block ${duration((s.inMs - s.outMs) / MIN)}${s.positioning ? ", positioning" : ""}${s.planned ? ", scheduled" : ""}`}
+            className="absolute"
+            style={{ left: sh.left, width: sh.width, top: LANE_TOP.flight, height: LANE_H }}
+          >
+            <span
+              className={cn("absolute rounded-md", (s.positioning || future) && "border-2 border-dashed", dutySelected && ring)}
+              style={{
+                left: sh.inset,
+                top: BAR_Y,
+                height: BAR_H,
+                width: sw,
+                borderColor: flightColor,
+                background: s.positioning ? "transparent" : tint(flightColor, future ? 35 : 85),
+              }}
+            />
+          </button>
         )
       })}
 
-      {/* REST — from when it commenced to this sign-on; the tick is where the
-          required rest would have ended, and a shortfall is the red past it. */}
-      {rest && (
-        <RestBar rest={rest} signOnMs={b.startMs} future={future} short={short} selected={restSelected} xOf={xOf} wOf={wOf} duration={duration} onSelect={() => onDuty("rest", b.id)} />
+      {b.restBefore && (
+        <RestBar rest={b.restBefore} signOnMs={b.startMs} future={future} selected={restSelected} xOf={xOf} wOf={wOf} duration={duration} onSelect={() => onSelect("rest", b.id)} />
       )}
     </>
   )
@@ -644,17 +698,15 @@ function RestBar({
   rest,
   signOnMs,
   future,
-  short,
   selected,
   xOf,
   wOf,
   duration,
   onSelect,
 }: {
-  rest: NonNullable<DutyBlock["restBefore"]>
+  rest: RestBefore
   signOnMs: number
   future: boolean
-  short: boolean
   selected: boolean
   xOf: (ms: number) => number
   wOf: (a: number, b: number) => number
@@ -663,37 +715,40 @@ function RestBar({
 }) {
   const left = xOf(rest.startMs)
   const width = wOf(rest.startMs, signOnMs)
-  const requiredEnd = rest.requiredMinutes != null ? rest.startMs + rest.requiredMinutes * MIN : null
-  const color = short ? SHORT_COLOR : future ? FDP_COLORS.planned : REST_COLOR
-  const text = width >= 90 ? `Rest ${duration(rest.minutes)}` : duration(rest.minutes)
   const h = hit(left, width)
+  const short = rest.status === "short"
+  // A rest still to come is grey and dashed: yellow on this chart means a
+  // planned DUTY, and a rest has no colour of its own unless it is judged.
+  const color = short ? OVER : rest.status === "tight" ? NEAR : REST_OK
+  const plannedRest = future && color === REST_OK
+  const owedEnd = short && rest.requiredMinutes != null ? rest.startMs + rest.requiredMinutes * MIN : null
   return (
     <>
-      <Caption text={text} left={left} width={width} top={LANE_TOP.rest} strong={short || selected} />
       <button
         type="button"
         onClick={onSelect}
         aria-pressed={selected}
-        aria-label={`Rest ${duration(rest.minutes)}${rest.requiredMinutes != null ? ` of ${duration(rest.requiredMinutes)} required` : ""}${short ? ", short" : ""}`}
+        aria-label={`Rest ${duration(rest.minutes)}${rest.requiredMinutes != null ? ` of ${duration(rest.requiredMinutes)} required` : ""}${short ? ", short" : rest.status === "tight" ? ", close to the minimum" : ""}`}
         className="absolute"
-        style={{ left: h.left, width: h.width, top: LANE_TOP.rest, height: REST_H }}
+        style={{ left: h.left, width: h.width, top: LANE_TOP.rest, height: LANE_H }}
       >
         <span
-          className={cn("absolute rounded-full", selected && "ring-2 ring-primary ring-offset-1 ring-offset-card")}
-          style={{ left: h.inset, top: BAR_Y + 2, height: 8, width, background: color, opacity: short ? 1 : 0.45 }}
+          className={cn("absolute rounded-full", plannedRest && "border border-dashed", selected && "ring-2 ring-primary ring-offset-1 ring-offset-card")}
+          style={{
+            left: h.inset,
+            top: BAR_Y + 4,
+            height: BAR_H - 8,
+            width,
+            borderColor: REST_OK,
+            background: tint(color, plannedRest ? 15 : color === REST_OK ? 45 : 85),
+          }}
         />
       </button>
-      {requiredEnd != null && short && (
-        // The rest still owed when the duty signed on.
+      {owedEnd != null && owedEnd > signOnMs && (
+        // The rest still owed when the next duty signed on.
         <span
-          className="pointer-events-none absolute rounded-full"
-          style={{ left: xOf(signOnMs), width: wOf(signOnMs, requiredEnd), top: LANE_TOP.rest + BAR_Y + 2, height: 8, background: `repeating-linear-gradient(135deg, ${SHORT_COLOR} 0 2px, transparent 2px 5px)` }}
-        />
-      )}
-      {requiredEnd != null && (
-        <span
-          className="pointer-events-none absolute w-0.5 rounded-full"
-          style={{ left: xOf(requiredEnd) - 1, top: LANE_TOP.rest + BAR_Y - 2, height: 16, background: short ? SHORT_COLOR : "var(--foreground)", opacity: short ? 1 : 0.55 }}
+          className="pointer-events-none absolute rounded-r-full"
+          style={{ left: xOf(signOnMs), width: wOf(signOnMs, owedEnd), top: LANE_TOP.rest + BAR_Y + 4, height: BAR_H - 8, background: `repeating-linear-gradient(135deg, ${OVER} 0 2px, transparent 2px 5px)` }}
         />
       )}
     </>
@@ -717,10 +772,22 @@ function DetailHeader({ title, subtitle, tag, onClose, closeLabel }: { title: st
   )
 }
 
-/** "22:13Z (sched 21:50Z)" — the schedule said only where it differs. */
+/** "22:13Z · sched 21:50Z" — the schedule said only where it differs. */
 function withScheduled(actual: number, scheduled: number | undefined, clock: (ms: number) => string): string {
   if (scheduled == null || Math.abs(actual - scheduled) < MIN) return clock(actual)
   return `${clock(actual)} · sched ${clock(scheduled)}`
+}
+
+/** A row whose value carries a verdict colour. */
+function VerdictRow({ label, value, tone }: { label: string; value: string; tone: "over" | "near" | null }) {
+  return (
+    <div className="row-divider flex items-center justify-between gap-3 px-4 py-3.5">
+      <span className="shrink-0 text-foreground">{label}</span>
+      <span className={cn("min-w-0 text-right", tone === "over" ? "font-semibold text-status-error" : tone === "near" ? "font-medium text-status-critical" : "text-muted-foreground")}>
+        {value}
+      </span>
+    </div>
+  )
 }
 
 function DutyDetail({
@@ -738,6 +805,10 @@ function DutyDetail({
   const aircraft = [b.types.join(", "), regs.join(", ")].filter(Boolean).join(" · ")
   const rest = b.restBefore
   const title = b.kind === "flight" ? b.route || "Duty" : b.kind === "standby" ? "Standby" : b.code
+  const fdp =
+    b.maxFdpMinutes > 0
+      ? `${duration(b.fdpMinutes)} of ${duration(b.maxFdpMinutes)} max${b.limit === "over" ? ` · over by ${duration(b.fdpMinutes - b.maxFdpMinutes)}` : ""}`
+      : ""
   return (
     <div className="space-y-2 pt-1">
       <DetailHeader
@@ -750,17 +821,17 @@ function DutyDetail({
       <div className="overflow-hidden rounded-xl border bg-card">
         <ReadOnlyRow label="Sign-On" value={withScheduled(b.startMs, b.planned?.startMs, clock)} />
         <ReadOnlyRow label="Sign-Off" value={withScheduled(b.endMs, b.planned?.endMs, clock)} />
-        <ReadOnlyRow
-          label="Duty"
-          value={b.maxFdpMinutes > 0 ? `${duration(b.dutyMinutes)} · FDP max ${duration(b.maxFdpMinutes)}` : duration(b.dutyMinutes)}
-        />
+        <ReadOnlyRow label="Duty" value={duration(b.dutyMinutes)} />
+        {fdp && <VerdictRow label="FDP" value={fdp} tone={b.limit} />}
+        {b.kind === "standby" && b.limit === "over" && <VerdictRow label="Limit" value="Over the 18:00 standby cap" tone="over" />}
         {b.kind === "flight" && <ReadOnlyRow label="Flight Time" value={duration(b.flightMinutes)} />}
         {b.kind === "flight" && <ReadOnlyRow label="Sectors" value={String(b.sectors.length)} />}
         {aircraft && <ReadOnlyRow label="Aircraft" value={aircraft} />}
         {rest && (
-          <ReadOnlyRow
+          <VerdictRow
             label="Rest Before"
             value={rest.requiredMinutes ? `${duration(rest.minutes)} of ${duration(rest.requiredMinutes)} required` : duration(rest.minutes)}
+            tone={rest.status === "short" ? "over" : rest.status === "tight" ? "near" : null}
           />
         )}
       </div>
@@ -778,10 +849,7 @@ function DutyDetail({
               </div>
               <div className="shrink-0 text-right">
                 <p className="text-sm tabular-nums">{clock(s.outMs)} – {clock(s.inMs)}</p>
-                <p className="text-xs text-muted-foreground tabular-nums">
-                  {duration((s.inMs - s.outMs) / MIN)}
-                  {s.airborne && ` · air ${duration((s.airborne.endMs - s.airborne.startMs) / MIN)}`}
-                </p>
+                <p className="text-xs text-muted-foreground tabular-nums">{duration((s.inMs - s.outMs) / MIN)}</p>
                 {!s.planned && s.scheduled && (Math.abs(s.scheduled.startMs - s.outMs) >= MIN || Math.abs(s.scheduled.endMs - s.inMs) >= MIN) && (
                   <p className="text-xs text-muted-foreground tabular-nums">
                     sched {clock(s.scheduled.startMs)} – {clock(s.scheduled.endMs)}
@@ -812,21 +880,28 @@ function RestDetail({
   onClose: () => void
 }) {
   const rest = after.restBefore!
-  const short = rest.compliant === false
+  const short = rest.status === "short"
   const owed = rest.requiredMinutes != null ? rest.requiredMinutes - rest.minutes : null
   return (
     <div className="space-y-2 pt-1">
       <DetailHeader
         title={`Rest ${duration(rest.minutes)}`}
         subtitle={`${clock(rest.startMs)} – ${clock(after.startMs)}`}
-        tag={short ? <span className="ml-1.5 text-xs font-semibold text-status-error">Short</span> : undefined}
+        tag={
+          short ? (
+            <span className="ml-1.5 text-xs font-semibold text-status-error">Short</span>
+          ) : rest.status === "tight" ? (
+            <span className="ml-1.5 text-xs font-semibold text-status-critical">Close to Minimum</span>
+          ) : undefined
+        }
         onClose={onClose}
         closeLabel="Close rest details"
       />
       <div className="overflow-hidden rounded-xl border bg-card">
-        <ReadOnlyRow label="Rest" value={duration(rest.minutes)} />
+        <VerdictRow label="Rest" value={duration(rest.minutes)} tone={short ? "over" : rest.status === "tight" ? "near" : null} />
         {rest.requiredMinutes != null && <ReadOnlyRow label="Required" value={duration(rest.requiredMinutes)} />}
-        {short && owed != null && owed > 0 && <ReadOnlyRow label="Short By" value={duration(owed)} />}
+        {short && owed != null && owed > 0 && <VerdictRow label="Short By" value={duration(owed)} tone="over" />}
+        {!short && owed != null && <ReadOnlyRow label="Margin" value={duration(-owed)} />}
         <ReadOnlyRow label="Commenced" value={clock(rest.startMs)} />
       </div>
       <div className="overflow-hidden rounded-xl border bg-card">
