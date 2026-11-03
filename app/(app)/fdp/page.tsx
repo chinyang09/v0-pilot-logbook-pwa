@@ -18,6 +18,9 @@ import {
   type RegulationType,
 } from "@/types/entities/roster.types"
 import { FDPTimelineChart } from "@/components/roster/fdp-timeline-chart"
+import { DutyTimeline } from "@/components/roster/duty-timeline"
+import { buildDutyTimeline } from "@/lib/utils/roster/duty-timeline"
+import { useFlights } from "@/hooks/data/use-flights"
 import { QuickCheckPanel } from "@/components/roster/quick-check-panel"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useMainPanelFullWidth } from "@/lib/layout/panel-mode"
@@ -89,6 +92,12 @@ export default function FDPPage() {
     isLoading,
   } = useFDPData()
   const timelineData = useFDPTimeline(allDutyPeriods)
+  // The duty timeline draws each duty's sectors, so it needs the rows they name.
+  const { flights } = useFlights()
+  const dutyBlocks = useMemo(() => {
+    const byId = new Map(flights.map((f) => [f.id, f]))
+    return buildDutyTimeline(allDutyPeriods, byId)
+  }, [allDutyPeriods, flights])
 
   const { preferences } = usePreferences()
   const activeRule: RegulationType = preferences.dutyTimeDefaults?.regulationType ?? "CAAS"
@@ -313,6 +322,14 @@ export default function FDPPage() {
               scenarioRemovedDates={scenarioResult?.removedDates}
               onClearScenario={() => setScenarioResult(null)}
             />
+          </ChartErrorBoundary>
+        ) : null}
+
+        {/* Each duty on one time axis: what was flown, the duty around it,
+            and the rest between. */}
+        {dutyBlocks.length > 0 ? (
+          <ChartErrorBoundary>
+            <DutyTimeline blocks={dutyBlocks} />
           </ChartErrorBoundary>
         ) : !isLoading ? (
           <EmptyState

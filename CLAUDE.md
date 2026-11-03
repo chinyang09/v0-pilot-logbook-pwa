@@ -48,7 +48,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 
 | Area | What it pins down |
 |---|---|
-| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp, that the single-pass timeline sums and acclimatisation equal their per-item definitions, the rolling windows in six time zones, and the Quick Check's violations |
+| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp, that the single-pass timeline sums and acclimatisation equal their per-item definitions, the rolling windows in six time zones, the duty timeline's blocks and range totals, and the Quick Check's violations |
 | `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation, and a REAL schedule PDF (`fixtures/schedule-oct-2026-local-base.pdf`) run through the actual extractor |
 | `lib/utils/parsers/shared/__tests__/pooled-map.test.ts` | the bounded fan-out both enrichment chains end in |
 | `lib/lookup/__tests__/search-candidates.test.ts`, `lib/lookup/__tests__/composite.test.ts`, `app/api/lookup/__tests__/` | search candidates — airframe and live-flight hits, exact / begins / inside ranking, one row per tail, airport codes off the label; the composed `aircraft/candidates` asking the flight history only for a whole registration search missed, and `exact=1` answering 404 only when every source answered; the door's sign-in rule over both kinds of route; enrichment never taking a near miss |
@@ -2083,7 +2083,7 @@ or a dialog over the list.
 | roster, currencies | month + agenda / the list | the duty / currency form (`DetailFormPanel`); a roster FLIGHT (`FlightForm`) |
 | discrepancies | comparisons, notes | a comparison's FLIGHT (`FlightForm`); a note and its Resolve (`DiscrepancyDetailPanel`) |
 | recently deleted | the bin | what the item was, how long it is kept, Restore / Delete forever |
-| FDP | the timeline chart, at FULL width | the Quick Check, only while it is open |
+| FDP | the rolling chart and the duty timeline, at FULL width | the Quick Check, only while it is open (a duty block expands IN PLACE — see "The FDP page") |
 | account, settings | the sections | the section |
 | dashboard | legal / summary | a requirement cell (`RequirementDetailPanel`); a period flight (`FlightForm`) |
 
@@ -4046,6 +4046,38 @@ scenario's (`scenario.test.ts`). The FDP chart's tooltip reads the same rule
 (`TimelineDataPoint.fdpExceeded`) and prints the FDP against its maximum
 (`fdpHours`) on its own row — "Duty 12:40/12:15" in red, for an FDP of 12:10,
 was the duty compared with a limit it is not measured against.
+
+### The FDP page — two charts, two questions (Nov 2026)
+
+| | Answers | Shape |
+|---|---|---|
+| the rolling chart (`fdp-timeline-chart.tsx`) | how close am I to a limit | a running total per day, against the limit lines |
+| the duty timeline (`duty-timeline.tsx`, `lib/utils/roster/duty-timeline.ts`) | how much have I flown, how much duty, how much rest between | every duty a BLOCK on one continuous time axis, its sectors inside it, the rest as the gaps |
+
+- **Flown and planned are two series, split AT TODAY.** Each rolling key is
+  written twice (`<key>__flown` up to and including today, `<key>__planned`
+  from today on, so the two meet), the planned one dashed in
+  `FDP_COLORS.planned` — the yellow the Quick Check's scenario uses. The
+  colours live in `components/roster/fdp-colors.ts`, shared by both charts.
+  The daily bars are gone: they restated the running total's steps.
+- **The x-axis is `allowDuplicatedCategory={false}`.** Recharts' category axis
+  defaults to allowing duplicates, and then a `ReferenceLine x=` /
+  `ReferenceArea x1=` cannot find its category by value — the Today line and
+  the rest-violation columns silently drew nothing.
+- **The default window is anchored on TODAY** (two weeks ahead of it where the
+  data reaches), not on the last data point — with the roster ahead in the
+  pipeline the last point is weeks out and today fell off the left edge.
+- **The timeline's blocks come from the same duty periods the limits were
+  computed from** (`allDutyPeriods`, flown + `upcomingPlannedDuties`), and the
+  rest is the pipeline's own `restBefore` where it has one, so the two can
+  never disagree. A sector is drawn on actual OUT/IN, else scheduled. Zoom is
+  3 days / week / 2 weeks; it scrolls sideways and renders only the days and
+  blocks within a view either side. The figures over it (`summarizeTimeline`)
+  count only the part of a duty inside the view, flight time pro-rated, so
+  two adjacent views never count one duty twice.
+- **A tapped block expands IN PLACE, under the strip** — an exception to
+  Main / Detail, because the FDP page gives the detail panel to the Quick
+  Check only and the owner asked for "expand".
 
 ### OCR engine
 
