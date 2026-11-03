@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from "vitest"
 import { buildDutyTimeline, summarizeTimeline } from "../duty-timeline"
+import { SCENARIO_DUTY_PREFIX } from "../fdp-calculator"
 import type { DutyPeriod, ScheduleEntry } from "@/types/entities/roster.types"
 import type { FlightLog } from "@/types/entities/flight.types"
 
@@ -83,6 +84,7 @@ describe("buildDutyTimeline", () => {
       startMs: at("2026-11-04T01:00:00Z") - 870 * 60_000,
       minutes: 870,
       requiredMinutes: 720,
+      minimumEndMs: at("2026-11-04T01:00:00Z") - 150 * 60_000,
       compliant: true,
       status: "ok",
       previousId: "d1",
@@ -93,6 +95,7 @@ describe("buildDutyTimeline", () => {
       startMs: at("2026-11-04T10:30:00Z"),
       minutes: 16.5 * 60,
       requiredMinutes: null,
+      minimumEndMs: null,
       compliant: null,
       status: null,
       previousId: "d2",
@@ -152,6 +155,50 @@ describe("against the limits", () => {
         new Map(),
       )[1].restBefore?.status
     expect([rest(700, false), rest(750, true), rest(900, true)]).toEqual(["short", "tight", "ok"])
+  })
+})
+
+describe("the maximum and the minimum", () => {
+  it("moves the sign-off by the FDP still in hand, and draws it only for a duty still to come", () => {
+    // 01:00–09:30, last on-blocks 09:00: an FDP of 8:00 against a 13:00 maximum.
+    const flown = duty({ id: "f", fdpEndTime: "09:00" })
+    const planned = duty({ id: "p", date: "2026-11-10", fdpEndTime: "09:00", isFuture: true })
+    const [a, b] = buildDutyTimeline([flown, planned], new Map())
+    expect(a.latestSignOffMs).toBe(a.endMs + 5 * H)
+    expect(a.showMax).toBe(false)
+    expect(b.showMax).toBe(true)
+    // Over: the latest sign-off falls BEFORE the sign-off.
+    const [over] = buildDutyTimeline([duty({ id: "o", fdpEndTime: "09:00", maxFdpMinutes: 420 })], new Map())
+    expect(over.latestSignOffMs).toBe(over.endMs - 1 * H)
+    expect(over.limit).toBe("over")
+  })
+
+  it("has no maximum on a standby", () => {
+    const [s] = buildDutyTimeline([duty({ id: "s", dutyKind: "standby", maxFdpMinutes: 0, isFuture: true })], new Map())
+    expect(s.latestSignOffMs).toBeNull()
+    expect(s.showMax).toBe(false)
+  })
+
+  it("ends the minimum rest at its requirement, past the sign-on when short", () => {
+    const first = duty({ id: "d1" })
+    const short = duty({
+      id: "d2",
+      date: "2026-11-03",
+      reportTime: "19:30",
+      restBefore: { restMinutes: 540, requiredRestMinutes: 720, compliant: false } as DutyPeriod["restBefore"],
+    })
+    const [, b] = buildDutyTimeline([first, short], new Map())
+    expect(b.restBefore!.minimumEndMs! - b.startMs).toBe(3 * H)
+  })
+
+  it("draws a what-if duty's flying inside it, from the end of the pre-flight checks", () => {
+    const what = duty({ id: `${SCENARIO_DUTY_PREFIX}c1__`, isFuture: true, flightMinutes: 240 })
+    const [b] = buildDutyTimeline([what], new Map())
+    expect(b.scenario).toBe(true)
+    expect(b.showMax).toBe(true)
+    expect(b.sectors).toHaveLength(1)
+    expect(b.sectors[0].outMs).toBe(b.startMs + H)
+    expect(b.sectors[0].inMs - b.sectors[0].outMs).toBe(4 * H)
   })
 })
 

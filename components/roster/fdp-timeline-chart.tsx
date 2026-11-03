@@ -61,7 +61,7 @@ const OVERVIEW_POINTS = 240
 const COLORS = {
   violation: FDP_COLORS.violation,
   warning90: "#b08040",   // muted amber for 90% line
-  scenario: "#d68a3e",    // muted orange — scenario/what-if change highlight
+  scenario: FDP_COLORS.scenario, // muted orange — scenario/what-if change highlight
   /**
    * What is PLANNED — every day after today. The rolling line changes colour
    * at today, the way the Quick Check's what-if paints over the flown line, so

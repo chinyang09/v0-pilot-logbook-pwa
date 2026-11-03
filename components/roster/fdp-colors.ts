@@ -11,6 +11,8 @@ export const FDP_COLORS = {
   flight: "#5a9478",
   /** What is still PLANNED: every day after today. */
   planned: "#d4b13c",
+  /** A Quick Check what-if — a duty added to the roster to test it. */
+  scenario: "#d68a3e",
   /** A limit broken, a rest short. */
   violation: "#b04e3a",
 } as const

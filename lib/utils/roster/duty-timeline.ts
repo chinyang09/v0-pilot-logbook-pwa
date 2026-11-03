@@ -1,9 +1,10 @@
 /**
- * The duty timeline: a Gantt chart whose axis is time, in three lanes —
+ * The duty timeline: a Gantt chart whose axis is time —
  *
- *   DUTY    sign-on → sign-off, every duty (flight, standby, ground)
- *   FLIGHT  each sector's block time (OUT→IN)
- *   REST    the gap between consecutive duties
+ *   DUTY    sign-on → sign-off, every duty (flight, standby, ground), with
+ *           each sector's block time (OUT→IN) drawn INSIDE it
+ *   REST    decked directly under it: the rest as provided, and the minimum
+ *           the regulation required of it
  *
  * — each labelled with its DURATION and judged against its LIMIT: a duty
  * whose FDP runs past its Reg 14 maximum, and a rest short of what para 3/4
@@ -21,7 +22,7 @@ import { DEFAULT_FTL_LIMITS, type DutyPeriod, type ScheduleEntry } from "@/types
 import type { FlightLog } from "@/types/entities/flight.types"
 import { isPositioningEntry } from "@/lib/utils/entry-type"
 import { hhmmToMinutes } from "@/lib/utils/time"
-import { fdpMinutesOf, isDutyExceedingLimits } from "@/lib/utils/roster/fdp-calculator"
+import { fdpMinutesOf, isDutyExceedingLimits, SCENARIO_DUTY_PREFIX } from "@/lib/utils/roster/fdp-calculator"
 import {
   POST_FLIGHT_CHECK_MIN,
   PRE_FLIGHT_CHECK_MIN,
@@ -90,6 +91,19 @@ export interface DutyBlock {
    */
   limit: "over" | "near" | null
   /**
+   * The latest sign-off the FDP maximum allows — the sign-off moved by the
+   * FDP still in hand (negative when over). Null where no maximum applies.
+   */
+  latestSignOffMs: number | null
+  /**
+   * Draw the maximum: a duty still to come (rostered, or a Quick Check
+   * what-if). Once a duty has been flown its record is the fact, and the
+   * maximum is only said when it was broken.
+   */
+  showMax: boolean
+  /** A duty the Quick Check's scenario added. */
+  scenario: boolean
+  /**
    * The rest before this duty — the regulation's figure where the pipeline
    * computed one (it commences an hour after free of all duties), else the
    * plain gap since the last duty ended. Null for the first duty, and for a
@@ -103,6 +117,8 @@ export interface RestBefore {
   startMs: number
   minutes: number
   requiredMinutes: number | null
+  /** When the required rest would have been complete, null when unknown. */
+  minimumEndMs: number | null
   compliant: boolean | null
   /** `short` below the requirement, `tight` within an hour of it. */
   status: "short" | "tight" | "ok" | null
@@ -222,8 +238,35 @@ function groundBlock(e: ScheduleEntry, today: string): DutyBlock | null {
     maxFdpMinutes: 0,
     fdpMinutes: 0,
     limit: null,
+    latestSignOffMs: null,
+    showMax: false,
+    scenario: false,
     restBefore: null,
   }
+}
+
+/**
+ * A what-if duty carries its flight time but no rows: drawn as one span from
+ * the end of the pre-flight checks, so the bar still shows flying inside duty.
+ */
+function syntheticSector(dp: DutyPeriod, startMs: number): TimelineSector[] {
+  if (!(dp.flightMinutes > 0)) return []
+  const outMs = startMs + PRE_FLIGHT_CHECK_MIN * MIN
+  return [
+    {
+      id: `${dp.id}:flight`,
+      flightNumber: "",
+      from: "",
+      to: "",
+      outMs,
+      inMs: outMs + dp.flightMinutes * MIN,
+      scheduled: null,
+      registration: "",
+      type: "",
+      planned: true,
+      positioning: false,
+    },
+  ]
 }
 
 /**
@@ -241,15 +284,19 @@ export function buildDutyTimeline(
     if (!dp.date || !dp.reportTime || !(dp.dutyMinutes > 0)) continue
     const startMs = instant(dp.date, dp.reportTime)
     const endMs = startMs + dp.dutyMinutes * MIN
-    const sectors = dp.flightIds
+    const scenario = dp.id.startsWith(SCENARIO_DUTY_PREFIX)
+    const fromRows = dp.flightIds
       .map((id) => flightsById.get(id))
       .filter((f): f is FlightLog => !!f)
       .map(sectorOf)
       .filter((s): s is TimelineSector => !!s)
       .sort((a, b) => a.outMs - b.outMs)
+    const sectors = scenario && fromRows.length === 0 ? syntheticSector(dp, startMs) : fromRows
     const types: string[] = []
     for (const s of sectors) if (s.type && !s.positioning && !types.includes(s.type)) types.push(s.type)
     const standby = dp.dutyKind === "standby"
+    const max = standby ? 0 : dp.maxFdpMinutes || 0
+    const fdp = standby ? 0 : fdpMinutesOf(dp)
     blocks.push({
       id: dp.id,
       kind: standby ? "standby" : "flight",
@@ -265,8 +312,11 @@ export function buildDutyTimeline(
       isFuture: dp.isFuture,
       isStandby: standby,
       maxFdpMinutes: dp.maxFdpMinutes || 0,
-      fdpMinutes: standby ? 0 : fdpMinutesOf(dp),
+      fdpMinutes: fdp,
       limit: limitOf(dp),
+      latestSignOffMs: max > 0 ? endMs + (max - fdp) * MIN : null,
+      showMax: max > 0 && (dp.isFuture || scenario),
+      scenario,
       restBefore: null,
     })
   }
@@ -294,10 +344,12 @@ export function buildDutyTimeline(
       const minutes = rp ? rp.restMinutes : gap
       const requiredMinutes = rp ? rp.requiredRestMinutes : null
       const compliant = rp ? rp.compliant : null
+      const startMs = b.startMs - minutes * MIN
       b.restBefore = {
-        startMs: b.startMs - minutes * MIN,
+        startMs,
         minutes,
         requiredMinutes,
+        minimumEndMs: requiredMinutes != null ? startMs + requiredMinutes * MIN : null,
         compliant,
         status: restStatus(minutes, requiredMinutes, compliant),
         previousId: previous.id,

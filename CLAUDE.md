@@ -4052,7 +4052,7 @@ was the duty compared with a limit it is not measured against.
 | | Answers | Shape |
 |---|---|---|
 | the rolling chart (`fdp-timeline-chart.tsx`) | how close am I to a limit | a running total per day, against the limit lines |
-| the duty timeline (`duty-timeline.tsx`, `lib/utils/roster/duty-timeline.ts`) | how long each duty, flight and rest was — and whether it BUST a limit or MET its minimum | a GANTT chart on a time axis, three lanes: DUTY (sign-on → sign-off), FLIGHT (each sector's block time), REST (between flight duties); each bar labelled with its duration and coloured by its verdict |
+| the duty timeline (`duty-timeline.tsx`, `lib/utils/roster/duty-timeline.ts`) | how long each duty, flight and rest was — and whether it BUST a limit or MET its minimum | a GANTT chart on a time axis, ONE DECK per duty: the duty bar (sign-on → sign-off) with each sector's block time drawn INSIDE it, and the rest before it decked directly underneath (no gap) — the minimum required, then the rest as provided to the sign-on; each labelled with its duration |
 
 - **Flown and planned are two series, split AT TODAY.** Each rolling key is
   written twice (`<key>__flown` up to and including today, `<key>__planned`
@@ -4077,31 +4077,45 @@ was the duty compared with a limit it is not measured against.
   ground duties come from the roster (`scheduleEntries`, UTC only — a local
   frame is left out rather than drawn a timezone wrong): the pipeline does not
   count them, but they are duty and are drawn, hatched like a standby.
-- **It exists to answer two verdicts, so the bars carry them.** A duty whose
-  FDP (`fdpMinutesOf`, against `maxFdpMinutes`) — or a standby's 18-hour cap —
-  is exceeded is RED (`isDutyExceedingLimits`, the pipeline's own rule), one in
-  the last tenth of its maximum ORANGE; a rest below its requirement is RED
-  with the rest still owed hatched past the sign-on, one within an hour of it
-  ORANGE. Near is `--status-critical`, not `--status-warning`: amber sat next
-  to the planned yellow and read as the same thing, and the rolling chart
-  above marks 90% of a limit in the same orange. A line under the figures
-  says it in words ("1 duty over the FDP limit · 2 rests short", or "Within
-  limits · every rest met"). Every bar is labelled with its DURATION over it
-  (a short rest's says what it needed), placed left to right and dropped
-  when it would overlap the last, so a dense view never prints one label on
-  another. There is no airborne time and no scheduled baseline on the chart —
-  the owner found the first version hard to read, and both were what made it
-  so; the schedule is in the detail ("07:10Z · sched 07:00Z"). Anything still
-  to come is the dashed planned yellow; a rest still to come is dashed GREY,
-  because yellow on this chart means a planned duty. Every other day is
-  banded so a day reads as a column.
+- **A limit is GEOMETRY, not a colour** (the owner's layout, Nov 2026). There
+  are no lane names on the left and no limit colours in the key — the room
+  goes to the timeline. A duty still to come (rostered, or a what-if) carries
+  its maximum as a DOTTED outline from sign-on to the latest sign-off it
+  allows (`latestSignOffMs` = sign-off + the FDP still in hand, so para 10(b)
+  and the post-flight half hour need no special case); a FLOWN duty draws no
+  maximum (`showMax`) — its record is the fact — and only the part past it,
+  if any, is struck red. The rest row shows the minimum (`minimumEndMs`)
+  solid, then the rest beyond it light; a minimum that runs past the next
+  sign-on is struck red there, directly under the duty that came too soon.
+  A line under the figures still says it in words ("1 duty over the FDP
+  limit · 2 rests short", or "Within limits · every rest met"), and a label's
+  figure goes red only for a real breach. Labels say the duty's duration
+  (with its flight time, and "max x" on a planned duty, where they fit), a
+  sector's block time inside it at 24 hours, and a rest's length ("· min"
+  or "· need" where it fits) — placed left to right and dropped when one
+  would overlap the last. Anything still to come is the dashed planned
+  yellow; every other day is banded so a day reads as a column.
+- **The axis is as good as endless, and Now brings it back.** It runs three
+  years either side of the logbook (and now), capped at `MAX_INNER_PX`
+  around now at the finest scale; only what is within a view either side is
+  drawn, so its length costs nothing. A jump of more than a few views is
+  instant, a short one smooth.
+- **The Quick Check draws on it.** `simulateScenario` returns the duties as
+  the what-if leaves them (`dutyPeriods`, rest recomputed) and the ids it
+  took out; the page builds blocks from them (`TimelineScenario`). An added
+  duty (`SCENARIO_DUTY_PREFIX`) is the what-if orange (`FDP_COLORS.scenario`,
+  shared with the rolling chart) with its flying drawn as one span from the
+  end of the pre-flight checks; a removed one is a dashed outline where it
+  was; a strip names the result with a Clear, and the view moves to the
+  first change. Closing the Quick Check KEEPS the what-if on both charts —
+  on a phone the check covers them, so going back is how it is read.
 - **Swipe to move, pinch to zoom.** 24 hours / 7 days / 28 days, from the tabs
   or a pinch (two fingers on the chart; ctrl-wheel for a trackpad), holding
   the time under the pinch still. The scroller is `touch-action: pan-x pan-y`
   and the pinch listener is native and non-passive, or the browser zooms the
-  page instead. Only what is within a view either side is rendered. Every tap
-  target is at least 28px wide (`hit`), centred on a narrower bar, and the
-  whole lane tall. The figures over it (`summarizeTimeline`) count only the
+  page instead. Every tap target is at least 28px wide (`hit`), centred on
+  a narrower bar: the duty's covers its label and bar, the rest's its bar
+  and label. The figures over it (`summarizeTimeline`) count only the
   part of a duty inside the view, flight time pro-rated, so two adjacent views
   never count one duty twice.
 - **A tapped duty or sector opens its sign-on, sign-off (each with the
