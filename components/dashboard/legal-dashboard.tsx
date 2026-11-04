@@ -495,7 +495,9 @@ function DutyBand({
             ]
               .filter(Boolean)
               .join(" · ")
-          : "No FDP limit computed",
+          : active.notFdp
+            ? `${active.notFdp} · Not an FDP`
+            : "No FDP limit computed",
         chipTone: hasFdp ? undefined : "idle",
         bar: hasFdp
           ? {

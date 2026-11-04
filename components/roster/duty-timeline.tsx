@@ -38,6 +38,7 @@ import { formatInstant, tzFormatter } from "@/lib/utils/tz-format"
 import { formatHHMMDisplay, minutesToHHMM } from "@/lib/utils/time"
 import { pointerState, REST_RULE_LABEL, type DutyBlock, type RestBefore } from "@/lib/utils/roster/duty-timeline"
 import { createRollingIndex, rollingAt, rollingSeries, type RollingIndex, type RollingKind } from "@/lib/utils/roster/rolling-at"
+import { analyseDaysOff } from "@/lib/utils/roster/days-off"
 import type { ForecastResult, FTLLimits } from "@/types/entities/roster.types"
 
 const MIN = 60_000
@@ -78,6 +79,13 @@ const MAX_INNER_PX = 12_000_000
 
 /** A trackpad pinch (ctrl + wheel): how strongly a unit of delta zooms. */
 const WHEEL_ZOOM = 0.004
+
+/** Para 13(1)(c) and para 3(2): what a pilot-in-command's discretion can cover. */
+const PIC_FDP_DISCRETION_MIN = 3 * 60
+const PIC_REST_DISCRETION_MIN = 2 * 60
+
+/** A duty that is not a flight duty period, by the code the timeline gives it. */
+const NOT_FDP: Record<string, string | undefined> = { SIM: "Simulator", POS: "Positioning" }
 
 const OVER = "var(--status-error)"
 const REST = "var(--muted-foreground)"
@@ -548,7 +556,7 @@ export function DutyTimeline({
       // already reads the duty it is on.
       if (fits(w, text)) duty.push({ key: `d${b.id}`, y: DUTY_Y + 3, x: left + w / 2, text, tone: b.limit === "over" ? "over" : null, onBar: true })
       for (const s of b.sectors) {
-        if (s.positioning) continue
+        if (s.positioning || s.simulator) continue
         const sw = xOf(s.inMs) - xOf(s.outMs)
         const st = duration((s.inMs - s.outMs) / MIN)
         if (fits(sw, st)) sector.push({ key: `s${s.id}`, y: DUTY_Y + DUTY_H - LABEL_H - 2, x: xOf(s.outMs) + sw / 2, text: st, tone: null, onBar: true })
@@ -566,6 +574,15 @@ export function DutyTimeline({
   }, [visible, xOf, duration])
 
   const exceedances = (forecast?.exceedances ?? []).filter((e) => e.limitName.includes(view.limitName)).slice(0, 3)
+
+  // Para 5 — days off — read off the same blocks the chart draws (the what-if's
+  // when there is one). Listed from four weeks back: what is still to be flown,
+  // and the month a pilot is about to account for.
+  const daysOffState = useMemo(() => analyseDaysOff(scenario?.blocks ?? blocks), [scenario, blocks])
+  const daysOffFindings = useMemo(
+    () => daysOffState.findings.filter((f) => f.atMs >= nowMs - 28 * DAY).slice(0, 4),
+    [daysOffState, nowMs],
+  )
 
   return (
     <FormSection>
@@ -768,9 +785,39 @@ export function DutyTimeline({
           </div>
         )}
 
+        {/* Para 5: a pattern of days off the roster breaks. */}
+        {daysOffFindings.length > 0 && (
+          <div className="space-y-1">
+            {daysOffFindings.map((f) => (
+              <button
+                key={`${f.rule}${f.atMs}`}
+                type="button"
+                onClick={() => scrollToTime(f.atMs)}
+                className={cn(
+                  "flex min-h-9 w-full items-center justify-between gap-3 rounded-md px-3 py-1.5 text-left text-xs",
+                  f.severity === "violation" ? "bg-status-error/10 text-status-error" : "bg-status-warning/10 text-status-warning",
+                )}
+              >
+                <span className="font-semibold">
+                  {fmt.dayMonth(f.atMs)} · {f.label}
+                </span>
+                <span className="shrink-0 tabular-nums opacity-80">Para {f.rule}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {selectedDuty && <DutyDetail block={selectedDuty} clock={clock} duration={duration} onClose={() => setSelection(null)} />}
         {restAfter?.restBefore && (
-          <RestDetail after={restAfter} before={restBefore} clock={clock} duration={duration} onDuty={showDuty} onClose={() => setSelection(null)} />
+          <RestDetail
+            after={restAfter}
+            before={restBefore}
+            daysOff={daysOffState.daysOff.filter((o) => o.startMs >= restAfter.restBefore!.signOffMs && o.endMs <= restAfter.startMs).length}
+            clock={clock}
+            duration={duration}
+            onDuty={showDuty}
+            onClose={() => setSelection(null)}
+          />
         )}
       </div>
     </FormSection>
@@ -844,7 +891,11 @@ function stateCells(
     if (b.kind === "ground") {
       return [{ caption: "Duty", value: b.code || "Ground" }, { caption: "Duty", value: duration(s.dutyMinutes) }, { ...none, caption: "Flight" }]
     }
-    return [{ caption: "Duty", value: state }, { caption: "Duty", value: duration(s.dutyMinutes) }, { caption: "Flight", value: duration(s.flightMinutes) }]
+    return [
+      { caption: "Duty", value: NOT_FDP[b.code] ?? state },
+      { caption: "Duty", value: duration(s.dutyMinutes) },
+      { caption: "Flight", value: duration(s.flightMinutes) },
+    ]
   }
   if (s.kind === "rest") {
     const req = s.rest.requiredMinutes
@@ -1010,7 +1061,7 @@ function DutyDeck({
   const left = xOf(b.startMs)
   const width = wOf(b.startMs, b.endMs)
   const h = hit(left, width)
-  const name = b.kind === "flight" ? b.route || "Duty" : b.kind === "standby" ? "Standby" : `Ground duty ${b.code}`
+  const name = b.kind === "flight" ? NOT_FDP[b.code] ?? (b.route || "Duty") : b.kind === "standby" ? "Standby" : `Ground duty ${b.code}`
   const ring = "ring-2 ring-primary ring-offset-1 ring-offset-card"
   const latest = b.latestSignOffMs
   const breachFrom = latest != null && b.endMs > latest ? Math.max(latest, b.startMs) : null
@@ -1035,14 +1086,14 @@ function DutyDeck({
       {b.sectors.map((s) => (
         <span
           key={s.id}
-          className={cn("pointer-events-none absolute rounded-[3px]", s.positioning && "border border-dashed")}
+          className={cn("pointer-events-none absolute rounded-[3px]", (s.positioning || s.simulator) && "border border-dashed")}
           style={{
             left: xOf(s.outMs),
             width: wOf(s.outMs, s.inMs),
             top: DUTY_Y + 1,
             height: DUTY_H - 2,
             borderColor: flightColor,
-            background: s.positioning ? "transparent" : tint(flightColor, future || b.scenario ? 75 : 85),
+            background: s.positioning ? "transparent" : s.simulator ? hatch(flightColor) : tint(flightColor, future || b.scenario ? 75 : 85),
           }}
         />
       ))}
@@ -1176,11 +1227,24 @@ function DutyDetail({
   const regs = Array.from(new Set(b.sectors.map((s) => s.registration).filter(Boolean)))
   const aircraft = [b.types.join(", "), regs.join(", ")].filter(Boolean).join(" · ")
   const rest = b.restBefore
-  const title = b.kind === "flight" ? b.route || "Duty" : b.kind === "standby" ? "Standby" : b.code
+  const notFdp = b.kind === "flight" ? NOT_FDP[b.code] : undefined
+  const title = notFdp ?? (b.kind === "flight" ? b.route || "Duty" : b.kind === "standby" ? "Standby" : b.code)
   const fdp =
     b.maxFdpMinutes > 0
       ? `${duration(b.fdpMinutes)} of ${duration(b.maxFdpMinutes)} max${b.limit === "over" ? ` · over by ${duration(b.fdpMinutes - b.maxFdpMinutes)}` : ""}`
       : ""
+  const over = b.maxFdpMinutes > 0 ? b.fdpMinutes - b.maxFdpMinutes : 0
+  // Para 13: the commander may extend an FDP by up to 3 hours in UNFORESEEN
+  // operational circumstances — never for a duty still to be flown, which is
+  // a schedule over its maximum.
+  const discretion =
+    over <= 0
+      ? null
+      : b.isFuture || b.scenario
+        ? { value: "None for a schedule (para 13)", tone: "over" as const }
+        : over <= PIC_FDP_DISCRETION_MIN
+          ? { value: "Within the PIC's 3:00 (para 13)", tone: "near" as const }
+          : { value: "Beyond the PIC's 3:00 (para 13)", tone: "over" as const }
   return (
     <div className="space-y-2 pt-1">
       <DetailHeader
@@ -1201,10 +1265,14 @@ function DutyDetail({
         <ReadOnlyRow label="Sign-Off" value={withScheduled(b.endMs, b.planned?.endMs, clock)} />
         <ReadOnlyRow label="Duty" value={duration(b.dutyMinutes)} />
         {fdp && <VerdictRow label="FDP" value={fdp} tone={b.limit} />}
+        {discretion && <VerdictRow label="Discretion" value={discretion.value} tone={discretion.tone} />}
+        {notFdp && <ReadOnlyRow label="FDP" value="Not a flight duty period" />}
         {b.showMax && b.latestSignOffMs != null && <ReadOnlyRow label="Latest Sign-Off" value={clock(b.latestSignOffMs)} />}
         {b.kind === "standby" && b.limit === "over" && <VerdictRow label="Limit" value="Over the 18:00 standby cap" tone="over" />}
         {b.kind === "flight" && <ReadOnlyRow label="Flight Time" value={duration(b.flightMinutes)} />}
-        {b.kind === "flight" && <ReadOnlyRow label="Sectors" value={String(b.sectors.length)} />}
+        {b.kind === "flight" && !notFdp && (
+          <ReadOnlyRow label="Sectors" value={String(b.sectors.filter((s) => !s.positioning && !s.simulator).length)} />
+        )}
         {aircraft && <ReadOnlyRow label="Aircraft" value={aircraft} />}
         {rest && (
           <VerdictRow
@@ -1223,7 +1291,7 @@ function DutyDetail({
                   {s.flightNumber || "—"} <span className="text-muted-foreground">{s.from}–{s.to}</span>
                 </p>
                 <p className="truncate text-xs text-muted-foreground">
-                  {[s.type, s.registration, s.positioning ? "Positioning" : "", s.planned ? "Scheduled" : ""].filter(Boolean).join(" · ")}
+                  {[s.type, s.registration, s.positioning ? "Positioning" : "", s.simulator ? "Simulator" : "", s.planned ? "Scheduled" : ""].filter(Boolean).join(" · ")}
                 </p>
               </div>
               <div className="shrink-0 text-right">
@@ -1246,6 +1314,7 @@ function DutyDetail({
 function RestDetail({
   after,
   before,
+  daysOff,
   clock,
   duration,
   onDuty,
@@ -1253,6 +1322,8 @@ function RestDetail({
 }: {
   after: DutyBlock
   before: DutyBlock | null
+  /** Days off (para 5) this rest holds. */
+  daysOff: number
   clock: (ms: number) => string
   duration: (min: number) => string
   onDuty: (b: DutyBlock) => void
@@ -1261,6 +1332,18 @@ function RestDetail({
   const rest = after.restBefore!
   const short = rest.status === "short"
   const owed = rest.requiredMinutes != null ? rest.requiredMinutes - rest.minutes : null
+  // Para 3(2): the commander may reduce a minimum rest by no more than 2 hours
+  // in unforeseen circumstances, "if the requirement for a local night, where
+  // required, is satisfied" — and never on a schedule.
+  const nightRequired = rest.rule === "3d" || rest.rule === "4a" || rest.rule === "4b"
+  const discretion =
+    !short || owed == null || owed <= 0
+      ? null
+      : after.isFuture || after.scenario
+        ? { value: "None for a schedule (para 3(2))", tone: "over" as const }
+        : owed <= PIC_REST_DISCRETION_MIN && (!nightRequired || rest.includesLocalNight)
+          ? { value: "Within the PIC's 2:00 (para 3(2))", tone: "near" as const }
+          : { value: "Beyond the PIC's 2:00 (para 3(2))", tone: "over" as const }
   return (
     <div className="space-y-2 pt-1">
       <DetailHeader
@@ -1283,6 +1366,8 @@ function RestDetail({
         {rest.rule && <ReadOnlyRow label="Rule" value={REST_RULE_LABEL[rest.rule]} />}
         {rest.includesLocalNight != null && <ReadOnlyRow label="Local Night (SGT)" value={rest.includesLocalNight ? "Included" : "Not included"} />}
         {short && owed != null && owed > 0 && <VerdictRow label="Short By" value={duration(owed)} tone="over" />}
+        {discretion && <VerdictRow label="Discretion" value={discretion.value} tone={discretion.tone} />}
+        {daysOff > 0 && <ReadOnlyRow label="Days Off (Para 5)" value={String(daysOff)} />}
         {!short && owed != null && <ReadOnlyRow label="Margin" value={duration(-owed)} />}
         <ReadOnlyRow label="Signed Off" value={clock(rest.signOffMs)} />
         <ReadOnlyRow label="Rest Commenced" value={clock(rest.startMs)} />
@@ -1296,7 +1381,7 @@ function RestDetail({
 }
 
 function NeighbourRow({ caption, block: b, when, onSelect }: { caption: string; block: DutyBlock; when: string; onSelect: () => void }) {
-  const name = b.kind === "flight" ? b.route || "Duty" : b.kind === "standby" ? "Standby" : b.code
+  const name = b.kind === "flight" ? NOT_FDP[b.code] ?? (b.route || "Duty") : b.kind === "standby" ? "Standby" : b.code
   return (
     <button type="button" onClick={onSelect} className="row-divider flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
       <div className="min-w-0">

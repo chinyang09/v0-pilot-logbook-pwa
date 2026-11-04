@@ -48,7 +48,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 
 | Area | What it pins down |
 |---|---|
-| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp, that the single-pass timeline sums and acclimatisation equal their per-item definitions, the rolling windows in six time zones, the duty timeline's blocks and the state at its pointer, the rolling limits at an instant (equal to the day figure once duties end), and the Quick Check's violations |
+| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp, that the single-pass timeline sums and acclimatisation equal their per-item definitions, the rolling windows in six time zones, the duty timeline's blocks and the state at its pointer, the rolling limits at an instant (equal to the day figure once duties end), the Quick Check's violations, and `fifth-schedule-scenarios.test.ts` — the Fifth and First Schedules clause by clause as worked scenarios through the real pipeline, days off (para 5) included |
 | `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation, and a REAL schedule PDF (`fixtures/schedule-oct-2026-local-base.pdf`) run through the actual extractor |
 | `lib/utils/parsers/shared/__tests__/pooled-map.test.ts` | the bounded fan-out both enrichment chains end in |
 | `lib/lookup/__tests__/search-candidates.test.ts`, `lib/lookup/__tests__/composite.test.ts`, `app/api/lookup/__tests__/` | search candidates — airframe and live-flight hits, exact / begins / inside ranking, one row per tail, airport codes off the label; the composed `aircraft/candidates` asking the flight history only for a whole registration search missed, and `exact=1` answering 404 only when every source answered; the door's sign-in rule over both kinds of route; enrichment never taking a near miss |
@@ -3745,18 +3745,25 @@ ordinary duty counts in full and only standby is discounted. Airport standby
 counts **zero** separately, because para 6(3) folds it into the rest period or
 the following FDP instead.
 
-**An un-called standby is REST.** The rest period runs straight through it: it
-takes no rest requirement of its own and does not become the duty the next one
-is measured against, so a flight after a standby rests from the last duty
-actually flown. `isRestingStandby` is the test; `calculateAllRestPeriods` and
-`calculateRestUntilLegal` are the two places that skip it. The 20% is unaffected
-— "did you rest" and "how many hours have you worked" are different questions
-and the schedule answers them in different paragraphs.
+**A home standby is REST — called out or not.** The rest period runs straight
+through it: it takes no rest requirement of its own and does not become the duty
+the next one is measured against, so a flight after a standby rests from the
+last duty actually flown. `isRestingStandby` is the test; `calculateAllRestPeriods`
+and `calculateRestUntilLegal` are the two places that skip it. The 20% is
+unaffected — "did you rest" and "how many hours have you worked" are different
+questions and the schedule answers them in different paragraphs. A CALLED-OUT
+standby is skipped too: it ends the moment the duty begins (6(6)), and treated as
+the duty to rest from it put the gap between activation and report — less the
+hour, so −1:00 — as the rest before the flight it became, and every called-out
+standby read "rest short".
 
-> ⚠ **ASSUMED, pending confirmation.** Para 3(1)(c)/(d) are written against a
-> "duty period", not a flight duty period, so read literally a 12-hour standby
-> does demand 12 hours of rest after it. This is the operator's practice taken
-> over the literal text, and it is the PERMISSIVE direction.
+> **The OWNER'S RULING (Nov 2026), against the literal text.** The First
+> Schedule's "duty" includes standby and a rest period is "free of all duties",
+> so read literally a standby interrupts rest and a 12-hour one demands 12 hours
+> after it under 3(1)(c). Both readings were put to the owner; the operator's
+> practice is the one kept. It is the PERMISSIVE direction — written down, not
+> assumed. For days off (para 5) a standby IS a duty: a day on standby is not a
+> day "free of all duties".
 
 **Para 6(6) — activation.** A standby that is called out ceases at the moment of
 activation, so `truncateActivatedStandby` cuts it back to the following duty's
@@ -4003,28 +4010,17 @@ crew logbook and `DEFAULT_FTL_LIMITS` carries the flight-crew figures — do not
   limits.** Only standby is discounted by rule; a ground duty is written to the
   roster and counted at zero, where para 12 would count it in full. It needs
   the owner's read on which of their ground codes are genuinely duty.
-- **Para 5: days off.** Not more than 7 consecutive days between days off; at
-  least 2 days off every 2 weeks; 8 every 4 weeks (6 permissible with
-  make-good); 82 hours at base after 7+ days away. None of this is computed.
-  It needs COMPLETE roster coverage to tell a day off from a day with no data,
-  and a false "you have worked 8 days straight" is worse than silence.
-- **Para 8: positioning.** A sector logged as `positioning` is duty but not an
-  operating sector (Entry Type, above). Still open: a duty made ONLY of
-  positioning is given the one-sector FDP maximum (it is a duty period, not an
-  FDP), and imports cannot mark positioning — neither report seen so far
-  flags it.
-- **Para 9: simulator then flying in the same duty.** Sim time counts in full
-  toward the subsequent FDP but is not a sector. The dashboard's
-  `buildPlannedDuties` skips simulators entirely.
-- **Para 3(1)(c)/(d) after a long standby.** Those sub-rules are written against
-  a "**duty period**", not a flight duty period, so read literally a 12-hour
-  home standby demands 12 hours of rest after it and an 18-hour one demands 24.
-  That sits oddly beside 6(7) counting only 20% of the same standby toward the
-  cumulative limits. The literal (conservative) reading is what is implemented;
-  if it proves punitive on a real roster the alternative is to drive
-  3(1)(c)/(d) from the COUNTED portion. Owner's call, against real data.
-- **Para 13 / 3(2): commander's discretion.** +3h FDP and −2h rest are not
-  representable, so a duty legitimately extended reads as an exceedance.
+- **Para 5(6)** (a disrupted flight may cut the ensuing day off by 4 hours if
+  made up) is not modelled — whether a disruption was unforeseen is not in
+  the record. Para 5(1)(b)'s "time taken to reach the accommodation" likewise.
+- **Imports cannot mark positioning** — neither report seen so far flags it.
+- **Para 13 / 3(2): commander's discretion** is not a field: a duty legitimately
+  extended still reads as an exceedance, and the timeline's detail SAYS whether
+  it lies within the PIC's 3:00 (FDP) or 2:00 (rest, local night satisfied) —
+  and that a schedule has no discretion at all.
+- **Para 4's "series" is read as ONE duty or more** (owner's ruling, Nov
+  2026): 24 hours before the first early-start / late-finish / WOCL duty after
+  an ordinary one, and again after two in a row.
 - **Acclimatisation is only as good as the roster's COVERAGE.**
   `acclimatisedOffsetMinutes` now walks the real duty history rather than
   assuming home base, but it reads a gap between two known duties as "free of
@@ -4036,6 +4032,40 @@ crew logbook and `DEFAULT_FTL_LIMITS` carries the flight-crew figures — do not
   rest definition takes the SHORTER of "one hour after free of all duties" and
   "on reaching the designated accommodation". The app has no idea when a crew
   member reached their hotel, so it models the first limb only.
+
+#### Audited against the full text (Nov 2026) — what changed
+
+The owner supplied the Fifth Schedule and the First Schedule in full; every
+clause was read against the code and `fifth-schedule-scenarios.test.ts` now
+walks them as worked scenarios through the REAL pipeline (flight rows in;
+duty periods, maxima, rests and days off out). The tables were already exact.
+What was wrong or missing:
+
+| Clause | Was | Is |
+|---|---|---|
+| FDP definition — "the last flight on which he or she is a crew member" | the FDP closed at the last arrival of ANY kind, so positioning home after the flying was charged against the maximum | closes at the last OPERATED on-blocks; the positioning is duty |
+| para 2(1)(b) — positioning "immediately precedes a flight" | across a date boundary it stayed a separate duty (merge only joined like kinds), so its rest to the flight read short | `mergeAdjacentDutyPeriods` joins positioning and simulator duties INTO a flight duty |
+| para 8 — positioning only | given the one-sector FDP maximum | `dutyKind: "positioning"`, a duty period with no maximum |
+| para 9 — simulator | counted as a sector, given a pre-flight hour, and a session alone was an FDP with a one-sector maximum | not a sector; its window is the detail itself; ahead of flying it opens the FDP (9(2)); alone it is `dutyKind: "training"`, a duty counted in full, no maximum; on the timeline it is hatched and adds no flight time (`TimelineSector.simulator`) |
+| para 4 — "consecutive flight duty periods" | a simulator or called-out standby between two early starts broke the run | non-FDPs neither extend nor end it (`isFlightDutyPeriod`) |
+| para 6(6) + the standby ruling | a called-out standby was the duty the flight rested from → rest −1:00 | skipped like an un-called one |
+| "acclimated" — 3 consecutive local nights free of duty | only nights inside ONE duty-free gap counted, so three London nights with day duties between never acclimated | the run of nights is carried across duties (`stepNights`); a night with a duty in it, or one in another zone, restarts it |
+| para 5 — days off | not computed | `days-off.ts`, below |
+
+**Para 5 is read off the timeline's own blocks** (`analyseDaysOff`), so the
+warning and the picture cannot disagree. A day off is 34 hours free of all
+duties with a local night, from an hour after the duty; each next one 24 hours
+with a local night (`daysOffIn`). Checked: 5(4)(a) more than 7 SGT dates
+worked between days off; 5(4)(b) fewer than 2 days off in any 14 SGT days;
+5(4)(c) fewer than 8 in any 28 — under 6 a violation, 6–7 a CAUTION unless the
+4 weeks before or after make the shortfall good; 5(5) back from 7 days or more
+away (the last sector's airport off home base, `DEFAULT_HOME_BASE`) without 82
+hours and 3 local nights before the next FDP. **Days off are found only
+BETWEEN known duties**, and windows are judged only inside the span the duties
+cover — missing data reads as free time, so it can only ever produce a day off,
+never a violation. Standby is a duty here; local nights are SGT. The FDP page
+lists findings from four weeks back under the forecast rows (tap → pointer),
+and a rest's detail counts the days off it holds.
 
 #### Rolling windows are whole UTC DAYS (settled 31 Oct 2026)
 
@@ -4129,6 +4159,13 @@ period and where it is focused", so they are ONE scroller on ONE time axis:
   (`allDutyPeriods`, flown + `upcomingPlannedDuties`), and a rest is the
   pipeline's own `restBefore` where it has one. Training and ground duties come
   from the roster (`scheduleEntries`, UTC only), hatched like a standby.
+- **Para 5 findings and the commander's discretion are read here too.** Under
+  the forecast rows, the days-off findings (`analyseDaysOff`, four weeks back
+  on); in a duty's detail, whether an FDP over its maximum lies within the
+  PIC's 3:00 (para 13) — "none for a schedule"; in a rest's detail, within the
+  PIC's 2:00 (para 3(2), the local night satisfied where required), its rule,
+  and the days off it holds. A simulator or positioning duty is named ("SIM",
+  "POS" → Simulator / Positioning) and reads "Not a flight duty period".
 - **A tapped duty or rest expands IN PLACE under the chart** — sign-on,
   sign-off, FDP against its maximum, latest sign-off, sectors; a rest's length,
   minimum and when it ends, and the duties before and after it — an exception
@@ -5073,7 +5110,10 @@ When making changes, be aware of these high-impact files:
 - Do not derive a duty's report time from the ACTUAL gate-out. It defaults to the ROSTERED report (`scheduledOut − PRE_FLIGHT_CHECK_MIN`), because a late aircraft under a crew who reported on time is the ordinary case and does not move the report — deriving from the actual OUT slid the duty's start forward with the delay and made the duty look SHORTER than it was (23 minutes hidden on the owner's TR566 duty; three hours on a three-hour delay, with the panel then offering FDP that does not exist). `FlightLog.reportTime` is how a genuinely moved report is recorded
 - Do not treat para 10(b) as a variation on 10(a). Under 10(b) the FDP window opens **4 hours after the ORIGINAL report**, which is EARLIER than the actual one — so part of the FDP is already spent when the crew member walks in. `DutyPeriod.fdpElapsedAtReport` carries that, and `ActiveDuty` keeps two clocks (`elapsedMinutes` for the crew duty period, `fdpElapsedMinutes` for the FDP) because only that branch separates them
 - Do not give a standby an FDP maximum, and do not let one reach an FDP exceedance check — it is a DUTY period but not a FLIGHT duty period, so paragraph 14's tables never applied to it. `maxFdpMinutes: 0` read as a limit makes every standby a full-length exceedance. Its cap is para 6(2)(a)'s 18 hours. `applyAcclimatisation` skips it (a lookup on 0 sectors would hand it the one-sector figure) and `mergeAdjacentDutyPeriods` will not merge it with a flight duty
-- Do not treat an un-called standby as a duty to rest FROM — it is rest, and the rest period runs straight through it. `isRestingStandby` is the test and `calculateAllRestPeriods` / `calculateRestUntilLegal` are the two places that skip it; read literally, para 3(1)(c) would otherwise demand 12 hours of rest after a 12-hour standby spent at home. It still contributes its 20%, and the assumption carries a marker because it is the permissive direction
+- Do not treat a home standby as a duty to rest FROM, called out or not — by the owner's ruling it is rest, and the rest period runs straight through it. `isRestingStandby` is the test and `calculateAllRestPeriods` / `calculateRestUntilLegal` are the two places that skip it. Treated as the duty to rest from, a CALLED-OUT one gave the flight it became a rest of −1:00. It still contributes its 20%, and for days off (para 5) it is a duty
+- Do not count a simulator session as a sector, give it para 7's pre-flight hour, or give a session-only duty an FDP maximum (para 9) — and do not let a positioning-only duty have one, or let positioning after the last flight extend the FDP. Read "is this an FDP" through `isFlightDutyPeriod`
+- Do not count "3 consecutive local nights" inside one duty-free gap only — the run carries across duties in the same zone (`stepNights`)
+- Do not evaluate a para 5 window outside the span the known duties cover, or count a day off anywhere but between two known duties — missing data must never produce a violation
 - Do not let `mergeDutyPeriods` consume a date for a NON-FLIGHT duty. Only a schedule flight duty is an alternative record of a logbook duty; a standby is a different duty that happens to share the day — and the day it shares with a flight is the day it was ACTIVATED on, so consuming the date dropped the one standby whose hours needed accounting for and hid the pair from `truncateActivatedStandby`
 - Do not answer "was this standby called out" in two places — `findActivationMinute` is the rule, with `truncateActivatedStandby` (duty periods) and `standbyActivation` (schedule entries + flights, for the roster page) as its two callers. And read the ROSTERED report when finding it, or a pushback delay moves the activation later and credits duty hours as standby
 - Do not let a standby into the dashboard's active-duty search — it would become the ACTIVE duty carrying `maxFdpMinutes: 0`, so the panel reads as a flight duty whose limit failed to compute. `DutyStatus.standby` is its own band

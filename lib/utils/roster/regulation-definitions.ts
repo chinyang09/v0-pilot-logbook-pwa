@@ -220,13 +220,60 @@ export interface DutyInterval {
 }
 
 /**
+ * The local nights a duty-free interval holds in full, as local day numbers
+ * (the night opening at 2200 on local day d is night d).
+ */
+function freeNights(startMs: number, endMs: number, tzOffsetMinutes: number): number[] {
+  if (!(endMs > startMs)) return []
+  const localStart = startMs + tzOffsetMinutes * MIN_MS
+  const localEnd = endMs + tzOffsetMinutes * MIN_MS
+  const out: number[] = []
+  for (let day = Math.floor(localStart / DAY_MS) - 1; day <= Math.floor(localEnd / DAY_MS); day++) {
+    const windowStart = day * DAY_MS + LOCAL_NIGHT_WINDOW_START_MIN * MIN_MS
+    const windowEnd = day * DAY_MS + LOCAL_NIGHT_WINDOW_END_MIN * MIN_MS
+    if (Math.min(localEnd, windowEnd) - Math.max(localStart, windowStart) >= LOCAL_NIGHT_DURATION_MIN * MIN_MS) {
+      out.push(day)
+    }
+  }
+  return out
+}
+
+/**
+ * The run of consecutive duty-free local nights, carried ACROSS duties.
+ *
+ * "3 consecutive local nights free of duty within a particular time zone" says
+ * nothing about the days between them: three nights in London with a day
+ * duty out and back between each is three consecutive nights free of duty.
+ * Counting only nights inside ONE duty-free gap (what this did) kept a crew
+ * member acclimated to the old zone for as long as they flew by day — on
+ * Table B where Table A applied abroad, and still on the far zone's time after
+ * coming home, which put a home-base morning departure in the wrong band.
+ */
+interface NightRun {
+  zone: number
+  lastNight: number
+  count: number
+}
+
+function stepNights(run: NightRun | null, nights: number[], zone: number): NightRun | null {
+  for (const night of nights) {
+    run =
+      run && run.zone === zone && run.lastNight === night - 1
+        ? { zone, lastNight: night, count: run.count + 1 }
+        : { zone, lastNight: night, count: 1 }
+  }
+  return run
+}
+
+/**
  * The zone a crew member is acclimated to, as an offset in minutes from UTC.
  *
  * Walks the duty history forward. After each duty the crew member is in that
- * duty's arrival zone; if the gap before the next duty contains three
- * consecutive local nights in that zone, they become acclimated to it.
- * Otherwise the previous acclimatisation stands — which is exactly the case
- * the schedule's Table B exists for.
+ * duty's arrival zone, and every local night they spend there free of duty
+ * extends the run of consecutive nights in that zone; a night with a duty in
+ * it, or one spent in another zone, starts the run again. Three in a row and
+ * they are acclimated to that zone. Otherwise the previous acclimatisation
+ * stands — which is exactly the case the schedule's Table B exists for.
  *
  * @param duties sorted oldest first
  * @param homeOffsetMinutes where the crew member is acclimated to begin with
@@ -238,6 +285,7 @@ export function acclimatisedOffsetMinutes(
   nowMs: number,
 ): number {
   let acclimatised = homeOffsetMinutes
+  let run: NightRun | null = null
 
   for (let i = 0; i < duties.length; i++) {
     const duty = duties[i]
@@ -246,16 +294,9 @@ export function acclimatisedOffsetMinutes(
     // The window free of duty after this one: until the next duty starts, or
     // until now if this is the last.
     const next = duties[i + 1]
-    const freeFrom = duty.endMs
     const freeUntil = Math.min(next ? next.startMs : nowMs, nowMs)
-    if (freeUntil <= freeFrom) continue
-
-    if (
-      countsConsecutiveLocalNights(freeFrom, freeUntil, duty.endZoneOffsetMinutes) >=
-      NIGHTS_TO_ACCLIMATISE
-    ) {
-      acclimatised = duty.endZoneOffsetMinutes
-    }
+    run = stepNights(run, freeNights(duty.endMs, freeUntil, duty.endZoneOffsetMinutes), duty.endZoneOffsetMinutes)
+    if (run && run.count >= NIGHTS_TO_ACCLIMATISE) acclimatised = run.zone
   }
 
   return acclimatised
@@ -286,16 +327,12 @@ export function acclimatisedOffsetsAtEachDuty(
   }
   const out: number[] = []
   let acclimatised = homeOffsetMinutes
+  let run: NightRun | null = null
   for (let i = 0; i < duties.length; i++) {
     if (i > 0) {
       const prev = duties[i - 1]
-      const freeUntil = duties[i].startMs
-      if (
-        freeUntil > prev.endMs &&
-        countsConsecutiveLocalNights(prev.endMs, freeUntil, prev.endZoneOffsetMinutes) >= NIGHTS_TO_ACCLIMATISE
-      ) {
-        acclimatised = prev.endZoneOffsetMinutes
-      }
+      run = stepNights(run, freeNights(prev.endMs, duties[i].startMs, prev.endZoneOffsetMinutes), prev.endZoneOffsetMinutes)
+      if (run && run.count >= NIGHTS_TO_ACCLIMATISE) acclimatised = run.zone
     }
     out.push(acclimatised)
   }
