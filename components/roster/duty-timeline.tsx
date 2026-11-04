@@ -27,7 +27,7 @@
  * duties on one axis.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { AlertTriangle, ChevronRight, Minus, Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { FormSection } from "@/components/ui/form-section"
@@ -266,6 +266,8 @@ export function DutyTimeline({
   const [viewStart, setViewStart] = useState<number | null>(null)
   /** A time to hold at an x in the view across a scale change. */
   const anchorRef = useRef<{ ms: number; x: number } | null>(null)
+  /** The exact instant at the centre — the store holds it floored to the minute. */
+  const centreRef = useRef(nowMs)
 
   useEffect(() => {
     const el = scrollerRef.current
@@ -282,21 +284,22 @@ export function DutyTimeline({
     const el = scrollerRef.current
     if (!el || pxPerMs === 0) return
     const left = rangeStart + el.scrollLeft / pxPerMs
-    pointer.set(Math.floor((left + width / 2 / pxPerMs) / MIN) * MIN)
+    centreRef.current = left + width / 2 / pxPerMs
+    pointer.set(Math.floor(centreRef.current / MIN) * MIN)
     const next = Math.floor(left / quantum) * quantum
     setViewStart((prev) => (prev === next ? prev : next))
   }, [pointer, pxPerMs, quantum, rangeStart, width])
 
   // Apply a pending anchor once the scale it needs is known: the opening
-  // view puts NOW at the pointer.
+  // view puts NOW at the pointer, a zoom holds the time under the fingers,
+  // and anything else that moves the axis — new data shifting where it
+  // starts, a resize — holds the pointer's own time where it was.
   useLayoutEffect(() => {
     const el = scrollerRef.current
     if (!el || pxPerMs === 0) return
-    const anchor = anchorRef.current ?? (viewStart == null ? { ms: nowMs, x: width / 2 } : null)
-    if (anchor) {
-      anchorRef.current = null
-      el.scrollLeft = Math.max(0, xOf(anchor.ms) - anchor.x)
-    }
+    const anchor = anchorRef.current ?? (viewStart == null ? { ms: nowMs, x: width / 2 } : { ms: centreRef.current, x: width / 2 })
+    anchorRef.current = null
+    el.scrollLeft = Math.max(0, xOf(anchor.ms) - anchor.x)
     readView()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs on a scale change only; viewStart is read for the first run
   }, [pxPerMs, width, xOf, nowMs])
@@ -337,17 +340,24 @@ export function DutyTimeline({
     },
     [pxPerMs, rangeStart, width],
   )
+  // Read by the native gesture listeners. Written in the LAYOUT phase, beside
+  // the scroll it pairs with — a passive effect left a frame in which the
+  // new scrollLeft met the old scale, and a pinch held the wrong time still.
   const latest = useRef({ span, zoomTo, scrollToTime, pxPerMs, rangeStart })
-  useEffect(() => {
+  useLayoutEffect(() => {
     latest.current = { span, zoomTo, scrollToTime, pxPerMs, rangeStart }
   })
 
-  // A new what-if is shown where it changed the roster.
-  useEffect(() => {
-    if (!scenario) return
-    const changed = [...scenario.blocks.filter((b) => b.scenario), ...scenario.removed].sort((a, b) => a.startMs - b.startMs)
-    if (changed[0]) latest.current.scrollToTime(changed[0].startMs)
+  // A new what-if is shown where it changed the roster — once per what-if,
+  // not on every data refresh that rebuilds the same one.
+  const firstChange = useMemo(() => {
+    if (!scenario) return null
+    const changed = [...scenario.blocks.filter((b) => b.scenario), ...scenario.removed]
+    return changed.length ? Math.min(...changed.map((b) => b.startMs)) : null
   }, [scenario])
+  useEffect(() => {
+    if (firstChange != null) latest.current.scrollToTime(firstChange)
+  }, [firstChange])
 
   // Pinch: the span follows the fingers' spread continuously, and the time
   // that was under them stays under them (so a pinch can also pan). Native
@@ -357,6 +367,8 @@ export function DutyTimeline({
     const el = scrollerRef.current
     if (!el) return
     let pinch: { spread: number; span: number; ms: number } | null = null
+    /** A wheel gesture's own running span and held time — the render may not have caught up between events. */
+    let wheel: { span: number; ms: number; at: number } | null = null
     let pending: { span: number; x: number; ms: number } | null = null
     let raf = 0
     const flush = () => {
@@ -392,8 +404,11 @@ export function DutyTimeline({
       if (!e.ctrlKey) return
       e.preventDefault()
       const x = e.clientX - el.getBoundingClientRect().left
-      const base = pending?.span ?? latest.current.span
-      queue({ span: base * Math.exp(e.deltaY * WHEEL_ZOOM), x, ms: pending?.ms ?? msAt(x) })
+      const now = performance.now()
+      const going = wheel && now - wheel.at < 250 ? wheel : null
+      const span = Math.min(MAX_SPAN, Math.max(MIN_SPAN, (going?.span ?? latest.current.span) * Math.exp(e.deltaY * WHEEL_ZOOM)))
+      wheel = { span, ms: going?.ms ?? msAt(x), at: now }
+      queue({ span, x, ms: wheel.ms })
     }
     // Safari's own pinch gesture, which would otherwise zoom the page.
     const onGesture = (e: Event) => e.preventDefault()
@@ -804,11 +819,12 @@ function PointerReadout({
         {dayMonth(t)} {clock(t)}
       </p>
       <p className={cn("text-xs tabular-nums", over ? "font-semibold text-status-error" : "text-muted-foreground")}>
+        {/* Breaks between its parts, never inside one ("FDP 4:28/13:15"). */}
         {line.split(" · ").map((part, i) => (
-          <span key={i} className="whitespace-nowrap">
+          <Fragment key={i}>
             {i > 0 && " · "}
-            {part}
-          </span>
+            <span className="whitespace-nowrap">{part}</span>
+          </Fragment>
         ))}
       </p>
     </div>

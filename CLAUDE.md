@@ -4062,7 +4062,9 @@ period and where it is focused", so they are ONE scroller on ONE time axis:
 | the deck | each duty bar (sign-on → sign-off) the full row height with its sectors' block time INSIDE it, full height too; the rest directly under it with no gap |
 
 - **The pointer is the centre of the view, to the minute, at any zoom.** It is a
-  fixed line over the scroller; the readouts subscribe to a small store
+  fixed line over the scroller, and it HOLDS its instant through anything that
+  moves the axis without a gesture — new data shifting where the axis starts,
+  a resize — so a sync never slides the view out from under the reader; the readouts subscribe to a small store
   (`createPointerStore`) written on each scroll frame, so the chart itself
   re-renders only when what is drawn has to move on (a quarter of the view).
   Nothing on the page is a total "over the period in view" any more — the
@@ -5150,7 +5152,6 @@ When making changes, be aware of these high-impact files:
 - Do not read computed style or layout in an effect that runs on a navigation's commit (`getComputedStyle(x).transform`, a rect) — the arriving page's DOM is still dirty, so the read is a style recalculation of the whole page. The gravity blob's interrupted-move position came from `getComputedStyle` and cost 312ms at 4× on a sidebar tap to FDP; it is computed from the move's own spring track and `currentTime` now
 - Do not let a keep-alive page listen to a background process's progress while it is hidden — the airports page re-rendered on every 250-row chunk of the seed it had started, while the pilot was on another page. Gate the listener on `usePageActive` as well as on there being something to wait for
 - Do not compute the whole period aggregate (`aggregateDashboard`) to read one figure off it — the legal page needs only recency, which is `ninetyDayRecency`. And keep `usePilotStatus`'s duty and legality halves in separate memos: one memo rebuilt the duty model (a pass over every duty window) each time an input it never reads landed
-- Do not let a chart restart from fallback colours on each mount when the theme has not changed — `FDPTimelineChart` probes its SVG colours once and the answer is cached per mode + palette, so a remount does not render the whole chart twice
 - Do not reintroduce a second typeface — Inter is the single app font (`--font-sans` and `--font-mono` both resolve to Inter); use `tabular-nums` for aligned numbers, never a `font-mono` class or a new Google-Fonts `<link>`
 - Do not give `register/complete`, `add-passkey`, the callsign change, or the TOTP-reveal routes a path that skips `verifyAuthenticationResponse`/`verifyStepUpAssertion` — the TOTP seed must never be revealed without a fresh passkey step-up
 - Do not give `SwipeableCard` action panels horizontal padding — the panel must collapse to 0 width when closed (the left gap comes from `openWidth`/`justify-end`), otherwise a sliver of the action button peeks at the card edge
