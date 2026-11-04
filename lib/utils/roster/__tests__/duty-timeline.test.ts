@@ -76,7 +76,7 @@ describe("buildDutyTimeline", () => {
       id: "d2",
       date: "2026-11-04",
       reportTime: "01:00",
-      restBefore: { restMinutes: 870, requiredRestMinutes: 720, compliant: true } as DutyPeriod["restBefore"],
+      restBefore: { restMinutes: 870, requiredRestMinutes: 720, compliant: true, rule: "3b", includesLocalNight: false } as DutyPeriod["restBefore"],
     })
     const third = duty({ id: "d3", date: "2026-11-05", reportTime: "03:00" })
     const [, b2, b3] = buildDutyTimeline([third, first, second], new Map())
@@ -89,6 +89,8 @@ describe("buildDutyTimeline", () => {
       compliant: true,
       status: "ok",
       previousId: "d1",
+      rule: "3b",
+      includesLocalNight: false,
     })
     // 2026-11-04 09:30 → 2026-11-05 03:00 is 17h30; rest commences an hour
     // after free of all duties, so 16h30, no requirement known.
@@ -101,6 +103,8 @@ describe("buildDutyTimeline", () => {
       compliant: null,
       status: null,
       previousId: "d2",
+      rule: null,
+      includesLocalNight: null,
     })
   })
 

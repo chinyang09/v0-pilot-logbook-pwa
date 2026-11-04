@@ -26,7 +26,6 @@ import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useMainPanelFullWidth } from "@/lib/layout/panel-mode"
 import type { ScenarioResult } from "@/lib/utils/roster/fdp-calculator"
 import { cn } from "@/lib/utils"
-import { formatMinutesHM, formatYMDShort as formatShortDate } from "@/lib/utils/date"
 
 /** Error boundary around the chart — prevents Recharts crashes from taking down the page */
 class ChartErrorBoundary extends Component<
@@ -73,20 +72,10 @@ class ChartErrorBoundary extends Component<
   }
 }
 
-/** Extract outbound destination from a route string like "WSSS-VVNB/VVNB-WSSS". */
-function extractDestination(route?: string): string {
-  if (!route) return ""
-  const firstSector = route.split("/")[0] ?? ""
-  const parts = firstSector.split("-")
-  return parts[1]?.trim() ?? ""
-}
-
 export default function FDPPage() {
   const {
     allDutyPeriods,
     forecast,
-    futureDuties,
-    restUntilLegal,
     isLoading,
   } = useFDPData()
   // The duty timeline draws each duty's sectors, so it needs the rows they
@@ -195,20 +184,6 @@ export default function FDPPage() {
   // that needs the panel, and opening it gives the panel back.
   useMainPanelFullWidth(!quickCheckOpen)
 
-  // Next scheduled duty drives the banner — no more ticking countdown.
-  //
-  // IMPORTANT: we deliberately do NOT mirror `restUntilLegal`, `futureDuties`,
-  // or any other `useFDPData` output into local state. SWR revalidations and
-  // airport-timezone resolution hand us new array references repeatedly; any
-  // setState-on-prop-change pattern risks React error #185 ("Maximum update
-  // depth exceeded") which the chart error boundary surfaces as "Chart failed
-  // to render". Static snapshots from the data hook are sufficient.
-  const nextDuty = futureDuties[0]
-  const nextDestination = extractDestination(nextDuty?.route)
-  const restHadMinutes = restUntilLegal?.restElapsedMinutes ?? 0
-  const restRequiredMinutes = restUntilLegal?.requiredRestMinutes ?? 0
-  const isRestMet = restHadMinutes >= restRequiredMinutes
-
   // Header actions: the Quick Check, a TOOL — one capsule (see the header
   // rule in glass-icon-button.tsx). There is no Refresh: it re-read the
   // schedule table, which every write and every sync already does.
@@ -229,85 +204,6 @@ export default function FDPPage() {
   return (
     <PageContainer title="FDP">
       <div className="px-panel pt-2 space-y-2">
-        {/* Next duty banner — reports next scheduled duty + rest vs. requirement.
-            Static snapshot from useFDPData; no tick interval to avoid setState
-            churn that could crash the chart (React error #185). */}
-        {nextDuty ? (
-          <Card
-            className={cn(
-              "border py-0 gap-0",
-              isRestMet
-                ? "border-status-valid/20 bg-status-valid/5"
-                : "border-status-error/20 bg-status-error/5"
-            )}
-          >
-            <CardContent className="py-1.5 px-2.5">
-              <div className="flex items-center gap-2.5">
-                {/* Left: next reporting time in distinctive serif/mono */}
-                <div className="flex flex-col leading-none shrink-0">
-                  <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
-                    Next
-                  </span>
-                  <span className="font-serif italic text-base tabular-nums text-foreground mt-0.5">
-                    {formatShortDate(nextDuty.date)} {nextDuty.reportTime}Z
-                  </span>
-                </div>
-                {nextDestination && (
-                  <div className="border-l border-border pl-2.5 min-w-0 shrink-0">
-                    <span className="text-[9px] uppercase tracking-wider text-muted-foreground block leading-none">
-                      Dest
-                    </span>
-                    <span className="text-sm font-semibold text-foreground mt-0.5 block leading-none">
-                      {nextDestination}
-                    </span>
-                  </div>
-                )}
-                {restUntilLegal && (
-                  <div className="border-l border-border pl-2.5 min-w-0 flex-1">
-                    <span className="text-[9px] uppercase tracking-wider text-muted-foreground block leading-none">
-                      Rest
-                    </span>
-                    <span
-                      className={cn(
-                        "text-sm font-semibold tabular-nums mt-0.5 block leading-none",
-                        isRestMet ? "text-status-valid" : "text-status-error"
-                      )}
-                    >
-                      {formatMinutesHM(restHadMinutes)}
-                      <span className="text-muted-foreground mx-0.5">/</span>
-                      {formatMinutesHM(restRequiredMinutes)}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        ) : restUntilLegal ? (
-          /* Fallback: no upcoming scheduled duty but we have rest info */
-          <Card className="border border-border/60 py-0 gap-0">
-            <CardContent className="py-1.5 px-2.5">
-              <div className="flex items-center gap-2.5">
-                <div className="flex flex-col leading-none shrink-0">
-                  <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
-                    Next
-                  </span>
-                  <span className="font-serif italic text-sm text-muted-foreground mt-0.5">
-                    None scheduled
-                  </span>
-                </div>
-                <div className="border-l border-border pl-2.5 flex-1">
-                  <span className="text-[9px] uppercase tracking-wider text-muted-foreground block leading-none">
-                    Rest Since Last Duty
-                  </span>
-                  <span className="text-sm font-semibold tabular-nums text-foreground mt-0.5 block leading-none">
-                    {formatMinutesHM(restHadMinutes)}
-                  </span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ) : null}
-
         {/* The rolling limits and the duties that make them, on one time
             axis, read at one pointer. */}
         {dutyBlocks.length > 0 ? (

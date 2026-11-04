@@ -27,7 +27,7 @@
  * duties on one axis.
  */
 
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { AlertTriangle, ChevronRight, Minus, Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { FormSection } from "@/components/ui/form-section"
@@ -36,7 +36,7 @@ import { usePreferences } from "@/components/providers/preferences-provider"
 import { FDP_COLORS } from "@/components/roster/fdp-colors"
 import { formatInstant, tzFormatter } from "@/lib/utils/tz-format"
 import { formatHHMMDisplay, minutesToHHMM } from "@/lib/utils/time"
-import { pointerState, type DutyBlock, type RestBefore } from "@/lib/utils/roster/duty-timeline"
+import { pointerState, REST_RULE_LABEL, type DutyBlock, type RestBefore } from "@/lib/utils/roster/duty-timeline"
 import { createRollingIndex, rollingAt, rollingSeries, type RollingIndex, type RollingKind } from "@/lib/utils/roster/rolling-at"
 import type { ForecastResult, FTLLimits } from "@/types/entities/roster.types"
 
@@ -61,6 +61,8 @@ const REST_H = 14
 const LABEL_H = 14
 const REST_LABEL_Y = REST_Y + REST_H + 3
 const CHART_H = REST_LABEL_Y + LABEL_H + 5
+/** Where the rolling chart's own floor sits in its fill, which carries on fainter behind the duties. */
+const ROLL_FLOOR = ROLL_H / (CHART_H - ROLL_TOP)
 /** The narrowest a tap target gets, centred on a bar narrower than it. */
 const HIT_MIN = 28
 /** Labels are 11px semibold tabular figures; this is a character's width. */
@@ -472,8 +474,11 @@ export function DutyTimeline({
     const yOf = (v: number) => ROLL_TOP + ROLL_H - (v / peak) * ROLL_H
     const left = xOf(drawFrom)
     const path = (pts: { t: number; v: number }[]) => pts.map((p, i) => `${i ? "L" : "M"}${(xOf(p.t) - left).toFixed(1)} ${yOf(p.v).toFixed(1)}`).join("")
+    // The fill runs on down BEHIND the duty and rest rows to the chart's
+    // floor, so the chart reads as one picture rather than stopping in a hard
+    // edge above the duties.
     const area = (pts: { t: number; v: number }[]) =>
-      pts.length < 2 ? "" : `${path(pts)}L${(xOf(pts[pts.length - 1].t) - left).toFixed(1)} ${ROLL_TOP + ROLL_H}L${(xOf(pts[0].t) - left).toFixed(1)} ${ROLL_TOP + ROLL_H}Z`
+      pts.length < 2 ? "" : `${path(pts)}L${(xOf(pts[pts.length - 1].t) - left).toFixed(1)} ${CHART_H}L${(xOf(pts[0].t) - left).toFixed(1)} ${CHART_H}Z`
     const flown = points.filter((p) => p.t <= nowMs)
     const ahead = points.filter((p) => p.t >= nowMs)
     return {
@@ -538,17 +543,20 @@ export function DutyTimeline({
             : b.kind === "ground"
               ? `${b.code} ${duration(b.dutyMinutes)}`
               : duration(b.dutyMinutes)
-      duty.push({ key: `d${b.id}`, y: DUTY_Y + 3, x: left + w / 2, text, tone: b.limit === "over" ? "over" : null, onBar: true })
+      // Only where the label fits its own bar: zoomed out, a figure per duty
+      // was a "x:xx/xx:xx" over every few pixels, and the pointer's row
+      // already reads the duty it is on.
+      if (fits(w, text)) duty.push({ key: `d${b.id}`, y: DUTY_Y + 3, x: left + w / 2, text, tone: b.limit === "over" ? "over" : null, onBar: true })
       for (const s of b.sectors) {
         if (s.positioning) continue
         const sw = xOf(s.inMs) - xOf(s.outMs)
         const st = duration((s.inMs - s.outMs) / MIN)
-        if (sw >= st.length * CHAR_PX + 6) sector.push({ key: `s${s.id}`, y: DUTY_Y + DUTY_H - LABEL_H - 2, x: xOf(s.outMs) + sw / 2, text: st, tone: null, onBar: true })
+        if (fits(sw, st)) sector.push({ key: `s${s.id}`, y: DUTY_Y + DUTY_H - LABEL_H - 2, x: xOf(s.outMs) + sw / 2, text: st, tone: null, onBar: true })
       }
       const r = b.restBefore
       if (r) {
         const text = r.requiredMinutes != null ? `${duration(r.minutes)}/${duration(r.requiredMinutes)}` : duration(r.minutes)
-        rest.push({ key: `r${b.id}`, y: REST_LABEL_Y, x: (xOf(r.signOffMs) + xOf(b.startMs)) / 2, text, tone: r.status === "short" ? "over" : null, onBar: false })
+        if (fits(xOf(b.startMs) - xOf(r.signOffMs), text)) rest.push({ key: `r${b.id}`, y: REST_LABEL_Y, x: (xOf(r.signOffMs) + xOf(b.startMs)) / 2, text, tone: r.status === "short" ? "over" : null, onBar: false })
       }
     }
     place(duty)
@@ -560,10 +568,10 @@ export function DutyTimeline({
   const exceedances = (forecast?.exceedances ?? []).filter((e) => e.limitName.includes(view.limitName)).slice(0, 3)
 
   return (
-    <FormSection title="Timeline">
-      <div className="space-y-2.5 px-3 pb-3 pt-1">
-        <div className="flex items-start justify-between gap-2">
-          <PointerReadout store={pointer} blocks={blocks} clock={clock} dayMonth={fmt.dayMonth} duration={duration} />
+    <FormSection>
+      <div className="space-y-2.5 px-3 py-3">
+        <div className="flex items-center justify-between gap-2">
+          <PointerClock store={pointer} clock={clock} dayMonth={fmt.dayMonth} />
           <div className="flex shrink-0 items-center gap-1.5">
             <button type="button" onClick={() => zoomTo(span * 1.6)} aria-label="Zoom out" className="control-surface flex h-9 w-9 items-center justify-center rounded-full">
               <Minus className="h-4 w-4" />
@@ -574,6 +582,8 @@ export function DutyTimeline({
             <NowButton store={pointer} nowMs={nowMs} span={span} onNow={() => scrollToTime(nowMs)} />
           </div>
         </div>
+
+        <PointerStateRow store={pointer} blocks={blocks} clock={clock} dayMonth={fmt.dayMonth} duration={duration} />
 
         <RollingTabs store={pointer} index={index} views={views} value={series} onChange={setSeries} duration={duration} />
 
@@ -632,7 +642,7 @@ export function DutyTimeline({
                 {chart && (
                   <svg
                     className="absolute top-0 cursor-pointer"
-                    style={{ left: chart.left, width: chart.width, height: DUTY_Y - 4 }}
+                    style={{ left: chart.left, width: chart.width, height: CHART_H }}
                     onClick={(e) => {
                       const r = e.currentTarget.getBoundingClientRect()
                       scrollToTime(drawFrom + (e.clientX - r.left) / pxPerMs)
@@ -640,13 +650,16 @@ export function DutyTimeline({
                     aria-hidden
                   >
                     <defs>
-                      <linearGradient id="roll-flown" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={view.color} stopOpacity={0.42} />
-                        <stop offset="100%" stopColor={view.color} stopOpacity={0.05} />
+                      {/* In chart space, so the fade is the same at every height of line. */}
+                      <linearGradient id="roll-flown" gradientUnits="userSpaceOnUse" x1="0" y1={ROLL_TOP} x2="0" y2={CHART_H}>
+                        <stop offset="0%" stopColor={view.color} stopOpacity={0.4} />
+                        <stop offset={ROLL_FLOOR} stopColor={view.color} stopOpacity={0.14} />
+                        <stop offset="100%" stopColor={view.color} stopOpacity={0.04} />
                       </linearGradient>
-                      <linearGradient id="roll-ahead" x1="0" y1="0" x2="0" y2="1">
+                      <linearGradient id="roll-ahead" gradientUnits="userSpaceOnUse" x1="0" y1={ROLL_TOP} x2="0" y2={CHART_H}>
                         <stop offset="0%" stopColor={scenario ? FDP_COLORS.scenario : FDP_COLORS.planned} stopOpacity={0.3} />
-                        <stop offset="100%" stopColor={scenario ? FDP_COLORS.scenario : FDP_COLORS.planned} stopOpacity={0.04} />
+                        <stop offset={ROLL_FLOOR} stopColor={scenario ? FDP_COLORS.scenario : FDP_COLORS.planned} stopOpacity={0.1} />
+                        <stop offset="100%" stopColor={scenario ? FDP_COLORS.scenario : FDP_COLORS.planned} stopOpacity={0.03} />
                       </linearGradient>
                     </defs>
                     <line x1={0} x2={chart.width} y1={chart.nearY} y2={chart.nearY} stroke={NEAR_LIMIT} strokeDasharray="3 3" strokeOpacity={0.6} />
@@ -774,8 +787,84 @@ interface Label {
   onBar: boolean
 }
 
-/** What the pointer reads: when, and what the pilot was doing then. */
-function PointerReadout({
+/** When the pointer is — the instant, to the minute. */
+function PointerClock({ store, clock, dayMonth }: { store: PointerStore; clock: (ms: number) => string; dayMonth: (ms: number) => string }) {
+  const t = usePointer(store)
+  return (
+    <p className="min-w-0 truncate px-1 text-lg font-semibold leading-tight tabular-nums">
+      {dayMonth(t)} {clock(t)}
+    </p>
+  )
+}
+
+interface StateCell {
+  caption: string
+  value: string
+  over?: boolean
+  muted?: boolean
+}
+
+/** The three cells of the state row, at the instant `t`. */
+function stateCells(
+  blocks: readonly DutyBlock[],
+  t: number,
+  clock: (ms: number) => string,
+  dayMonth: (ms: number) => string,
+  duration: (min: number) => string,
+): [StateCell, StateCell, StateCell] {
+  const s = pointerState(blocks, t)
+  const none: StateCell = { caption: "", value: "—", muted: true }
+  // A duty ahead: when it signs on, and the FDP it asks for against its max.
+  const ahead = (next: DutyBlock | null): [StateCell, StateCell] => {
+    if (!next) return [{ caption: "Next Duty", value: "None", muted: true }, { ...none, caption: "FDP" }]
+    // The date only when it is not the pointer's own day — "Nov 5 01:00Z"
+    // did not fit a phone's third of the row.
+    const when = dayMonth(next.startMs) === dayMonth(t) ? clock(next.startMs) : `${dayMonth(next.startMs)} ${clock(next.startMs)}`
+    if (next.kind !== "flight" || next.maxFdpMinutes <= 0) {
+      return [{ caption: "Next Duty", value: when }, { caption: next.kind === "standby" ? "Standby" : next.code || "Duty", value: duration(next.dutyMinutes) }]
+    }
+    return [
+      { caption: "Next Duty", value: when },
+      { caption: "FDP", value: `${duration(next.fdpMinutes)}/${duration(next.maxFdpMinutes)}`, over: next.fdpMinutes > next.maxFdpMinutes },
+    ]
+  }
+  if (s.kind === "duty") {
+    const b = s.block
+    const state = b.scenario ? "What-If" : b.isFuture ? "Scheduled" : "On Duty"
+    if (b.kind === "flight" && b.maxFdpMinutes > 0) {
+      return [
+        { caption: "Duty", value: state },
+        { caption: "FDP", value: `${duration(s.fdpMinutes)}/${duration(b.maxFdpMinutes)}`, over: s.fdpMinutes > b.maxFdpMinutes },
+        { caption: "Flight", value: duration(s.flightMinutes) },
+      ]
+    }
+    if (b.kind === "standby") {
+      return [{ caption: "Duty", value: "Standby" }, { caption: "Standby", value: `${duration(s.dutyMinutes)}/${duration(18 * 60)}` }, { ...none, caption: "Flight" }]
+    }
+    if (b.kind === "ground") {
+      return [{ caption: "Duty", value: b.code || "Ground" }, { caption: "Duty", value: duration(s.dutyMinutes) }, { ...none, caption: "Flight" }]
+    }
+    return [{ caption: "Duty", value: state }, { caption: "Duty", value: duration(s.dutyMinutes) }, { caption: "Flight", value: duration(s.flightMinutes) }]
+  }
+  if (s.kind === "rest") {
+    const req = s.rest.requiredMinutes
+    const rest: StateCell =
+      s.minutes < 0
+        ? { caption: "Rest", value: `In ${duration(-s.minutes)}`, muted: true }
+        : { caption: "Rest", value: req != null ? `${duration(s.minutes)}/${duration(req)}` : duration(s.minutes), over: s.rest.status === "short" }
+    return [...ahead(s.block), rest]
+  }
+  return [...ahead(s.next), { ...none, caption: "Rest" }]
+}
+
+/**
+ * What the pilot was doing at the pointer, in a row of three that never
+ * changes height: on duty, the duty / its FDP against the maximum / flight so
+ * far; at rest, the next duty / its FDP against the maximum / rest against
+ * its minimum. A line of prose wrapped onto a second row as it changed, and
+ * the card's height moved under the reader.
+ */
+function PointerStateRow({
   store,
   blocks,
   clock,
@@ -789,44 +878,22 @@ function PointerReadout({
   duration: (min: number) => string
 }) {
   const t = usePointer(store)
-  const s = pointerState(blocks, t)
-  let line = "Off duty"
-  let over = false
-  if (s.kind === "duty") {
-    const b = s.block
-    if (b.kind === "flight" && b.maxFdpMinutes > 0) {
-      over = s.fdpMinutes > b.maxFdpMinutes
-      line = `${b.isFuture || b.scenario ? "Scheduled duty" : "On duty"} · FDP ${duration(s.fdpMinutes)}/${duration(b.maxFdpMinutes)} · Flight ${duration(s.flightMinutes)}`
-    } else if (b.kind === "standby") {
-      line = `Standby · ${duration(s.dutyMinutes)}/${duration(18 * 60)}`
-    } else if (b.kind === "ground") {
-      line = `${b.code} · ${duration(s.dutyMinutes)}`
-    } else {
-      line = `On duty · ${duration(s.dutyMinutes)} · Flight ${duration(s.flightMinutes)}`
-    }
-  } else if (s.kind === "rest") {
-    const req = s.rest.requiredMinutes
-    if (s.minutes < 0) line = `Rest counts in ${duration(-s.minutes)}`
-    else {
-      over = s.rest.status === "short"
-      line = req != null ? `Rest ${duration(s.minutes)}/${duration(req)}` : `Rest ${duration(s.minutes)}`
-      if (req != null && s.rest.minutes < req) line += ` · ${duration(req - s.rest.minutes)} short`
-    }
-  }
+  const cells = stateCells(blocks, t, clock, dayMonth, duration)
   return (
-    <div className="min-w-0 px-1">
-      <p className="text-lg font-semibold leading-tight tabular-nums">
-        {dayMonth(t)} {clock(t)}
-      </p>
-      <p className={cn("text-xs tabular-nums", over ? "font-semibold text-status-error" : "text-muted-foreground")}>
-        {/* Breaks between its parts, never inside one ("FDP 4:28/13:15"). */}
-        {line.split(" · ").map((part, i) => (
-          <Fragment key={i}>
-            {i > 0 && " · "}
-            <span className="whitespace-nowrap">{part}</span>
-          </Fragment>
-        ))}
-      </p>
+    <div className="grid grid-cols-[1.25fr_1fr_1fr] gap-1 rounded-lg bg-muted/50 px-1 py-1">
+      {cells.map((c, i) => (
+        <div key={i} className="min-w-0 px-1.5">
+          <span className="block truncate text-[10px] font-medium leading-tight text-muted-foreground">{c.caption || "\u00a0"}</span>
+          <span
+            className={cn(
+              "block truncate text-sm font-semibold leading-tight tabular-nums",
+              c.over ? "text-status-error" : c.muted ? "text-muted-foreground" : "text-foreground",
+            )}
+          >
+            {c.value}
+          </span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -902,6 +969,9 @@ function Key({ swatch, label }: { swatch: React.ReactNode; label: string }) {
     </span>
   )
 }
+
+/** Whether a label fits inside a span `width` px wide, with a little air. */
+const fits = (width: number, text: string) => width >= text.length * CHAR_PX + 8
 
 /** A tap target at least `HIT_MIN` wide, centred on the bar it opens. */
 function hit(left: number, width: number): { left: number; width: number; inset: number } {
@@ -1210,6 +1280,8 @@ function RestDetail({
         <VerdictRow label="Rest" value={duration(rest.minutes)} tone={short ? "over" : rest.status === "tight" ? "near" : null} />
         {rest.requiredMinutes != null && <ReadOnlyRow label="Minimum" value={duration(rest.requiredMinutes)} />}
         {rest.minimumEndMs != null && <ReadOnlyRow label="Minimum Until" value={clock(rest.minimumEndMs)} />}
+        {rest.rule && <ReadOnlyRow label="Rule" value={REST_RULE_LABEL[rest.rule]} />}
+        {rest.includesLocalNight != null && <ReadOnlyRow label="Local Night (SGT)" value={rest.includesLocalNight ? "Included" : "Not included"} />}
         {short && owed != null && owed > 0 && <VerdictRow label="Short By" value={duration(owed)} tone="over" />}
         {!short && owed != null && <ReadOnlyRow label="Margin" value={duration(-owed)} />}
         <ReadOnlyRow label="Signed Off" value={clock(rest.signOffMs)} />

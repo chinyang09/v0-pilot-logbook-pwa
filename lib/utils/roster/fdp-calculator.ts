@@ -79,6 +79,16 @@ const DEBRIEF_BUFFER_MINUTES = POST_FLIGHT_CHECK_MIN
 const HOME_BASE_OFFSET_MINUTES = 8 * 60
 
 /**
+ * The clock a rest period's LOCAL NIGHT (2200–0800, First Schedule) is read
+ * in: Singapore time, wherever the rest is taken — the owner's ruling (Nov
+ * 2026). It was the zone the previous duty ARRIVED in, which on a layover
+ * abroad moved the night window by the zone difference. Acclimatisation's own
+ * "3 consecutive local nights in a time zone" is a different question and is
+ * still read in that zone.
+ */
+const LOCAL_NIGHT_ZONE_MINUTES = HOME_BASE_OFFSET_MINUTES
+
+/**
  * Para 10's threshold. A reporting delay below this keeps the FDP maximum on
  * the original reporting time; at or above it, the maximum is re-based on the
  * actual one and the FDP window opens 4 hours after the original.
@@ -691,10 +701,16 @@ interface CircadianInstants {
  *
  * Two readings of the source data are deliberate:
  *
- * - **One source per flight.** A flight that has been flown supplies its actual
- *   times; one that has not supplies its scheduled ones. Mixing the two within a
- *   sector risks an actual time reading as earlier than the scheduled one it
- *   follows, which the day-wrap below would push a whole day out.
+ * - **Early start and late finish read the SCHEDULE.** The First Schedule
+ *   defines them as a "scheduled departure" (0500–0659) and a "scheduled
+ *   arrival" (0100–0159), so a delay cannot make one: an arrival planned for
+ *   0030 that blocks in at 0115 is not a late finish. They read the actual
+ *   times only where a flight records no schedule. Reading the actual times
+ *   called delayed duties late finishes, and para 4 then asked for 24 hours.
+ * - **The window of circadian low reads what HAPPENED** — a take-off or
+ *   landing, actual where flown, scheduled where not.
+ * - **Each sequence wraps on its own.** An actual time is never compared with
+ *   a scheduled one, or a delay would read as the next day.
  * - **Gate times stand in for wheels times when a flight has none.** The window
  *   of circadian low is defined in relation to a TAKE-OFF or LANDING, so off/on
  *   are preferred; a duty that records neither (every planned duty, and older
@@ -722,22 +738,43 @@ function collectCircadianInstants(
   let arrivalMs: number | undefined
   const takeoffLandingMs: number[] = []
 
+  // The SCHEDULE is its own sequence: "early start" and "late finish" are a
+  // SCHEDULED departure and a SCHEDULED arrival, so a delayed arrival after
+  // 0100 does not make a duty a late finish. Each sequence keeps its own day
+  // wrap, so an actual time never reads against a scheduled one.
+  let schedCursor = -1
+  const stepSched = (time?: string): number | undefined => {
+    if (!time) return undefined
+    let m = hhmmToMinutes(time)
+    while (m < schedCursor) m += 1440
+    schedCursor = m
+    return (dayStartMinutes + m) * 60_000
+  }
+
   for (const flight of groupFlights) {
     const flown = Boolean(flight.outTime)
     const outT = flown ? flight.outTime : flight.scheduledOut
     const inT = flown ? flight.inTime : flight.scheduledIn
-    const offT = (flown ? flight.offTime : undefined) ?? outT
-    const onT = (flown ? flight.onTime : undefined) ?? inT
+    // `||`, not `??`: an unrecorded time is stored as "" (the canonical
+    // default), and `??` let that through as "no take-off at all".
+    const offT = (flown ? flight.offTime : undefined) || outT
+    const onT = (flown ? flight.onTime : undefined) || inT
 
-    const out = step(outT)
+    step(outT)
     const off = step(offT)
     const on = step(onT)
-    const arrived = step(inT)
+    const arrivedActual = step(inT)
 
-    if (out !== undefined && departureMs === undefined) departureMs = out
+    // A flight with no schedule recorded (hand-entered) is judged on what it
+    // actually did — the only evidence there is.
+    const schedOut = stepSched(flight.scheduledOut || outT)
+    const schedIn = stepSched(flight.scheduledIn || inT)
+
+    if (schedOut !== undefined && departureMs === undefined) departureMs = schedOut
     if (off !== undefined) takeoffLandingMs.push(off)
     if (on !== undefined) takeoffLandingMs.push(on)
-    if (arrived !== undefined) arrivalMs = arrived
+    if (schedIn !== undefined) arrivalMs = schedIn
+    else if (arrivedActual !== undefined) arrivalMs = arrivedActual
   }
 
   return {
@@ -1308,10 +1345,7 @@ export function calculateRestPeriod(
     wrappedDebriefTime,
     current.date,
     current.reportTime,
-    // Where the crew member actually is once the previous duty ends.
-    previous.arrivalTimezoneOffset != null
-      ? previous.arrivalTimezoneOffset * 60
-      : HOME_BASE_OFFSET_MINUTES
+    LOCAL_NIGHT_ZONE_MINUTES
   )
 
   const precedingDutyMinutes = previous.dutyMinutes
@@ -2011,11 +2045,7 @@ export function calculateRestUntilLegal(
   // reads off the dashboard to know when they may next report.
   const precedingDutyMinutes = lastDP.dutyMinutes
   const restStartMs = restStartTimestamp.getTime()
-  // Local time WHERE THE CREW MEMBER IS once that duty ended.
-  const restZoneMinutes =
-    lastDP.arrivalTimezoneOffset != null
-      ? lastDP.arrivalTimezoneOffset * 60
-      : HOME_BASE_OFFSET_MINUTES
+  const restZoneMinutes = LOCAL_NIGHT_ZONE_MINUTES
 
   // ── Floors that do not depend on the local night ────────────────────────
   //
