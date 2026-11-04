@@ -201,31 +201,19 @@ describe("the local night is the DEFINED one, not a fixed 2200–0600 band", () 
     expect(r.requiredRestMinutes).toBe(12 * 60)
   })
 
-  it("measures the night where the crew member actually is", () => {
-    // Rest taken at a UTC+0 station: 22:00 → 08:00 THERE is a local night,
-    // even though in Singapore it is the middle of the working day.
-    const away = calculateRestPeriod(
-      duty({ date: "2026-08-15", reportTime: "09:00" }),
-      duty({
-        date: "2026-08-14",
-        debriefTime: "21:00",
-        dutyMinutes: 8 * 60,
-        arrivalTimezoneOffset: 0,
-      }),
-    )
-    expect(away.includesLocalNight).toBe(true)
-
-    // The same absolute rest, but recorded as ending at home base, is not one.
-    const home = calculateRestPeriod(
-      duty({ date: "2026-08-15", reportTime: "09:00" }),
-      duty({
-        date: "2026-08-14",
-        debriefTime: "21:00",
-        dutyMinutes: 8 * 60,
-        arrivalTimezoneOffset: 8,
-      }),
-    )
-    expect(home.includesLocalNight).toBe(false)
+  it("reads the night in SINGAPORE time, wherever the rest is taken", () => {
+    // The owner's ruling: the 2200–0800 window is SGT. A rest from 21:00Z to
+    // 09:00Z spans 22:00–08:00 at a UTC+0 station, but in Singapore it is
+    // 05:00–17:00 — three hours inside the window, so no local night, and
+    // the arrival zone makes no difference.
+    for (const arrivalTimezoneOffset of [0, 8]) {
+      const r = calculateRestPeriod(
+        duty({ date: "2026-08-15", reportTime: "09:00" }),
+        duty({ date: "2026-08-14", debriefTime: "21:00", dutyMinutes: 8 * 60, arrivalTimezoneOffset }),
+      )
+      expect(r.includesLocalNight).toBe(false)
+      expect(r.requiredRestMinutes).toBe(12 * 60)
+    }
   })
 })
 
@@ -308,15 +296,16 @@ describe("the earliest a duty may be planned", () => {
     expect(r!.rule).toBe("3c")
   })
 
-  it("measures the night where the crew member actually is", () => {
-    // The same absolute rest, taken at a UTC+0 station. 18:26 SGT is 10:26
-    // there — the middle of the morning — so the night is a long way off and
-    // the 12-hour rule governs instead.
-    const r = calculateRestUntilLegal(
-      [flown({ date: "2026-08-15", reportTime: "03:10", debriefTime: "09:26", dutyMinutes: 6 * 60 + 16, arrivalTimezoneOffset: 0 })],
-      new Date("2026-08-15T10:14:00Z"),
-    )
-    expect(r!.rule).toBe("3b")
-    expect(r!.requiredRestMinutes).toBe(12 * 60)
+  it("reads the night in SINGAPORE time, wherever the rest is taken", () => {
+    // The same absolute rest as the case above, recorded as ending at a UTC+0
+    // station: the night is still SGT's, so the answer does not move.
+    const at = (arrivalTimezoneOffset: number) =>
+      calculateRestUntilLegal(
+        [flown({ date: "2026-08-15", reportTime: "03:10", debriefTime: "09:26", dutyMinutes: 6 * 60 + 16, arrivalTimezoneOffset })],
+        new Date("2026-08-15T10:14:00Z"),
+      )!
+    expect(at(0).rule).toBe(at(8).rule)
+    expect(at(0).requiredRestMinutes).toBe(at(8).requiredRestMinutes)
+    expect(at(0).legalAtUtc).toBe(at(8).legalAtUtc)
   })
 })

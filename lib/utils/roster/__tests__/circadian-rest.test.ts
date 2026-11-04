@@ -396,4 +396,67 @@ describe("the instants reach the classification from the flight rows", () => {
     )
     expect(dp.circadian?.woclOperation).toBe(true)
   })
+
+  it("falls back to the gate times when the wheels times are stored BLANK", () => {
+    // The canonical default for an unrecorded time is "", which `??` let
+    // through as "no take-off at all".
+    const [dp] = applyAcclimatisation(
+      createDutyPeriodsFromFlights([
+        flight({ id: "f1", date: "2026-08-13", outTime: "15:00", offTime: "", onTime: "", inTime: "19:25" }),
+      ]),
+    )
+    expect(dp.circadian?.woclOperation).toBe(true)
+  })
+
+  it("reads a late finish off the SCHEDULED arrival — a delay does not make one", () => {
+    // Scheduled in 16:20Z = 00:20 SGT; blocked in 17:15Z = 01:15 SGT. The
+    // First Schedule's late finish is a SCHEDULED arrival in 0100–0159.
+    const [late] = applyAcclimatisation(
+      createDutyPeriodsFromFlights([
+        flight({
+          id: "f1", date: "2026-08-14",
+          scheduledOut: "13:00", scheduledIn: "16:20",
+          outTime: "13:55", offTime: "14:10", onTime: "17:05", inTime: "17:15",
+        }),
+      ]),
+    )
+    expect(late.circadian?.lateFinish).toBe(false)
+
+    // And the other way round: scheduled for 01:20 SGT, early on blocks.
+    const [sched] = applyAcclimatisation(
+      createDutyPeriodsFromFlights([
+        flight({
+          id: "f1", date: "2026-08-14",
+          scheduledOut: "14:00", scheduledIn: "17:20",
+          outTime: "13:50", offTime: "14:00", onTime: "16:45", inTime: "16:55",
+        }),
+      ]),
+    )
+    expect(sched.circadian?.lateFinish).toBe(true)
+  })
+
+  it("reads an early start off the SCHEDULED departure", () => {
+    // Scheduled out 22:45Z = 06:45 SGT (early start); pushed back 23:10Z =
+    // 07:10 SGT. Still an early start — the schedule is what counts.
+    const [dp] = applyAcclimatisation(
+      createDutyPeriodsFromFlights([
+        flight({
+          id: "f1", date: "2026-08-13",
+          scheduledOut: "22:45", scheduledIn: "01:45",
+          outTime: "23:10", offTime: "23:25", onTime: "02:00", inTime: "02:10",
+        }),
+      ]),
+    )
+    expect(dp.circadian?.earlyStart).toBe(true)
+  })
+
+  it("judges a hand-entered flight with no schedule on what it actually did", () => {
+    const [dp] = applyAcclimatisation(
+      createDutyPeriodsFromFlights([
+        flight({ id: "f1", date: "2026-08-14", outTime: "14:00", offTime: "14:15", onTime: "17:00", inTime: "17:10" }),
+      ]),
+    )
+    // 17:10Z = 01:10 SGT.
+    expect(dp.circadian?.lateFinish).toBe(true)
+  })
 })

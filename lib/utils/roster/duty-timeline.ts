@@ -18,7 +18,7 @@
  * duty, and a pilot reading the week needs to see them.
  */
 
-import { DEFAULT_FTL_LIMITS, type DutyPeriod, type ScheduleEntry } from "@/types/entities/roster.types"
+import { DEFAULT_FTL_LIMITS, type DutyPeriod, type RestPeriodInfo, type ScheduleEntry } from "@/types/entities/roster.types"
 import type { FlightLog } from "@/types/entities/flight.types"
 import { isPositioningEntry } from "@/lib/utils/entry-type"
 import { hhmmToMinutes } from "@/lib/utils/time"
@@ -133,6 +133,20 @@ export interface RestBefore {
   status: "short" | "tight" | "ok" | null
   /** The duty the rest follows. */
   previousId: string
+  /** The sub-rule that set the minimum (para 3 or 4), null when unknown. */
+  rule: RestPeriodInfo["rule"] | null
+  /** Whether the rest includes a local night (2200–0800 SGT). */
+  includesLocalNight: boolean | null
+}
+
+/** What each rest sub-rule asks, as a pilot reads it. */
+export const REST_RULE_LABEL: Record<RestPeriodInfo["rule"], string> = {
+  "3a": "3(1)(a) · 10h, includes a local night",
+  "3b": "3(1)(b) · 12h, no local night",
+  "3c": "3(1)(c) · the duty before, rounded up",
+  "3d": "3(1)(d) · 24h after a duty over 16h",
+  "4a": "4(1)(a) · 24h before an early/late/WOCL series",
+  "4b": "4(2) · 24h after 2 early/late/WOCL in a row",
 }
 
 /** A rest within this much of its requirement is called tight. */
@@ -372,6 +386,8 @@ export function buildDutyTimeline(
         compliant,
         status: restStatus(minutes, requiredMinutes, compliant),
         previousId: previous.id,
+        rule: rp ? rp.rule : null,
+        includesLocalNight: rp ? rp.includesLocalNight : null,
       }
     }
     previous = b
@@ -399,7 +415,8 @@ export type PointerState =
       /** Rest counted so far — negative in the hour after sign-off, before it commences. */
       minutes: number
     }
-  | { kind: "off" }
+  /** Neither on duty nor in a rest the next duty is measured from; `next` is the duty ahead, if any. */
+  | { kind: "off"; next: DutyBlock | null }
 
 const minutesBetween = (a: number, b: number) => Math.max(0, Math.floor((b - a) / MIN))
 
@@ -441,5 +458,5 @@ export function pointerState(blocks: readonly DutyBlock[], t: number): PointerSt
     const rest = next.restBefore
     return { kind: "rest", block: next, rest, minutes: Math.floor((t - rest.startMs) / MIN) }
   }
-  return { kind: "off" }
+  return { kind: "off", next: blocks.find((b) => b.startMs > t) ?? null }
 }
