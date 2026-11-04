@@ -48,7 +48,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 
 | Area | What it pins down |
 |---|---|
-| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp, that the single-pass timeline sums and acclimatisation equal their per-item definitions, the rolling windows in six time zones, the duty timeline's blocks and range totals, and the Quick Check's violations |
+| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp, that the single-pass timeline sums and acclimatisation equal their per-item definitions, the rolling windows in six time zones, the duty timeline's blocks and the state at its pointer, the rolling limits at an instant (equal to the day figure once duties end), and the Quick Check's violations |
 | `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation, and a REAL schedule PDF (`fixtures/schedule-oct-2026-local-base.pdf`) run through the actual extractor |
 | `lib/utils/parsers/shared/__tests__/pooled-map.test.ts` | the bounded fan-out both enrichment chains end in |
 | `lib/lookup/__tests__/search-candidates.test.ts`, `lib/lookup/__tests__/composite.test.ts`, `app/api/lookup/__tests__/` | search candidates — airframe and live-flight hits, exact / begins / inside ranking, one row per tail, airport codes off the label; the composed `aircraft/candidates` asking the flight history only for a whole registration search missed, and `exact=1` answering 404 only when every source answered; the door's sign-in rule over both kinds of route; enrichment never taking a near miss |
@@ -1627,7 +1627,7 @@ What it took, in order of size:
   rolling windows (`generateTimelineData`), the dashboard's plan/record overlap
   (`indexWindows`), acclimatisation (`acclimatisedOffsetsAtEachDuty`). Each is
   pinned to the old per-item definition by a randomized equivalence test.
-- **The FDP chart's timeline is built only on the FDP page** (`useFDPTimeline`).
+- **No day-by-day FDP timeline is built at all** — the FDP page's timeline reads the rolling limits at an instant over what it draws (`rolling-at.ts`).
 - **`SwipeableCard` rows arm on first contact** — no drag feature, no action
   panel, no `dragControls` until a pointer or focus reaches the row.
 - **Opening a detail renders as a transition**, with the `?selected=` history
@@ -2083,7 +2083,7 @@ or a dialog over the list.
 | roster, currencies | month + agenda / the list | the duty / currency form (`DetailFormPanel`); a roster FLIGHT (`FlightForm`) |
 | discrepancies | comparisons, notes | a comparison's FLIGHT (`FlightForm`); a note and its Resolve (`DiscrepancyDetailPanel`) |
 | recently deleted | the bin | what the item was, how long it is kept, Restore / Delete forever |
-| FDP | the rolling chart and the duty timeline, at FULL width | the Quick Check, only while it is open (a duty block expands IN PLACE — see "The FDP page") |
+| FDP | the timeline (rolling limits + duties, one pointer), at FULL width | the Quick Check, only while it is open (a duty block expands IN PLACE — see "The FDP page") |
 | account, settings | the sections | the section |
 | dashboard | legal / summary | a requirement cell (`RequirementDetailPanel`); a period flight (`FlightForm`) |
 
@@ -4047,83 +4047,75 @@ scenario's (`scenario.test.ts`). The FDP chart's tooltip reads the same rule
 (`fdpHours`) on its own row — "Duty 12:40/12:15" in red, for an FDP of 12:10,
 was the duty compared with a limit it is not measured against.
 
-### The FDP page — two charts, two questions (Nov 2026)
+### The FDP page — ONE timeline, read at ONE pointer (Nov 2026)
 
-| | Answers | Shape |
-|---|---|---|
-| the rolling chart (`fdp-timeline-chart.tsx`) | how close am I to a limit | a running total per day, against the limit lines |
-| the duty timeline (`duty-timeline.tsx`, `lib/utils/roster/duty-timeline.ts`) | how long each duty, flight and rest was — and whether it BUST a limit or MET its minimum | a GANTT chart on a time axis, ONE DECK per duty: the duty bar (sign-on → sign-off) with each sector's block time drawn INSIDE it, and the rest before it decked directly underneath (no gap) — the minimum required, then the rest as provided to the sign-on; each labelled with its duration |
+`components/roster/duty-timeline.tsx` (model: `lib/utils/roster/duty-timeline.ts`,
+`lib/utils/roster/rolling-at.ts`). The rolling limits chart and the duty Gantt
+used to be two charts with two zooms; the owner asked for them in sync "both in
+period and where it is focused", so they are ONE scroller on ONE time axis:
 
-- **Flown and planned are two series, split AT TODAY.** Each rolling key is
-  written twice (`<key>__flown` up to and including today, `<key>__planned`
-  from today on, so the two meet), the planned one dashed in
-  `FDP_COLORS.planned` — the yellow the Quick Check's scenario uses. The
-  colours live in `components/roster/fdp-colors.ts`, shared by both charts.
-  The daily bars are gone: they restated the running total's steps.
-- **The x-axis is `allowDuplicatedCategory={false}`.** Recharts' category axis
-  defaults to allowing duplicates, and then a `ReferenceLine x=` /
-  `ReferenceArea x1=` cannot find its category by value — the Today line and
-  the rest-violation columns silently drew nothing.
-- **The default window is anchored on TODAY** (two weeks ahead of it where the
-  data reaches), not on the last data point — with the roster ahead in the
-  pipeline the last point is weeks out and today fell off the left edge.
-- **The timeline's blocks come from the same duty periods the limits were
-  computed from** (`allDutyPeriods`, flown + `upcomingPlannedDuties`), and the
-  rest is the pipeline's own `restBefore` where it has one, so the two can
-  never disagree. A rest bar runs from when the rest COMMENCED (an hour after
-  sign-off) to the next sign-on, with a tick where the required rest ends and
-  the shortfall hatched red past the sign-on. It runs through an un-called
-  standby and ignores a ground duty, as the pipeline's does. Training and
-  ground duties come from the roster (`scheduleEntries`, UTC only — a local
-  frame is left out rather than drawn a timezone wrong): the pipeline does not
-  count them, but they are duty and are drawn, hatched like a standby.
-- **A limit is GEOMETRY, not a colour** (the owner's layout, Nov 2026). There
-  are no lane names on the left and no limit colours in the key — the room
-  goes to the timeline. A duty still to come (rostered, or a what-if) carries
-  its maximum as a DOTTED outline from sign-on to the latest sign-off it
-  allows (`latestSignOffMs` = sign-off + the FDP still in hand, so para 10(b)
-  and the post-flight half hour need no special case); a FLOWN duty draws no
-  maximum (`showMax`) — its record is the fact — and only the part past it,
-  if any, is struck red. The rest row shows the minimum (`minimumEndMs`)
-  solid, then the rest beyond it light; a minimum that runs past the next
-  sign-on is struck red there, directly under the duty that came too soon.
-  A line under the figures still says it in words ("1 duty over the FDP
-  limit · 2 rests short", or "Within limits · every rest met"), and a label's
-  figure goes red only for a real breach. Labels say the duty's duration
-  (with its flight time, and "max x" on a planned duty, where they fit), a
-  sector's block time inside it at 24 hours, and a rest's length ("· min"
-  or "· need" where it fits) — placed left to right and dropped when one
-  would overlap the last. Anything still to come is the dashed planned
-  yellow; every other day is banded so a day reads as a column.
-- **The axis is as good as endless, and Now brings it back.** It runs three
-  years either side of the logbook (and now), capped at `MAX_INNER_PX`
-  around now at the finest scale; only what is within a view either side is
-  drawn, so its length costs nothing. A jump of more than a few views is
-  instant, a short one smooth.
-- **The Quick Check draws on it.** `simulateScenario` returns the duties as
-  the what-if leaves them (`dutyPeriods`, rest recomputed) and the ids it
-  took out; the page builds blocks from them (`TimelineScenario`). An added
-  duty (`SCENARIO_DUTY_PREFIX`) is the what-if orange (`FDP_COLORS.scenario`,
-  shared with the rolling chart) with its flying drawn as one span from the
-  end of the pre-flight checks; a removed one is a dashed outline where it
-  was; a strip names the result with a Clear, and the view moves to the
-  first change. Closing the Quick Check KEEPS the what-if on both charts —
-  on a phone the check covers them, so going back is how it is read.
-- **Swipe to move, pinch to zoom.** 24 hours / 7 days / 28 days, from the tabs
-  or a pinch (two fingers on the chart; ctrl-wheel for a trackpad), holding
-  the time under the pinch still. The scroller is `touch-action: pan-x pan-y`
-  and the pinch listener is native and non-passive, or the browser zooms the
-  page instead. Every tap target is at least 28px wide (`hit`), centred on
-  a narrower bar: the duty's covers its label and bar, the rest's its bar
-  and label. The figures over it (`summarizeTimeline`) count only the
-  part of a duty inside the view, flight time pro-rated, so two adjacent views
-  never count one duty twice.
-- **A tapped duty or sector opens its sign-on, sign-off (each with the
-  schedule where it differs) and sectors; a tapped rest opens its length,
-  requirement and the duties BEFORE and AFTER it**, each a row that selects
-  that duty and scrolls it into view. Both expand IN PLACE, under the chart —
-  an exception to Main / Detail, because the FDP page gives the detail panel
-  to the Quick Check only and the owner asked for "expand".
+| | Shows |
+|---|---|
+| the header | the POINTER's instant ("Nov 4 03:11Z") and what the pilot was doing then (`pointerState`: "On duty · FDP 3:12/12:15 · Flight 1:40", "Rest 8:20/10:00", "Off duty") |
+| the tabs | 14D duty, 28D duty, 28D flight, 12M flight AS AT THE POINTER (`rollingAt`); the chosen one is drawn |
+| the rolling chart | that limit's running total — flown solid, scheduled dashed yellow from now, what-if orange — against the limit line and its 90% |
+| the deck | each duty bar (sign-on → sign-off) the full row height with its sectors' block time INSIDE it, full height too; the rest directly under it with no gap |
+
+- **The pointer is the centre of the view, to the minute, at any zoom.** It is a
+  fixed line over the scroller, and it HOLDS its instant through anything that
+  moves the axis without a gesture — new data shifting where the axis starts,
+  a resize — so a sync never slides the view out from under the reader; the readouts subscribe to a small store
+  (`createPointerStore`) written on each scroll frame, so the chart itself
+  re-renders only when what is drawn has to move on (a quarter of the view).
+  Nothing on the page is a total "over the period in view" any more — the
+  owner found that not useful.
+- **The rolling total is the pipeline's window at an INSTANT** (`rollingAt`):
+  the `days` UTC dates ending on the instant's date, as `calculateRollingStats`,
+  but a duty in progress counts only as far as it has gone (duty pro rata,
+  flight as its sectors' block time) and a date leaves at its midnight. It is
+  linear between breakpoints, so `rollingSeries` draws it exactly from those
+  alone, and once every duty in the window has ended it IS the pipeline's
+  figure (`rolling-at.test.ts` pins both). Ground duties count zero, standby its
+  `countedDutyMinutes`.
+- **Zoom is continuous** — a pinch follows the fingers' spread and holds the
+  time under them (so it pans too), ctrl-wheel on a trackpad, − / + for a
+  keyboard; 3 hours to 180 days. There are no 24h / 7d / 28d presets. Gridlines
+  run the FULL height at the finest step that leaves 42px for a label (hours
+  under a day, dates beyond; midnights stronger), dates as "Nov 4", no weekday.
+- **A limit is GEOMETRY, not a colour.** A duty still to come (rostered, or a
+  what-if) carries its maximum as a DOTTED outline to the latest sign-off it
+  allows (`latestSignOffMs` = sign-off + the FDP still in hand); a FLOWN duty
+  draws no maximum (`showMax`), only the part past it struck red. The rest row
+  starts at the SIGN-OFF (`RestBefore.signOffMs`), light for the hour before
+  rest commences (First Schedule), then the minimum solid (`minimumEndMs`), then
+  the rest beyond it; a minimum past the next sign-on is struck red under the
+  duty that came too soon. Labels are "used/limit" in the pilot's duration
+  format — a duty its FDP against its maximum, a rest against its minimum.
+- **"Scheduled", never "planned"**, in anything a pilot reads, as everywhere
+  else in the app.
+- **The axis runs three years either side of the logbook** (capped at
+  `MAX_INNER_PX` around now at the finest scale); only what is within a view
+  either side is drawn. "Now" brings the pointer back; a jump of more than a
+  few views is instant, a short one smooth. Tapping the rolling chart brings
+  that time to the pointer, and a forecast breach row (`forecast.exceedances`)
+  does the same.
+- **The Quick Check draws on it.** `simulateScenario` returns the duties as the
+  what-if leaves them (`dutyPeriods`, rest recomputed) and the ids it took out;
+  the page builds blocks from them (`TimelineScenario`). An added duty
+  (`SCENARIO_DUTY_PREFIX`) is orange (`FDP_COLORS.scenario`) with its flying as
+  one span from the end of the pre-flight checks; a removed one is a dashed
+  outline; the rolling line ahead turns orange over the original's dashed
+  yellow; a strip names the result with a Clear. Closing the Quick Check KEEPS
+  the what-if until it is cleared — on a phone the check covers the chart.
+- **The blocks come from the same duty periods the limits were computed from**
+  (`allDutyPeriods`, flown + `upcomingPlannedDuties`), and a rest is the
+  pipeline's own `restBefore` where it has one. Training and ground duties come
+  from the roster (`scheduleEntries`, UTC only), hatched like a standby.
+- **A tapped duty or rest expands IN PLACE under the chart** — sign-on,
+  sign-off, FDP against its maximum, latest sign-off, sectors; a rest's length,
+  minimum and when it ends, and the duties before and after it — an exception
+  to Main / Detail, because the FDP page gives the detail panel to the Quick
+  Check only. Every tap target is at least 28px wide (`hit`).
 
 ### OCR engine
 
@@ -5068,8 +5060,7 @@ When making changes, be aware of these high-impact files:
 - Do not let a standby into the dashboard's active-duty search — it would become the ACTIVE duty carrying `maxFdpMinutes: 0`, so the panel reads as a flight duty whose limit failed to compute. `DutyStatus.standby` is its own band
 - Do not hard-delete a roster duty, and do not let a binned one be matched by `bulkUpsertScheduleEntries` — updating a deleted row silently resurrects a duty the user deleted, the same rule the flight reconciler follows. Every read filters `isLiveEntity`
 - Do not open what is behind a row in a sheet, a dialog or an in-list expansion on a page with a detail panel — it opens IN the detail panel (see "Main / Detail on every page"). The discrepancy resolution was a sheet over the list it was chosen from; account was one long scroll with accordions
-- Do not key the FDP chart's x-axis (or any lookup on it) on `dateLabel` — "13 Oct" repeats once a zoomed-out window spans a year, and every lookup by label lands on the first year. The axis is the `date`, printed through `tickFormatter`
-- Do not open a tapped FDP chart day in the detail panel — a tap on the chart is part of scrubbing it, and on a phone the overlay covered the chart on every one. The tooltip reads the day, and selecting several series reads all four rolling figures at once. The page takes the full width instead (`useMainPanelFullWidth`) and gives the panel back only to the Quick Check
+- Do not open anything tapped on the FDP timeline in the detail panel — a tap on it is part of reading it, and on a phone the overlay covered the chart on every one. The page takes the full width instead (`useMainPanelFullWidth`) and gives the panel back only to the Quick Check
 - Do not let an app scroller scroll SIDEWAYS — `PageContainer`, `DetailFormPanel` and the dialog scrollers carry `overflow-x-hidden`. Glass inside one reaches past its own box by its edge-blur margin (`.GlassEdgeReflection`'s negative margin), so a segmented control on Discrepancies gave the page 14px of sideways play. Clip at the scroller, never on the glass, which would cut its shadow
 - Do not listen for `beforeinstallprompt` in a component — the install banner's module captures and spends it at page load, before any page mounts. Read the offer through `useInstallOffer()` (`pwa-install-prompt.tsx`); the account page's own listener never saw an offer, so its Install button only ever showed manual steps
 - Do not put the duty or currency form back in a sheet over the page — a selected duty or currency opens in the DETAIL panel (`DutyDetailPanel` / `CurrencyDetailPanel` on `DetailFormPanel`), beside its list on a tablet and as the overlay on a phone, like a flight or a crew member; a sheet covered the very list it was chosen from. And keep their forms a DRAFT over the live record (`useDraft`), never a copy seeded once — a copy goes stale at the next pull and saving it reverts another device's edit
@@ -5161,7 +5152,6 @@ When making changes, be aware of these high-impact files:
 - Do not read computed style or layout in an effect that runs on a navigation's commit (`getComputedStyle(x).transform`, a rect) — the arriving page's DOM is still dirty, so the read is a style recalculation of the whole page. The gravity blob's interrupted-move position came from `getComputedStyle` and cost 312ms at 4× on a sidebar tap to FDP; it is computed from the move's own spring track and `currentTime` now
 - Do not let a keep-alive page listen to a background process's progress while it is hidden — the airports page re-rendered on every 250-row chunk of the seed it had started, while the pilot was on another page. Gate the listener on `usePageActive` as well as on there being something to wait for
 - Do not compute the whole period aggregate (`aggregateDashboard`) to read one figure off it — the legal page needs only recency, which is `ninetyDayRecency`. And keep `usePilotStatus`'s duty and legality halves in separate memos: one memo rebuilt the duty model (a pass over every duty window) each time an input it never reads landed
-- Do not let a chart restart from fallback colours on each mount when the theme has not changed — `FDPTimelineChart` probes its SVG colours once and the answer is cached per mode + palette, so a remount does not render the whole chart twice
 - Do not reintroduce a second typeface — Inter is the single app font (`--font-sans` and `--font-mono` both resolve to Inter); use `tabular-nums` for aligned numbers, never a `font-mono` class or a new Google-Fonts `<link>`
 - Do not give `register/complete`, `add-passkey`, the callsign change, or the TOTP-reveal routes a path that skips `verifyAuthenticationResponse`/`verifyStepUpAssertion` — the TOTP seed must never be revealed without a fresh passkey step-up
 - Do not give `SwipeableCard` action panels horizontal padding — the panel must collapse to 0 width when closed (the left gap comes from `openWidth`/`justify-end`), otherwise a sliver of the action button peeks at the card edge
@@ -5317,7 +5307,7 @@ When making changes, be aware of these high-impact files:
 - Do not run the device OCR engine on the page's main thread — it runs in `engine/ocr.worker.ts`, so the UI is not one of its compute threads; and do not give it every core (`ocrThreadCount` leaves one for the UI)
 - Do not animate a CSS custom property on a container — not a registered `@property`, not a keyframed `--var`. An inherited custom property changing every frame restyles the container's WHOLE subtree every frame: the glass's specular drift did that on every glass surface, which in the nav and the header is most of the app — ~1.8s of every 2s idle at a 4× CPU throttle, 29 frames in 3s on an idle logbook. And it did not even move the glint: `--glass-rim` is declared on `:root`, where its `var()` resolves, so the animated value never reached the paint. If something must move, animate a transform or opacity on the element that draws it. A spinner left running behind the OCR processing dialog is the same mistake in miniature
 - Do not compute something per DAY by filtering every duty period — `generateTimelineData` called `calculateRollingStats` three times per day over all duties (O(days × duties), ~40s at a 4× throttle on a long logbook, in the dashboard's first render, during which the page did not paint). The windows are read off a sorted index now and `timeline-data.test.ts` pins them to the original definition. The same goes for `deriveDutyStatus` (`indexWindows`) and `applyAcclimatisation` (`acclimatisedOffsetsAtEachDuty`): a whole-timeline pass must be one pass, and each keeps the per-item definition as its test oracle
-- Do not build the FDP chart's timeline in `computeFDPResult` — it is a point per day for a whole career, and only the FDP page draws it. `useFDPTimeline` builds it there; the dashboard's pipeline does not And do not hand the FDP chart's OVERVIEW strip the whole timeline: it is a point per day of a career (~8,400 per series on the 1,200-flight benchmark) drawn into a 50px strip, and Recharts building those paths was most of the FDP page's first render. `overviewData` buckets it to `OVERVIEW_POINTS` (240) keeping each bucket's MAX, so a peak near a limit survives; the touch mapping and the window box stay in `activeData`'s index space, which uniform buckets preserve. The main chart already draws only the visible window
+- Do not compute the FDP timeline's rolling line per DAY, or for the whole career — `rollingSeries` evaluates `rollingAt` only at the breakpoints inside what is drawn (a view either side of the screen), off a prefix-summed index (`createRollingIndex`). And do not split it into a second chart with its own zoom again: the owner asked for the limits and the duties in sync, and one scroller is what guarantees it
 - Do not leave an unarmed `SwipeableCard` row without its keyboard stand-in. The action panel only mounts once the row is armed, and most rows' content is not focusable, so without the `sr-only` "Show actions" button Tab could never reach Delete or `…`. Focusing it arms the row and hands focus to the first real button a TASK later — the arming render commits inside Tab's own focus change, so a synchronous `focus()` there is overridden and focus lands on `<body>`. The flag is set in the ROOT's `onFocusCapture`, because the stand-in is removed before its own `onFocus` can run
 - Do not pass `dragControls` (or `drag`) to an unarmed `SwipeableCard` row — framer mounts its whole drag feature for EITHER prop, and fifty rows of it plus their action panels was ~800ms of the tap that opens a flight. The row arms on first pointerdown/focus and hands that pointerdown to the drag controls, so the first swipe still swipes
 - Do not write `?selected=` to history INSIDE the tap — Next applies the write as a router transition, but one made inside a click renders synchronously, in the click, and takes the selection's own transition with it (the whole flight form rendered before the tap could paint: INP 656ms at 4×, 96ms deferred). `writeUrlAfterTap` defers it one task, `pendingUrlWriteRef` covers the gap, and the selection itself commits as a transition. Keep `pushedBaseRef` in the "is it already open" test, or a second tap inside that task pushes a second entry The deferred write is ONE at a time (a second inside the task supersedes the first but keeps its push), is dropped if the pathname changed before it fires (it would put the old page's URL on top of the new route), and a close inside that task cancels the pending push instead of calling `router.back()` — there is no entry to go back over yet, and the back would pop the page before it

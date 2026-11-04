@@ -11,13 +11,12 @@ import {
   AlertTriangle,
   Calculator,
 } from "lucide-react"
-import { useFDPData, useFDPTimeline } from "@/hooks/data/use-fdp-data"
+import { useFDPData } from "@/hooks/data/use-fdp-data"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import {
   FTL_PRESETS,
   type RegulationType,
 } from "@/types/entities/roster.types"
-import { FDPTimelineChart } from "@/components/roster/fdp-timeline-chart"
 import { DutyTimeline, type TimelineScenario } from "@/components/roster/duty-timeline"
 import { buildDutyTimeline } from "@/lib/utils/roster/duty-timeline"
 import { useFlights } from "@/hooks/data/use-flights"
@@ -85,14 +84,11 @@ function extractDestination(route?: string): string {
 export default function FDPPage() {
   const {
     allDutyPeriods,
-    capacity,
     forecast,
-    restViolations,
     futureDuties,
     restUntilLegal,
     isLoading,
   } = useFDPData()
-  const timelineData = useFDPTimeline(allDutyPeriods)
   // The duty timeline draws each duty's sectors, so it needs the rows they
   // name, and the roster for the ground duties the pipeline does not count.
   const { flights } = useFlights()
@@ -312,39 +308,17 @@ export default function FDPPage() {
           </Card>
         ) : null}
 
-        {/* Forecast breach — rest violations are now rendered as red overlays
-            on the chart itself, so only the breach forecast stays inline here. */}
-        {forecast.hasExceedance && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1">
-            <div className="flex items-center gap-1">
-              <AlertTriangle className="h-3 w-3 text-status-critical" />
-              <span className="text-[10px] text-status-critical">Breach Forecast</span>
-            </div>
-          </div>
-        )}
-
-        {/* Interactive Timeline Chart — tabs integrated into card */}
-        {timelineData.length > 0 ? (
-          <ChartErrorBoundary>
-            <FDPTimelineChart
-              timelineData={timelineData}
-              limits={activeLimits}
-              capacity={capacity}
-              forecast={forecast}
-              restViolationDates={restViolations.map((dp) => dp.date)}
-              scenarioTimelineData={scenarioResult?.timelineData}
-              scenarioModifiedDates={scenarioResult?.modifiedDates}
-              scenarioRemovedDates={scenarioResult?.removedDates}
-              onClearScenario={() => setScenarioResult(null)}
-            />
-          </ChartErrorBoundary>
-        ) : null}
-
-        {/* Each duty on one time axis: what was flown, the duty around it,
-            and the rest between. */}
+        {/* The rolling limits and the duties that make them, on one time
+            axis, read at one pointer. */}
         {dutyBlocks.length > 0 ? (
           <ChartErrorBoundary>
-            <DutyTimeline blocks={dutyBlocks} scenario={timelineScenario} onClearScenario={() => setScenarioResult(null)} />
+            <DutyTimeline
+              blocks={dutyBlocks}
+              limits={activeLimits}
+              forecast={forecast}
+              scenario={timelineScenario}
+              onClearScenario={() => setScenarioResult(null)}
+            />
           </ChartErrorBoundary>
         ) : !isLoading ? (
           <EmptyState

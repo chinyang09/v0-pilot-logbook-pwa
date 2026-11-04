@@ -1,91 +1,85 @@
 "use client"
 
 /**
- * The duty timeline — a Gantt chart whose axis is TIME. Each duty is ONE bar
- * with its flying drawn inside it, and the rest that preceded it decked
- * straight underneath, so a single look says whether the next duty signs on
- * inside the minimum rest:
+ * The FDP page's timeline — the rolling limits and the duties that make them,
+ * on ONE time axis, read at ONE pointer:
  *
- *          MON 3              TUE 4
- *   8:30 · max 12:15      ┊┈┈┈┈┈┈┈┈┐
- *   ▐░▓▓▓░░▓▓▓▓░░▌┈┈┈┈┈┈┈┈┊         duty, sectors inside, the maximum dotted
- *                 ▐████████▒▒▒▒▒░░░▌ rest: the minimum (solid), then the rest
- *                 14:20 · min 10:00    as provided, to the next sign-on
+ *    3 Nov          4 Nov          5 Nov            ← dates; gridlines full height
+ *   ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄  90h       ← the limit
+ *        ╱‾‾‾‾‾‾‾‾╲___╱‾‾‾‾‾┆‾ ‾ ‾ ‾ ‾             ← the rolling total, flown then scheduled
+ *   ▐░▓▓▓░▓▓▓░▌┈┈┈┈┈┊       ┆ ▐░▓▓▓░▌               ← duty, its sectors inside, max FDP dotted
+ *   ▒▒▒▒▒████████▒▒▒▒▒▒▒▒▒▒┆▒                      ← rest: the minimum solid, then the rest
+ *                          ┆
+ *                       pointer — everything above is read HERE, to the minute
  *
- * The maximum is drawn for a duty still to come (rostered, or a Quick Check
- * what-if) — the latest sign-off its Reg 14 maximum allows; once a duty has
- * been flown its record is the fact, and the maximum is only said if it was
- * broken (the part past it hatched red). A rest whose minimum runs past the
- * next sign-on has that part hatched red, under the duty that signed on early.
- * Duties still to come are dashed in the planned yellow; a what-if is orange.
+ * The rolling total is the pipeline's window at an INSTANT (`rolling-at.ts`):
+ * a duty in progress counts as far as it has gone, so the line is exact at any
+ * zoom, and the pointer reads it to the minute. Both halves sit in one
+ * scroller, so they cannot fall out of step.
  *
- * The axis runs years either side of the logbook, drawn only near the view;
- * "Now" brings it back. Swipe sideways to move; pinch (or the tabs) to step
- * between 24 hours, 7 days and 28 days. Tap a duty for its sign-on, sign-off
- * and sectors; tap a rest for the duties either side of it.
+ * Swipe to move; pinch (ctrl-wheel on a trackpad, or − / +) to zoom smoothly,
+ * holding the time under the fingers still. "Now" brings the pointer back to
+ * the present. Tap a duty or a rest to open it under the chart; tap the
+ * rolling chart to bring that time to the pointer.
+ *
+ * Plain positioned elements and one SVG, not a chart library, and only what is
+ * within a view either side of the screen is drawn — a career is thousands of
+ * duties on one axis.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { AlertTriangle, CheckCircle2, ChevronRight, X } from "lucide-react"
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { AlertTriangle, ChevronRight, Minus, Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { FormSection } from "@/components/ui/form-section"
 import { ReadOnlyRow } from "@/components/ui/settings-row"
-import { SegmentedTabs, type SegmentedTab } from "@/components/ui/segmented-tabs"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { FDP_COLORS } from "@/components/roster/fdp-colors"
 import { formatInstant, tzFormatter } from "@/lib/utils/tz-format"
 import { formatHHMMDisplay, minutesToHHMM } from "@/lib/utils/time"
-import { summarizeTimeline, type DutyBlock, type RestBefore } from "@/lib/utils/roster/duty-timeline"
+import { pointerState, type DutyBlock, type RestBefore } from "@/lib/utils/roster/duty-timeline"
+import { createRollingIndex, rollingAt, rollingSeries, type RollingIndex, type RollingKind } from "@/lib/utils/roster/rolling-at"
+import type { ForecastResult, FTLLimits } from "@/types/entities/roster.types"
 
 const MIN = 60_000
 const HOUR = 60 * MIN
 const DAY = 24 * HOUR
 const YEAR = 365 * DAY
 
-type Zoom = "1" | "7" | "28"
-/** In order of the span shown — pinching OUT steps left, IN steps right. */
-const ZOOM_ORDER: Zoom[] = ["1", "7", "28"]
-const ZOOMS: SegmentedTab<Zoom>[] = [
-  { value: "1", label: "24 Hours" },
-  { value: "7", label: "7 Days" },
-  { value: "28", label: "28 Days" },
-]
+/** How much time the view spans, and the bounds of a zoom. */
+const DEFAULT_SPAN = 7 * DAY
+const MIN_SPAN = 3 * HOUR
+const MAX_SPAN = 180 * DAY
 
-/**
- * Geometry, px — one deck: the duty's label, the duty bar, the rest bar
- * directly under it (no gap), the rest's label.
- */
-const AXIS_H = 26
-const LABEL_H = 14
-const DUTY_LABEL_Y = AXIS_H + 4
-const DUTY_Y = DUTY_LABEL_Y + LABEL_H + 2
-const DUTY_H = 24
+/** Geometry, px — the date header, the rolling chart, then the duty deck. */
+const AXIS_H = 22
+const ROLL_TOP = AXIS_H + 10
+const ROLL_H = 120
+const DUTY_Y = ROLL_TOP + ROLL_H + 10
+const DUTY_H = 36
 const REST_Y = DUTY_Y + DUTY_H
-const REST_H = 12
+const REST_H = 14
+const LABEL_H = 14
 const REST_LABEL_Y = REST_Y + REST_H + 3
 const CHART_H = REST_LABEL_Y + LABEL_H + 5
-/** Sectors sit inside the duty bar, this far in from its top and bottom. */
-const SECTOR_INSET = 5
-/** The "Now" chip sits under the day and hour labels, above the deck. */
-const NOW_Y = 13
 /** The narrowest a tap target gets, centred on a bar narrower than it. */
 const HIT_MIN = 28
 /** Labels are 11px semibold tabular figures; this is a character's width. */
 const CHAR_PX = 6.6
 const LABEL_GAP = 6
+/** The fewest pixels between two labelled gridlines. */
+const TICK_MIN_PX = 42
 
 /** How far the axis runs past the logbook (and now), either way. */
 const AXIS_PAD = 3 * YEAR
 /** The widest the scroller's content may be — past it, centred on now. */
 const MAX_INNER_PX = 12_000_000
 
-/** A pinch has to change the finger spread this much to step the zoom. */
-const PINCH_STEP = 1.3
-/** A trackpad pinch (ctrl + wheel) accumulates this much delta per step. */
-const WHEEL_STEP = 60
+/** A trackpad pinch (ctrl + wheel): how strongly a unit of delta zooms. */
+const WHEEL_ZOOM = 0.004
 
 const OVER = "var(--status-error)"
 const REST = "var(--muted-foreground)"
+const NEAR_LIMIT = "#b08040"
 
 /** A colour at a share of its strength — works for a hex and a CSS variable. */
 function tint(color: string, pct: number): string {
@@ -99,6 +93,9 @@ function hatch(color: string): string {
 /** What runs past a limit: red stripes over whatever is beneath. */
 const BREACH = `repeating-linear-gradient(135deg, ${OVER} 0 2px, transparent 2px 5px)`
 
+/** Text over a bar: the foreground, lifted off whatever colour is under it. */
+const ON_BAR = { color: "var(--foreground)", textShadow: "0 0 3px var(--background), 0 0 1px var(--background)" }
+
 /** The Quick Check's what-if, as the timeline draws it. */
 export interface TimelineScenario {
   /** Every duty as the scenario leaves it. */
@@ -107,6 +104,15 @@ export interface TimelineScenario {
   removed: DutyBlock[]
   /** How many problems the check found. */
   problems: number
+}
+
+interface RollingView {
+  key: RollingKind
+  label: string
+  /** The limit, minutes. */
+  limit: number
+  limitName: string
+  color: string
 }
 
 type Selection = { kind: "duty" | "rest"; id: string } | null
@@ -137,17 +143,48 @@ function dayStarts(from: number, to: number, zulu: boolean): number[] {
   return out
 }
 
-/** Alternate days, consistently wherever the view is (a midnight is within 14h of a UTC one). */
-function isBandedDay(dayStart: number): boolean {
-  return ((Math.round(dayStart / DAY) % 2) + 2) % 2 === 1
+/** A day's number — consecutive across the axis (a midnight is within 14h of a UTC one). */
+const dayNumber = (dayStart: number) => Math.round(dayStart / DAY)
+
+/** The gridline step: the finest that leaves room for a label. */
+const STEPS_H = [1, 2, 3, 6, 12, 24, 48, 24 * 7, 24 * 14, 24 * 28]
+function gridStepHours(pxPerMs: number): number {
+  return STEPS_H.find((h) => h * HOUR * pxPerMs >= TICK_MIN_PX) ?? STEPS_H[STEPS_H.length - 1]
+}
+
+/** A tiny store for the pointer's instant: the readouts follow it, the chart does not re-render for it. */
+function createPointerStore(initial: number) {
+  let value = initial
+  const listeners = new Set<() => void>()
+  return {
+    get: () => value,
+    set: (v: number) => {
+      if (v === value) return
+      value = v
+      for (const l of listeners) l()
+    },
+    subscribe: (l: () => void) => {
+      listeners.add(l)
+      return () => listeners.delete(l)
+    },
+  }
+}
+type PointerStore = ReturnType<typeof createPointerStore>
+
+function usePointer(store: PointerStore): number {
+  return useSyncExternalStore(store.subscribe, store.get, store.get)
 }
 
 export function DutyTimeline({
   blocks: logged,
+  limits,
+  forecast,
   scenario = null,
   onClearScenario,
 }: {
   blocks: DutyBlock[]
+  limits: FTLLimits
+  forecast?: ForecastResult
   scenario?: TimelineScenario | null
   onClearScenario?: () => void
 }) {
@@ -162,22 +199,32 @@ export function DutyTimeline({
     (min: number) => formatHHMMDisplay(minutesToHHMM(Math.max(0, Math.round(min))), display.timeFormat === "12h" ? "24h" : display.timeFormat),
     [display.timeFormat],
   )
-  // "MON 3": the weekday first, as a pilot reads a roster. One formatter for
-  // each half, because a locale's own order for the pair puts the day first.
+  const sep = display.clockSeparator === "none" ? "" : ":"
   const fmt = useMemo(() => {
-    const wd = tzFormatter(zone, { weekday: "short" }, "wd")
-    const dn = tzFormatter(zone, { day: "numeric" }, "dn")
     const dm = tzFormatter(zone, { day: "numeric", month: "short" }, "d-mon")
     const hr = tzFormatter(zone, { hour: "2-digit", hourCycle: "h23" }, "hh")
     return {
-      day: (ms: number) => `${wd.format(new Date(ms))} ${dn.format(new Date(ms))}`,
-      dayNumber: (ms: number) => dn.format(new Date(ms)),
       dayMonth: (ms: number) => dm.format(new Date(ms)),
-      hour: (ms: number) => hr.format(new Date(ms)),
+      hour: (ms: number) => `${hr.format(new Date(ms))}${sep}00`,
     }
-  }, [zone])
+  }, [zone, sep])
 
-  const [zoom, setZoom] = useState<Zoom>("7")
+  const views: RollingView[] = useMemo(
+    () => [
+      { key: "duty14", label: "14D Duty", limit: limits.maxDuty14Days * 60, limitName: "14-day duty", color: FDP_COLORS.duty },
+      { key: "duty28", label: "28D Duty", limit: limits.maxDuty28Days * 60, limitName: "28-day duty", color: "#8a7aa5" },
+      { key: "flight28", label: "28D Flight", limit: limits.maxFlight28Days * 60, limitName: "28-day flight", color: FDP_COLORS.flight },
+      { key: "flight365", label: "12M Flight", limit: limits.maxFlight365Days * 60, limitName: "12-month flight", color: "#6fa3b0" },
+    ],
+    [limits],
+  )
+  const [series, setSeries] = useState<RollingKind>("duty14")
+  const view = views.find((v) => v.key === series) ?? views[0]
+
+  const index = useMemo(() => createRollingIndex(blocks), [blocks])
+  const loggedIndex = useMemo(() => (scenario ? createRollingIndex(logged) : null), [scenario, logged])
+
+  const [span, setSpan] = useState(DEFAULT_SPAN)
   const [width, setWidth] = useState(0)
   const [selection, setSelection] = useState<Selection>(null)
   const scrollerRef = useRef<HTMLDivElement>(null)
@@ -185,9 +232,8 @@ export function DutyTimeline({
   // One clock reading per mount: the "Now" line and the opening view. The
   // page is not kept alive, so it is current every time it is opened.
   const [nowMs] = useState(() => Date.now())
+  const [pointer] = useState(() => createPointerStore(Math.floor(nowMs / MIN) * MIN))
 
-  const spanDays = Number(zoom)
-  const span = spanDays * DAY
   const pxPerMs = width > 0 ? width / span : 0
 
   // The axis runs years past the logbook either way — as good as endless to
@@ -213,17 +259,16 @@ export function DutyTimeline({
   const xOf = useCallback((ms: number) => (ms - rangeStart) * pxPerMs, [rangeStart, pxPerMs])
   const wOf = useCallback((a: number, b: number) => Math.max(2, (b - a) * pxPerMs), [pxPerMs])
 
-  // Where the view starts — moved by the scroll, quantised (an hour at 24
-  // hours, a day otherwise) so a scroll re-renders only when that changes.
-  const quantum = zoom === "1" ? HOUR : DAY
+  // Where the view starts, quantised to a quarter of it, so a scroll
+  // re-renders the chart only when what is drawn needs to move on. The
+  // pointer reads the exact scroll on every frame without re-rendering it.
+  const quantum = span / 4
   const [viewStart, setViewStart] = useState<number | null>(null)
-  // A time to hold at an x in the view across a scale change: the opening
-  // view (now, a little left of centre), the centre across a tab change, the
-  // pinch's midpoint across a pinch.
+  /** A time to hold at an x in the view across a scale change. */
   const anchorRef = useRef<{ ms: number; x: number } | null>(null)
+  /** The exact instant at the centre — the store holds it floored to the minute. */
+  const centreRef = useRef(nowMs)
 
-  // Width from a ResizeObserver: its first callback runs after layout, so the
-  // mount reads nothing in the middle of a commit.
   useEffect(() => {
     const el = scrollerRef.current
     if (!el) return
@@ -238,25 +283,26 @@ export function DutyTimeline({
   const readView = useCallback(() => {
     const el = scrollerRef.current
     if (!el || pxPerMs === 0) return
-    const t = rangeStart + el.scrollLeft / pxPerMs
-    const next = Math.floor(t / quantum) * quantum
+    const left = rangeStart + el.scrollLeft / pxPerMs
+    centreRef.current = left + width / 2 / pxPerMs
+    pointer.set(Math.floor(centreRef.current / MIN) * MIN)
+    const next = Math.floor(left / quantum) * quantum
     setViewStart((prev) => (prev === next ? prev : next))
-  }, [pxPerMs, quantum, rangeStart])
+  }, [pointer, pxPerMs, quantum, rangeStart, width])
 
-  // Apply a pending anchor once the scale it needs is known, then read the
-  // view in a frame (a scroll event follows only if scrollLeft moved).
+  // Apply a pending anchor once the scale it needs is known: the opening
+  // view puts NOW at the pointer, a zoom holds the time under the fingers,
+  // and anything else that moves the axis — new data shifting where it
+  // starts, a resize — holds the pointer's own time where it was.
   useLayoutEffect(() => {
     const el = scrollerRef.current
     if (!el || pxPerMs === 0) return
-    const anchor = anchorRef.current ?? (viewStart == null ? { ms: nowMs, x: width * 0.35 } : null)
-    if (anchor) {
-      anchorRef.current = null
-      el.scrollLeft = Math.max(0, xOf(anchor.ms) - anchor.x)
-    }
-    const raf = requestAnimationFrame(readView)
-    return () => cancelAnimationFrame(raf)
+    const anchor = anchorRef.current ?? (viewStart == null ? { ms: nowMs, x: width / 2 } : { ms: centreRef.current, x: width / 2 })
+    anchorRef.current = null
+    el.scrollLeft = Math.max(0, xOf(anchor.ms) - anchor.x)
+    readView()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs on a scale change only; viewStart is read for the first run
-  }, [pxPerMs, width, xOf, readView, nowMs])
+  }, [pxPerMs, width, xOf, nowMs])
 
   const scrollRaf = useRef(0)
   const handleScroll = useCallback(() => {
@@ -268,12 +314,12 @@ export function DutyTimeline({
   }, [readView])
   useEffect(() => () => cancelAnimationFrame(scrollRaf.current), [])
 
-  // Bring a time to a share of the way across the view.
+  /** Bring a time to the pointer. */
   const scrollToTime = useCallback(
-    (ms: number, share: number) => {
+    (ms: number) => {
       const el = scrollerRef.current
       if (!el || pxPerMs === 0) return
-      const left = Math.max(0, xOf(ms) - width * share)
+      const left = Math.max(0, xOf(ms) - width / 2)
       // A jump of more than a few views goes straight there: smooth across
       // months is a long wait for nothing worth watching.
       el.scrollTo({ left, behavior: Math.abs(left - el.scrollLeft) > 3 * width ? "instant" : "smooth" })
@@ -281,73 +327,88 @@ export function DutyTimeline({
     [pxPerMs, width, xOf],
   )
 
-  // Step the zoom, holding the time under `x` (a position in the view) still.
+  /** Zoom to `next`, holding the time at `x` (a position in the view) still. */
   const zoomTo = useCallback(
-    (next: Zoom, x?: number) => {
+    (next: number, x?: number, heldMs?: number) => {
       const el = scrollerRef.current
-      if (next === zoom) return
+      const clamped = Math.min(MAX_SPAN, Math.max(MIN_SPAN, next))
       if (el && pxPerMs > 0) {
         const at = x ?? width / 2
-        anchorRef.current = { ms: rangeStart + (el.scrollLeft + at) / pxPerMs, x: at }
+        anchorRef.current = { ms: heldMs ?? rangeStart + (el.scrollLeft + at) / pxPerMs, x: at }
       }
-      setZoom(next)
+      setSpan(clamped)
     },
-    [pxPerMs, rangeStart, width, zoom],
+    [pxPerMs, rangeStart, width],
   )
-  const latest = useRef({ zoom, zoomTo, scrollToTime })
-  useEffect(() => {
-    latest.current = { zoom, zoomTo, scrollToTime }
+  // Read by the native gesture listeners. Written in the LAYOUT phase, beside
+  // the scroll it pairs with — a passive effect left a frame in which the
+  // new scrollLeft met the old scale, and a pinch held the wrong time still.
+  const latest = useRef({ span, zoomTo, scrollToTime, pxPerMs, rangeStart })
+  useLayoutEffect(() => {
+    latest.current = { span, zoomTo, scrollToTime, pxPerMs, rangeStart }
   })
 
-  // A new what-if is shown where it changed the roster.
-  useEffect(() => {
-    if (!scenario) return
-    const changed = [...scenario.blocks.filter((b) => b.scenario), ...scenario.removed].sort((a, b) => a.startMs - b.startMs)
-    if (changed[0]) latest.current.scrollToTime(changed[0].startMs, 0.3)
+  // A new what-if is shown where it changed the roster — once per what-if,
+  // not on every data refresh that rebuilds the same one.
+  const firstChange = useMemo(() => {
+    if (!scenario) return null
+    const changed = [...scenario.blocks.filter((b) => b.scenario), ...scenario.removed]
+    return changed.length ? Math.min(...changed.map((b) => b.startMs)) : null
   }, [scenario])
+  useEffect(() => {
+    if (firstChange != null) latest.current.scrollToTime(firstChange)
+  }, [firstChange])
 
-  // Pinch: two fingers apart steps to a shorter span, together to a longer
-  // one. Native listeners, because a passive React touchmove cannot stop the
-  // browser zooming the page instead.
+  // Pinch: the span follows the fingers' spread continuously, and the time
+  // that was under them stays under them (so a pinch can also pan). Native
+  // listeners, because a passive React touchmove cannot stop the browser
+  // zooming the page instead. Applied once per frame.
   useEffect(() => {
     const el = scrollerRef.current
     if (!el) return
-    let base = 0
-    let wheel = 0
+    let pinch: { spread: number; span: number; ms: number } | null = null
+    /** A wheel gesture's own running span and held time — the render may not have caught up between events. */
+    let wheel: { span: number; ms: number; at: number } | null = null
+    let pending: { span: number; x: number; ms: number } | null = null
+    let raf = 0
+    const flush = () => {
+      raf = 0
+      if (!pending) return
+      latest.current.zoomTo(pending.span, pending.x, pending.ms)
+      pending = null
+    }
+    const queue = (p: { span: number; x: number; ms: number }) => {
+      pending = p
+      if (!raf) raf = requestAnimationFrame(flush)
+    }
     const spread = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
     const midX = (t: TouchList) => (t[0].clientX + t[1].clientX) / 2 - el.getBoundingClientRect().left
-    const step = (dir: -1 | 1, x: number) => {
-      const { zoom: z, zoomTo: go } = latest.current
-      const i = ZOOM_ORDER.indexOf(z) + dir
-      if (i >= 0 && i < ZOOM_ORDER.length) go(ZOOM_ORDER[i], x)
+    const msAt = (x: number) => {
+      const { pxPerMs: k, rangeStart: r } = latest.current
+      return k > 0 ? r + (el.scrollLeft + x) / k : 0
     }
     const onStart = (e: TouchEvent) => {
-      if (e.touches.length === 2) base = spread(e.touches)
+      if (e.touches.length === 2) pinch = { spread: spread(e.touches), span: latest.current.span, ms: msAt(midX(e.touches)) }
     }
     const onMove = (e: TouchEvent) => {
-      if (e.touches.length !== 2 || base === 0) return
+      if (e.touches.length !== 2 || !pinch) return
       e.preventDefault()
       const d = spread(e.touches)
-      if (d / base >= PINCH_STEP) {
-        step(-1, midX(e.touches))
-        base = d
-      } else if (base / d >= PINCH_STEP) {
-        step(1, midX(e.touches))
-        base = d
-      }
+      if (d > 0) queue({ span: (pinch.span * pinch.spread) / d, x: midX(e.touches), ms: pinch.ms })
     }
     const onEnd = (e: TouchEvent) => {
-      if (e.touches.length < 2) base = 0
+      if (e.touches.length < 2) pinch = null
     }
     // A trackpad pinch arrives as a ctrl-wheel; a plain wheel scrolls the page.
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return
       e.preventDefault()
-      wheel += e.deltaY
-      if (Math.abs(wheel) >= WHEEL_STEP) {
-        step(wheel > 0 ? 1 : -1, e.clientX - el.getBoundingClientRect().left)
-        wheel = 0
-      }
+      const x = e.clientX - el.getBoundingClientRect().left
+      const now = performance.now()
+      const going = wheel && now - wheel.at < 250 ? wheel : null
+      const span = Math.min(MAX_SPAN, Math.max(MIN_SPAN, (going?.span ?? latest.current.span) * Math.exp(e.deltaY * WHEEL_ZOOM)))
+      wheel = { span, ms: going?.ms ?? msAt(x), at: now }
+      queue({ span, x, ms: wheel.ms })
     }
     // Safari's own pinch gesture, which would otherwise zoom the page.
     const onGesture = (e: Event) => e.preventDefault()
@@ -358,6 +419,7 @@ export function DutyTimeline({
     el.addEventListener("wheel", onWheel, { passive: false })
     el.addEventListener("gesturestart", onGesture)
     return () => {
+      cancelAnimationFrame(raf)
       el.removeEventListener("touchstart", onStart)
       el.removeEventListener("touchmove", onMove)
       el.removeEventListener("touchend", onEnd)
@@ -367,35 +429,65 @@ export function DutyTimeline({
     }
   }, [])
 
-  const viewFrom = viewStart ?? nowMs - span * 0.35
-  const viewTo = viewFrom + span
+  const viewFrom = viewStart ?? nowMs - span / 2
   const drawFrom = viewFrom - span
-  const drawTo = viewTo + span
-  const nowInView = nowMs >= viewFrom && nowMs <= viewTo
-  const summary = useMemo(() => summarizeTimeline(blocks, viewFrom, viewTo), [blocks, viewFrom, viewTo])
+  const drawTo = viewFrom + 2 * span
   const visible = useMemo(
     () =>
       blocks.filter(
-        (b) => Math.max(b.endMs, b.showMax ? (b.latestSignOffMs ?? 0) : 0) > drawFrom && (b.restBefore?.startMs ?? b.startMs) < drawTo,
+        (b) => Math.max(b.endMs, b.showMax ? (b.latestSignOffMs ?? 0) : 0) > drawFrom && (b.restBefore?.signOffMs ?? b.startMs) < drawTo,
       ),
     [blocks, drawFrom, drawTo],
   )
   const ghosts = useMemo(() => removed.filter((b) => b.endMs > drawFrom && b.startMs < drawTo), [removed, drawFrom, drawTo])
   const byId = useMemo(() => new Map(blocks.map((b) => [b.id, b])), [blocks])
 
-  // The axis: midnight rules, and the ticks between them the zoom can carry.
+  // The axis: a gridline per step, full height, midnights stronger. A step
+  // under a day labels hours and puts the date on each midnight; a step of a
+  // day or more labels dates.
   const axis = useMemo(() => {
-    const dayPx = DAY * pxPerMs
-    const shown = pxPerMs > 0 ? dayStarts(Math.max(drawFrom, rangeStart), Math.min(drawTo, rangeEnd), zulu) : []
-    // At 28 days a cell is ~11px: label every Nth day so labels never touch.
-    const every = dayPx >= 40 ? 1 : Math.ceil(22 / Math.max(1, dayPx))
-    const ticks: { ms: number; label: string }[] = []
-    if (zoom !== "28") {
-      const stepH = zoom === "1" ? 1 : 6
-      for (const d of shown) for (let h = stepH; h < 24; h += stepH) ticks.push({ ms: d + h * HOUR, label: zoom === "1" && h % 6 === 0 ? fmt.hour(d + h * HOUR) : "" })
+    if (pxPerMs === 0) return { lines: [] as { ms: number; midnight: boolean; label: string }[], bands: [] as number[] }
+    const stepH = gridStepHours(pxPerMs)
+    const days = dayStarts(Math.max(drawFrom, rangeStart), Math.min(drawTo, rangeEnd), zulu)
+    const lines: { ms: number; midnight: boolean; label: string }[] = []
+    if (stepH < 24) {
+      for (const d of days) {
+        lines.push({ ms: d, midnight: true, label: fmt.dayMonth(d) })
+        for (let h = stepH; h < 24; h += stepH) lines.push({ ms: d + h * HOUR, midnight: false, label: fmt.hour(d + h * HOUR) })
+      }
+    } else {
+      const every = stepH / 24
+      for (const d of days) if (dayNumber(d) % every === 0) lines.push({ ms: d, midnight: true, label: fmt.dayMonth(d) })
     }
-    return { shown, every, ticks, full: dayPx >= 40 }
-  }, [drawFrom, drawTo, fmt, pxPerMs, rangeEnd, rangeStart, zoom, zulu])
+    const bands = DAY * pxPerMs >= 6 ? days.filter((d) => dayNumber(d) % 2 === 1) : []
+    return { lines, bands }
+  }, [drawFrom, drawTo, fmt, pxPerMs, rangeEnd, rangeStart, zulu])
+
+  // The rolling line across what is drawn, exact between its breakpoints.
+  const chart = useMemo(() => {
+    if (pxPerMs === 0) return null
+    const points = rollingSeries(index, series, drawFrom, drawTo, [nowMs])
+    const before = loggedIndex ? rollingSeries(loggedIndex, series, drawFrom, drawTo, [nowMs]) : null
+    const peak = Math.max(view.limit * 1.1, ...points.map((p) => p.v), ...(before ?? []).map((p) => p.v))
+    const yOf = (v: number) => ROLL_TOP + ROLL_H - (v / peak) * ROLL_H
+    const left = xOf(drawFrom)
+    const path = (pts: { t: number; v: number }[]) => pts.map((p, i) => `${i ? "L" : "M"}${(xOf(p.t) - left).toFixed(1)} ${yOf(p.v).toFixed(1)}`).join("")
+    const area = (pts: { t: number; v: number }[]) =>
+      pts.length < 2 ? "" : `${path(pts)}L${(xOf(pts[pts.length - 1].t) - left).toFixed(1)} ${ROLL_TOP + ROLL_H}L${(xOf(pts[0].t) - left).toFixed(1)} ${ROLL_TOP + ROLL_H}Z`
+    const flown = points.filter((p) => p.t <= nowMs)
+    const ahead = points.filter((p) => p.t >= nowMs)
+    return {
+      left,
+      width: xOf(drawTo) - left,
+      flown: path(flown),
+      flownArea: area(flown),
+      ahead: path(ahead),
+      aheadArea: area(ahead),
+      before: before ? path(before.filter((p) => p.t >= nowMs)) : "",
+      limitY: yOf(view.limit),
+      nearY: yOf(view.limit * 0.9),
+    }
+  }, [drawFrom, drawTo, index, loggedIndex, nowMs, pxPerMs, series, view.limit, xOf])
 
   const selectedDuty = selection?.kind === "duty" ? (byId.get(selection.id) ?? null) : null
   const restAfter = selection?.kind === "rest" ? (byId.get(selection.id) ?? null) : null
@@ -405,27 +497,21 @@ export function DutyTimeline({
     (kind: "duty" | "rest", id: string) => setSelection((cur) => (cur?.kind === kind && cur.id === id ? null : { kind, id })),
     [],
   )
-  // From a rest's detail to one of its duties: select it and bring it into view.
+  // From a rest's detail to one of its duties: select it and bring it to the pointer.
   const showDuty = useCallback(
     (b: DutyBlock) => {
       setSelection({ kind: "duty", id: b.id })
-      const el = scrollerRef.current
-      if (!el || pxPerMs === 0) return
-      if (xOf(b.startMs) < el.scrollLeft || xOf(b.endMs) > el.scrollLeft + width) scrollToTime(b.startMs, 0.2)
+      scrollToTime((b.startMs + b.endMs) / 2)
     },
-    [pxPerMs, scrollToTime, width, xOf],
+    [scrollToTime],
   )
 
   const innerWidth = Math.max(width, (rangeEnd - rangeStart) * pxPerMs)
-  const rangeText =
-    zoom === "1"
-      ? `${fmt.dayMonth(viewFrom)} ${clock(viewFrom)} – ${fmt.dayMonth(viewTo)} ${clock(viewTo)}`
-      : `${fmt.dayMonth(viewFrom)} – ${fmt.dayMonth(viewTo - 1)}`
 
   // Labels, placed left to right per row; one that would overlap the last
-  // placed is left out. A label may be wider than its bar — it sits centred
-  // over it — so a duty a few pixels wide at 7 days still says how long it
-  // was. Each takes the longest of its forms that fits the room it has.
+  // placed is left out. A duty says its FDP against its maximum (or its
+  // length, where no maximum applies), a sector its block time, a rest its
+  // length against its minimum — each in the pilot's duration format.
   const labels = useMemo(() => {
     const out: Label[] = []
     const place = (items: Label[]) => {
@@ -438,73 +524,63 @@ export function DutyTimeline({
         right = l.x + half
       }
     }
-    const fits = (forms: string[], room: number) => forms.find((t) => t.length * CHAR_PX + 8 <= room) ?? forms[forms.length - 1]
     const duty: Label[] = []
+    const sector: Label[] = []
     const rest: Label[] = []
     for (const b of visible) {
       const left = xOf(b.startMs)
-      const reach = b.showMax && b.latestSignOffMs != null ? Math.max(b.endMs, b.latestSignOffMs) : b.endMs
-      const room = xOf(reach) - left
-      const dur = duration(b.dutyMinutes)
-      const max = b.showMax ? `max ${duration(b.maxFdpMinutes)}` : ""
-      const flown = b.sectors.filter((s) => !s.positioning)
-      // At 24 hours a sector carries its own block time inside the bar, so
-      // the duty's label does not repeat it.
-      const inside = flown.some((s) => xOf(s.inMs) - xOf(s.outMs) >= sectorText(s, duration).length * CHAR_PX + 6)
-      const flight = flown.length > 0 && !inside ? `${duration(b.flightMinutes)} flight` : ""
-      const name = b.kind === "flight" ? b.route : b.code
-      const forms =
-        b.kind === "flight"
-          ? [
-              [dur, flight, max, name].filter(Boolean).join(" · "),
-              [dur, flight, max].filter(Boolean).join(" · "),
-              [dur, max].filter(Boolean).join(" · "),
-              dur,
-            ]
-          : [`${b.code} ${dur}`]
-      duty.push({ key: `d${b.id}`, row: "duty", x: left + Math.min(room, xOf(b.endMs) - left) / 2, text: fits(forms, room), tone: b.limit === "over" ? "over" : null })
-
+      const w = xOf(b.endMs) - left
+      const text =
+        b.kind === "flight" && b.maxFdpMinutes > 0
+          ? `${duration(b.fdpMinutes)}/${duration(b.maxFdpMinutes)}`
+          : b.kind === "standby"
+            ? `SBY ${duration(b.dutyMinutes)}`
+            : b.kind === "ground"
+              ? `${b.code} ${duration(b.dutyMinutes)}`
+              : duration(b.dutyMinutes)
+      duty.push({ key: `d${b.id}`, y: DUTY_Y + 3, x: left + w / 2, text, tone: b.limit === "over" ? "over" : null, onBar: true })
+      for (const s of b.sectors) {
+        if (s.positioning) continue
+        const sw = xOf(s.inMs) - xOf(s.outMs)
+        const st = duration((s.inMs - s.outMs) / MIN)
+        if (sw >= st.length * CHAR_PX + 6) sector.push({ key: `s${s.id}`, y: DUTY_Y + DUTY_H - LABEL_H - 2, x: xOf(s.outMs) + sw / 2, text: st, tone: null, onBar: true })
+      }
       const r = b.restBefore
       if (r) {
-        const a = xOf(r.startMs)
-        const z = xOf(b.startMs)
-        const rd = duration(r.minutes)
-        const short = r.status === "short"
-        const forms = r.requiredMinutes != null ? [`${rd} · ${short ? "need" : "min"} ${duration(r.requiredMinutes)}`, rd] : [rd]
-        rest.push({ key: `r${b.id}`, row: "rest", x: (a + z) / 2, text: fits(forms, z - a), tone: short ? "over" : null })
+        const text = r.requiredMinutes != null ? `${duration(r.minutes)}/${duration(r.requiredMinutes)}` : duration(r.minutes)
+        rest.push({ key: `r${b.id}`, y: REST_LABEL_Y, x: (xOf(r.signOffMs) + xOf(b.startMs)) / 2, text, tone: r.status === "short" ? "over" : null, onBar: false })
       }
     }
     place(duty)
+    place(sector)
     place(rest)
     return out
   }, [visible, xOf, duration])
 
-  // The verdict for what is in view, said in words beside the figures.
-  const nearCount = useMemo(
-    () => blocks.filter((b) => b.startMs < viewTo && b.endMs > viewFrom && (b.limit === "near" || b.restBefore?.status === "tight")).length,
-    [blocks, viewFrom, viewTo],
-  )
+  const exceedances = (forecast?.exceedances ?? []).filter((e) => e.limitName.includes(view.limitName)).slice(0, 3)
 
   return (
-    <FormSection title="Duty Timeline">
+    <FormSection title="Timeline">
       <div className="space-y-2.5 px-3 pb-3 pt-1">
-        <div className="flex items-center justify-between gap-2">
-          <SegmentedTabs tabs={ZOOMS} value={zoom} onChange={(z) => zoomTo(z)} />
-          <button
-            type="button"
-            onClick={() => scrollToTime(nowMs, 0.35)}
-            disabled={nowInView}
-            className="control-surface h-9 shrink-0 rounded-full px-3.5 text-sm font-medium transition-opacity disabled:opacity-40"
-          >
-            Now
-          </button>
+        <div className="flex items-start justify-between gap-2">
+          <PointerReadout store={pointer} blocks={blocks} clock={clock} dayMonth={fmt.dayMonth} duration={duration} />
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button type="button" onClick={() => zoomTo(span * 1.6)} aria-label="Zoom out" className="control-surface flex h-9 w-9 items-center justify-center rounded-full">
+              <Minus className="h-4 w-4" />
+            </button>
+            <button type="button" onClick={() => zoomTo(span / 1.6)} aria-label="Zoom in" className="control-surface flex h-9 w-9 items-center justify-center rounded-full">
+              <Plus className="h-4 w-4" />
+            </button>
+            <NowButton store={pointer} nowMs={nowMs} span={span} onNow={() => scrollToTime(nowMs)} />
+          </div>
         </div>
-        <p className="px-1 text-xs font-medium text-muted-foreground tabular-nums">{rangeText}</p>
+
+        <RollingTabs store={pointer} index={index} views={views} value={series} onChange={setSeries} duration={duration} />
 
         {scenario && (
           <div className="flex items-center justify-between gap-2 rounded-lg py-1 pl-3 pr-1" style={{ background: tint(FDP_COLORS.scenario, 14) }}>
             <p className="flex min-w-0 items-center gap-1.5 text-xs font-semibold" style={{ color: FDP_COLORS.scenario }}>
-              {scenario.problems > 0 ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden /> : <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden />}
+              {scenario.problems > 0 && <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />}
               <span className="truncate">
                 What-If · {scenario.problems > 0 ? `${scenario.problems} problem${scenario.problems === 1 ? "" : "s"}` : "Legal"}
               </span>
@@ -517,125 +593,171 @@ export function DutyTimeline({
           </div>
         )}
 
-        {/* How much, in view: flight, duty, and the shortest rest. */}
-        <div className="grid grid-cols-3 gap-2 px-1">
-          <Figure value={duration(summary.flightMinutes)} caption="Flight" color={FDP_COLORS.flight} />
-          <Figure value={duration(summary.dutyMinutes)} caption="Duty" color={FDP_COLORS.duty} />
-          <Figure
-            value={summary.shortestRestMinutes == null ? "—" : duration(summary.shortestRestMinutes)}
-            caption="Shortest Rest"
-            alert={summary.shortRests > 0}
-          />
-        </div>
-        <Verdict over={summary.overLimit} short={summary.shortRests} near={nearCount} duties={summary.duties} />
-
-        <div
-          ref={scrollerRef}
-          onScroll={handleScroll}
-          className="relative overflow-x-auto overflow-y-hidden overscroll-x-contain rounded-lg border border-border/60 bg-card scrollbar-hide"
-          style={{ height: CHART_H, touchAction: "pan-x pan-y" }}
-          role="group"
-          aria-label="Duty timeline"
-        >
-          {pxPerMs > 0 && (
-            <div className="relative h-full" style={{ width: innerWidth }}>
-              {/* Every other day banded, so a day reads as a column. */}
-              {axis.shown.map((d) =>
-                isBandedDay(d) ? (
-                  <div key={`band${d}`} className="pointer-events-none absolute bottom-0 bg-foreground/[0.04]" style={{ left: xOf(d), width: DAY * pxPerMs, top: AXIS_H }} />
-                ) : null,
-              )}
-              <div className="pointer-events-none absolute inset-x-0 border-t border-border/50" style={{ top: AXIS_H }} />
-
-              {axis.ticks.map((t) => (
-                <div key={t.ms} className="pointer-events-none absolute border-l border-border/30" style={{ left: xOf(t.ms), top: AXIS_H - 5, height: 5 }}>
-                  {t.label && (
-                    <span className="absolute -translate-x-1/2 text-[10px] leading-[12px] tabular-nums text-muted-foreground" style={{ top: 1 - (AXIS_H - 5) }}>
-                      {t.label}
+        <div className="relative overflow-hidden rounded-lg border border-border/60 bg-card">
+          <div
+            ref={scrollerRef}
+            onScroll={handleScroll}
+            className="relative overflow-x-auto overflow-y-hidden overscroll-x-contain scrollbar-hide"
+            style={{ height: CHART_H, touchAction: "pan-x pan-y" }}
+            role="group"
+            aria-label="Duty timeline"
+          >
+            {pxPerMs > 0 && (
+              <div className="relative h-full" style={{ width: innerWidth }}>
+                {/* Every other day banded, so a day reads as a column. */}
+                {axis.bands.map((d) => (
+                  <div key={`band${d}`} className="pointer-events-none absolute bottom-0 bg-foreground/[0.035]" style={{ left: xOf(d), width: DAY * pxPerMs, top: AXIS_H }} />
+                ))}
+                {/* Gridlines the full height, so where a bar ends can be read off the axis. */}
+                {axis.lines.map((l) => (
+                  <div
+                    key={`g${l.ms}`}
+                    className={cn("pointer-events-none absolute bottom-0 border-l", l.midnight ? "border-border" : "border-border/40")}
+                    style={{ left: xOf(l.ms), top: l.midnight ? 0 : AXIS_H - 6 }}
+                  >
+                    <span
+                      className={cn(
+                        "absolute left-1 whitespace-nowrap text-[11px] leading-[14px] tabular-nums",
+                        l.midnight ? "font-semibold text-foreground" : "text-muted-foreground",
+                      )}
+                      style={{ top: l.midnight ? 3 : -3 }}
+                    >
+                      {l.label}
                     </span>
-                  )}
-                </div>
-              ))}
-              {axis.shown.map((d, i) => (
-                <div key={d} className="pointer-events-none absolute inset-y-0 border-l border-border/60" style={{ left: xOf(d) }}>
-                  {(axis.full || i % axis.every === 0) && (
-                    <span className="absolute left-1 top-px whitespace-nowrap text-[10px] font-semibold uppercase leading-[12px] tracking-wide text-muted-foreground">
-                      {axis.full ? fmt.day(d) : fmt.dayNumber(d)}
-                    </span>
-                  )}
-                </div>
-              ))}
+                  </div>
+                ))}
+                <div className="pointer-events-none absolute inset-x-0 border-t border-border/50" style={{ top: AXIS_H }} />
 
-              {/* A duty the what-if took out — an outline where it was. */}
-              {ghosts.map((b) => (
-                <span
-                  key={`x${b.id}`}
-                  className="pointer-events-none absolute rounded-md border-2 border-dashed"
-                  style={{ left: xOf(b.startMs), width: wOf(b.startMs, b.endMs), top: DUTY_Y, height: DUTY_H, borderColor: tint(FDP_COLORS.scenario, 70), background: `repeating-linear-gradient(135deg, ${tint(FDP_COLORS.scenario, 25)} 0 2px, transparent 2px 6px)` }}
-                  aria-hidden
-                />
-              ))}
+                {/* The rolling total: flown, then scheduled; tap to bring a time to the pointer. */}
+                {chart && (
+                  <svg
+                    className="absolute top-0 cursor-pointer"
+                    style={{ left: chart.left, width: chart.width, height: DUTY_Y - 4 }}
+                    onClick={(e) => {
+                      const r = e.currentTarget.getBoundingClientRect()
+                      scrollToTime(drawFrom + (e.clientX - r.left) / pxPerMs)
+                    }}
+                    aria-hidden
+                  >
+                    <defs>
+                      <linearGradient id="roll-flown" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={view.color} stopOpacity={0.42} />
+                        <stop offset="100%" stopColor={view.color} stopOpacity={0.05} />
+                      </linearGradient>
+                      <linearGradient id="roll-ahead" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={scenario ? FDP_COLORS.scenario : FDP_COLORS.planned} stopOpacity={0.3} />
+                        <stop offset="100%" stopColor={scenario ? FDP_COLORS.scenario : FDP_COLORS.planned} stopOpacity={0.04} />
+                      </linearGradient>
+                    </defs>
+                    <line x1={0} x2={chart.width} y1={chart.nearY} y2={chart.nearY} stroke={NEAR_LIMIT} strokeDasharray="3 3" strokeOpacity={0.6} />
+                    <line x1={0} x2={chart.width} y1={chart.limitY} y2={chart.limitY} stroke={FDP_COLORS.violation} strokeWidth={1.5} />
+                    <path d={chart.flownArea} fill="url(#roll-flown)" />
+                    <path d={chart.aheadArea} fill="url(#roll-ahead)" />
+                    {chart.before && <path d={chart.before} fill="none" stroke={FDP_COLORS.planned} strokeWidth={1.5} strokeDasharray="5 3" strokeOpacity={0.6} />}
+                    <path d={chart.flown} fill="none" stroke={view.color} strokeWidth={2} />
+                    <path d={chart.ahead} fill="none" stroke={scenario ? FDP_COLORS.scenario : FDP_COLORS.planned} strokeWidth={2} strokeDasharray="5 3" />
+                  </svg>
+                )}
 
-              {visible.map((b) => (
-                <DutyDeck
-                  key={b.id}
-                  block={b}
-                  xOf={xOf}
-                  wOf={wOf}
-                  clock={clock}
-                  duration={duration}
-                  dutySelected={selection?.kind === "duty" && selection.id === b.id}
-                  restSelected={selection?.kind === "rest" && selection.id === b.id}
-                  onSelect={toggle}
-                />
-              ))}
+                {/* A duty the what-if took out — an outline where it was. */}
+                {ghosts.map((b) => (
+                  <span
+                    key={`x${b.id}`}
+                    className="pointer-events-none absolute rounded-md border-2 border-dashed"
+                    style={{ left: xOf(b.startMs), width: wOf(b.startMs, b.endMs), top: DUTY_Y, height: DUTY_H, borderColor: tint(FDP_COLORS.scenario, 70), background: `repeating-linear-gradient(135deg, ${tint(FDP_COLORS.scenario, 25)} 0 2px, transparent 2px 6px)` }}
+                    aria-hidden
+                  />
+                ))}
 
-              {labels.map((l) => (
-                <span
-                  key={l.key}
-                  className="pointer-events-none absolute -translate-x-1/2 whitespace-nowrap text-[11px] font-semibold leading-[14px] tabular-nums"
-                  style={{ left: l.x, top: l.row === "duty" ? DUTY_LABEL_Y : REST_LABEL_Y, color: l.tone === "over" ? OVER : l.row === "rest" ? "var(--muted-foreground)" : "var(--foreground)" }}
-                >
-                  {l.text}
-                </span>
-              ))}
+                {visible.map((b) => (
+                  <DutyDeck
+                    key={b.id}
+                    block={b}
+                    xOf={xOf}
+                    wOf={wOf}
+                    clock={clock}
+                    duration={duration}
+                    dutySelected={selection?.kind === "duty" && selection.id === b.id}
+                    restSelected={selection?.kind === "rest" && selection.id === b.id}
+                    onSelect={toggle}
+                  />
+                ))}
 
-              {/* Now — between what has happened and what is planned. */}
-              {nowMs > drawFrom && nowMs < drawTo && (
-                <div className="pointer-events-none absolute bottom-0 z-10 border-l-2 border-dashed border-foreground/60" style={{ left: xOf(nowMs), top: NOW_Y }}>
-                  <span className="absolute -left-3.5 top-0 rounded bg-foreground px-1 text-[9px] font-semibold uppercase leading-[12px] text-background">
-                    Now
+                {labels.map((l) => (
+                  <span
+                    key={l.key}
+                    className="pointer-events-none absolute -translate-x-1/2 whitespace-nowrap text-[11px] font-semibold leading-[14px] tabular-nums"
+                    style={{
+                      left: l.x,
+                      top: l.y,
+                      ...(l.onBar ? ON_BAR : { color: "var(--muted-foreground)" }),
+                      ...(l.tone === "over" ? { color: OVER } : null),
+                    }}
+                  >
+                    {l.text}
                   </span>
-                </div>
-              )}
-            </div>
+                ))}
+
+                {/* Now — between what has happened and what is scheduled. */}
+                {nowMs > drawFrom && nowMs < drawTo && (
+                  <div className="pointer-events-none absolute bottom-0 border-l-2 border-dashed border-foreground/50" style={{ left: xOf(nowMs), top: AXIS_H }}>
+                    <span className="absolute left-1 top-1 rounded bg-foreground/80 px-1 text-[9px] font-semibold uppercase leading-[12px] text-background">Now</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Outside the scroller, so they stay put: the limit's figure, and the pointer. */}
+          {chart && (
+            <span
+              className="pointer-events-none absolute left-1.5 -translate-y-full rounded bg-card/80 px-1 text-[10px] font-semibold tabular-nums"
+              style={{ top: chart.limitY - 1, color: FDP_COLORS.violation }}
+            >
+              {duration(view.limit)}
+            </span>
           )}
+          <div className="pointer-events-none absolute bottom-0 left-1/2 z-10 -translate-x-1/2" style={{ top: AXIS_H }} aria-hidden>
+            <div className="h-full w-0.5 bg-primary" />
+            <div className="absolute -top-1 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rotate-45 bg-primary" />
+          </div>
         </div>
 
-        {/* The key. A limit is not a colour of its own: the maximum is a
-            dotted outline, the minimum rest a solid bar, and what runs past
-            either is struck red — the verdict line says it in words. */}
+        {/* The key — a limit is drawn, not coloured: the maximum dotted, the
+            minimum rest solid, what runs past either struck red. */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[11px] text-muted-foreground" aria-hidden>
           <Key swatch={<span className="h-2.5 w-3.5 rounded-sm" style={{ background: tint(FDP_COLORS.duty, 45) }} />} label="Duty" />
           <Key swatch={<span className="h-2.5 w-3.5 rounded-sm" style={{ background: tint(FDP_COLORS.flight, 90) }} />} label="Flight" />
           <Key swatch={<span className="h-2.5 w-3.5 rounded-sm border-2 border-dotted" style={{ borderColor: FDP_COLORS.planned }} />} label="Max FDP" />
           <Key swatch={<span className="h-2 w-3.5 rounded-sm" style={{ background: tint(REST, 80) }} />} label="Minimum Rest" />
           <Key swatch={<span className="h-2 w-3.5 rounded-sm" style={{ background: tint(REST, 28) }} />} label="Rest" />
-          <Key swatch={<span className="h-2.5 w-3.5 rounded-sm border border-dashed" style={{ borderColor: FDP_COLORS.planned, background: tint(FDP_COLORS.planned, 30) }} />} label="Planned" />
+          <Key swatch={<span className="h-2.5 w-3.5 rounded-sm border border-dashed" style={{ borderColor: FDP_COLORS.planned, background: tint(FDP_COLORS.planned, 30) }} />} label="Scheduled" />
           <Key swatch={<span className="h-2.5 w-3.5 rounded-sm" style={{ background: hatch(FDP_COLORS.duty) }} />} label="Standby / Ground" />
           {scenario && <Key swatch={<span className="h-2.5 w-3.5 rounded-sm" style={{ background: tint(FDP_COLORS.scenario, 45) }} />} label="What-If" />}
         </div>
 
+        {/* A breach the schedule is heading for: tap to bring it to the pointer. */}
+        {exceedances.length > 0 && (
+          <div className="space-y-1">
+            {exceedances.map((e) => (
+              <button
+                key={`${e.date}${e.limitName}`}
+                type="button"
+                onClick={() => scrollToTime(Date.parse(`${e.date}T12:00:00Z`))}
+                className="flex h-9 w-full items-center justify-between rounded-md bg-status-error/10 px-3 text-xs text-status-error"
+              >
+                <span className="font-semibold">{fmt.dayMonth(Date.parse(`${e.date}T12:00:00Z`))} · {view.label} over</span>
+                <span className="tabular-nums">
+                  {duration(e.projected * 60)}/{duration(e.limit * 60)}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {selectedDuty && <DutyDetail block={selectedDuty} clock={clock} duration={duration} onClose={() => setSelection(null)} />}
         {restAfter?.restBefore && (
-          <RestDetail
-            after={restAfter}
-            before={restBefore}
-            clock={clock}
-            duration={duration}
-            onDuty={showDuty}
-            onClose={() => setSelection(null)}
-          />
+          <RestDetail after={restAfter} before={restBefore} clock={clock} duration={duration} onDuty={showDuty} onClose={() => setSelection(null)} />
         )}
       </div>
     </FormSection>
@@ -644,45 +766,131 @@ export function DutyTimeline({
 
 interface Label {
   key: string
-  row: "duty" | "rest"
+  y: number
   x: number
   text: string
   tone: "over" | null
+  /** Drawn over a bar rather than on the chart's ground. */
+  onBar: boolean
 }
 
-/** What a sector says inside the bar: its block time. */
-function sectorText(s: DutyBlock["sectors"][number], duration: (min: number) => string): string {
-  return duration((s.inMs - s.outMs) / MIN)
-}
-
-function Figure({ value, caption, color, alert }: { value: string; caption: string; color?: string; alert?: boolean }) {
+/** What the pointer reads: when, and what the pilot was doing then. */
+function PointerReadout({
+  store,
+  blocks,
+  clock,
+  dayMonth,
+  duration,
+}: {
+  store: PointerStore
+  blocks: DutyBlock[]
+  clock: (ms: number) => string
+  dayMonth: (ms: number) => string
+  duration: (min: number) => string
+}) {
+  const t = usePointer(store)
+  const s = pointerState(blocks, t)
+  let line = "Off duty"
+  let over = false
+  if (s.kind === "duty") {
+    const b = s.block
+    if (b.kind === "flight" && b.maxFdpMinutes > 0) {
+      over = s.fdpMinutes > b.maxFdpMinutes
+      line = `${b.isFuture || b.scenario ? "Scheduled duty" : "On duty"} · FDP ${duration(s.fdpMinutes)}/${duration(b.maxFdpMinutes)} · Flight ${duration(s.flightMinutes)}`
+    } else if (b.kind === "standby") {
+      line = `Standby · ${duration(s.dutyMinutes)}/${duration(18 * 60)}`
+    } else if (b.kind === "ground") {
+      line = `${b.code} · ${duration(s.dutyMinutes)}`
+    } else {
+      line = `On duty · ${duration(s.dutyMinutes)} · Flight ${duration(s.flightMinutes)}`
+    }
+  } else if (s.kind === "rest") {
+    const req = s.rest.requiredMinutes
+    if (s.minutes < 0) line = `Rest counts in ${duration(-s.minutes)}`
+    else {
+      over = s.rest.status === "short"
+      line = req != null ? `Rest ${duration(s.minutes)}/${duration(req)}` : `Rest ${duration(s.minutes)}`
+      if (req != null && s.rest.minutes < req) line += ` · ${duration(req - s.rest.minutes)} short`
+    }
+  }
   return (
-    <div className="min-w-0">
-      <div className={cn("text-xl font-semibold leading-tight tabular-nums", alert && "text-status-error")} style={!alert && color ? { color } : undefined}>
-        {value}
-      </div>
-      <div className="truncate text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{caption}</div>
+    <div className="min-w-0 px-1">
+      <p className="text-lg font-semibold leading-tight tabular-nums">
+        {dayMonth(t)} {clock(t)}
+      </p>
+      <p className={cn("text-xs tabular-nums", over ? "font-semibold text-status-error" : "text-muted-foreground")}>
+        {/* Breaks between its parts, never inside one ("FDP 4:28/13:15"). */}
+        {line.split(" · ").map((part, i) => (
+          <Fragment key={i}>
+            {i > 0 && " · "}
+            <span className="whitespace-nowrap">{part}</span>
+          </Fragment>
+        ))}
+      </p>
     </div>
   )
 }
 
-/** The view's verdict against the limits, in a sentence. */
-function Verdict({ over, short, near, duties }: { over: number; short: number; near: number; duties: number }) {
-  if (duties === 0) return <p className="px-1 text-xs text-muted-foreground">No duties in view.</p>
-  const bad = [over > 0 ? `${over} ${over === 1 ? "duty" : "duties"} over the FDP limit` : "", short > 0 ? `${short} rest${short === 1 ? "" : "s"} short` : ""].filter(Boolean)
-  if (bad.length > 0) {
-    return (
-      <p className="flex items-center gap-1.5 px-1 text-xs font-semibold text-status-error">
-        <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
-        {bad.join(" · ")}
-      </p>
-    )
-  }
+/** Back to the present — needed only once the pointer has left it. */
+function NowButton({ store, nowMs, span, onNow }: { store: PointerStore; nowMs: number; span: number; onNow: () => void }) {
+  const t = usePointer(store)
+  const atNow = Math.abs(t - nowMs) < Math.max(MIN, span / 200)
   return (
-    <p className={cn("flex items-center gap-1.5 px-1 text-xs font-medium", near > 0 ? "text-status-critical" : "text-muted-foreground")}>
-      {near > 0 ? <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden /> : <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-status-valid" aria-hidden />}
-      {near > 0 ? `Within limits · ${near} close to a limit` : "Within limits · every rest met"}
-    </p>
+    <button
+      type="button"
+      onClick={onNow}
+      disabled={atNow}
+      className="control-surface h-9 shrink-0 rounded-full px-3.5 text-sm font-medium transition-opacity disabled:opacity-40"
+    >
+      Now
+    </button>
+  )
+}
+
+/** The four rolling limits as at the pointer; the chosen one is drawn. */
+function RollingTabs({
+  store,
+  index,
+  views,
+  value,
+  onChange,
+  duration,
+}: {
+  store: PointerStore
+  index: RollingIndex
+  views: RollingView[]
+  value: RollingKind
+  onChange: (k: RollingKind) => void
+  duration: (min: number) => string
+}) {
+  const t = usePointer(store)
+  return (
+    <div className="grid grid-cols-4 gap-1" role="tablist" aria-label="Rolling limit">
+      {views.map((v) => {
+        const used = rollingAt(index, v.key, t)
+        const pct = v.limit > 0 ? (used / v.limit) * 100 : 0
+        const bar = pct >= 100 ? "bg-status-error" : pct >= 90 ? "bg-status-critical" : pct >= 75 ? "bg-status-warning" : "bg-status-valid"
+        const active = v.key === value
+        return (
+          <button
+            key={v.key}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(v.key)}
+            className={cn("min-w-0 border-b-2 px-1 pb-1 pt-0.5 text-left transition-colors", active ? "text-foreground" : "border-transparent text-muted-foreground")}
+            style={active ? { borderBottomColor: v.color } : undefined}
+          >
+            <span className="block truncate text-[10px] font-medium leading-tight">{v.label}</span>
+            <span className="block truncate text-xs font-bold leading-tight tabular-nums text-foreground">{duration(used)}</span>
+            <span className="block truncate text-[10px] leading-tight tabular-nums text-muted-foreground">/{duration(v.limit)}</span>
+            <span className="mt-0.5 block h-1 rounded-full bg-muted">
+              <span className={cn("block h-full rounded-full", bar)} style={{ width: `${Math.min(pct, 100)}%` }} />
+            </span>
+          </button>
+        )
+      })}
+    </div>
   )
 }
 
@@ -703,8 +911,9 @@ function hit(left: number, width: number): { left: number; width: number; inset:
 }
 
 /**
- * One duty's deck: the duty bar with its sectors inside, its maximum dotted
- * round it while it is still to come, and the rest before it directly under.
+ * One duty's deck: the duty bar the full height of its row, its sectors
+ * inside it top to bottom, its maximum dotted round it while it is still to
+ * come, and the rest before it directly under.
  */
 function DutyDeck({
   block: b,
@@ -728,14 +937,11 @@ function DutyDeck({
   const future = b.isFuture
   const base = b.scenario ? FDP_COLORS.scenario : future ? FDP_COLORS.planned : FDP_COLORS.duty
   const flightColor = b.scenario ? FDP_COLORS.scenario : future ? FDP_COLORS.planned : FDP_COLORS.flight
-  // In-bar text: dark on the planned yellow and the what-if orange, light on the flown green.
-  const inkOnFlight = b.scenario || future ? "#1c1917" : "#ffffff"
   const left = xOf(b.startMs)
   const width = wOf(b.startMs, b.endMs)
   const h = hit(left, width)
   const name = b.kind === "flight" ? b.route || "Duty" : b.kind === "standby" ? "Standby" : `Ground duty ${b.code}`
   const ring = "ring-2 ring-primary ring-offset-1 ring-offset-card"
-  const verdict = b.limit === "over" ? ", over the FDP limit" : ""
   const latest = b.latestSignOffMs
   const breachFrom = latest != null && b.endMs > latest ? Math.max(latest, b.startMs) : null
 
@@ -745,49 +951,31 @@ function DutyDeck({
         type="button"
         onClick={() => onSelect("duty", b.id)}
         aria-pressed={dutySelected}
-        aria-label={`${name}, ${clock(b.startMs)}–${clock(b.endMs)}, duty ${duration(b.dutyMinutes)}${b.flightMinutes > 0 ? `, flight ${duration(b.flightMinutes)}` : ""}${b.showMax && latest != null ? `, latest sign-off ${clock(latest)}` : ""}${verdict}${b.scenario ? ", what-if" : future ? ", planned" : ""}`}
+        aria-label={`${name}, ${clock(b.startMs)}–${clock(b.endMs)}, duty ${duration(b.dutyMinutes)}${b.maxFdpMinutes > 0 ? `, FDP ${duration(b.fdpMinutes)} of ${duration(b.maxFdpMinutes)}` : ""}${b.limit === "over" ? ", over the FDP limit" : ""}${b.scenario ? ", what-if" : future ? ", scheduled" : ""}`}
         className="absolute"
-        style={{ left: h.left, width: h.width, top: DUTY_LABEL_Y, height: DUTY_Y + DUTY_H - DUTY_LABEL_Y }}
+        style={{ left: h.left, width: h.width, top: DUTY_Y, height: DUTY_H }}
       >
         <span
-          className={cn("absolute rounded-md", (future || b.scenario) && "border border-dashed", dutySelected && ring)}
-          style={{
-            left: h.inset,
-            top: DUTY_Y - DUTY_LABEL_Y,
-            height: DUTY_H,
-            width,
-            borderColor: base,
-            background: b.kind === "flight" ? tint(base, future || b.scenario ? 28 : 45) : hatch(base),
-          }}
+          className={cn("absolute inset-y-0 rounded-md", (future || b.scenario) && "border border-dashed", dutySelected && ring)}
+          style={{ left: h.inset, width, borderColor: base, background: b.kind === "flight" ? tint(base, future || b.scenario ? 28 : 45) : hatch(base) }}
         />
       </button>
 
-      {/* The flying, inside the duty. */}
-      {b.sectors.map((s) => {
-        const sl = xOf(s.outMs)
-        const sw = wOf(s.outMs, s.inMs)
-        const text = sectorText(s, duration)
-        return (
-          <span
-            key={s.id}
-            className={cn("pointer-events-none absolute flex items-center justify-center overflow-hidden rounded-sm", s.positioning && "border border-dashed")}
-            style={{
-              left: sl,
-              width: sw,
-              top: DUTY_Y + SECTOR_INSET,
-              height: DUTY_H - 2 * SECTOR_INSET,
-              borderColor: flightColor,
-              background: s.positioning ? "transparent" : tint(flightColor, 90),
-            }}
-          >
-            {!s.positioning && sw >= text.length * CHAR_PX + 6 && (
-              <span className="text-[10px] font-semibold leading-none tabular-nums" style={{ color: inkOnFlight }}>
-                {text}
-              </span>
-            )}
-          </span>
-        )
-      })}
+      {/* The flying, inside the duty, its full height. */}
+      {b.sectors.map((s) => (
+        <span
+          key={s.id}
+          className={cn("pointer-events-none absolute rounded-[3px]", s.positioning && "border border-dashed")}
+          style={{
+            left: xOf(s.outMs),
+            width: wOf(s.outMs, s.inMs),
+            top: DUTY_Y + 1,
+            height: DUTY_H - 2,
+            borderColor: flightColor,
+            background: s.positioning ? "transparent" : tint(flightColor, future || b.scenario ? 75 : 85),
+          }}
+        />
+      ))}
 
       {/* The maximum, dotted round the whole window it allows. */}
       {b.showMax && latest != null && latest > b.startMs && (
@@ -810,10 +998,10 @@ function DutyDeck({
 }
 
 /**
- * The rest before a duty, decked under it: the minimum the regulation
- * required (solid), then the rest beyond it to the sign-on (light). A
- * minimum that runs past the sign-on is struck red there, directly under the
- * duty that came too soon.
+ * The rest before a duty, decked under it from the sign-off before: the hour
+ * before rest commences, then the minimum the regulation required (solid),
+ * then the rest beyond it to the sign-on. A minimum that runs past the
+ * sign-on is struck red there, directly under the duty that came too soon.
  */
 function RestBar({
   rest,
@@ -834,8 +1022,8 @@ function RestBar({
   duration: (min: number) => string
   onSelect: () => void
 }) {
-  const left = xOf(rest.startMs)
-  const width = wOf(rest.startMs, signOnMs)
+  const left = xOf(rest.signOffMs)
+  const width = wOf(rest.signOffMs, signOnMs)
   const h = hit(left, width)
   const short = rest.status === "short"
   const minEnd = rest.minimumEndMs
@@ -856,8 +1044,8 @@ function RestBar({
       </button>
       {minEnd != null && (
         <span
-          className="pointer-events-none absolute rounded-bl-sm"
-          style={{ left, width: wOf(rest.startMs, Math.min(minEnd, signOnMs)), top: REST_Y, height: REST_H, background: tint(REST, future ? 60 : 80) }}
+          className="pointer-events-none absolute"
+          style={{ left: xOf(rest.startMs), width: wOf(rest.startMs, Math.min(minEnd, signOnMs)), top: REST_Y, height: REST_H, background: tint(REST, future ? 60 : 80) }}
           aria-hidden
         />
       )}
@@ -932,7 +1120,7 @@ function DutyDetail({
           b.scenario ? (
             <span className="ml-1.5 text-xs font-medium" style={{ color: FDP_COLORS.scenario }}>What-If</span>
           ) : b.isFuture ? (
-            <span className="ml-1.5 text-xs font-medium" style={{ color: FDP_COLORS.planned }}>Planned</span>
+            <span className="ml-1.5 text-xs font-medium" style={{ color: FDP_COLORS.planned }}>Scheduled</span>
           ) : undefined
         }
         onClose={onClose}
@@ -1024,7 +1212,8 @@ function RestDetail({
         {rest.minimumEndMs != null && <ReadOnlyRow label="Minimum Until" value={clock(rest.minimumEndMs)} />}
         {short && owed != null && owed > 0 && <VerdictRow label="Short By" value={duration(owed)} tone="over" />}
         {!short && owed != null && <ReadOnlyRow label="Margin" value={duration(-owed)} />}
-        <ReadOnlyRow label="Commenced" value={clock(rest.startMs)} />
+        <ReadOnlyRow label="Signed Off" value={clock(rest.signOffMs)} />
+        <ReadOnlyRow label="Rest Commenced" value={clock(rest.startMs)} />
       </div>
       <div className="overflow-hidden rounded-xl border bg-card">
         {before && <NeighbourRow caption="Before" block={before} when={`Sign-off ${clock(before.endMs)}`} onSelect={() => onDuty(before)} />}
