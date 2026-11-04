@@ -21,10 +21,9 @@ import {
   calculateCumulativeLimits,
   calculateCapacity,
   forecastExceedances,
-  generateTimelineData,
   calculateRestUntilLegal,
 } from "@/lib/utils/roster/fdp-calculator"
-import type { RestUntilLegalResult, TimelineDataPoint } from "@/lib/utils/roster/fdp-calculator"
+import type { RestUntilLegalResult } from "@/lib/utils/roster/fdp-calculator"
 import { getAirportByIata } from "@/lib/db/stores/reference/airports.store"
 import { getAirportTimeInfo } from "@/lib/db/stores/reference/airports.store"
 import { isFlownFlight } from "@/lib/utils/flight-calculations"
@@ -177,9 +176,8 @@ function computeFDPResult(
       (dp) => dp.restBefore && !dp.restBefore.compliant
     )
 
-    // The chart's day-by-day timeline is NOT built here: only the FDP page
-    // draws it, and this pipeline runs for the dashboard's first render too.
-    // See `useFDPTimeline`.
+    // No day-by-day timeline is built here: the FDP page's timeline reads the
+    // rolling limits at an instant (`rolling-at.ts`) over what it draws.
 
     // Rest until legal for the next duty. Given the WHOLE timeline, not just
     // the past: it picks the last COMPLETED duty itself, and para 4's 24-hour
@@ -321,13 +319,4 @@ export function useFDPData() {
     ...result,
     isLoading: !dbReady || flightsLoading || scheduleLoading,
   }
-}
-
-/**
- * The FDP chart's timeline — a point per DAY from the first duty to today, so
- * it is the one part of the pipeline whose cost grows with the length of the
- * logbook rather than the number of duties. Built only where it is drawn.
- */
-export function useFDPTimeline(allDutyPeriods: DutyPeriod[]): TimelineDataPoint[] {
-  return useMemo(() => generateTimelineData(allDutyPeriods, DEFAULT_FTL_LIMITS), [allDutyPeriods])
 }

@@ -3,7 +3,7 @@
  * sectors inside — and the summary of whatever range is in view.
  */
 import { describe, expect, it } from "vitest"
-import { buildDutyTimeline, summarizeTimeline } from "../duty-timeline"
+import { buildDutyTimeline } from "../duty-timeline"
 import { SCENARIO_DUTY_PREFIX } from "../fdp-calculator"
 import type { DutyPeriod, ScheduleEntry } from "@/types/entities/roster.types"
 import type { FlightLog } from "@/types/entities/flight.types"
@@ -81,6 +81,7 @@ describe("buildDutyTimeline", () => {
     const third = duty({ id: "d3", date: "2026-11-05", reportTime: "03:00" })
     const [, b2, b3] = buildDutyTimeline([third, first, second], new Map())
     expect(b2.restBefore).toEqual({
+      signOffMs: at("2026-11-03T09:30:00Z"),
       startMs: at("2026-11-04T01:00:00Z") - 870 * 60_000,
       minutes: 870,
       requiredMinutes: 720,
@@ -92,6 +93,7 @@ describe("buildDutyTimeline", () => {
     // 2026-11-04 09:30 → 2026-11-05 03:00 is 17h30; rest commences an hour
     // after free of all duties, so 16h30, no requirement known.
     expect(b3.restBefore).toEqual({
+      signOffMs: at("2026-11-04T09:30:00Z"),
       startMs: at("2026-11-04T10:30:00Z"),
       minutes: 16.5 * 60,
       requiredMinutes: null,
@@ -145,7 +147,6 @@ describe("against the limits", () => {
     const [fine] = buildDutyTimeline([duty({ id: "f", fdpEndTime: "09:00", maxFdpMinutes: 780 })], new Map())
     expect(over.fdpMinutes).toBe(480)
     expect([over.limit, near.limit, fine.limit]).toEqual(["over", "near", null])
-    expect(summarizeTimeline([over, fine], 0, Number.MAX_SAFE_INTEGER).overLimit).toBe(1)
   })
 
   it("calls a rest short below its requirement and tight within an hour of it", () => {
@@ -231,32 +232,5 @@ describe("ground duties", () => {
     expect(g.dutyMinutes).toBe(240)
     expect(g.restBefore).toBeNull()
     expect(blocks[2].restBefore?.previousId).toBe("d1")
-  })
-})
-
-describe("summarizeTimeline", () => {
-  const blocks = buildDutyTimeline(
-    [
-      duty({ id: "d1" }), // 3 Nov 01:00–09:30, 5:00 flown
-      duty({
-        id: "d2",
-        date: "2026-11-04",
-        restBefore: { restMinutes: 600, requiredRestMinutes: 720, compliant: false } as DutyPeriod["restBefore"],
-      }),
-    ],
-    new Map(),
-  )
-
-  it("adds what the range holds and names the shortest rest and the short ones", () => {
-    const s = summarizeTimeline(blocks, at("2026-11-02T00:00:00Z"), at("2026-11-06T00:00:00Z"))
-    expect(s).toEqual({ flightMinutes: 600, dutyMinutes: 1020, shortestRestMinutes: 600, shortRests: 1, overLimit: 0, duties: 2 })
-  })
-
-  it("counts only the part of a duty inside the range, never a duty twice", () => {
-    const split = at("2026-11-03T05:15:00Z") // halfway through d1
-    const left = summarizeTimeline(blocks, at("2026-11-02T00:00:00Z"), split)
-    const right = summarizeTimeline(blocks, split, at("2026-11-06T00:00:00Z"))
-    expect(left.dutyMinutes + right.dutyMinutes).toBe(1020)
-    expect(left.flightMinutes + right.flightMinutes).toBe(600)
   })
 })

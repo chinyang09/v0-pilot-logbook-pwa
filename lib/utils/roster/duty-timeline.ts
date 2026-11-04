@@ -60,6 +60,8 @@ export type DutyBlockKind = "flight" | "standby" | "ground"
 export interface DutyBlock {
   id: string
   kind: DutyBlockKind
+  /** The UTC date the duty is keyed on — the rolling limits' day. */
+  date: string
   /** Sign-on (the report) and sign-off (free of all duties), UTC ms. */
   startMs: number
   endMs: number
@@ -70,6 +72,8 @@ export interface DutyBlock {
    */
   planned: Span | null
   dutyMinutes: number
+  /** What reaches the rolling duty limits — 20% of a home standby (para 6(7)), none of a ground duty. */
+  countedDutyMinutes: number
   /** Block time of the sectors operated — positioning carries none. */
   flightMinutes: number
   sectors: TimelineSector[]
@@ -85,6 +89,9 @@ export interface DutyBlock {
   maxFdpMinutes: number
   /** The FDP as the limits measure it — report to last on-blocks. */
   fdpMinutes: number
+  /** FDP already spent at the report (para 10(b)), and when the FDP ends. */
+  fdpAtReportMinutes: number
+  fdpEndMs: number
   /**
    * Against its limit: `over` when the FDP (or a standby's own 18-hour cap)
    * is exceeded, `near` within the last tenth of the FDP maximum.
@@ -113,6 +120,8 @@ export interface DutyBlock {
 }
 
 export interface RestBefore {
+  /** When the duty before it signed off — the rest counts from an hour after. */
+  signOffMs: number
   /** When the rest commenced, and its length to this duty's sign-on. */
   startMs: number
   minutes: number
@@ -224,10 +233,12 @@ function groundBlock(e: ScheduleEntry, today: string): DutyBlock | null {
   return {
     id: e.id,
     kind: "ground",
+    date: e.date,
     startMs,
     endMs,
     planned: null,
     dutyMinutes: Math.round((endMs - startMs) / MIN),
+    countedDutyMinutes: 0,
     flightMinutes: 0,
     sectors: [],
     route: "",
@@ -237,6 +248,8 @@ function groundBlock(e: ScheduleEntry, today: string): DutyBlock | null {
     isStandby: false,
     maxFdpMinutes: 0,
     fdpMinutes: 0,
+    fdpAtReportMinutes: 0,
+    fdpEndMs: endMs,
     limit: null,
     latestSignOffMs: null,
     showMax: false,
@@ -297,13 +310,16 @@ export function buildDutyTimeline(
     const standby = dp.dutyKind === "standby"
     const max = standby ? 0 : dp.maxFdpMinutes || 0
     const fdp = standby ? 0 : fdpMinutesOf(dp)
+    const atReport = standby ? 0 : (dp.fdpElapsedAtReport ?? 0)
     blocks.push({
       id: dp.id,
       kind: standby ? "standby" : "flight",
+      date: dp.date,
       startMs,
       endMs,
       planned: standby ? null : plannedDuty(sectors),
       dutyMinutes: dp.dutyMinutes,
+      countedDutyMinutes: dp.countedDutyMinutes ?? dp.dutyMinutes,
       flightMinutes: standby ? 0 : dp.flightMinutes,
       sectors,
       route: routeOf(sectors, dp.route),
@@ -313,6 +329,8 @@ export function buildDutyTimeline(
       isStandby: standby,
       maxFdpMinutes: dp.maxFdpMinutes || 0,
       fdpMinutes: fdp,
+      fdpAtReportMinutes: atReport,
+      fdpEndMs: standby ? endMs : startMs + Math.max(0, fdp - atReport) * MIN,
       limit: limitOf(dp),
       latestSignOffMs: max > 0 ? endMs + (max - fdp) * MIN : null,
       showMax: max > 0 && (dp.isFuture || scenario),
@@ -346,6 +364,7 @@ export function buildDutyTimeline(
       const compliant = rp ? rp.compliant : null
       const startMs = b.startMs - minutes * MIN
       b.restBefore = {
+        signOffMs: previous.endMs,
         startMs,
         minutes,
         requiredMinutes,
@@ -360,50 +379,67 @@ export function buildDutyTimeline(
   return blocks
 }
 
-export interface TimelineSummary {
-  /** Block time flown (or to be flown) inside the range. */
-  flightMinutes: number
-  /** Duty inside the range — a duty crossing an edge counts the part inside. */
-  dutyMinutes: number
-  /** The shortest rest that ENDS inside the range, and how many fell short. */
-  shortestRestMinutes: number | null
-  shortRests: number
-  /** Duties whose FDP (or standby cap) is exceeded. */
-  overLimit: number
-  duties: number
+/** What the timeline says about one instant — what the pointer reads. */
+export type PointerState =
+  | {
+      kind: "duty"
+      block: DutyBlock
+      /** Since sign-on. */
+      dutyMinutes: number
+      /** As the limits count it: para 10(b)'s spent part, then report to last on-blocks. */
+      fdpMinutes: number
+      /** Block time flown so far in this duty. */
+      flightMinutes: number
+    }
+  | {
+      kind: "rest"
+      /** The duty the rest is before. */
+      block: DutyBlock
+      rest: RestBefore
+      /** Rest counted so far — negative in the hour after sign-off, before it commences. */
+      minutes: number
+    }
+  | { kind: "off" }
+
+const minutesBetween = (a: number, b: number) => Math.max(0, Math.floor((b - a) / MIN))
+
+/** Block time a duty's sectors had flown by `t`. */
+export function flightElapsed(b: DutyBlock, t: number): number {
+  const flown = b.sectors.filter((s) => !s.positioning)
+  const total = flown.reduce((n, s) => n + (s.inMs - s.outMs), 0)
+  if (total <= 0) {
+    const share = b.endMs > b.startMs ? Math.min(1, Math.max(0, (t - b.startMs) / (b.endMs - b.startMs))) : 0
+    return b.flightMinutes * share
+  }
+  const done = flown.reduce((n, s) => n + Math.min(s.inMs - s.outMs, Math.max(0, t - s.outMs)), 0)
+  return (b.flightMinutes * done) / total
 }
 
 /**
- * What the range [fromMs, toMs) holds. A duty that straddles an edge counts
- * only its part inside, and its flight time in the same proportion, so
- * scrolling the timeline never counts a duty twice across two views.
+ * The state at `t`, to the minute: inside a duty, its duty, FDP and flight so
+ * far; between flight duties, the rest so far against what the next one
+ * needs. `blocks` in time order, as `buildDutyTimeline` returns them.
  */
-export function summarizeTimeline(blocks: readonly DutyBlock[], fromMs: number, toMs: number): TimelineSummary {
-  let flight = 0
-  let duty = 0
-  let duties = 0
-  let shortest: number | null = null
-  let shortRests = 0
-  let overLimit = 0
+export function pointerState(blocks: readonly DutyBlock[], t: number): PointerState {
+  let duty: DutyBlock | null = null
   for (const b of blocks) {
-    if (b.endMs <= fromMs || b.startMs >= toMs) continue
-    duties++
-    if (b.limit === "over") overLimit++
-    const inside = Math.min(b.endMs, toMs) - Math.max(b.startMs, fromMs)
-    const share = inside / (b.endMs - b.startMs)
-    duty += inside / MIN
-    flight += b.flightMinutes * share
-    if (b.restBefore && b.startMs >= fromMs) {
-      if (shortest === null || b.restBefore.minutes < shortest) shortest = b.restBefore.minutes
-      if (b.restBefore.status === "short") shortRests++
+    if (b.startMs > t) break
+    if (t < b.endMs) duty = b // the later-starting one wins (a duty inside another)
+  }
+  if (duty) {
+    const elapsed = Math.min(t, duty.fdpEndMs)
+    return {
+      kind: "duty",
+      block: duty,
+      dutyMinutes: minutesBetween(duty.startMs, t),
+      fdpMinutes: duty.kind === "flight" ? duty.fdpAtReportMinutes + minutesBetween(duty.startMs, elapsed) : 0,
+      flightMinutes: Math.floor(flightElapsed(duty, t)),
     }
   }
-  return {
-    flightMinutes: Math.round(flight),
-    dutyMinutes: Math.round(duty),
-    shortestRestMinutes: shortest,
-    shortRests,
-    overLimit,
-    duties,
+  const next = blocks.find((b) => b.startMs > t && b.restBefore && b.restBefore.signOffMs <= t)
+  if (next?.restBefore) {
+    const rest = next.restBefore
+    return { kind: "rest", block: next, rest, minutes: Math.floor((t - rest.startMs) / MIN) }
   }
+  return { kind: "off" }
 }
