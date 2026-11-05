@@ -37,6 +37,7 @@
 import type { DutyBlock } from "@/lib/utils/roster/duty-timeline"
 import {
   countsConsecutiveLocalNights,
+  DAY_OFF_MIN,
   earliestLocalNightCompletion,
   REST_STARTS_AFTER_DUTY_MIN,
 } from "@/lib/utils/roster/regulation-definitions"
@@ -48,7 +49,7 @@ const DAY = 24 * HOUR
 /** Where days off and local nights are read: Singapore. */
 const SGT_MIN = 8 * 60
 
-export const DAY_OFF_MIN_HOURS = 34
+export const DAY_OFF_MIN_HOURS = DAY_OFF_MIN / 60
 export const SUBSEQUENT_DAY_OFF_HOURS = 24
 export const MAX_CONSECUTIVE_WORK_DAYS = 7
 export const RETURN_REST_HOURS = 82

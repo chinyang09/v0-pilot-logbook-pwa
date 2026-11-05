@@ -1,7 +1,8 @@
 /**
- * The rolling limits at an instant: equal to the pipeline's day figure once
- * every duty in the window has ended, a duty in progress counted only as far
- * as it has gone, and a date leaving the window at midnight.
+ * The rolling limits at an instant: a CONTINUOUS window (`days` × 24h ending
+ * at the instant), each duty counted by the part of it inside — so it climbs
+ * through a duty and rolls off the far end minute by minute, never jumping a
+ * whole day at midnight — and never below the pipeline's day figure.
  */
 import { describe, expect, it } from "vitest"
 import { buildDutyTimeline, pointerState } from "../duty-timeline"
@@ -49,21 +50,33 @@ function roster(): DutyPeriod[] {
 }
 
 describe("rollingAt", () => {
-  it("equals the pipeline's figure at the end of every day", () => {
+  it("equals the overlap of every duty with the window, at any instant", () => {
+    const dps = roster()
+    const blocks = buildDutyTimeline(dps, new Map())
+    const index = createRollingIndex(blocks)
+    // The definition, duty by duty: the share of it inside (t − 14d, t].
+    const brute = (t: number, days: number) =>
+      blocks.reduce((sum, b) => {
+        const lo = Math.max(b.startMs, t - days * 24 * H)
+        const hi = Math.min(b.endMs, t)
+        return hi > lo ? sum + (b.countedDutyMinutes * (hi - lo)) / (b.endMs - b.startMs) : sum
+      }, 0)
+    for (let k = 0; k < 400; k++) {
+      const t = Date.UTC(2026, 8, 10) + k * 3.7 * H
+      expect(rollingAt(index, "duty14", t)).toBeCloseTo(brute(t, 14), 6)
+      expect(rollingAt(index, "duty28", t)).toBeCloseTo(brute(t, 28), 6)
+    }
+  })
+
+  it("is never below the pipeline's whole-day figure once the day's duties end", () => {
     const dps = roster()
     const index = createRollingIndex(buildDutyTimeline(dps, new Map()))
-    let compared = 0
     for (let d = 20; d < 64; d++) {
-      // 23:59:59 on a day, by which every duty keyed earlier has ended.
       const t = Date.UTC(2026, 8, 1 + d) + 24 * H - 1000
       const ended = dps.filter((dp) => Date.parse(`${dp.date}T${dp.reportTime}:00Z`) + dp.dutyMinutes * MIN <= t)
       if (ended.length !== dps.filter((dp) => dp.date <= new Date(t).toISOString().slice(0, 10)).length) continue
-      compared++
-      expect(rollingAt(index, "duty14", t)).toBeCloseTo(calculateRollingStats(dps, new Date(t), 14, DEFAULT_FTL_LIMITS).dutyHours * 60, 6)
-      expect(rollingAt(index, "duty28", t)).toBeCloseTo(calculateRollingStats(dps, new Date(t), 28, DEFAULT_FTL_LIMITS).dutyHours * 60, 6)
-      expect(rollingAt(index, "flight28", t)).toBeCloseTo(calculateRollingStats(dps, new Date(t), 28, DEFAULT_FTL_LIMITS).flightHours * 60, 6)
+      expect(rollingAt(index, "duty14", t)).toBeGreaterThanOrEqual(calculateRollingStats(dps, new Date(t), 14, DEFAULT_FTL_LIMITS).dutyHours * 60 - 1e-6)
     }
-    expect(compared).toBeGreaterThan(20)
   })
 
   it("counts a duty in progress as far as it has gone, and standby at its counted share", () => {
@@ -88,13 +101,15 @@ describe("rollingAt", () => {
     expect(rollingAt(index, "flight28", at("2026-11-03T09:00:00Z"))).toBe(300)
   })
 
-  it("drops a date at the midnight it leaves the window", () => {
+  it("rolls a duty off the far end of the window as it slides out, not at a midnight", () => {
     const index = createRollingIndex(buildDutyTimeline([duty({ id: "a" })], new Map()))
-    // Keyed 3 Nov: in the 14-day window through 16 Nov, out from 17 Nov 00:00Z.
-    expect(rollingAt(index, "duty14", at("2026-11-16T23:59:59Z"))).toBe(480)
-    expect(rollingAt(index, "duty14", at("2026-11-17T00:00:00Z"))).toBe(0)
+    // 01:00–09:00Z on 3 Nov: leaves the 14 × 24h window from 17 Nov 01:00Z to 09:00Z.
+    expect(rollingAt(index, "duty14", at("2026-11-17T00:59:00Z"))).toBe(480)
+    expect(rollingAt(index, "duty14", at("2026-11-17T05:00:00Z"))).toBe(240)
+    expect(rollingAt(index, "duty14", at("2026-11-17T09:00:00Z"))).toBe(0)
     const series = rollingSeries(index, "duty14", at("2026-11-16T12:00:00Z"), at("2026-11-17T12:00:00Z"))
     expect(series.map((p) => p.v)).toEqual([480, 480, 0, 0])
+    expect(series.map((p) => new Date(p.t).toISOString().slice(11, 16))).toEqual(["12:00", "01:00", "09:00", "12:00"])
   })
 })
 

@@ -88,6 +88,7 @@ const PIC_REST_DISCRETION_MIN = 2 * 60
 const NOT_FDP: Record<string, string | undefined> = { SIM: "Simulator", POS: "Positioning" }
 
 const OVER = "var(--status-error)"
+const SGT_ZONE = "Asia/Singapore"
 const REST = "var(--muted-foreground)"
 const NEAR_LIMIT = "#b08040"
 
@@ -205,6 +206,15 @@ export function DutyTimeline({
   const zulu = display.useZuluTime ?? true
   const zone = zulu ? "UTC" : localZone()
   const clock = useCallback((ms: number) => formatInstant(ms, display, zone), [display, zone])
+  // The other clock beside the pointer's: Singapore time beside Zulu (the
+  // home base, and the clock local nights are read in), Zulu beside local.
+  const otherClock = useCallback(
+    (ms: number) =>
+      zulu
+        ? `${formatInstant(ms, { ...display, useZuluTime: false }, SGT_ZONE)} SGT`
+        : formatInstant(ms, { ...display, useZuluTime: true }),
+    [display, zulu],
+  )
   const duration = useCallback(
     (min: number) => formatHHMMDisplay(minutesToHHMM(Math.max(0, Math.round(min))), display.timeFormat === "12h" ? "24h" : display.timeFormat),
     [display.timeFormat],
@@ -445,7 +455,7 @@ export function DutyTimeline({
   const visible = useMemo(
     () =>
       blocks.filter(
-        (b) => Math.max(b.endMs, b.showMax ? (b.latestSignOffMs ?? 0) : 0) > drawFrom && (b.restBefore?.signOffMs ?? b.startMs) < drawTo,
+        (b) => Math.max(b.endMs, b.showMax ? (b.fdpLimitMs ?? 0) : 0) > drawFrom && (b.restBefore?.startMs ?? b.startMs) < drawTo,
       ),
     [blocks, drawFrom, drawTo],
   )
@@ -564,7 +574,7 @@ export function DutyTimeline({
       const r = b.restBefore
       if (r) {
         const text = r.requiredMinutes != null ? `${duration(r.minutes)}/${duration(r.requiredMinutes)}` : duration(r.minutes)
-        if (fits(xOf(b.startMs) - xOf(r.signOffMs), text)) rest.push({ key: `r${b.id}`, y: REST_LABEL_Y, x: (xOf(r.signOffMs) + xOf(b.startMs)) / 2, text, tone: r.status === "short" ? "over" : null, onBar: false })
+        if (fits(xOf(b.startMs) - xOf(r.startMs), text)) rest.push({ key: `r${b.id}`, y: REST_LABEL_Y, x: (xOf(r.startMs) + xOf(b.startMs)) / 2, text, tone: r.status === "short" ? "over" : null, onBar: false })
       }
     }
     place(duty)
@@ -621,7 +631,7 @@ export function DutyTimeline({
     <FormSection>
       <div className="space-y-2.5 px-3 py-3">
         <div className="flex items-center justify-between gap-2">
-          <PointerClock store={pointer} clock={clock} dayMonth={fmt.dayMonth} />
+          <PointerClock store={pointer} clock={clock} otherClock={otherClock} dayMonth={fmt.dayMonth} />
           <div className="flex shrink-0 items-center gap-1.5">
             <button type="button" onClick={() => zoomTo(span * 1.6)} aria-label="Zoom out" className="control-surface flex h-9 w-9 items-center justify-center rounded-full">
               <Minus className="h-4 w-4" />
@@ -669,18 +679,21 @@ export function DutyTimeline({
                   <div key={`band${d}`} className="pointer-events-none absolute bottom-0 bg-foreground/[0.035]" style={{ left: xOf(d), width: DAY * pxPerMs, top: AXIS_H }} />
                 ))}
                 {/* Gridlines the full height, so where a bar ends can be read off the axis. */}
+                {/* Each label is centred ON its line — the line is the instant, so a
+                    label beside it read as the hour after. The line starts as a
+                    tick under the label rather than running through it. */}
                 {axis.lines.map((l) => (
                   <div
                     key={`g${l.ms}`}
                     className={cn("pointer-events-none absolute bottom-0 border-l", l.midnight ? "border-border" : "border-border/40")}
-                    style={{ left: xOf(l.ms), top: l.midnight ? 0 : AXIS_H - 6 }}
+                    style={{ left: xOf(l.ms), top: AXIS_H - 5 }}
                   >
                     <span
                       className={cn(
-                        "absolute left-1 whitespace-nowrap text-[11px] leading-[14px] tabular-nums",
+                        "absolute left-0 -translate-x-1/2 whitespace-nowrap text-[11px] leading-[14px] tabular-nums",
                         l.midnight ? "font-semibold text-foreground" : "text-muted-foreground",
                       )}
-                      style={{ top: l.midnight ? 3 : -3 }}
+                      style={{ top: -(AXIS_H - 8) }}
                     >
                       {l.label}
                     </span>
@@ -789,7 +802,8 @@ export function DutyTimeline({
         {/* The key — a limit is drawn, not coloured: the maximum dotted, the
             minimum rest solid, what runs past either struck red. */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[11px] text-muted-foreground" aria-hidden>
-          <Key swatch={<span className="h-2.5 w-3.5 rounded-sm" style={{ background: tint(FDP_COLORS.duty, 45) }} />} label="Duty" />
+          <Key swatch={<span className="h-2.5 w-3.5 rounded-sm" style={{ background: tint(FDP_COLORS.duty, 24) }} />} label="Duty" />
+          <Key swatch={<span className="h-2.5 w-3.5 rounded-sm" style={{ background: tint(FDP_COLORS.duty, 50) }} />} label="FDP" />
           <Key swatch={<span className="h-2.5 w-3.5 rounded-sm" style={{ background: tint(FDP_COLORS.flight, 90) }} />} label="Flight" />
           <Key swatch={<span className="h-2.5 w-3.5 rounded-sm border-2 border-dotted" style={{ borderColor: FDP_COLORS.planned }} />} label="Max FDP" />
           <Key swatch={<span className="h-2 w-3.5 rounded-sm" style={{ background: tint(REST, 80) }} />} label="Minimum Rest" />
@@ -868,11 +882,25 @@ interface Label {
 }
 
 /** When the pointer is — the instant, to the minute. */
-function PointerClock({ store, clock, dayMonth }: { store: PointerStore; clock: (ms: number) => string; dayMonth: (ms: number) => string }) {
+function PointerClock({
+  store,
+  clock,
+  otherClock,
+  dayMonth,
+}: {
+  store: PointerStore
+  clock: (ms: number) => string
+  otherClock: (ms: number) => string
+  dayMonth: (ms: number) => string
+}) {
   const t = usePointer(store)
   return (
-    <p className="min-w-0 truncate px-1 text-lg font-semibold leading-tight tabular-nums">
-      {dayMonth(t)} {clock(t)}
+    // Two lines, inside the controls' height: beside them a phone had no room.
+    <p className="flex min-w-0 flex-col px-1 tabular-nums">
+      <span className="truncate text-lg font-semibold leading-tight">
+        {dayMonth(t)} {clock(t)}
+      </span>
+      <span className="truncate text-xs font-medium leading-tight text-muted-foreground">{otherClock(t)}</span>
     </p>
   )
 }
@@ -884,7 +912,23 @@ interface StateCell {
   muted?: boolean
 }
 
+/** The leg at `t`: the one in the air or at the gate, else the next to fly, else the last. */
+function legAt(b: DutyBlock, t: number): string {
+  const legs = b.sectors.filter((x) => x.from || x.to).slice().sort((x, y) => x.outMs - y.outMs)
+  const leg = legs.find((x) => t < x.inMs) ?? legs[legs.length - 1]
+  return leg ? `${leg.from}-${leg.to}` : b.route || "Duty"
+}
+
 /** The three cells of the state row, at the instant `t`. */
+/** A rest this long is read in days, not hours and minutes. */
+const LONG_REST_MIN = 100 * 60
+
+/** "19d 21h" — whole hours, for a rest long enough that minutes are noise. */
+function daysHours(minutes: number): string {
+  const h = Math.floor(minutes / 60)
+  return `${Math.floor(h / 24)}d ${h % 24}h`
+}
+
 function stateCells(
   blocks: readonly DutyBlock[],
   t: number,
@@ -903,31 +947,36 @@ function stateCells(
     if (next.kind !== "flight" || next.maxFdpMinutes <= 0) {
       // Not an FDP: what it is, and how long it runs.
       const what = next.kind === "standby" ? "Standby" : NOT_FDP[next.code] ?? (next.code || "Duty")
-      return [{ caption: "Next Duty", value: when }, { caption: what, value: duration(next.dutyMinutes) }]
+      return [{ caption: "Next Duty", value: when, muted: true }, { caption: what, value: duration(next.dutyMinutes), muted: true }]
     }
+    // The next duty's FDP is what it will ASK, not a clock running now — so it
+    // reads dimmed beside the rest, which is.
     return [
-      { caption: "Next Duty", value: when },
-      { caption: "FDP", value: `${duration(next.fdpMinutes)}/${duration(next.maxFdpMinutes)}`, over: next.fdpMinutes > next.maxFdpMinutes },
+      { caption: "Next Duty", value: when, muted: true },
+      { caption: "Next FDP", value: `${duration(next.fdpMinutes)}/${duration(next.maxFdpMinutes)}`, over: next.fdpMinutes > next.maxFdpMinutes, muted: true },
     ]
   }
   if (s.kind === "duty") {
     const b = s.block
+    // The caption says what kind of duty it is; the value says WHERE in it the
+    // pointer is — the leg being flown, or the next one to fly, or the duty's
+    // own code — rather than restating "On Duty".
     const state = b.scenario ? "What-If" : b.isFuture ? "Scheduled" : "On Duty"
     if (b.kind === "flight" && b.maxFdpMinutes > 0) {
       return [
-        { caption: "Duty", value: state },
+        { caption: state, value: legAt(b, t) },
         { caption: "FDP", value: `${duration(s.fdpMinutes)}/${duration(b.maxFdpMinutes)}`, over: s.fdpMinutes > b.maxFdpMinutes },
         { caption: "Flight", value: duration(s.flightMinutes) },
       ]
     }
     if (b.kind === "standby") {
-      return [{ caption: "Duty", value: "Standby" }, { caption: "Elapsed", value: `${duration(s.dutyMinutes)}/${duration(18 * 60)}` }, { ...none, caption: "Flight" }]
+      return [{ caption: "Standby", value: b.code || "SBY" }, { caption: "Elapsed", value: `${duration(s.dutyMinutes)}/${duration(18 * 60)}` }, { ...none, caption: "Flight" }]
     }
     if (b.kind === "ground") {
-      return [{ caption: "Duty", value: b.code || "Ground" }, { caption: "Elapsed", value: duration(s.dutyMinutes) }, { ...none, caption: "Flight" }]
+      return [{ caption: "Ground Duty", value: b.code || "Ground" }, { caption: "Elapsed", value: duration(s.dutyMinutes) }, { ...none, caption: "Flight" }]
     }
     return [
-      { caption: "Duty", value: NOT_FDP[b.code] ?? state },
+      { caption: NOT_FDP[b.code] ?? state, value: b.code === "POS" ? legAt(b, t) : b.sectors[0]?.flightNumber || b.code },
       { caption: "Elapsed", value: duration(s.dutyMinutes) },
       // A simulator or positioning duty flies nothing.
       { ...none, caption: "Flight" },
@@ -935,10 +984,16 @@ function stateCells(
   }
   if (s.kind === "rest") {
     const req = s.rest.requiredMinutes
+    // Past 100 hours "x:xx/xx:xx" no longer fits a third of a phone's row
+    // ("477:23/11…"), so a long rest reads in days and hours and its minimum
+    // moves up into the caption.
+    const long = s.minutes >= LONG_REST_MIN
     const rest: StateCell =
       s.minutes < 0
         ? { caption: "Rest", value: `In ${duration(-s.minutes)}`, muted: true }
-        : { caption: "Rest", value: req != null ? `${duration(s.minutes)}/${duration(req)}` : duration(s.minutes), over: s.rest.status === "short" }
+        : long
+          ? { caption: req != null ? `Rest · Min ${duration(req)}` : "Rest", value: daysHours(s.minutes), over: s.rest.status === "short" }
+          : { caption: "Rest", value: req != null ? `${duration(s.minutes)}/${duration(req)}` : duration(s.minutes), over: s.rest.status === "short" }
     return [...ahead(s.block), rest]
   }
   return [...ahead(s.next), { ...none, caption: "Rest" }]
@@ -1099,8 +1154,13 @@ function DutyDeck({
   const h = hit(left, width)
   const name = b.kind === "flight" ? NOT_FDP[b.code] ?? (b.route || "Duty") : b.kind === "standby" ? "Standby" : `Ground duty ${b.code}`
   const ring = "ring-2 ring-primary ring-offset-1 ring-offset-card"
-  const latest = b.latestSignOffMs
-  const breachFrom = latest != null && b.endMs > latest ? Math.max(latest, b.startMs) : null
+  const limitAt = b.fdpLimitMs
+  // The FDP is what is limited, so a breach runs from where it reached its
+  // maximum to its own end — the last on-blocks — never into the post-flight
+  // half hour after it, which is duty but not FDP.
+  const breachFrom = limitAt != null && b.fdpEndMs > limitAt ? Math.max(limitAt, b.startMs) : null
+  const isFdp = b.kind === "flight" && b.maxFdpMinutes > 0
+  const fdpEnd = Math.max(b.startMs, Math.min(b.fdpEndMs, b.endMs))
 
   return (
     <>
@@ -1114,9 +1174,19 @@ function DutyDeck({
       >
         <span
           className={cn("absolute inset-y-0 rounded-md", (future || b.scenario) && "border border-dashed", dutySelected && ring)}
-          style={{ left: h.inset, width, borderColor: base, background: b.kind === "flight" ? tint(base, future || b.scenario ? 28 : 45) : hatch(base) }}
+          style={{ left: h.inset, width, borderColor: base, background: b.kind === "flight" ? tint(base, future || b.scenario ? 16 : 24) : hatch(base) }}
         />
       </button>
+
+      {/* The FDP inside the duty: sign-on to the last on-blocks. What is left
+          of the duty after it is the post-flight checks — duty, not FDP. */}
+      {isFdp && fdpEnd > b.startMs && (
+        <span
+          className="pointer-events-none absolute rounded-l-md"
+          style={{ left, width: wOf(b.startMs, fdpEnd), top: DUTY_Y, height: DUTY_H, background: tint(base, future || b.scenario ? 30 : 50) }}
+          aria-hidden
+        />
+      )}
 
       {/* The flying, inside the duty, its full height. */}
       {b.sectors.map((s) => (
@@ -1134,17 +1204,18 @@ function DutyDeck({
         />
       ))}
 
-      {/* The maximum, dotted round the whole window it allows. */}
-      {b.showMax && latest != null && latest > b.startMs && (
+      {/* The FDP maximum, dotted round the window it allows: sign-on to the
+          latest on-blocks. */}
+      {b.showMax && limitAt != null && limitAt > b.startMs && (
         <span
           className="pointer-events-none absolute rounded-md border-2 border-dotted"
-          style={{ left, width: wOf(b.startMs, latest), top: DUTY_Y, height: DUTY_H, borderColor: base }}
+          style={{ left, width: wOf(b.startMs, limitAt), top: DUTY_Y, height: DUTY_H, borderColor: base }}
           aria-hidden
         />
       )}
-      {/* What ran past the maximum. */}
+      {/* The FDP past its maximum, ending at the last on-blocks. */}
       {breachFrom != null && (
-        <span className="pointer-events-none absolute rounded-r-md" style={{ left: xOf(breachFrom), width: wOf(breachFrom, b.endMs), top: DUTY_Y, height: DUTY_H, background: BREACH }} aria-hidden />
+        <span className="pointer-events-none absolute" style={{ left: xOf(breachFrom), width: wOf(breachFrom, b.fdpEndMs), top: DUTY_Y, height: DUTY_H, background: BREACH, borderRight: `2px solid ${OVER}` }} aria-hidden />
       )}
 
       {b.restBefore && (
@@ -1155,10 +1226,12 @@ function DutyDeck({
 }
 
 /**
- * The rest before a duty, decked under it from the sign-off before: the hour
- * before rest commences, then the minimum the regulation required (solid),
- * then the rest beyond it to the sign-on. A minimum that runs past the
- * sign-on is struck red there, directly under the duty that came too soon.
+ * The rest before a duty, decked under it from when the rest COMMENCES — an
+ * hour after the duty before is free of all duties (First Schedule); the hour
+ * itself is neither duty nor rest, so nothing is drawn there. Then the minimum
+ * the regulation required (solid), then the rest beyond it to the sign-on. A
+ * minimum that runs past the sign-on is struck red there, directly under the
+ * duty that came too soon.
  */
 function RestBar({
   rest,
@@ -1179,8 +1252,8 @@ function RestBar({
   duration: (min: number) => string
   onSelect: () => void
 }) {
-  const left = xOf(rest.signOffMs)
-  const width = wOf(rest.signOffMs, signOnMs)
+  const left = xOf(rest.startMs)
+  const width = wOf(rest.startMs, signOnMs)
   const h = hit(left, width)
   const short = rest.status === "short"
   const minEnd = rest.minimumEndMs
@@ -1303,7 +1376,8 @@ function DutyDetail({
         {fdp && <VerdictRow label="FDP" value={fdp} tone={b.limit} />}
         {discretion && <VerdictRow label="Discretion" value={discretion.value} tone={discretion.tone} />}
         {notFdp && <ReadOnlyRow label="FDP" value="Not a flight duty period" />}
-        {b.showMax && b.latestSignOffMs != null && <ReadOnlyRow label="Latest Sign-Off" value={clock(b.latestSignOffMs)} />}
+        {b.kind === "flight" && b.maxFdpMinutes > 0 && <ReadOnlyRow label="FDP End" value={`${clock(b.fdpEndMs)} · last on-blocks`} />}
+        {b.showMax && b.fdpLimitMs != null && <ReadOnlyRow label="Latest On-Blocks" value={clock(b.fdpLimitMs)} />}
         {b.kind === "standby" && b.limit === "over" && <VerdictRow label="Limit" value="Over the 18:00 standby cap" tone="over" />}
         {b.kind === "flight" && !notFdp && <ReadOnlyRow label="Flight Time" value={duration(b.flightMinutes)} />}
         {b.kind === "flight" && !notFdp && (

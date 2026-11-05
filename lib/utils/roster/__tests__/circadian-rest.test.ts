@@ -4,6 +4,8 @@ import {
   classifyCircadian,
   circadianRestRule,
   CIRCADIAN_REST_MIN,
+  CIRCADIAN_START,
+  stepCircadian,
 } from "../regulation-definitions"
 import {
   applyAcclimatisation,
@@ -38,7 +40,13 @@ import type { FlightLog } from "@/types/entities/flight.types"
  * The three terms it reacts to are all defined in the FIRST SCHEDULE, and all
  * of them in ACCLIMATED time — see `regulation-definitions.test.ts` for the
  * boundaries themselves. What is pinned here is that they are read in the right
- * clock, and that the two 24-hour requirements land on the right duties.
+ * clock, and that the 24 hours lands on the right duties.
+ *
+ * A SERIES is the run of duties between resets (the owner's reading, Nov
+ * 2026): it begins after a rest of 24 hours inclusive of a local night, so
+ * 4(1)(a) is met by construction and inside it paragraph 3 governs (4(1)(b)).
+ * What bites is 4(2): two consecutive disruptive FDPs make the 24 hours owed
+ * before the next disruptive one, until a 24-hour rest discharges it.
  */
 
 const SGT = 8 * 60
@@ -116,26 +124,65 @@ describe("classifyCircadian — read in ACCLIMATED time, not UTC", () => {
 
 /* ── Which of the two 24-hour requirements applies ───────────────────────── */
 
-describe("circadianRestRule — 4(1)(a) before the first, 4(2) after every two", () => {
-  it("asks for nothing before an ordinary duty", () => {
-    expect(circadianRestRule(0, false)).toBeNull()
-    expect(circadianRestRule(2, false)).toBeNull()
+describe("circadianRestRule — 24 hours only where 4(2) has made it owed", () => {
+  const owed = { run: 0, owed: true }
+  it("asks for nothing before an ordinary duty, owed or not", () => {
+    expect(circadianRestRule(CIRCADIAN_START, false)).toBeNull()
+    expect(circadianRestRule(owed, false)).toBeNull()
   })
 
-  it("asks for 24 hours before the FIRST of a series — 4(1)(a)", () => {
-    expect(circadianRestRule(0, true)).toBe("4a")
+  it("asks for nothing before a disruptive duty mid-series — 4(1)(b) hands it to para 3", () => {
+    expect(circadianRestRule(CIRCADIAN_START, true)).toBeNull()
+    expect(circadianRestRule({ run: 1, owed: false }, true)).toBeNull()
   })
 
-  it("asks for nothing before the SECOND — 4(1)(b) hands it back to para 3", () => {
-    expect(circadianRestRule(1, true)).toBeNull()
+  it("asks for 24 hours before the next disruptive duty once owed — 4(2)", () => {
+    expect(circadianRestRule(owed, true)).toBe("4b")
   })
 
-  it("asks for 24 hours again once two consecutive ones are complete — 4(2)", () => {
-    expect(circadianRestRule(2, true)).toBe("4b")
-  })
-
-  it("is 24 hours either way", () => {
+  it("is 24 hours", () => {
     expect(CIRCADIAN_REST_MIN).toBe(24 * 60)
+  })
+})
+
+describe("stepCircadian — the state 4(2) carries", () => {
+  const fdp = (disruptive: boolean) => ({ isFlightDutyPeriod: true, disruptive })
+  const short = { restMinutes: 12 * 60, includesLocalNight: true }
+  const reset = { restMinutes: 30 * 60, includesLocalNight: true }
+
+  it("owes the 24 hours once two consecutive disruptive FDPs are complete", () => {
+    const one = stepCircadian(CIRCADIAN_START, fdp(true))
+    expect(one.owed).toBe(false)
+    expect(stepCircadian(one, fdp(true), short).owed).toBe(true)
+  })
+
+  it("an ordinary FDP breaks the run but does not discharge what is owed", () => {
+    const owed = stepCircadian(stepCircadian(CIRCADIAN_START, fdp(true)), fdp(true), short)
+    const after = stepCircadian(owed, fdp(false), short)
+    expect(after.owed).toBe(true)
+    // …and between two disruptive ones it means they are not consecutive.
+    expect(stepCircadian(stepCircadian(stepCircadian(CIRCADIAN_START, fdp(true)), fdp(false), short), fdp(true), short).owed).toBe(false)
+  })
+
+  it("only a day off (34 hours with a local night) ends the series — 24 hours does not", () => {
+    const owed = { run: 0, owed: true }
+    const dayOff = { restMinutes: 34 * 60, includesLocalNight: true }
+    expect(stepCircadian(owed, fdp(false), dayOff).owed).toBe(false)
+    // 30 hours with a local night is more than para 4's 24 but short of a day off.
+    expect(stepCircadian(owed, fdp(false), reset).owed).toBe(true)
+    expect(stepCircadian(owed, fdp(false), { restMinutes: 40 * 60, includesLocalNight: false }).owed).toBe(true)
+  })
+
+  it("once owed, every disruptive FDP until the day off needs it — not just the next one", () => {
+    const owed = stepCircadian(stepCircadian(CIRCADIAN_START, fdp(true)), fdp(true), short)
+    const third = stepCircadian(owed, fdp(true), { restMinutes: 26 * 60, includesLocalNight: true })
+    expect(third.owed).toBe(true)
+  })
+
+  it("a simulator or positioning duty neither extends the run nor breaks it", () => {
+    const one = stepCircadian(CIRCADIAN_START, fdp(true))
+    const sim = stepCircadian(one, { isFlightDutyPeriod: false, disruptive: false }, short)
+    expect(stepCircadian(sim, fdp(true), short).owed).toBe(true)
   })
 })
 
@@ -165,48 +212,99 @@ function duty(over: Partial<DutyPeriod>): DutyPeriod {
 const disruptive = { earlyStart: true, lateFinish: false, woclOperation: false, disruptive: true }
 const ordinary = { earlyStart: false, lateFinish: false, woclOperation: false, disruptive: false }
 
-describe("calculateAllRestPeriods — the run of disruptive duties", () => {
-  it("requires 24 hours before the first, para 3 before the second, 24 again before the third", () => {
-    // Four consecutive early-start duties, each a day apart. Under paragraph 4
-    // the pattern is 4(1)(a), then paragraph 3 between the first pair, then
-    // 4(2) before the third — which opens a new pair, so the fourth is back on
-    // paragraph 3.
-    const timeline = [
+describe("calculateAllRestPeriods — 4(2) across a timeline", () => {
+  it("para 3 inside a series, 24 hours before the third of a run", () => {
+    // Four consecutive early starts a day apart (15 hours between them). The
+    // first two are the series' business and para 3's; the third follows two
+    // in a row and needs 24 hours, which it does not get — so the 24 hours is
+    // still owed before the fourth.
+    const out = calculateAllRestPeriods([
       duty({ id: "d1", date: "2026-08-14", circadian: disruptive }),
       duty({ id: "d2", date: "2026-08-15", circadian: disruptive }),
       duty({ id: "d3", date: "2026-08-16", circadian: disruptive }),
       duty({ id: "d4", date: "2026-08-17", circadian: disruptive }),
-    ]
-    const out = calculateAllRestPeriods(timeline)
-
-    // The first duty has no rest before it to measure.
+    ])
     expect(out[0].restBefore).toBeUndefined()
     expect(out[1].restBefore?.rule).toBe("3a")
     expect(out[2].restBefore?.rule).toBe("4b")
     expect(out[2].restBefore?.requiredRestMinutes).toBe(24 * 60)
-    expect(out[3].restBefore?.rule).toBe("3a")
+    expect(out[2].restBefore?.compliant).toBe(false)
+    expect(out[3].restBefore?.rule).toBe("4b")
   })
 
-  it("calls 4(1)(a) when the series starts after an ordinary duty", () => {
+  it("an early start after an ordinary duty mid-series is paragraph 3, not 24 hours", () => {
+    // The "24 hours every now and then": read as the first of a new series,
+    // this asked for 24 hours where the roster gave 15 — and the operator's
+    // roster was legal.
     const out = calculateAllRestPeriods([
       duty({ id: "d1", date: "2026-08-14", circadian: ordinary }),
       duty({ id: "d2", date: "2026-08-15", circadian: disruptive }),
     ])
-    expect(out[1].restBefore?.rule).toBe("4a")
-    expect(out[1].restBefore?.requiredRestMinutes).toBe(24 * 60)
+    expect(out[1].restBefore?.rule).toBe("3a")
+    expect(out[1].restBefore?.compliant).toBe(true)
   })
 
-  it("an ordinary duty clears the run, so the next disruptive one is a first again", () => {
+  it("an ordinary duty after a pair does not discharge the 24 hours", () => {
     const out = calculateAllRestPeriods([
       duty({ id: "d1", date: "2026-08-14", circadian: disruptive }),
       duty({ id: "d2", date: "2026-08-15", circadian: disruptive }),
       duty({ id: "d3", date: "2026-08-16", circadian: ordinary }),
       duty({ id: "d4", date: "2026-08-17", circadian: disruptive }),
     ])
-    // Without the reset, d4 would follow two consecutive disruptive duties and
-    // read as 4(2) — but an ordinary duty sat between them, so the series
-    // ended and d4 begins a new one.
-    expect(out[3].restBefore?.rule).toBe("4a")
+    // "prior to … the next flight duty period that encompasses" one — d4.
+    expect(out[2].restBefore?.rule).toBe("3a")
+    expect(out[3].restBefore?.rule).toBe("4b")
+    expect(out[3].restBefore?.compliant).toBe(false)
+  })
+
+  it("a day off after the pair ends the series", () => {
+    const out = calculateAllRestPeriods([
+      duty({ id: "d1", date: "2026-08-14", circadian: disruptive }),
+      duty({ id: "d2", date: "2026-08-15", circadian: disruptive }),
+      duty({ id: "d3", date: "2026-08-17", circadian: ordinary }),
+      duty({ id: "d4", date: "2026-08-18", circadian: disruptive }),
+    ])
+    expect(out[2].restBefore?.restMinutes).toBeGreaterThanOrEqual(34 * 60)
+    expect(out[3].restBefore?.rule).toBe("3a")
+  })
+
+  it("a 24-hour rest short of a day off does not: the next disruptive one still needs it", () => {
+    // 04:00–12:00 daily; d3 two days after d2 at 16:00 is a 26-hour rest.
+    const out = calculateAllRestPeriods([
+      duty({ id: "d1", date: "2026-08-14", circadian: disruptive }),
+      duty({ id: "d2", date: "2026-08-15", circadian: disruptive }),
+      duty({ id: "d3", date: "2026-08-16", reportTime: "15:00", debriefTime: "20:00", circadian: disruptive }),
+      duty({ id: "d4", date: "2026-08-17", reportTime: "10:00", debriefTime: "18:00", circadian: disruptive }),
+    ])
+    expect(out[2].restBefore?.rule).toBe("4b")
+    expect(out[3].restBefore?.rule).toBe("4b")
+    expect(out[3].restBefore?.compliant).toBe(false)
+  })
+
+  it("the roster of 17 Feb 2026: a day off between ends the series, so the third is paragraph 3's", () => {
+    // Disruptive, 118 hours off, disruptive, 15 hours, disruptive — rostered.
+    const out = calculateAllRestPeriods([
+      duty({ id: "a", date: "2026-02-11", circadian: disruptive }),
+      duty({ id: "b", date: "2026-02-16", circadian: disruptive }),
+      duty({ id: "c", date: "2026-02-17", reportTime: "04:00", circadian: disruptive }),
+    ])
+    expect(out[2].restBefore?.rule).not.toBe("4b")
+    expect(out[2].restBefore?.compliant).toBe(true)
+  })
+
+  it("the roster of 27 Nov 2026: the 24 hours is still owed past two ordinary duties", () => {
+    // Two disruptive, two ordinary on short rests, then a disruptive one —
+    // the operator rostered 25:30 before it.
+    const out = calculateAllRestPeriods([
+      duty({ id: "a", date: "2026-11-22", circadian: disruptive }),
+      duty({ id: "b", date: "2026-11-23", reportTime: "05:00", debriefTime: "13:00", circadian: disruptive }),
+      duty({ id: "c", date: "2026-11-24", reportTime: "10:00", debriefTime: "18:00", circadian: ordinary }),
+      duty({ id: "d", date: "2026-11-25", reportTime: "10:00", debriefTime: "15:00", circadian: ordinary }),
+      duty({ id: "e", date: "2026-11-26", reportTime: "17:30", debriefTime: "23:00", circadian: disruptive }),
+    ])
+    expect(out[4].restBefore?.rule).toBe("4b")
+    expect(out[4].restBefore?.restMinutes).toBe(25 * 60 + 30)
+    expect(out[4].restBefore?.compliant).toBe(true)
   })
 
   it("leaves an all-ordinary timeline entirely to paragraph 3", () => {
@@ -220,51 +318,46 @@ describe("calculateAllRestPeriods — the run of disruptive duties", () => {
     }
   })
 
-  it("fails a 24-hour requirement that the roster does not give", () => {
-    // 12 hours between duties satisfies paragraph 3 comfortably and is half of
-    // what 4(1)(a) demands. Reported as compliant, this is a rest period the
-    // pilot would have flown on.
+  it("accepts the 24 hours when the roster gives it, local night included", () => {
     const out = calculateAllRestPeriods([
-      duty({ id: "d1", date: "2026-08-14", debriefTime: "12:00", circadian: ordinary }),
-      duty({ id: "d2", date: "2026-08-15", reportTime: "01:00", circadian: disruptive }),
+      duty({ id: "d1", date: "2026-08-14", circadian: disruptive }),
+      duty({ id: "d2", date: "2026-08-15", debriefTime: "12:00", circadian: disruptive }),
+      duty({ id: "d3", date: "2026-08-17", reportTime: "04:00", circadian: disruptive }),
     ])
-    expect(out[1].restBefore?.rule).toBe("4a")
-    expect(out[1].restBefore?.compliant).toBe(false)
-  })
-
-  it("accepts one that it does", () => {
-    const out = calculateAllRestPeriods([
-      duty({ id: "d1", date: "2026-08-14", debriefTime: "12:00", circadian: ordinary }),
-      duty({ id: "d2", date: "2026-08-16", reportTime: "04:00", circadian: disruptive }),
-    ])
-    expect(out[1].restBefore?.rule).toBe("4a")
-    expect(out[1].restBefore?.includesLocalNight).toBe(true)
-    expect(out[1].restBefore?.compliant).toBe(true)
+    expect(out[2].restBefore?.rule).toBe("4b")
+    expect(out[2].restBefore?.includesLocalNight).toBe(true)
+    expect(out[2].restBefore?.compliant).toBe(true)
   })
 })
 
 /* ── The figure the dashboard actually shows ─────────────────────────────── */
 
 describe("calculateRestUntilLegal", () => {
-  it("asks for 24 hours when the duty AHEAD is disruptive", () => {
+  it("asks for 24 hours when the duty AHEAD is disruptive and two in a row are done", () => {
     // Para 4 is the one rest rule that turns on the NEXT duty rather than the
     // preceding one, so the countdown has to be given the whole timeline —
     // a past-only list cannot see the early start it is counting down to.
     const r = calculateRestUntilLegal(
+      calculateAllRestPeriods([
+        duty({ id: "d0", date: "2026-08-13", debriefTime: "12:00", circadian: disruptive }),
+        duty({ id: "d1", date: "2026-08-14", debriefTime: "12:00", circadian: disruptive }),
+        duty({ id: "d2", date: "2026-08-15", reportTime: "21:30", isFuture: true, circadian: disruptive }),
+      ]),
+      new Date("2026-08-14T14:00:00Z"),
+    )
+    expect(r?.rule).toBe("4b")
+    expect(r?.requiredRestMinutes).toBe(24 * 60)
+  })
+
+  it("asks for paragraph 3 before a disruptive duty when nothing is owed", () => {
+    const r = calculateRestUntilLegal(
       [
         duty({ id: "d1", date: "2026-08-14", debriefTime: "12:00", circadian: ordinary }),
-        duty({
-          id: "d2",
-          date: "2026-08-15",
-          reportTime: "21:30",
-          isFuture: true,
-          circadian: disruptive,
-        }),
+        duty({ id: "d2", date: "2026-08-15", reportTime: "21:30", isFuture: true, circadian: disruptive }),
       ],
       new Date("2026-08-14T14:00:00Z"),
     )
-    expect(r?.rule).toBe("4a")
-    expect(r?.requiredRestMinutes).toBe(24 * 60)
+    expect(r?.rule).toBe("3a")
   })
 
   it("reads the duty AFTER a standby rostered in between", () => {
@@ -272,8 +365,9 @@ describe("calculateRestUntilLegal", () => {
     // beyond — para 4 still asks for 24 hours. It read the standby, which is
     // never disruptive, and counted down 10.
     const r = calculateRestUntilLegal(
-      [
-        duty({ id: "d1", date: "2026-08-14", debriefTime: "12:00", circadian: ordinary }),
+      calculateAllRestPeriods([
+        duty({ id: "d0", date: "2026-08-13", debriefTime: "12:00", circadian: disruptive }),
+        duty({ id: "d1", date: "2026-08-14", debriefTime: "12:00", circadian: disruptive }),
         duty({
           id: "sby",
           date: "2026-08-15",
@@ -284,10 +378,10 @@ describe("calculateRestUntilLegal", () => {
           isFuture: true,
         }),
         duty({ id: "d2", date: "2026-08-15", reportTime: "21:30", isFuture: true, circadian: disruptive }),
-      ],
+      ]),
       new Date("2026-08-14T14:00:00Z"),
     )
-    expect(r?.rule).toBe("4a")
+    expect(r?.rule).toBe("4b")
   })
 
   it("asks for the ordinary minimum when it is not", () => {

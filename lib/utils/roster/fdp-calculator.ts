@@ -28,6 +28,9 @@ import {
   acclimatisedOffsetsAtEachDuty,
   CIRCADIAN_REST_MIN,
   circadianRestRule,
+  CIRCADIAN_START,
+  stepCircadian,
+  type CircadianState,
   classifyCircadian,
   earliestLocalNightCompletion,
   containsLocalNight,
@@ -1430,17 +1433,16 @@ function daysToDate(days: number): string {
  *
  * Paragraph 4 then adds its own 24-hour requirement around duties that
  * encompass an early start, a late finish, or a take-off or landing in the
- * window of circadian low — see `priorDisruptiveRun`.
+ * window of circadian low — see `circadian`.
  *
- * @param priorDisruptiveRun how many consecutive disruptive flight duty
- *   periods the crew member has completed since their last 24-hour circadian
- *   rest. Only `calculateAllRestPeriods` can know this; a standalone call
- *   treats a disruptive duty as the first of a series, which is para 4(1)(a).
+ * @param circadian para 4's state before this duty (`stepCircadian`): whether
+ *   4(2)'s 24 hours is owed. Only `calculateAllRestPeriods` can know it; a
+ *   standalone call owes nothing, so paragraph 3 alone decides.
  */
 export function calculateRestPeriod(
   current: DutyPeriod,
   previous: DutyPeriod,
-  priorDisruptiveRun: number = 0
+  circadian: CircadianState = CIRCADIAN_START
 ): RestPeriodInfo {
   // Calculate actual rest in minutes
   const prevDebriefDay = dateToDays(previous.date)
@@ -1497,18 +1499,16 @@ export function calculateRestPeriod(
   // ── Para 4: duties encompassing an early start, a late finish, or a
   // take-off or landing in the window of circadian low ────────────────────
   //
-  // 24 hours inclusive of a local night, before the FIRST such duty in a
-  // series (4(1)(a)) and again before the next one after two consecutive ones
-  // (4(2)). It is a requirement on the rest BEFORE the duty, so the CURRENT
-  // duty's classification decides it, not the preceding one's.
+  // 24 hours inclusive of a local night before the next such duty once two
+  // consecutive ones have been completed (4(2)); 4(1)(a)'s 24 hours before a
+  // series is met by the reset that starts one (`circadianRestRule`). It is a
+  // requirement on the rest BEFORE the duty, so the CURRENT duty's
+  // classification decides it, not the preceding one's.
   //
   // Pushed FIRST so that it names itself on a tie with para 3(1)(d), which is
   // also 24 hours: it is the rule a pilot would need to look up, and the same
   // rest satisfies 3(1)(d) anyway.
-  const circadianRule = circadianRestRule(
-    priorDisruptiveRun,
-    current.circadian?.disruptive ?? false
-  )
+  const circadianRule = circadianRestRule(circadian, current.circadian?.disruptive ?? false)
   if (circadianRule) {
     candidates.push({ minutes: CIRCADIAN_REST_MIN, rule: circadianRule })
   }
@@ -1560,22 +1560,16 @@ export function calculateRestPeriod(
  * Enrich sorted duty periods with rest period information.
  * Expects duty periods sorted chronologically (oldest first).
  *
- * Also carries paragraph 4's running count of consecutive DISRUPTIVE duties —
- * ones encompassing an early start, a late finish, or a take-off or landing in
- * the window of circadian low. It has to be tracked across the timeline because
- * neither duty in a pair can see it: 4(2) reacts to the two duties BEFORE the
- * one whose rest is being measured.
- *
- * The count is "since the last 24-hour circadian rest", not "since the last
- * ordinary duty": once para 4 has required its 24 hours, the duty that follows
- * begins a fresh series, so a run of disruptive duties asks for 24 hours before
- * the first and again after every second one thereafter. A non-disruptive duty
- * clears it outright.
+ * Also carries paragraph 4's state across the timeline (`stepCircadian`):
+ * neither duty in a pair can see that 4(2)'s 24 hours is owed, because it is
+ * set by two duties BEFORE the one whose rest is measured, and it stays owed
+ * past an ordinary duty until a 24-hour rest inclusive of a local night
+ * discharges it.
  */
 export function calculateAllRestPeriods(sortedDPs: DutyPeriod[]): DutyPeriod[] {
   if (sortedDPs.length <= 1) return sortedDPs
 
-  let disruptiveRun = 0
+  let circadian = CIRCADIAN_START
   // The last duty that actually ENDED a rest period. A standby the crew member
   // was never called out on is rest, so it neither takes a rest requirement of
   // its own nor becomes the duty the next one is measured against — the rest
@@ -1586,31 +1580,18 @@ export function calculateAllRestPeriods(sortedDPs: DutyPeriod[]): DutyPeriod[] {
   return sortedDPs.map((dp) => {
     if (isRestingStandby(dp)) return dp
 
-    const priorRun = disruptiveRun
-    const result = previousDuty
-      ? { ...dp, restBefore: calculateRestPeriod(dp, previousDuty, priorRun) }
-      : dp
+    const restBefore = previousDuty ? calculateRestPeriod(dp, previousDuty, circadian) : undefined
+    const result = restBefore ? { ...dp, restBefore } : dp
 
     previousDuty = dp
-    // Para 4 counts FLIGHT duty periods. A simulator duty or a called-out
-    // standby in between is neither one more of a series nor the end of one.
-    if (isFlightDutyPeriod(dp)) {
-      disruptiveRun = advanceDisruptiveRun(priorRun, dp.circadian?.disruptive ?? false)
-    }
+    circadian = stepCircadianPast(circadian, dp, restBefore)
     return result
   })
 }
 
-/**
- * Step paragraph 4's run of consecutive disruptive duties past one more duty.
- *
- * A duty that is not disruptive clears the run. One that IS extends it — unless
- * para 4 already required a 24-hour rest before it, in which case it is the
- * first of a new series rather than the third of an old one.
- */
-function advanceDisruptiveRun(run: number, disruptive: boolean): number {
-  if (!disruptive) return 0
-  return circadianRestRule(run, true) ? 1 : run + 1
+/** Para 4's state past one more duty period. */
+function stepCircadianPast(state: CircadianState, dp: DutyPeriod, restBefore?: RestPeriodInfo | null): CircadianState {
+  return stepCircadian(state, { isFlightDutyPeriod: isFlightDutyPeriod(dp), disruptive: dp.circadian?.disruptive ?? false }, restBefore)
 }
 
 /** The next duty period chronologically after `after`, if there is one. */
@@ -2099,6 +2080,94 @@ function isoDay(ms: number): string {
 // Rest until legal
 // ============================================
 
+/**
+ * The EARLIEST instant a rest period commencing at `restStartMs` satisfies
+ * every applicable rule — paragraph 3 for the duty before it, and paragraph 4
+ * when `circadianRule` says the 24 hours is owed.
+ *
+ * Shared by the dashboard's countdown (`calculateRestUntilLegal`) and the FDP
+ * timeline's minimum-rest bar, so "when the rest was enough" is one answer.
+ * The span can EXCEED a sub-rule's own figure: a rest commencing at 01:27 SGT
+ * after an 11-hour duty has no local night by its eleventh hour, so it is
+ * legal at 12 hours (3(1)(b)) even though the rest as finally provided — with
+ * nights in it — only needed 11 (3(1)(c)).
+ */
+export function earliestLegalRestEnd(
+  restStartMs: number,
+  precedingDutyMinutes: number,
+  circadianRule: "4a" | "4b" | null,
+): { legalAtMs: number; requiredRestMinutes: number; rule: RestPeriodInfo["rule"] } {
+  let floorMinutes = 0
+  let floorRule: RestPeriodInfo["rule"] | null = null
+  /** 3(1)(d) and para 4 both require the rest to INCLUDE a local night. */
+  let nightRequired = false
+
+  if (circadianRule) {
+    floorMinutes = CIRCADIAN_REST_MIN
+    floorRule = circadianRule
+    nightRequired = true
+  }
+  if (precedingDutyMinutes > 16 * 60 && 24 * 60 >= floorMinutes) {
+    floorMinutes = 24 * 60
+    floorRule = floorRule ?? "3d"
+    nightRequired = true
+  } else if (precedingDutyMinutes > 10 * 60 && precedingDutyMinutes <= 16 * 60) {
+    const rounded = Math.ceil(precedingDutyMinutes / 60) * 60
+    if (rounded > floorMinutes) {
+      floorMinutes = rounded
+      floorRule = "3c"
+    }
+  }
+
+  // ── The EARLIEST instant the rest period satisfies every applicable rule ──
+  //
+  // Para 3(1)(a)/(b) are conditions on the rest period AS PROVIDED, and
+  // whether it includes a local night grows as the crew member waits. So this
+  // is a search for the earliest end, not a single lookup:
+  //
+  //   • wait for a local night → 10 hours suffices (3(1)(a)), but not before
+  //     the night itself completes;
+  //   • do not → 12 hours (3(1)(b)).
+  //
+  // Taking whichever comes first. Testing for a night once over a hypothetical
+  // 10-hour rest and falling to 12 when it failed missed everything in
+  // between: rest starting in the evening reaches its eighth hour inside the
+  // 2200–0800 window around the eleventh hour, and 3(1)(a) then asks for 10.
+  const nightCompletesAt = earliestLocalNightCompletion(restStartMs, LOCAL_NIGHT_ZONE_MINUTES)
+
+  const withNightEnd =
+    nightCompletesAt === null
+      ? null
+      : Math.max(restStartMs + Math.max(10 * 60, floorMinutes) * 60_000, nightCompletesAt)
+  const withoutNightEnd = nightRequired
+    ? null
+    : restStartMs + Math.max(12 * 60, floorMinutes) * 60_000
+
+  let legalAtMs: number
+  let hasLocalNight: boolean
+  if (withNightEnd !== null && (withoutNightEnd === null || withNightEnd <= withoutNightEnd)) {
+    legalAtMs = withNightEnd
+    hasLocalNight = true
+  } else {
+    legalAtMs = withoutNightEnd as number
+    hasLocalNight = false
+  }
+
+  // The span actually required — which can EXCEED the sub-rule's own minimum
+  // when the wait is for the local night to complete rather than for hours to
+  // pass. Reporting the bare minimum there tells a pilot they are legal before
+  // they are.
+  const requiredRestMinutes = Math.round((legalAtMs - restStartMs) / 60_000)
+  const rule: RestPeriodInfo["rule"] =
+    floorRule && floorMinutes >= (hasLocalNight ? 10 * 60 : 12 * 60)
+      ? floorRule
+      : hasLocalNight
+        ? "3a"
+        : "3b"
+
+  return { legalAtMs, requiredRestMinutes, rule }
+}
+
 export interface RestUntilLegalResult {
   isLegalNow: boolean
   restNeededMinutes: number    // 0 if legal
@@ -2180,7 +2249,6 @@ export function calculateRestUntilLegal(
   // reads off the dashboard to know when they may next report.
   const precedingDutyMinutes = lastDP.dutyMinutes
   const restStartMs = restStartTimestamp.getTime()
-  const restZoneMinutes = LOCAL_NIGHT_ZONE_MINUTES
 
   // ── Floors that do not depend on the local night ────────────────────────
   //
@@ -2192,82 +2260,14 @@ export function calculateRestUntilLegal(
     dutyPeriods.filter((dp) => !isRestingStandby(dp)),
     lastDP
   )
+  // Para 4's state as at the rest being counted, walked over the duties
+  // before it with the rests the pipeline gave them.
   const circadianRule = circadianRestRule(
-    completedDPs.reduce(
-      (run, dp) =>
-        isFlightDutyPeriod(dp) ? advanceDisruptiveRun(run, dp.circadian?.disruptive ?? false) : run,
-      0
-    ),
+    completedDPs.reduce((state, dp) => stepCircadianPast(state, dp, dp.restBefore), CIRCADIAN_START),
     nextDP?.circadian?.disruptive ?? false
   )
 
-  let floorMinutes = 0
-  let floorRule: RestPeriodInfo["rule"] | null = null
-  /** 3(1)(d) and para 4 both require the rest to INCLUDE a local night. */
-  let nightRequired = false
-
-  if (circadianRule) {
-    floorMinutes = CIRCADIAN_REST_MIN
-    floorRule = circadianRule
-    nightRequired = true
-  }
-  if (precedingDutyMinutes > 16 * 60 && 24 * 60 >= floorMinutes) {
-    floorMinutes = 24 * 60
-    floorRule = floorRule ?? "3d"
-    nightRequired = true
-  } else if (precedingDutyMinutes > 10 * 60 && precedingDutyMinutes <= 16 * 60) {
-    const rounded = Math.ceil(precedingDutyMinutes / 60) * 60
-    if (rounded > floorMinutes) {
-      floorMinutes = rounded
-      floorRule = "3c"
-    }
-  }
-
-  // ── The EARLIEST instant the rest period satisfies every applicable rule ──
-  //
-  // Para 3(1)(a)/(b) are conditions on the rest period AS PROVIDED, and
-  // whether it includes a local night grows as the crew member waits. So this
-  // is a search for the earliest end, not a single lookup:
-  //
-  //   • wait for a local night → 10 hours suffices (3(1)(a)), but not before
-  //     the night itself completes;
-  //   • do not → 12 hours (3(1)(b)).
-  //
-  // Taking whichever comes first. Testing for a night once over a hypothetical
-  // 10-hour rest and falling to 12 when it failed missed everything in
-  // between: rest starting in the evening reaches its eighth hour inside the
-  // 2200–0800 window around the eleventh hour, and 3(1)(a) then asks for 10.
-  const nightCompletesAt = earliestLocalNightCompletion(restStartMs, restZoneMinutes)
-
-  const withNightEnd =
-    nightCompletesAt === null
-      ? null
-      : Math.max(restStartMs + Math.max(10 * 60, floorMinutes) * 60_000, nightCompletesAt)
-  const withoutNightEnd = nightRequired
-    ? null
-    : restStartMs + Math.max(12 * 60, floorMinutes) * 60_000
-
-  let legalAtMs: number
-  let hasLocalNight: boolean
-  if (withNightEnd !== null && (withoutNightEnd === null || withNightEnd <= withoutNightEnd)) {
-    legalAtMs = withNightEnd
-    hasLocalNight = true
-  } else {
-    legalAtMs = withoutNightEnd as number
-    hasLocalNight = false
-  }
-
-  // The span actually required — which can EXCEED the sub-rule's own minimum
-  // when the wait is for the local night to complete rather than for hours to
-  // pass. Reporting the bare minimum there tells a pilot they are legal before
-  // they are.
-  const requiredRestMinutes = Math.round((legalAtMs - restStartMs) / 60_000)
-  const rule: RestPeriodInfo["rule"] =
-    floorRule && floorMinutes >= (hasLocalNight ? 10 * 60 : 12 * 60)
-      ? floorRule
-      : hasLocalNight
-        ? "3a"
-        : "3b"
+  const { legalAtMs, requiredRestMinutes, rule } = earliestLegalRestEnd(restStartMs, precedingDutyMinutes, circadianRule)
 
   const restNeededMinutes = Math.max(0, Math.round((legalAtMs - now.getTime()) / 60_000))
   const legalAtUtc = new Date(legalAtMs).toISOString()

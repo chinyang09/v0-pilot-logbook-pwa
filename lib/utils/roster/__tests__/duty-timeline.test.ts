@@ -108,6 +108,32 @@ describe("buildDutyTimeline", () => {
     })
   })
 
+  it("ends the minimum where the rest first became legal, as the dashboard does", () => {
+    // Rest commencing 01:27 SGT (17:27Z) after an 11-hour duty. As provided
+    // (30h, a local night in it) it needs 11h under 3(1)(c) — but it holds no
+    // night by its eleventh hour (01:27–08:00 is short of eight), so it was
+    // legal at 12h under 3(1)(b), 13:27 SGT. The bar and the figure say 12.
+    const first = duty({ id: "d1", date: "2026-11-04", reportTime: "05:00", debriefTime: "16:27", dutyMinutes: 660 })
+    const second = duty({
+      id: "d2",
+      date: "2026-11-05",
+      reportTime: "23:27",
+      restBefore: {
+        restMinutes: 1800,
+        requiredRestMinutes: 660,
+        compliant: true,
+        rule: "3c",
+        includesLocalNight: true,
+        precedingDutyMinutes: 660,
+      } as DutyPeriod["restBefore"],
+    })
+    const [, b] = buildDutyTimeline([first, second], new Map())
+    expect(b.restBefore!.startMs).toBe(at("2026-11-04T17:27:00Z"))
+    expect(b.restBefore!.requiredMinutes).toBe(720)
+    expect(b.restBefore!.minimumEndMs).toBe(at("2026-11-05T05:27:00Z"))
+    expect(b.restBefore!.rule).toBe("3b")
+  })
+
   it("flies nothing on a standby and carries no type for a positioning sector", () => {
     const pos = flight({ id: "p", entryType: "positioning" })
     const [sby] = buildDutyTimeline([duty({ id: "s", dutyKind: "standby", flightMinutes: 0 })], new Map())
@@ -164,23 +190,25 @@ describe("against the limits", () => {
 })
 
 describe("the maximum and the minimum", () => {
-  it("moves the sign-off by the FDP still in hand, and draws it only for a duty still to come", () => {
+  it("puts the FDP's limit at the last on-blocks moved by the FDP still in hand, drawn only for a duty to come", () => {
     // 01:00–09:30, last on-blocks 09:00: an FDP of 8:00 against a 13:00 maximum.
     const flown = duty({ id: "f", fdpEndTime: "09:00" })
     const planned = duty({ id: "p", date: "2026-11-10", fdpEndTime: "09:00", isFuture: true })
     const [a, b] = buildDutyTimeline([flown, planned], new Map())
-    expect(a.latestSignOffMs).toBe(a.endMs + 5 * H)
+    expect(a.fdpEndMs).toBe(a.endMs - 0.5 * H)
+    expect(a.fdpLimitMs).toBe(a.fdpEndMs + 5 * H)
     expect(a.showMax).toBe(false)
     expect(b.showMax).toBe(true)
-    // Over: the latest sign-off falls BEFORE the sign-off.
+    // Over: the limit falls BEFORE the last on-blocks — the breach is the FDP's
+    // last hour, not the post-flight half hour after it.
     const [over] = buildDutyTimeline([duty({ id: "o", fdpEndTime: "09:00", maxFdpMinutes: 420 })], new Map())
-    expect(over.latestSignOffMs).toBe(over.endMs - 1 * H)
+    expect(over.fdpLimitMs).toBe(over.fdpEndMs - 1 * H)
     expect(over.limit).toBe("over")
   })
 
   it("has no maximum on a standby", () => {
     const [s] = buildDutyTimeline([duty({ id: "s", dutyKind: "standby", maxFdpMinutes: 0, isFuture: true })], new Map())
-    expect(s.latestSignOffMs).toBeNull()
+    expect(s.fdpLimitMs).toBeNull()
     expect(s.showMax).toBe(false)
   })
 
