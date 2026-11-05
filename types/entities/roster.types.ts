@@ -286,9 +286,11 @@ export interface DutyPeriod {
    *
    * A standby is a DUTY period but not a FLIGHT duty period: paragraph 14's
    * tables do not apply to it, so it carries no FDP maximum and must never
-   * reach an FDP gauge.
+   * reach an FDP gauge. Neither is `training` — a duty of simulator sessions
+   * only — or `positioning` — a duty of positioning only: neither includes a
+   * flight on which the pilot is crew, and both count in full.
    */
-  dutyKind?: "flight" | "standby"
+  dutyKind?: "flight" | "standby" | "training" | "positioning"
   /** How a standby is served — see para 6(3) and 6(7). */
   standbyKind?: "home" | "airport"
   /**

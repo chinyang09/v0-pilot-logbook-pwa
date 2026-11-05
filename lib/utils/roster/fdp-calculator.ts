@@ -366,14 +366,26 @@ export function findActivationMinute(
  * rest" and "how many hours have you worked" are different questions and the
  * schedule answers them in different paragraphs.
  *
- * ⚠ ASSUMED, PENDING CONFIRMATION. Para 3(1)(c)/(d) are written against a
- * "duty period", not a flight duty period, so read literally a 12-hour standby
- * does demand 12 hours of rest after it. This is the operator's practice taken
- * over the literal text, and it is the PERMISSIVE direction — it should be
- * re-checked against a real roster before it is settled.
+ * THE OWNER'S RULING (Nov 2026), against the literal text. The First Schedule
+ * defines "duty" to include standby and a rest period as "free of all
+ * duties", so read literally a standby interrupts rest and a 12-hour one
+ * demands 12 hours after it under 3(1)(c). The operator's practice — a home
+ * standby not called out is rest — was put to the owner with both readings
+ * and is the one kept. It is the PERMISSIVE direction, so it is written down
+ * here rather than assumed.
  */
 export function isRestingStandby(dp: DutyPeriod): boolean {
-  return dp.dutyKind === "standby" && !dp.activatedAt
+  // A standby CALLED OUT is rest up to its activation by the same ruling — it
+  // ends the moment the duty begins (para 6(6)), and the rest it formed part of
+  // is the rest before that duty. Treating it as the duty to rest FROM read the
+  // gap between activation and report as the rest, which is none: every
+  // called-out standby put a "rest short" on the flight it turned into.
+  return dp.dutyKind === "standby"
+}
+
+/** A FLIGHT duty period — what paragraphs 4 and 14 speak of. */
+export function isFlightDutyPeriod(dp: Pick<DutyPeriod, "dutyKind">): boolean {
+  return !dp.dutyKind || dp.dutyKind === "flight"
 }
 
 export function truncateActivatedStandby(dutyPeriods: DutyPeriod[]): DutyPeriod[] {
@@ -489,7 +501,19 @@ function createDutyPeriodFromFlightGroup(
   // Para 8: positioning is DUTY — its OUT/IN widen the duty window below —
   // but it is not an operating sector and not flight time, so it is left out
   // of the sector count, the sector lengths and the flight minutes.
-  const operated = groupFlights.filter((f) => !isPositioningEntry(f))
+  //
+  // Para 9: a session in a flight simulation training device is DUTY too, and
+  // where it comes before flying in the same duty period "all the time spent
+  // in the [device] is counted in full towards the subsequent flight duty
+  // period", which "is calculated from the reporting time of the simulator
+  // detail" — but the session "does not count as a sector". It used to be
+  // counted as one, and a duty made only of a session was given a one-sector
+  // FDP maximum it has no business carrying: with no flight in it, it is not
+  // a flight duty period at all.
+  const sims = groupFlights.filter((f) => isSimulatorEntry(f))
+  const flying = groupFlights.filter((f) => !isSimulatorEntry(f))
+  if (flying.length === 0) return createSimulatorDutyPeriod(date, sims, groupIdx, totalGroups)
+  const operated = flying.filter((f) => !isPositioningEntry(f))
 
   let totalFlightMinutes = 0
   let earliestOut = Infinity
@@ -502,7 +526,7 @@ function createDutyPeriodFromFlightGroup(
       totalFlightMinutes += hhmmToMinutes(flight.blockTime)
     }
   }
-  for (const flight of groupFlights) {
+  for (const flight of flying) {
     if (flight.outTime) {
       earliestOut = Math.min(earliestOut, hhmmToMinutes(flight.outTime))
     }
@@ -530,7 +554,7 @@ function createDutyPeriodFromFlightGroup(
     earliestOut = earliestScheduledOut
   }
   if (latestIn === -Infinity) {
-    for (const flight of groupFlights) {
+    for (const flight of flying) {
       if (flight.scheduledIn) {
         let inMin = hhmmToMinutes(flight.scheduledIn)
         const outRef = flight.scheduledOut
@@ -554,6 +578,23 @@ function createDutyPeriodFromFlightGroup(
 
   if (earliestOut === Infinity || latestIn === -Infinity) return null
 
+  // "Flight duty period … finishes when the aircraft finally comes to rest and
+  // the engines are shut down at the end of the LAST FLIGHT ON WHICH HE OR SHE
+  // IS A CREW MEMBER" (First Schedule). Positioning AFTER that is duty, not
+  // FDP, so the FDP closes at the last OPERATED on-blocks. It used to close at
+  // the last arrival of any kind, which charged a positioning leg home against
+  // the FDP maximum.
+  let lastOperatedIn = -Infinity
+  for (const flight of operated) {
+    const inT = flight.inTime || flight.scheduledIn
+    if (!inT) continue
+    let inMin = hhmmToMinutes(inT)
+    const outT = flight.inTime ? flight.outTime : flight.scheduledOut
+    if (outT && inMin < hhmmToMinutes(outT)) inMin += 1440
+    lastOperatedIn = Math.max(lastOperatedIn, inMin)
+  }
+  const fdpEndMinutes = lastOperatedIn === -Infinity ? latestIn : lastOperatedIn
+
   // ── When the duty period began ─────────────────────────────────────────
   //
   // The ORIGINAL (rostered) report is the SCHEDULED gate-out less the hour
@@ -575,15 +616,23 @@ function createDutyPeriodFromFlightGroup(
   // (07:30 vs 08:00 local). The duty is put on the day it was reported for
   // instead (`dutyDate`, below), so every reader that builds an instant from
   // `date` + `reportTime` gets the right one.
-  const originalReportMinutes =
+  // A simulator detail earlier in the same duty is where the FDP starts
+  // (para 9(2)): its session window already runs from its own report.
+  const simWindow = sessionWindow(sims)
+  const originalReportMinutes = Math.min(
     (earliestScheduledOut !== Infinity ? earliestScheduledOut : earliestOut) -
-    REPORT_BUFFER_MINUTES
+      REPORT_BUFFER_MINUTES,
+    simWindow ? simWindow.start : Infinity
+  )
   const reportMinutes =
     earliestStatedReport !== Infinity ? earliestStatedReport : originalReportMinutes
 
   // A duty period "ends when that crew member is free from all duties", and
   // para 7(2) puts at least 30 minutes of post-flight checks after gate-in.
-  const debriefMinutes = latestIn + DEBRIEF_BUFFER_MINUTES
+  const debriefMinutes = Math.max(
+    latestIn + DEBRIEF_BUFFER_MINUTES,
+    simWindow ? simWindow.end : -Infinity
+  )
 
   // ── Para 10 — delayed reporting ────────────────────────────────────────
   //
@@ -615,9 +664,9 @@ function createDutyPeriodFromFlightGroup(
   // Departure timezone from the first flight, arrival timezone from the last —
   // the latter is where the crew member is when the duty ends, which is the
   // "local time" a local night is measured in.
-  const depTzOffset = groupFlights[0]?.departureTimezone ?? 8
+  const depTzOffset = flying[0]?.departureTimezone ?? 8
   const arrTzOffset =
-    groupFlights[groupFlights.length - 1]?.arrivalTimezone ?? depTzOffset
+    flying[flying.length - 1]?.arrivalTimezone ?? depTzOffset
 
   // EVERY sector's block time — para 14(2) counts each long sector up, not
   // only the longest.
@@ -625,20 +674,28 @@ function createDutyPeriodFromFlightGroup(
     f.blockTime ? hhmmToMinutes(f.blockTime) : 0
   )
 
-  const circadianInstants = collectCircadianInstants(date, groupFlights)
+  // A session is not a departure, an arrival, a take-off or a landing.
+  const circadianInstants = collectCircadianInstants(date, flying)
 
   // Para 14 enters its tables on the local time of start of the FDP, taken
   // from the SCHEDULED report — para 10(a) keeps the maximum on the original
   // reporting time when the actual one slips by less than 4 hours.
   const localReportTime = toLocalClock(scheduledReportMinutes, depTzOffset)
 
-  const fdpResult = deriveMaxFDP({
-    reportTime,
-    fdpStartLocal: localReportTime,
-    sectorCount: operated.length,
-    sectorMinutes,
-    departureTimezoneOffset: depTzOffset,
-  })
+  // A duty with no flight on which the pilot is crew — positioning only — is a
+  // duty period but not a flight duty period (para 8 and the First Schedule's
+  // definition), so paragraph 14 gives it no maximum. It used to take the
+  // one-sector figure.
+  const positioningOnly = operated.length === 0
+  const fdpResult = positioningOnly
+    ? { maxFdpMinutes: 0, tableUsed: undefined, effectiveSectors: 0 }
+    : deriveMaxFDP({
+        reportTime,
+        fdpStartLocal: localReportTime,
+        sectorCount: operated.length,
+        sectorMinutes,
+        departureTimezoneOffset: depTzOffset,
+      })
 
   // Use unique id when multiple duty periods exist on same date
   const id = totalGroups > 1 ? `logbook-${date}-${groupIdx}` : `logbook-${date}`
@@ -647,9 +704,9 @@ function createDutyPeriodFromFlightGroup(
   // A simulator session has no airports at all: it is "SIM", not "?-?".
   const route =
     chainRoute([
-      groupFlights[0]?.departureIcao || groupFlights[0]?.departureIata,
-      ...groupFlights.map((f) => f.arrivalIcao || f.arrivalIata),
-    ]) || (groupFlights.some((f) => isSimulatorEntry(f)) ? "SIM" : "")
+      flying[0]?.departureIcao || flying[0]?.departureIata,
+      ...flying.map((f) => f.arrivalIcao || f.arrivalIata),
+    ]) || ""
 
   return {
     // The id stays on the FLIGHTS' date: a duty moved back a day must not
@@ -663,10 +720,13 @@ function createDutyPeriodFromFlightGroup(
     sectorCount: operated.length,
     maxFdpMinutes: fdpResult.maxFdpMinutes,
     fdpExtensionUsed: false,
+    ...(positioningOnly ? { dutyKind: "positioning" as const } : {}),
     fdpTableUsed: fdpResult.tableUsed,
     fdpStartLocal: localReportTime,
     fdpElapsedAtReport,
-    fdpEndTime: minutesToHHMM(((latestIn % 1440) + 1440) % 1440),
+    // A positioning-only duty has no FDP to end; merged ahead of a flight, the
+    // flight's own end is the one that stands.
+    fdpEndTime: positioningOnly ? undefined : minutesToHHMM(((fdpEndMinutes % 1440) + 1440) % 1440),
     departureTimezoneOffset: depTzOffset,
     arrivalTimezoneOffset: arrTzOffset,
     effectiveSectors: fdpResult.effectiveSectors,
@@ -677,6 +737,66 @@ function createDutyPeriodFromFlightGroup(
     scheduleEntryIds: [],
     flightIds: groupFlights.map((f) => f.id),
     route,
+  }
+}
+
+/**
+ * A run of simulator sessions as minutes on their date: from the first one's
+ * start to the last one's end. A session's recorded window is the detail
+ * itself (the company's training-detail times), so no pre- or post-flight
+ * checks are added to it — those are para 7's, for a flight.
+ */
+function sessionWindow(sims: FlightLog[]): { start: number; end: number } | null {
+  let start = Infinity
+  let end = -Infinity
+  for (const f of sims) {
+    const outT = f.outTime || f.scheduledOut
+    const inT = f.inTime || f.scheduledIn
+    if (!outT || !inT) continue
+    const out = hhmmToMinutes(outT)
+    let inn = hhmmToMinutes(inT)
+    if (inn <= out) inn += 1440
+    start = Math.min(start, out)
+    end = Math.max(end, inn)
+  }
+  return start === Infinity ? null : { start, end }
+}
+
+/**
+ * A duty made only of simulator sessions: a DUTY period (it counts in full
+ * toward the cumulative duty limits of para 12, and the rest around it is
+ * checked like any other) but not a FLIGHT duty period — it includes no
+ * flight, so paragraph 14's tables never apply and it carries no maximum.
+ */
+function createSimulatorDutyPeriod(
+  date: string,
+  sims: FlightLog[],
+  groupIdx: number,
+  totalGroups: number
+): DutyPeriod | null {
+  const window = sessionWindow(sims)
+  if (!window) return null
+  const reportDayShift = Math.floor(window.start / 1440)
+  const dutyDate = reportDayShift === 0 ? date : daysToDate(dateToDays(date) + reportDayShift)
+  const id = totalGroups > 1 ? `logbook-${date}-${groupIdx}` : `logbook-${date}`
+  return {
+    id,
+    date: dutyDate,
+    reportTime: minutesToHHMM(((window.start % 1440) + 1440) % 1440),
+    debriefTime: minutesToHHMM(((window.end % 1440) + 1440) % 1440),
+    dutyMinutes: window.end - window.start,
+    flightMinutes: 0,
+    sectorCount: 0,
+    maxFdpMinutes: 0,
+    fdpExtensionUsed: false,
+    dutyKind: "training",
+    departureTimezoneOffset: sims[0]?.departureTimezone ?? HOME_BASE_OFFSET_MINUTES / 60,
+    arrivalTimezoneOffset: sims[0]?.arrivalTimezone ?? HOME_BASE_OFFSET_MINUTES / 60,
+    source: "logbook",
+    isFuture: date > new Date().toISOString().split("T")[0],
+    scheduleEntryIds: [],
+    flightIds: sims.map((f) => f.id),
+    route: "SIM",
   }
 }
 
@@ -943,7 +1063,17 @@ export function mergeAdjacentDutyPeriods(dutyPeriods: DutyPeriod[]): DutyPeriod[
     // other cannot — and merging them would give the pair a single maximum
     // covering hours paragraph 14 never applied to. Para 6(6) handles that
     // pairing instead, by ending the standby at activation.
-    if ((prev.dutyKind ?? "flight") !== (curr.dutyKind ?? "flight")) {
+    //
+    // Positioning and simulator duties are the exception: para 2(1)(b) puts
+    // positioning that immediately precedes a flight INTO that flight's FDP,
+    // and para 9 counts a simulator detail before flying in full toward it —
+    // so either one running into a flight duty across a date boundary is one
+    // duty period, a flight duty period.
+    const prevKind = prev.dutyKind ?? "flight"
+    const currKind = curr.dutyKind ?? "flight"
+    const joinsFlight =
+      prevKind !== "standby" && currKind !== "standby" && (prevKind === "flight" || currKind === "flight")
+    if (prevKind !== currKind && !joinsFlight) {
       result.push(curr)
       continue
     }
@@ -994,6 +1124,7 @@ export function mergeAdjacentDutyPeriods(dutyPeriods: DutyPeriod[]): DutyPeriod[
 
       result[result.length - 1] = {
         ...prev,
+        dutyKind: prevKind === currKind ? prev.dutyKind : "flight",
         debriefTime: curr.debriefTime,
         dutyMinutes: totalDutyMinutes,
         flightMinutes: prev.flightMinutes + curr.flightMinutes,
@@ -1461,7 +1592,11 @@ export function calculateAllRestPeriods(sortedDPs: DutyPeriod[]): DutyPeriod[] {
       : dp
 
     previousDuty = dp
-    disruptiveRun = advanceDisruptiveRun(priorRun, dp.circadian?.disruptive ?? false)
+    // Para 4 counts FLIGHT duty periods. A simulator duty or a called-out
+    // standby in between is neither one more of a series nor the end of one.
+    if (isFlightDutyPeriod(dp)) {
+      disruptiveRun = advanceDisruptiveRun(priorRun, dp.circadian?.disruptive ?? false)
+    }
     return result
   })
 }
@@ -2051,10 +2186,16 @@ export function calculateRestUntilLegal(
   //
   // Para 4 turns on the duty AHEAD, so it can only be answered when the next
   // one is known; with no roster loaded it simply does not apply.
-  const nextDP = nextDutyAfter(dutyPeriods, lastDP)
+  // A standby is rest, so the duty the rest is FOR is the first one after it
+  // that is not — para 4 reads that duty, not a standby rostered in between.
+  const nextDP = nextDutyAfter(
+    dutyPeriods.filter((dp) => !isRestingStandby(dp)),
+    lastDP
+  )
   const circadianRule = circadianRestRule(
     completedDPs.reduce(
-      (run, dp) => advanceDisruptiveRun(run, dp.circadian?.disruptive ?? false),
+      (run, dp) =>
+        isFlightDutyPeriod(dp) ? advanceDisruptiveRun(run, dp.circadian?.disruptive ?? false) : run,
       0
     ),
     nextDP?.circadian?.disruptive ?? false
@@ -2397,7 +2538,7 @@ export function applyAcclimatisation(
     // applied to it — deriving a maximum here would hand it a one-sector FDP
     // it has no business carrying. It still occupies the timeline, which is
     // what matters for the acclimatisation of the duties around it.
-    if (dp.dutyKind === "standby") return dp
+    if (!isFlightDutyPeriod(dp)) return dp
 
     // What the crew member was acclimated to when THIS duty commenced — so the
     // duty's own arrival zone cannot retroactively justify its own table.

@@ -39,15 +39,16 @@ import { isFlownFlight } from "@/lib/utils/flight-calculations"
  *
  * A flight contributes its ACTUAL times when it has them and its SCHEDULED
  * times otherwise, so a part-flown duty spans from the first real gate-out to
- * the last planned gate-in. Simulators and rows with no time at all are
- * skipped: neither describes an aircraft moving.
+ * the last planned gate-in. Rows with no time at all are skipped. A
+ * simulator session is kept: the duty builder makes it a duty that is not an
+ * FDP, or — ahead of flying in the same duty — the start of that FDP and not a
+ * sector (para 9).
  */
 export function buildPlannedDuties(flights: FlightLog[]): DutyPeriod[] {
   const projected: FlightLog[] = []
 
   for (const flight of flights) {
     if (!flight.date || !isLiveFlight(flight)) continue
-    if (flight.isSimulator) continue
 
     const out = flight.outTime || flight.scheduledOut || ""
     const inn = flight.inTime || flight.scheduledIn || ""

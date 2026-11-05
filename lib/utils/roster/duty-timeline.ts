@@ -20,7 +20,7 @@
 
 import { DEFAULT_FTL_LIMITS, type DutyPeriod, type RestPeriodInfo, type ScheduleEntry } from "@/types/entities/roster.types"
 import type { FlightLog } from "@/types/entities/flight.types"
-import { isPositioningEntry } from "@/lib/utils/entry-type"
+import { isPositioningEntry, isSimulatorEntry } from "@/lib/utils/entry-type"
 import { hhmmToMinutes } from "@/lib/utils/time"
 import { fdpMinutesOf, isDutyExceedingLimits, SCENARIO_DUTY_PREFIX } from "@/lib/utils/roster/fdp-calculator"
 import {
@@ -53,6 +53,8 @@ export interface TimelineSector {
   planned: boolean
   /** Carried as a passenger — duty, no flight time. */
   positioning: boolean
+  /** A session in a flight simulation training device — duty, no flight time (para 9). */
+  simulator?: boolean
 }
 
 export type DutyBlockKind = "flight" | "standby" | "ground"
@@ -211,6 +213,7 @@ function sectorOf(f: FlightLog): TimelineSector | null {
     type: f.aircraftType || "",
     planned: !(f.outTime && f.inTime),
     positioning: isPositioningEntry(f),
+    simulator: isSimulatorEntry(f) || undefined,
   }
 }
 
@@ -227,9 +230,11 @@ function routeOf(sectors: TimelineSector[], fallback?: string): string {
 /** The duty as rostered — only when every sector carries its schedule. */
 function plannedDuty(sectors: TimelineSector[]): Span | null {
   if (sectors.length === 0 || sectors.some((s) => !s.scheduled)) return null
-  const first = Math.min(...sectors.map((s) => s.scheduled!.startMs))
-  const last = Math.max(...sectors.map((s) => s.scheduled!.endMs))
-  return { startMs: first - PRE_FLIGHT_CHECK_MIN * MIN, endMs: last + POST_FLIGHT_CHECK_MIN * MIN }
+  // A simulator session's window is the detail itself — para 7's checks are a
+  // flight's, as in the duty builder.
+  const first = Math.min(...sectors.map((s) => s.scheduled!.startMs - (s.simulator ? 0 : PRE_FLIGHT_CHECK_MIN * MIN)))
+  const last = Math.max(...sectors.map((s) => s.scheduled!.endMs + (s.simulator ? 0 : POST_FLIGHT_CHECK_MIN * MIN)))
+  return { startMs: first, endMs: last }
 }
 
 /**
@@ -320,7 +325,7 @@ export function buildDutyTimeline(
       .sort((a, b) => a.outMs - b.outMs)
     const sectors = scenario && fromRows.length === 0 ? syntheticSector(dp, startMs) : fromRows
     const types: string[] = []
-    for (const s of sectors) if (s.type && !s.positioning && !types.includes(s.type)) types.push(s.type)
+    for (const s of sectors) if (s.type && !s.positioning && !s.simulator && !types.includes(s.type)) types.push(s.type)
     const standby = dp.dutyKind === "standby"
     const max = standby ? 0 : dp.maxFdpMinutes || 0
     const fdp = standby ? 0 : fdpMinutesOf(dp)
@@ -337,7 +342,9 @@ export function buildDutyTimeline(
       flightMinutes: standby ? 0 : dp.flightMinutes,
       sectors,
       route: routeOf(sectors, dp.route),
-      code: standby ? "SBY" : "",
+      // Not a flight duty period either (no flight on which the pilot is
+      // crew): drawn as a duty, named, and given no maximum.
+      code: standby ? "SBY" : dp.dutyKind === "training" ? "SIM" : dp.dutyKind === "positioning" ? "POS" : "",
       types,
       isFuture: dp.isFuture,
       isStandby: standby,
@@ -422,7 +429,7 @@ const minutesBetween = (a: number, b: number) => Math.max(0, Math.floor((b - a) 
 
 /** Block time a duty's sectors had flown by `t`. */
 export function flightElapsed(b: DutyBlock, t: number): number {
-  const flown = b.sectors.filter((s) => !s.positioning)
+  const flown = b.sectors.filter((s) => !s.positioning && !s.simulator)
   const total = flown.reduce((n, s) => n + (s.inMs - s.outMs), 0)
   if (total <= 0) {
     const share = b.endMs > b.startMs ? Math.min(1, Math.max(0, (t - b.startMs) / (b.endMs - b.startMs))) : 0

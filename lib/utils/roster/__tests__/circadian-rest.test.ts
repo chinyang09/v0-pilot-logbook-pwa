@@ -267,6 +267,29 @@ describe("calculateRestUntilLegal", () => {
     expect(r?.requiredRestMinutes).toBe(24 * 60)
   })
 
+  it("reads the duty AFTER a standby rostered in between", () => {
+    // A standby is rest, so the rest runs through it to the early start
+    // beyond — para 4 still asks for 24 hours. It read the standby, which is
+    // never disruptive, and counted down 10.
+    const r = calculateRestUntilLegal(
+      [
+        duty({ id: "d1", date: "2026-08-14", debriefTime: "12:00", circadian: ordinary }),
+        duty({
+          id: "sby",
+          date: "2026-08-15",
+          reportTime: "00:00",
+          debriefTime: "08:00",
+          dutyKind: "standby",
+          maxFdpMinutes: 0,
+          isFuture: true,
+        }),
+        duty({ id: "d2", date: "2026-08-15", reportTime: "21:30", isFuture: true, circadian: disruptive }),
+      ],
+      new Date("2026-08-14T14:00:00Z"),
+    )
+    expect(r?.rule).toBe("4a")
+  })
+
   it("asks for the ordinary minimum when it is not", () => {
     const r = calculateRestUntilLegal(
       [

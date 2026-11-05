@@ -76,12 +76,19 @@ describe("buildPlannedDuties", () => {
     expect(twoSector.maxFdpMinutes).toBeLessThanOrEqual(oneSector.maxFdpMinutes)
   })
 
-  it("ignores rows that describe no aircraft movement", () => {
-    const sim = flight({ id: "sim", isSimulator: true, outTime: "01:00", inTime: "05:00" })
+  it("ignores rows with no time at all, and binned ones", () => {
     const empty = flight({ id: "blank", outTime: "", inTime: "", scheduledOut: "", scheduledIn: "" })
     const binned = flight({ id: "gone", outTime: "01:00", inTime: "02:00", deletedAt: Date.now() })
 
-    expect(buildPlannedDuties([sim, empty, binned])).toEqual([])
+    expect(buildPlannedDuties([empty, binned])).toEqual([])
+  })
+
+  it("keeps a simulator session — a duty, but not a flight duty period (para 9)", () => {
+    const sim = flight({ id: "sim", isSimulator: true, entryType: "simulator", outTime: "01:00", inTime: "05:00", blockTime: "00:00" })
+    const [dp] = buildPlannedDuties([sim])
+    expect(dp.dutyKind).toBe("training")
+    expect(dp.maxFdpMinutes).toBe(0)
+    expect(dp.sectorCount).toBe(0)
   })
 
   it("leaves the original flight rows untouched", () => {

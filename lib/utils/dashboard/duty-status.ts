@@ -181,6 +181,8 @@ export interface ActiveDuty {
   id: string
   date: string
   route: string
+  /** What a duty that is not a flight duty period is ("Simulator", "Positioning"). */
+  notFdp?: string
   sectorCount: number
   /** Minutes since report — the CREW DUTY period's clock. */
   elapsedMinutes: number
@@ -344,6 +346,7 @@ function toActive(
     id: dp.id,
     date: dp.date,
     route: dp.route || "",
+    notFdp: dp.dutyKind === "training" ? "Simulator" : dp.dutyKind === "positioning" ? "Positioning" : undefined,
     sectorCount: dp.sectorCount || 0,
     elapsedMinutes: elapsed,
     fdpElapsedMinutes: fdpElapsed,

@@ -342,12 +342,21 @@ describe("a standby nobody called is rest, not a duty to rest from", () => {
     expect(stats.dutyHours).toBeCloseTo(12 * 0.2, 5)
   })
 
-  it("but an ACTIVATED one is a duty the next flight rests from", () => {
-    const called = flightDuty({ id: "called", date: "2026-08-15", reportTime: "10:00" })
-    const timeline = truncateActivatedStandby([standbyOn("2026-08-15"), called])
+  it("and a CALLED-OUT one is rest up to its activation — the flight rests from the duty before it", () => {
+    // It ends the moment the duty begins (para 6(6)). Read as the duty to rest
+    // FROM, the rest before the flight it turned into was activation → report
+    // less the hour: −1:00, and every called-out standby read "rest short".
+    const before = flightDuty({ id: "before", date: "2026-08-14", reportTime: "06:00", debriefTime: "18:00" })
+    const called = flightDuty({ id: "called", date: "2026-08-15", reportTime: "10:00", debriefTime: "20:00", dutyMinutes: 10 * 60 })
+    const timeline = truncateActivatedStandby([before, standbyOn("2026-08-15"), called])
     const sb = timeline.find((dp) => dp.dutyKind === "standby")!
     expect(sb.activatedAt).toBe("10:00")
-    expect(isRestingStandby(sb)).toBe(false)
+    expect(isRestingStandby(sb)).toBe(true)
+
+    const rested = calculateAllRestPeriods(timeline).find((dp) => dp.id === "called")!
+    // 18:00 on the 14th + 1h → 10:00 on the 15th.
+    expect(rested.restBefore?.restMinutes).toBe(15 * 60)
+    expect(rested.restBefore?.compliant).toBe(true)
   })
 })
 
