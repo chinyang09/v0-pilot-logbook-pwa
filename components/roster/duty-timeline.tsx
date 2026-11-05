@@ -573,16 +573,49 @@ export function DutyTimeline({
     return out
   }, [visible, xOf, duration])
 
-  const exceedances = (forecast?.exceedances ?? []).filter((e) => e.limitName.includes(view.limitName)).slice(0, 3)
+  // A breach of ANY limit, not only the tab being drawn — one hidden behind
+  // another tab was not shown at all. The first date per limit: a breach runs
+  // on day after day, and three rows of the same one said nothing more.
+  const exceedances = useMemo(() => {
+    const out: { view: RollingView; date: string; projected: number; limit: number; regulation: string }[] = []
+    for (const e of forecast?.exceedances ?? []) {
+      const v = views.find((x) => e.limitName.startsWith(x.limitName))
+      if (!v || out.some((o) => o.view.key === v.key)) continue
+      out.push({ view: v, date: e.date, projected: e.projected, limit: e.limit, regulation: e.limitName.match(/\((Reg [^)]+)\)/)?.[1] ?? "" })
+    }
+    return out.sort((a, b) => a.date.localeCompare(b.date))
+  }, [forecast, views])
 
   // Para 5 — days off — read off the same blocks the chart draws (the what-if's
   // when there is one). Listed from four weeks back: what is still to be flown,
   // and the month a pilot is about to account for.
   const daysOffState = useMemo(() => analyseDaysOff(scenario?.blocks ?? blocks), [scenario, blocks])
-  const daysOffFindings = useMemo(
-    () => daysOffState.findings.filter((f) => f.atMs >= nowMs - 28 * DAY).slice(0, 4),
-    [daysOffState, nowMs],
-  )
+  // One list, in date order: what the schedule is heading for and what the
+  // roster breaks are the same question — "what is wrong, and when".
+  const findings = useMemo(() => {
+    const rows: { key: string; atMs: number; severity: "violation" | "caution"; text: string; source: string; series?: RollingKind }[] = []
+    for (const e of exceedances) {
+      const at = Date.parse(`${e.date}T12:00:00Z`)
+      rows.push({
+        key: e.view.key,
+        atMs: at,
+        severity: "violation",
+        text: `${e.view.label} ${duration(e.projected * 60)}/${duration(e.limit * 60)}`,
+        source: e.regulation,
+        series: e.view.key,
+      })
+    }
+    for (const f of daysOffState.findings) {
+      if (f.atMs < nowMs - 28 * DAY) continue
+      rows.push({ key: `${f.rule}${f.atMs}`, atMs: f.atMs, severity: f.severity, text: f.label, source: `Para ${f.rule}` })
+    }
+    return rows.sort((a, b) => a.atMs - b.atMs).slice(0, 6)
+  }, [exceedances, daysOffState, nowMs, duration])
+  /** A breach row switches to its limit's tab; every row brings its date to the pointer. */
+  const openFinding = (f: { atMs: number; series?: RollingKind }) => {
+    if (f.series) setSeries(f.series)
+    scrollToTime(f.atMs)
+  }
 
   return (
     <FormSection>
@@ -766,43 +799,13 @@ export function DutyTimeline({
           {scenario && <Key swatch={<span className="h-2.5 w-3.5 rounded-sm" style={{ background: tint(FDP_COLORS.scenario, 45) }} />} label="What-If" />}
         </div>
 
-        {/* A breach the schedule is heading for: tap to bring it to the pointer. */}
-        {exceedances.length > 0 && (
+        {/* What the schedule is heading for — a rolling breach, a pattern of
+            days off it breaks (para 5). One row shape for both; a tap brings
+            it to the pointer. */}
+        {findings.length > 0 && (
           <div className="space-y-1">
-            {exceedances.map((e) => (
-              <button
-                key={`${e.date}${e.limitName}`}
-                type="button"
-                onClick={() => scrollToTime(Date.parse(`${e.date}T12:00:00Z`))}
-                className="flex h-9 w-full items-center justify-between rounded-md bg-status-error/10 px-3 text-xs text-status-error"
-              >
-                <span className="font-semibold">{fmt.dayMonth(Date.parse(`${e.date}T12:00:00Z`))} · {view.label} over</span>
-                <span className="tabular-nums">
-                  {duration(e.projected * 60)}/{duration(e.limit * 60)}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Para 5: a pattern of days off the roster breaks. */}
-        {daysOffFindings.length > 0 && (
-          <div className="space-y-1">
-            {daysOffFindings.map((f) => (
-              <button
-                key={`${f.rule}${f.atMs}`}
-                type="button"
-                onClick={() => scrollToTime(f.atMs)}
-                className={cn(
-                  "flex min-h-9 w-full items-center justify-between gap-3 rounded-md px-3 py-1.5 text-left text-xs",
-                  f.severity === "violation" ? "bg-status-error/10 text-status-error" : "bg-status-warning/10 text-status-warning",
-                )}
-              >
-                <span className="font-semibold">
-                  {fmt.dayMonth(f.atMs)} · {f.label}
-                </span>
-                <span className="shrink-0 tabular-nums opacity-80">Para {f.rule}</span>
-              </button>
+            {findings.map((f) => (
+              <FindingRow key={f.key} severity={f.severity} text={`${fmt.dayMonth(f.atMs)} · ${f.text}`} source={f.source} onClick={() => openFinding(f)} />
             ))}
           </div>
         )}
@@ -821,6 +824,36 @@ export function DutyTimeline({
         )}
       </div>
     </FormSection>
+  )
+}
+
+/** One thing the roster breaks, as a row: what and when, then the rule. */
+function FindingRow({
+  severity,
+  text,
+  source,
+  onClick,
+}: {
+  severity: "violation" | "caution"
+  text: string
+  source: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex min-h-9 w-full items-center justify-between gap-3 rounded-md px-3 py-1.5 text-left text-xs",
+        severity === "violation" ? "bg-status-error/10 text-status-error" : "bg-status-warning/10 text-status-warning",
+      )}
+    >
+      <span className="flex min-w-0 items-center gap-1.5 font-semibold">
+        <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        <span className="tabular-nums">{text}</span>
+      </span>
+      {source && <span className="shrink-0 opacity-80">{source}</span>}
+    </button>
   )
 }
 
@@ -868,7 +901,9 @@ function stateCells(
     // did not fit a phone's third of the row.
     const when = dayMonth(next.startMs) === dayMonth(t) ? clock(next.startMs) : `${dayMonth(next.startMs)} ${clock(next.startMs)}`
     if (next.kind !== "flight" || next.maxFdpMinutes <= 0) {
-      return [{ caption: "Next Duty", value: when }, { caption: next.kind === "standby" ? "Standby" : next.code || "Duty", value: duration(next.dutyMinutes) }]
+      // Not an FDP: what it is, and how long it runs.
+      const what = next.kind === "standby" ? "Standby" : NOT_FDP[next.code] ?? (next.code || "Duty")
+      return [{ caption: "Next Duty", value: when }, { caption: what, value: duration(next.dutyMinutes) }]
     }
     return [
       { caption: "Next Duty", value: when },
@@ -886,15 +921,16 @@ function stateCells(
       ]
     }
     if (b.kind === "standby") {
-      return [{ caption: "Duty", value: "Standby" }, { caption: "Standby", value: `${duration(s.dutyMinutes)}/${duration(18 * 60)}` }, { ...none, caption: "Flight" }]
+      return [{ caption: "Duty", value: "Standby" }, { caption: "Elapsed", value: `${duration(s.dutyMinutes)}/${duration(18 * 60)}` }, { ...none, caption: "Flight" }]
     }
     if (b.kind === "ground") {
-      return [{ caption: "Duty", value: b.code || "Ground" }, { caption: "Duty", value: duration(s.dutyMinutes) }, { ...none, caption: "Flight" }]
+      return [{ caption: "Duty", value: b.code || "Ground" }, { caption: "Elapsed", value: duration(s.dutyMinutes) }, { ...none, caption: "Flight" }]
     }
     return [
       { caption: "Duty", value: NOT_FDP[b.code] ?? state },
-      { caption: "Duty", value: duration(s.dutyMinutes) },
-      { caption: "Flight", value: duration(s.flightMinutes) },
+      { caption: "Elapsed", value: duration(s.dutyMinutes) },
+      // A simulator or positioning duty flies nothing.
+      { ...none, caption: "Flight" },
     ]
   }
   if (s.kind === "rest") {
@@ -1269,7 +1305,7 @@ function DutyDetail({
         {notFdp && <ReadOnlyRow label="FDP" value="Not a flight duty period" />}
         {b.showMax && b.latestSignOffMs != null && <ReadOnlyRow label="Latest Sign-Off" value={clock(b.latestSignOffMs)} />}
         {b.kind === "standby" && b.limit === "over" && <VerdictRow label="Limit" value="Over the 18:00 standby cap" tone="over" />}
-        {b.kind === "flight" && <ReadOnlyRow label="Flight Time" value={duration(b.flightMinutes)} />}
+        {b.kind === "flight" && !notFdp && <ReadOnlyRow label="Flight Time" value={duration(b.flightMinutes)} />}
         {b.kind === "flight" && !notFdp && (
           <ReadOnlyRow label="Sectors" value={String(b.sectors.filter((s) => !s.positioning && !s.simulator).length)} />
         )}

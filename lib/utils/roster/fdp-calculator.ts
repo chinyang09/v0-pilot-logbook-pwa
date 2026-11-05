@@ -2186,7 +2186,12 @@ export function calculateRestUntilLegal(
   //
   // Para 4 turns on the duty AHEAD, so it can only be answered when the next
   // one is known; with no roster loaded it simply does not apply.
-  const nextDP = nextDutyAfter(dutyPeriods, lastDP)
+  // A standby is rest, so the duty the rest is FOR is the first one after it
+  // that is not — para 4 reads that duty, not a standby rostered in between.
+  const nextDP = nextDutyAfter(
+    dutyPeriods.filter((dp) => !isRestingStandby(dp)),
+    lastDP
+  )
   const circadianRule = circadianRestRule(
     completedDPs.reduce(
       (run, dp) =>

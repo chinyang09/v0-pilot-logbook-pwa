@@ -4064,8 +4064,8 @@ hours and 3 local nights before the next FDP. **Days off are found only
 BETWEEN known duties**, and windows are judged only inside the span the duties
 cover — missing data reads as free time, so it can only ever produce a day off,
 never a violation. Standby is a duty here; local nights are SGT. The FDP page
-lists findings from four weeks back under the forecast rows (tap → pointer),
-and a rest's detail counts the days off it holds.
+lists findings from four weeks back in the same list as the forecast breaches
+(tap → pointer), and a rest's detail counts the days off it holds.
 
 #### Rolling windows are whole UTC DAYS (settled 31 Oct 2026)
 
@@ -4098,7 +4098,7 @@ period and where it is focused", so they are ONE scroller on ONE time axis:
 | | Shows |
 |---|---|
 | the header | the POINTER's instant ("Nov 4 03:11Z") beside − / + / Now — no "Timeline" title, and no Next Duty card above it (the row below says the same) |
-| the state row | THREE fixed cells, never prose (`PointerStateRow`, `stateCells`): on duty, Duty / FDP x/max / Flight; at rest, Next Duty / its FDP x/max / Rest x/minimum. A line of prose wrapped as it changed and moved the card's height |
+| the state row | THREE fixed cells, never prose (`PointerStateRow`, `stateCells`): on duty, Duty / FDP x/max / Flight (a duty that is not an FDP — standby, simulator, positioning, ground — Duty / Elapsed / Flight —); at rest, Next Duty / its FDP x/max / Rest x/minimum. A line of prose wrapped as it changed and moved the card's height |
 | the tabs | 14D duty, 28D duty, 28D flight, 12M flight AS AT THE POINTER (`rollingAt`); the chosen one is drawn |
 | the rolling chart | that limit's running total — flown solid, scheduled dashed yellow from now, what-if orange — against the limit line and its 90% |
 | the deck | each duty bar (sign-on → sign-off) the full row height with its sectors' block time INSIDE it, full height too; the rest directly under it with no gap |
@@ -4145,8 +4145,13 @@ period and where it is focused", so they are ONE scroller on ONE time axis:
   `MAX_INNER_PX` around now at the finest scale); only what is within a view
   either side is drawn. "Now" brings the pointer back; a jump of more than a
   few views is instant, a short one smooth. Tapping the rolling chart brings
-  that time to the pointer, and a forecast breach row (`forecast.exceedances`)
-  does the same.
+  that time to the pointer.
+- **ONE findings list under the chart, in date order** (`FindingRow`): a
+  forecast breach of ANY of the four limits — the first date per limit; a
+  breach hidden behind another tab was not shown at all, and the same breach
+  repeated day after day — and the para 5 findings, each "date · what" with
+  its rule ("Reg 12a", "Para 5(4)(a)") on the right. A breach row switches to
+  its limit's tab and brings the date to the pointer.
 - **The Quick Check draws on it.** `simulateScenario` returns the duties as the
   what-if leaves them (`dutyPeriods`, rest recomputed) and the ids it took out;
   the page builds blocks from them (`TimelineScenario`). An added duty
@@ -4159,8 +4164,8 @@ period and where it is focused", so they are ONE scroller on ONE time axis:
   (`allDutyPeriods`, flown + `upcomingPlannedDuties`), and a rest is the
   pipeline's own `restBefore` where it has one. Training and ground duties come
   from the roster (`scheduleEntries`, UTC only), hatched like a standby.
-- **Para 5 findings and the commander's discretion are read here too.** Under
-  the forecast rows, the days-off findings (`analyseDaysOff`, four weeks back
+- **Para 5 findings and the commander's discretion are read here too.** In
+  the findings list, the days-off findings (`analyseDaysOff`, four weeks back
   on); in a duty's detail, whether an FDP over its maximum lies within the
   PIC's 3:00 (para 13) — "none for a schedule"; in a rest's detail, within the
   PIC's 2:00 (para 3(2), the local night satisfied where required), its rule,

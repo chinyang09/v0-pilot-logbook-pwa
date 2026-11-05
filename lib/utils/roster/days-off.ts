@@ -163,7 +163,7 @@ export function analyseDaysOff(
           rule: "5(4)(a)",
           severity: "violation",
           atMs: at,
-          label: `${worked.size} days on without a day off (max ${MAX_CONSECUTIVE_WORK_DAYS})`,
+          label: `${worked.size} days on in a row (max ${MAX_CONSECUTIVE_WORK_DAYS})`,
         })
       }
     }
@@ -207,7 +207,7 @@ export function analyseDaysOff(
           rule: "5(4)(b)",
           severity: "violation",
           atMs: sgtMidday(from),
-          label: `${count} day${count === 1 ? "" : "s"} off in 2 weeks (min 2)`,
+          label: `${count} day${count === 1 ? "" : "s"} off in 14D (min 2)`,
         },
   )
   rolling(28, (count, from) => {
@@ -215,7 +215,7 @@ export function analyseDaysOff(
     const base = {
       rule: "5(4)(c)" as const,
       atMs: sgtMidday(from),
-      label: `${count} day${count === 1 ? "" : "s"} off in 4 weeks (min 8)`,
+      label: `${count} day${count === 1 ? "" : "s"} off in 28D (min 8)`,
     }
     if (count < 6) return { ...base, severity: "violation" }
     // 6 or 7 is permissible where the shortfall is made good in the 4 weeks
