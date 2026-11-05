@@ -433,12 +433,21 @@ describe("Para 4 — a series of duties around the window of circadian low", () 
   const early = (id: string, date: string) => leg({ id, date, out: "21:30", in: "23:30" })
   const ordinary = (id: string, date: string) => leg({ id, date, out: "02:00", in: "04:00" })
 
-  it("(1)(a) 24 hours inclusive of a local night before the FIRST of a series", () => {
+  it("(1)(a) the series starts after a reset, so an early start mid-block is para 3's", () => {
+    // A series is the run of duties between rests of 24 hours inclusive of a
+    // local night (the owner's reading): one begins after such a rest, which is
+    // what 4(1)(a) asks, and an early start after an ordinary duty inside it is
+    // 4(1)(b)'s — paragraph 3.
     const dps = pipeline([ordinary("o", "2026-08-10"), early("e1", "2026-08-11")])
     const e1 = byId(dps, "e1")
     expect(e1.circadian?.earlyStart).toBe(true)
-    expect(e1.restBefore?.rule).toBe("4a")
-    expect(e1.restBefore?.requiredRestMinutes).toBe(24 * H)
+    expect(e1.restBefore?.rule).not.toMatch(/^4/)
+  })
+
+  it("(2) is owed before the next early start even past an ordinary duty", () => {
+    const dps = pipeline([early("e1", "2026-08-11"), early("e2", "2026-08-12"), ordinary("o", "2026-08-13"), early("e3", "2026-08-14")])
+    expect(byId(dps, "o").restBefore?.rule).not.toMatch(/^4/)
+    expect(byId(dps, "e3").restBefore?.rule).toBe("4b")
   })
 
   it("(1)(b) para 3 between the duties of the series; (2) 24 hours again after two in a row", () => {

@@ -100,10 +100,13 @@ export interface DutyBlock {
    */
   limit: "over" | "near" | null
   /**
-   * The latest sign-off the FDP maximum allows — the sign-off moved by the
-   * FDP still in hand (negative when over). Null where no maximum applies.
+   * The latest ON-BLOCKS the FDP maximum allows — where the FDP's own end
+   * would reach its maximum (before it when over). It is the FDP that is
+   * limited, not the duty: the post-flight half hour after it is duty, so a
+   * breach is drawn from here to the last on-blocks, never to the sign-off.
+   * Null where no maximum applies.
    */
-  latestSignOffMs: number | null
+  fdpLimitMs: number | null
   /**
    * Draw the maximum: a duty still to come (rostered, or a Quick Check
    * what-if). Once a duty has been flown its record is the fact, and the
@@ -270,7 +273,7 @@ function groundBlock(e: ScheduleEntry, today: string): DutyBlock | null {
     fdpAtReportMinutes: 0,
     fdpEndMs: endMs,
     limit: null,
-    latestSignOffMs: null,
+    fdpLimitMs: null,
     showMax: false,
     scenario: false,
     restBefore: null,
@@ -353,7 +356,7 @@ export function buildDutyTimeline(
       fdpAtReportMinutes: atReport,
       fdpEndMs: standby ? endMs : startMs + Math.max(0, fdp - atReport) * MIN,
       limit: limitOf(dp),
-      latestSignOffMs: max > 0 ? endMs + (max - fdp) * MIN : null,
+      fdpLimitMs: max > 0 && !standby ? startMs + Math.max(0, fdp - atReport) * MIN + (max - fdp) * MIN : null,
       showMax: max > 0 && (dp.isFuture || scenario),
       scenario,
       restBefore: null,
