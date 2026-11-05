@@ -920,6 +920,15 @@ function legAt(b: DutyBlock, t: number): string {
 }
 
 /** The three cells of the state row, at the instant `t`. */
+/** A rest this long is read in days, not hours and minutes. */
+const LONG_REST_MIN = 100 * 60
+
+/** "19d 21h" — whole hours, for a rest long enough that minutes are noise. */
+function daysHours(minutes: number): string {
+  const h = Math.floor(minutes / 60)
+  return `${Math.floor(h / 24)}d ${h % 24}h`
+}
+
 function stateCells(
   blocks: readonly DutyBlock[],
   t: number,
@@ -975,10 +984,16 @@ function stateCells(
   }
   if (s.kind === "rest") {
     const req = s.rest.requiredMinutes
+    // Past 100 hours "x:xx/xx:xx" no longer fits a third of a phone's row
+    // ("477:23/11…"), so a long rest reads in days and hours and its minimum
+    // moves up into the caption.
+    const long = s.minutes >= LONG_REST_MIN
     const rest: StateCell =
       s.minutes < 0
         ? { caption: "Rest", value: `In ${duration(-s.minutes)}`, muted: true }
-        : { caption: "Rest", value: req != null ? `${duration(s.minutes)}/${duration(req)}` : duration(s.minutes), over: s.rest.status === "short" }
+        : long
+          ? { caption: req != null ? `Rest · Min ${duration(req)}` : "Rest", value: daysHours(s.minutes), over: s.rest.status === "short" }
+          : { caption: "Rest", value: req != null ? `${duration(s.minutes)}/${duration(req)}` : duration(s.minutes), over: s.rest.status === "short" }
     return [...ahead(s.block), rest]
   }
   return [...ahead(s.next), { ...none, caption: "Rest" }]

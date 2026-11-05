@@ -43,6 +43,9 @@ export function initServiceWorker() {
   navigator.serviceWorker
     .register("/sw.js")
     .then((reg) => {
+      // A browser that blocks workers (a privacy mode, an automation harness)
+      // can resolve with nothing rather than reject.
+      if (!reg) return
       console.log("[SW] Registered:", reg.scope)
       registration = reg
       // A worker that finished installing in an EARLIER visit is already

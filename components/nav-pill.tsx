@@ -134,8 +134,14 @@ const MOBILE_PILL_HEIGHT = 56
  * capsule.
  */
 const MOBILE_PILL_RADIUS = MOBILE_PILL_HEIGHT / 2
-/** The bottom bar's width: the screen less the panel gutter each side, as a flight card. */
-const MOBILE_PILL_WIDTH = "calc(100% - 2 * var(--panel-gutter))"
+/**
+ * The bottom bar's width: the screen less the panel gutter each side, as a
+ * flight card — but never wider than 25rem. On a phone (≤ ~424px) that is the
+ * full width; on an iPad in portrait the full width read as a slab across the
+ * screen (the owner's report), so it stops a little wider than the 330px the
+ * bar used to hug its tabs at.
+ */
+const MOBILE_PILL_WIDTH = "min(calc(100% - 2 * var(--panel-gutter)), 25rem)"
 const PILL_TOP = SIDEBAR_MARGIN // top offset — aligns pill center with header center
 
 // ─── Morph timing ────────────────────────────────────────────
@@ -1889,9 +1895,10 @@ function MobilePillMorph({
       : "translateX(-50%)",
     // The bottom bar spans the screen the way a flight card does — the
     // viewport less the panel gutter either side — so it is the same SHARE of
-    // the screen on every phone, its tabs spread evenly across it. It used to
-    // shrink to its content (330px everywhere), which is a different
-    // proportion of every screen: most of a 375px window, less of a 412px one.
+    // the screen on every phone, its tabs spread evenly across it, up to 25rem
+    // (an iPad in portrait keeps a bar, not a slab). It used to shrink to its
+    // content (330px everywhere), which is a different proportion of every
+    // screen: most of a 375px window, less of a 412px one.
     // A `calc()` is a length CSS can interpolate against the sidebar's px
     // width, so the morph still moves width with position — only `auto` could
     // not (see usePillWidth, which the desktop pill still needs).

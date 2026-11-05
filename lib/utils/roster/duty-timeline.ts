@@ -22,7 +22,7 @@ import { DEFAULT_FTL_LIMITS, type DutyPeriod, type RestPeriodInfo, type Schedule
 import type { FlightLog } from "@/types/entities/flight.types"
 import { isPositioningEntry, isSimulatorEntry } from "@/lib/utils/entry-type"
 import { hhmmToMinutes } from "@/lib/utils/time"
-import { fdpMinutesOf, isDutyExceedingLimits, SCENARIO_DUTY_PREFIX } from "@/lib/utils/roster/fdp-calculator"
+import { earliestLegalRestEnd, fdpMinutesOf, isDutyExceedingLimits, SCENARIO_DUTY_PREFIX } from "@/lib/utils/roster/fdp-calculator"
 import {
   POST_FLIGHT_CHECK_MIN,
   PRE_FLIGHT_CHECK_MIN,
@@ -384,19 +384,32 @@ export function buildDutyTimeline(
       const rp = restOf.get(b.id)
       const gap = Math.max(0, Math.round((b.startMs - previous.endMs) / MIN) - REST_STARTS_AFTER_DUTY_MIN)
       const minutes = rp ? rp.restMinutes : gap
-      const requiredMinutes = rp ? rp.requiredRestMinutes : null
       const compliant = rp ? rp.compliant : null
       const startMs = b.startMs - minutes * MIN
+      // The minimum is WHEN the rest became enough, the dashboard's answer
+      // (`earliestLegalRestEnd`) — not commencement plus the requirement of
+      // the rest as finally provided. A rest commencing at 01:27 SGT after an
+      // 11-hour duty needs 11 hours once it holds a night, but has none by its
+      // eleventh hour: it was legal at 12, and drawing the minimum at 11 put
+      // the bar an hour early and the figure an hour short of the dashboard's.
+      // A rest the pipeline gives without its preceding duty's length (an
+      // older or hand-built record) keeps the pipeline's own figure.
+      const earliest = rp
+        ? typeof rp.precedingDutyMinutes === "number"
+          ? earliestLegalRestEnd(startMs, rp.precedingDutyMinutes, rp.rule === "4a" || rp.rule === "4b" ? rp.rule : null)
+          : { legalAtMs: startMs + rp.requiredRestMinutes * MIN, requiredRestMinutes: rp.requiredRestMinutes, rule: rp.rule ?? null }
+        : null
+      const requiredMinutes = earliest ? earliest.requiredRestMinutes : null
       b.restBefore = {
         signOffMs: previous.endMs,
         startMs,
         minutes,
         requiredMinutes,
-        minimumEndMs: requiredMinutes != null ? startMs + requiredMinutes * MIN : null,
+        minimumEndMs: earliest ? earliest.legalAtMs : null,
         compliant,
         status: restStatus(minutes, requiredMinutes, compliant),
         previousId: previous.id,
-        rule: rp ? rp.rule : null,
+        rule: earliest ? earliest.rule : null,
         includesLocalNight: rp ? rp.includesLocalNight : null,
       }
     }

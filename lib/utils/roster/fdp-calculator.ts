@@ -2080,6 +2080,94 @@ function isoDay(ms: number): string {
 // Rest until legal
 // ============================================
 
+/**
+ * The EARLIEST instant a rest period commencing at `restStartMs` satisfies
+ * every applicable rule — paragraph 3 for the duty before it, and paragraph 4
+ * when `circadianRule` says the 24 hours is owed.
+ *
+ * Shared by the dashboard's countdown (`calculateRestUntilLegal`) and the FDP
+ * timeline's minimum-rest bar, so "when the rest was enough" is one answer.
+ * The span can EXCEED a sub-rule's own figure: a rest commencing at 01:27 SGT
+ * after an 11-hour duty has no local night by its eleventh hour, so it is
+ * legal at 12 hours (3(1)(b)) even though the rest as finally provided — with
+ * nights in it — only needed 11 (3(1)(c)).
+ */
+export function earliestLegalRestEnd(
+  restStartMs: number,
+  precedingDutyMinutes: number,
+  circadianRule: "4a" | "4b" | null,
+): { legalAtMs: number; requiredRestMinutes: number; rule: RestPeriodInfo["rule"] } {
+  let floorMinutes = 0
+  let floorRule: RestPeriodInfo["rule"] | null = null
+  /** 3(1)(d) and para 4 both require the rest to INCLUDE a local night. */
+  let nightRequired = false
+
+  if (circadianRule) {
+    floorMinutes = CIRCADIAN_REST_MIN
+    floorRule = circadianRule
+    nightRequired = true
+  }
+  if (precedingDutyMinutes > 16 * 60 && 24 * 60 >= floorMinutes) {
+    floorMinutes = 24 * 60
+    floorRule = floorRule ?? "3d"
+    nightRequired = true
+  } else if (precedingDutyMinutes > 10 * 60 && precedingDutyMinutes <= 16 * 60) {
+    const rounded = Math.ceil(precedingDutyMinutes / 60) * 60
+    if (rounded > floorMinutes) {
+      floorMinutes = rounded
+      floorRule = "3c"
+    }
+  }
+
+  // ── The EARLIEST instant the rest period satisfies every applicable rule ──
+  //
+  // Para 3(1)(a)/(b) are conditions on the rest period AS PROVIDED, and
+  // whether it includes a local night grows as the crew member waits. So this
+  // is a search for the earliest end, not a single lookup:
+  //
+  //   • wait for a local night → 10 hours suffices (3(1)(a)), but not before
+  //     the night itself completes;
+  //   • do not → 12 hours (3(1)(b)).
+  //
+  // Taking whichever comes first. Testing for a night once over a hypothetical
+  // 10-hour rest and falling to 12 when it failed missed everything in
+  // between: rest starting in the evening reaches its eighth hour inside the
+  // 2200–0800 window around the eleventh hour, and 3(1)(a) then asks for 10.
+  const nightCompletesAt = earliestLocalNightCompletion(restStartMs, LOCAL_NIGHT_ZONE_MINUTES)
+
+  const withNightEnd =
+    nightCompletesAt === null
+      ? null
+      : Math.max(restStartMs + Math.max(10 * 60, floorMinutes) * 60_000, nightCompletesAt)
+  const withoutNightEnd = nightRequired
+    ? null
+    : restStartMs + Math.max(12 * 60, floorMinutes) * 60_000
+
+  let legalAtMs: number
+  let hasLocalNight: boolean
+  if (withNightEnd !== null && (withoutNightEnd === null || withNightEnd <= withoutNightEnd)) {
+    legalAtMs = withNightEnd
+    hasLocalNight = true
+  } else {
+    legalAtMs = withoutNightEnd as number
+    hasLocalNight = false
+  }
+
+  // The span actually required — which can EXCEED the sub-rule's own minimum
+  // when the wait is for the local night to complete rather than for hours to
+  // pass. Reporting the bare minimum there tells a pilot they are legal before
+  // they are.
+  const requiredRestMinutes = Math.round((legalAtMs - restStartMs) / 60_000)
+  const rule: RestPeriodInfo["rule"] =
+    floorRule && floorMinutes >= (hasLocalNight ? 10 * 60 : 12 * 60)
+      ? floorRule
+      : hasLocalNight
+        ? "3a"
+        : "3b"
+
+  return { legalAtMs, requiredRestMinutes, rule }
+}
+
 export interface RestUntilLegalResult {
   isLegalNow: boolean
   restNeededMinutes: number    // 0 if legal
@@ -2161,7 +2249,6 @@ export function calculateRestUntilLegal(
   // reads off the dashboard to know when they may next report.
   const precedingDutyMinutes = lastDP.dutyMinutes
   const restStartMs = restStartTimestamp.getTime()
-  const restZoneMinutes = LOCAL_NIGHT_ZONE_MINUTES
 
   // ── Floors that do not depend on the local night ────────────────────────
   //
@@ -2180,73 +2267,7 @@ export function calculateRestUntilLegal(
     nextDP?.circadian?.disruptive ?? false
   )
 
-  let floorMinutes = 0
-  let floorRule: RestPeriodInfo["rule"] | null = null
-  /** 3(1)(d) and para 4 both require the rest to INCLUDE a local night. */
-  let nightRequired = false
-
-  if (circadianRule) {
-    floorMinutes = CIRCADIAN_REST_MIN
-    floorRule = circadianRule
-    nightRequired = true
-  }
-  if (precedingDutyMinutes > 16 * 60 && 24 * 60 >= floorMinutes) {
-    floorMinutes = 24 * 60
-    floorRule = floorRule ?? "3d"
-    nightRequired = true
-  } else if (precedingDutyMinutes > 10 * 60 && precedingDutyMinutes <= 16 * 60) {
-    const rounded = Math.ceil(precedingDutyMinutes / 60) * 60
-    if (rounded > floorMinutes) {
-      floorMinutes = rounded
-      floorRule = "3c"
-    }
-  }
-
-  // ── The EARLIEST instant the rest period satisfies every applicable rule ──
-  //
-  // Para 3(1)(a)/(b) are conditions on the rest period AS PROVIDED, and
-  // whether it includes a local night grows as the crew member waits. So this
-  // is a search for the earliest end, not a single lookup:
-  //
-  //   • wait for a local night → 10 hours suffices (3(1)(a)), but not before
-  //     the night itself completes;
-  //   • do not → 12 hours (3(1)(b)).
-  //
-  // Taking whichever comes first. Testing for a night once over a hypothetical
-  // 10-hour rest and falling to 12 when it failed missed everything in
-  // between: rest starting in the evening reaches its eighth hour inside the
-  // 2200–0800 window around the eleventh hour, and 3(1)(a) then asks for 10.
-  const nightCompletesAt = earliestLocalNightCompletion(restStartMs, restZoneMinutes)
-
-  const withNightEnd =
-    nightCompletesAt === null
-      ? null
-      : Math.max(restStartMs + Math.max(10 * 60, floorMinutes) * 60_000, nightCompletesAt)
-  const withoutNightEnd = nightRequired
-    ? null
-    : restStartMs + Math.max(12 * 60, floorMinutes) * 60_000
-
-  let legalAtMs: number
-  let hasLocalNight: boolean
-  if (withNightEnd !== null && (withoutNightEnd === null || withNightEnd <= withoutNightEnd)) {
-    legalAtMs = withNightEnd
-    hasLocalNight = true
-  } else {
-    legalAtMs = withoutNightEnd as number
-    hasLocalNight = false
-  }
-
-  // The span actually required — which can EXCEED the sub-rule's own minimum
-  // when the wait is for the local night to complete rather than for hours to
-  // pass. Reporting the bare minimum there tells a pilot they are legal before
-  // they are.
-  const requiredRestMinutes = Math.round((legalAtMs - restStartMs) / 60_000)
-  const rule: RestPeriodInfo["rule"] =
-    floorRule && floorMinutes >= (hasLocalNight ? 10 * 60 : 12 * 60)
-      ? floorRule
-      : hasLocalNight
-        ? "3a"
-        : "3b"
+  const { legalAtMs, requiredRestMinutes, rule } = earliestLegalRestEnd(restStartMs, precedingDutyMinutes, circadianRule)
 
   const restNeededMinutes = Math.max(0, Math.round((legalAtMs - now.getTime()) / 60_000))
   const legalAtUtc = new Date(legalAtMs).toISOString()

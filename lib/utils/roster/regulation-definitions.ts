@@ -452,27 +452,38 @@ export function classifyCircadian(
  *     each includes [one], … a rest period of 24 hours (inclusive of a local
  *     night) prior to … the next flight duty period that encompasses [one].
  *
- * **A series is the run of duties between resets** (the owner's reading, Nov
- * 2026, replacing "one disruptive duty is a series"): it starts after a rest
- * of 24 hours inclusive of a local night — which a day off always is — so
- * 4(1)(a) is met by construction, and within it 4(1)(b) hands every rest to
- * paragraph 3. An early start after an ordinary duty mid-block therefore asks
- * for paragraph 3, not 24 hours; that was the "24 hours every now and then".
+ * **A series runs between DAYS OFF** (the owner's reading, Nov 2026, tested
+ * against 18 months of the operator's rosters with no failure): it starts
+ * after a rest of 34 hours inclusive of a local night — a day off, para 5(1) —
+ * so 4(1)(a)'s 24 hours is met by construction, and within it 4(1)(b) hands
+ * every rest to paragraph 3. An early start after an ordinary duty mid-block
+ * therefore asks for paragraph 3, not 24 hours; that was the "24 hours every
+ * now and then".
  *
- * What remains is 4(2), and it is a STATE, not a pair of neighbours:
+ * What remains is 4(2), and it is a STATE carried until the next day off:
  * - two consecutive FDPs that each include one make the 24 hours OWED;
- * - it is owed "prior to the next FDP that encompasses" one — so an ordinary
- *   FDP in between does not discharge it, it only breaks the run;
- * - any rest of 24 hours inclusive of a local night taken since does.
+ * - from then on EVERY disruptive FDP needs a rest of 24 hours inclusive of a
+ *   local night before it, until a day off ends the series;
+ * - an ordinary FDP breaks the run (the next two must be consecutive again)
+ *   but does not discharge the 24 hours — "prior to … the next flight duty
+ *   period that encompasses" one;
+ * - a 24-hour rest short of a day off does not end the series either: the
+ *   chain continues.
  * Non-FDP duties (a simulator detail, positioning) neither extend nor break
  * the run.
+ *
+ * The roster evidence: 17 Feb 2026 (disruptive, 118h off, disruptive, 15h,
+ * disruptive) is legal only because the 118h is a day off that ends the
+ * series; 27 Nov 2026 (two disruptive, two ordinary on short rests, then
+ * 25:30 before a disruptive one) is the operator giving the owed 24 hours
+ * past the ordinary duties.
  */
 export const CIRCADIAN_REST_MIN = 24 * 60
 
 export interface CircadianState {
-  /** Consecutive disruptive FDPs since the run last broke or the 24h was owed. */
+  /** Consecutive disruptive FDPs since an ordinary FDP or a day off. */
   run: number
-  /** 4(2): the 24 hours is owed before the next disruptive FDP. */
+  /** 4(2): two in a row have been flown, so every disruptive FDP until the next day off needs 24 hours before it. */
   owed: boolean
 }
 
@@ -483,9 +494,12 @@ export function circadianRestRule(state: CircadianState, thisIsDisruptive: boole
   return thisIsDisruptive && state.owed ? "4b" : null
 }
 
-/** A rest that discharges para 4's 24 hours. */
-export function isCircadianRest(rest: { restMinutes: number; includesLocalNight: boolean } | null | undefined): boolean {
-  return !!rest && rest.restMinutes >= CIRCADIAN_REST_MIN && rest.includesLocalNight
+/** A day off (para 5(1)): at least 34 hours free of all duties, a local night included. */
+export const DAY_OFF_MIN = 34 * 60
+
+/** A rest long enough to be a day off — what ends a para 4 series. */
+export function isDayOffRest(rest: { restMinutes: number; includesLocalNight: boolean } | null | undefined): boolean {
+  return !!rest && rest.restMinutes >= DAY_OFF_MIN && rest.includesLocalNight
 }
 
 /**
@@ -499,10 +513,13 @@ export function stepCircadian(
   restBefore?: { restMinutes: number; includesLocalNight: boolean } | null,
 ): CircadianState {
   let { run, owed } = state
-  if (owed && isCircadianRest(restBefore)) owed = false
+  // A day off ends the series: the run and what it owed both start again.
+  if (isDayOffRest(restBefore)) {
+    run = 0
+    owed = false
+  }
   if (!duty.isFlightDutyPeriod) return { run, owed }
   if (!duty.disruptive) return { run: 0, owed }
   run += 1
-  if (run >= 2) return { run: 0, owed: true }
-  return { run, owed }
+  return { run, owed: owed || run >= 2 }
 }

@@ -108,6 +108,32 @@ describe("buildDutyTimeline", () => {
     })
   })
 
+  it("ends the minimum where the rest first became legal, as the dashboard does", () => {
+    // Rest commencing 01:27 SGT (17:27Z) after an 11-hour duty. As provided
+    // (30h, a local night in it) it needs 11h under 3(1)(c) — but it holds no
+    // night by its eleventh hour (01:27–08:00 is short of eight), so it was
+    // legal at 12h under 3(1)(b), 13:27 SGT. The bar and the figure say 12.
+    const first = duty({ id: "d1", date: "2026-11-04", reportTime: "05:00", debriefTime: "16:27", dutyMinutes: 660 })
+    const second = duty({
+      id: "d2",
+      date: "2026-11-05",
+      reportTime: "23:27",
+      restBefore: {
+        restMinutes: 1800,
+        requiredRestMinutes: 660,
+        compliant: true,
+        rule: "3c",
+        includesLocalNight: true,
+        precedingDutyMinutes: 660,
+      } as DutyPeriod["restBefore"],
+    })
+    const [, b] = buildDutyTimeline([first, second], new Map())
+    expect(b.restBefore!.startMs).toBe(at("2026-11-04T17:27:00Z"))
+    expect(b.restBefore!.requiredMinutes).toBe(720)
+    expect(b.restBefore!.minimumEndMs).toBe(at("2026-11-05T05:27:00Z"))
+    expect(b.restBefore!.rule).toBe("3b")
+  })
+
   it("flies nothing on a standby and carries no type for a positioning sector", () => {
     const pos = flight({ id: "p", entryType: "positioning" })
     const [sby] = buildDutyTimeline([duty({ id: "s", dutyKind: "standby", flightMinutes: 0 })], new Map())

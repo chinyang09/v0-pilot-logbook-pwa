@@ -2766,11 +2766,13 @@ re-renders).
   active transition. Desktop has no backdrop at all — its sidebar sits
   alongside the content rather than over it.
 
-  **The phone's bottom bar spans the screen, as a flight card does** —
-  `MOBILE_PILL_WIDTH`, `calc(100% - 2 * var(--panel-gutter))`, so it keeps one
-  proportion to the screen on every phone (it used to hug its tabs, ~330px
-  whatever the width). A `calc` interpolates against the sidebar's px width,
-  so the morph needs no measurement there.
+  **The phone's bottom bar spans the screen, as a flight card does, up to
+  25rem** — `MOBILE_PILL_WIDTH`, `min(calc(100% - 2 * var(--panel-gutter)),
+  25rem)`, so it keeps one proportion to the screen on every phone (it used to
+  hug its tabs, ~330px whatever the width) without becoming a slab across an
+  iPad in portrait (the owner's report: full width there was too much). A
+  `min()`/`calc` interpolates against the sidebar's px width, so the morph
+  needs no measurement there.
 
   **The DESKTOP pill's width is MEASURED (`usePillWidth`), never `auto`.** `width` rides
   in the position group so the pill resizes *while* it moves, and CSS cannot
@@ -3905,26 +3907,35 @@ before the first FDP of a SERIES, and 4(2) before the next disruptive FDP once
 two consecutive ones are complete. Inside a series, 4(1)(b) hands every rest to
 paragraph 3.
 
-**A series is the run of duties between resets** (the owner's reading, Nov
-2026, replacing "one disruptive duty is a series"): it begins after a rest of
-24 hours inclusive of a local night — which a day off always is — so 4(1)(a)
-is met by construction and an early start after an ordinary duty mid-block is
+**A series runs between DAYS OFF** (the owner's reading, Nov 2026, replacing
+"one disruptive duty is a series"): it begins after a rest of 34 hours
+inclusive of a local night — a day off, para 5(1) — so 4(1)(a)'s 24 hours is
+met by construction and an early start after an ordinary duty mid-block is
 paragraph 3's. Read the other way, every disruptive duty after an ordinary one
 asked for 24 hours where the operator's legal roster gave 15–18 — the "24
 hours every now and then". The text supports either reading ("a series of
-flight duty periods that encompass …"); this one is the operator's practice,
-and it is the PERMISSIVE direction, so it is written down.
+flight duty periods that encompass …"); this one is the operator's practice.
+**Tested against the owner's 18 months of rosters (May 2025 – Nov 2026, 154
+FDPs, 47 disruptive) with no failure**, on scheduled and on actual times; the
+older readings each failed rostered rests. Two of those rosters decide it:
+17 Feb 2026 (disruptive, 118h off, disruptive, 15h, disruptive) is legal only
+because the day off ends the series; 27 Nov 2026 (two disruptive, two
+ordinary on short rests, then 25:30 before a disruptive one) is the owed 24
+hours given past the ordinary duties. Both are pinned in
+`circadian-rest.test.ts`.
 
 - **The classification happens in `applyAcclimatisation`, not at construction.**
   The duty period producers store the raw instants (`departureMs`, `arrivalMs`,
   `takeoffLandingMs`); only the whole timeline knows what clock to read them in.
-- **4(2) is a STATE carried across the timeline** (`CircadianState`,
+- **4(2) is a STATE carried until the next day off** (`CircadianState`,
   `stepCircadian`, in `calculateAllRestPeriods` and `calculateRestUntilLegal`),
   because neither duty in a pair can see it. Two consecutive disruptive FDPs
-  make the 24 hours OWED; it is owed "prior to … the next FDP that
-  encompasses" one, so an ordinary FDP in between breaks the RUN but does not
-  discharge it; any rest of 24 hours inclusive of a local night taken since
-  does. Non-FDP duties neither extend the run nor break it.
+  make the 24 hours OWED, and from then on EVERY disruptive FDP needs 24 hours
+  inclusive of a local night before it until a day off (`isDayOffRest`, 34h
+  with a local night) ends the series. An ordinary FDP breaks the RUN but does
+  not discharge it ("prior to … the next FDP that encompasses" one), and
+  neither does a 24-hour rest short of a day off. Non-FDP duties neither
+  extend the run nor break it.
 - **Early start and late finish read the SCHEDULE, never the actual times.**
   The definitions say "scheduled departure" / "scheduled arrival", so a delay
   cannot make one — an arrival planned for 0030 that blocks in at 0115 is not
@@ -4030,9 +4041,12 @@ crew logbook and `DEFAULT_FTL_LIMITS` carries the flight-crew figures — do not
   extended still reads as an exceedance, and the timeline's detail SAYS whether
   it lies within the PIC's 3:00 (FDP) or 2:00 (rest, local night satisfied) —
   and that a schedule has no discretion at all.
-- **Para 4's "series" is the run of duties between resets** (owner's reading,
-  Nov 2026 — it replaced "one duty is a series"): see Paragraph 4 above. 4(1)(a)
-  is then met by the reset that begins a series; only 4(2) can fail.
+- **Para 4's "series" runs between days off** (owner's reading, Nov 2026,
+  tested against 18 months of rosters — it replaced "one duty is a series"):
+  see Paragraph 4 above. 4(1)(a) is then met by the day off that begins a
+  series; only 4(2) can fail. The rosters could not tell whether a 24-hour rest
+  short of a day off should end a series too; the stricter answer (it does not)
+  is the one kept.
 - **Acclimatisation is only as good as the roster's COVERAGE.**
   `acclimatisedOffsetMinutes` now walks the real duty history rather than
   assuming home base, but it reads a gap between two known duties as "free of
@@ -4110,7 +4124,7 @@ period and where it is focused", so they are ONE scroller on ONE time axis:
 | | Shows |
 |---|---|
 | the header | the POINTER's instant ("Nov 4 03:11Z", the other clock under it: "11:11 SGT") beside − / + / Now — no "Timeline" title, and no Next Duty card above it (the row below says the same) |
-| the state row | THREE fixed cells, never prose (`PointerStateRow`, `stateCells`): on duty, the leg (WSSS-RPLL) under its state / FDP x/max / Flight (a duty that is not an FDP — standby, simulator, positioning, ground — its code / Elapsed / Flight —); at rest, Next Duty / Next FDP x/max, both DIMMED / Rest x/minimum. A line of prose wrapped as it changed and moved the card's height |
+| the state row | THREE fixed cells, never prose (`PointerStateRow`, `stateCells`): on duty, the leg (WSSS-RPLL) under its state / FDP x/max / Flight (a duty that is not an FDP — standby, simulator, positioning, ground — its code / Elapsed / Flight —); at rest, Next Duty / Next FDP x/max, both DIMMED / Rest x/minimum (from 100 hours, "19d 21h" under "Rest · Min 12:00" — "477:23/11…" did not fit a phone's third). A line of prose wrapped as it changed and moved the card's height |
 | the tabs | 14D duty, 28D duty, 28D flight, 12M flight AS AT THE POINTER (`rollingAt`); the chosen one is drawn |
 | the rolling chart | that limit's running total — flown solid, scheduled dashed yellow from now, what-if orange — against the limit line and its 90% |
 | the deck | each duty bar (sign-on → sign-off) the full row height with its sectors' block time INSIDE it, full height too; the rest directly under it with no gap |
@@ -4152,7 +4166,12 @@ period and where it is focused", so they are ONE scroller on ONE time axis:
   starts where rest COMMENCES (`RestBefore.startMs`, an hour after sign-off —
   that hour is neither, so nothing is drawn), then the minimum solid
   (`minimumEndMs`), then the rest beyond it; a minimum past the next sign-on is
-  struck red under the duty that came too soon.
+  struck red under the duty that came too soon. The minimum ends where the
+  rest FIRST BECAME LEGAL — `earliestLegalRestEnd`, the same function the
+  dashboard's "legal from" uses — not at commencement plus the requirement of
+  the rest as finally provided: rest commencing 01:27 SGT after an 11-hour
+  duty holds a night by the time it is over (11h), but none by its eleventh
+  hour, so it was legal at 12, and the timeline drew it an hour early.
 - **The state row says WHERE, not that.** On a flight duty the first cell's
   caption is the state (On Duty / Scheduled / What-If) and its value the leg at
   the pointer (`legAt`: the one in progress, else the next, else the last); a
@@ -5134,7 +5153,7 @@ When making changes, be aware of these high-impact files:
 - Do not decide an FDP table from the departure airport's offset alone. `applyAcclimatisation` re-derives each duty against the zone the crew member was acclimated to **as at that duty's report time**, from the duties before it — reading the duty's own arrival zone would let landing somewhere instantly justify its own table. It must run between `mergeDutyPeriods` and `calculateAllRestPeriods`, because the rest calculation reads the corrected figures
 - Do not classify a duty's circadian state where the duty period is BUILT — early start, late finish and the window of circadian low are all defined in ACCLIMATED time, and acclimatisation is a property of the whole timeline. The producers store the raw instants (`departureMs`/`arrivalMs`/`takeoffLandingMs`) and `applyAcclimatisation` does the classifying. Carry all three through `mergeAdjacentDutyPeriods` too, or a merged overnight — precisely the shape that lands in the window — is classified against half of itself
 - Do not read the window of circadian low against a duty period or a cruise — it is defined "in relation to a **take-off or landing**", 0200–0459. A sector airborne at 2310 and landing at 0650 is over the window for its whole middle and touches neither end of it
-- Do not track paragraph 4 inside `calculateRestPeriod` — 4(2) reacts to the two duties BEFORE the one whose rest is being measured, so neither duty in a pair can see it. `calculateAllRestPeriods` carries a `CircadianState` (`stepCircadian`): two consecutive disruptive FDPs make 24 hours OWED before the next disruptive one, an ordinary FDP breaks the run but does NOT discharge it, a 24-hour rest with a local night does. And do not ask 24 hours before a disruptive duty merely because the one before was ordinary — a series runs between resets (the owner's reading), so that rest is paragraph 3's
+- Do not track paragraph 4 inside `calculateRestPeriod` — 4(2) reacts to the two duties BEFORE the one whose rest is being measured, so neither duty in a pair can see it. `calculateAllRestPeriods` carries a `CircadianState` (`stepCircadian`): two consecutive disruptive FDPs make 24 hours OWED before every disruptive one until a DAY OFF (34h with a local night) ends the series; an ordinary FDP breaks the run but does NOT discharge it, and neither does a 24-hour rest. And do not ask 24 hours before a disruptive duty merely because the one before was ordinary — a series runs between days off (the owner's reading, tested against the owner's rosters), so that rest is paragraph 3's
 - Do not draw an FDP breach to the sign-off, or the FDP maximum round the whole duty — the FDP ends at the last on-blocks (`fdpEndMs`, `fdpLimitMs`), and the post-flight half hour after it is duty. And do not start the rest bar at the sign-off: rest commences an hour later (`RestBefore.startMs`)
 - Do not treat a flight with no wheels times as never touching the window of circadian low — every PLANNED sector and older logbook rows carry out/in only, so the gate times stand in for them. Silence there is the permissive way to be wrong. A LOCAL_STATION schedule report is the opposite case and is left unclassified on purpose: its departure-side and arrival-side times are in different zones the entry cannot resolve
 - Do not count only the LONGEST sector for the para 14(2) adjustment — the schedule says long sectorS. Two 8-hour sectors are 4 effective sectors under Table A, not 3, and under-counting raises the FDP maximum. Pass `sectorMinutes: number[]`, and carry `DutyPeriod.sectorMinutes` through `mergeAdjacentDutyPeriods` or a merged overnight silently loses the adjustment
@@ -5346,7 +5365,7 @@ When making changes, be aware of these high-impact files:
 - Do not bring back the month-capsule grid or a year stepper in the calendar's month/year picker — it is two wheels, live, closed by the date selector; and in the dual layout it takes the RIGHT pane with the month being chosen still drawn on the left. Keep `WHEEL_ITEM_PX` small enough that the wheel fits a dual pane's grid, or the panel grows (or clips) when it opens
 - Do not cap a date wheel's past at a few years — a pilot back-filling a paper logbook enters flights from decades ago; the default is 70
 - Do not make "Add Crew" open the crew picker directly, and do not lay an additional crew member out differently from the PIC/SIC rows — role on the LEFT (the menu), name on the RIGHT (the picker, for THAT row), a swipe to clear. The pick carries the row's role and index (`additionalCrewField`); address rows by index, never by crew-card id
-- Do not size the phone's bottom bar to its tabs — it is `MOBILE_PILL_WIDTH`, the screen less the panel gutter each side, the same edges as a flight card, so it is the same proportion of every phone. The tab padding still gives way below ~346px (`clamp(6px, (100vw − 250px)/8, 12px)`) so five tabs fit an iPad Split View window of 320. The bar's HEIGHT is not scaled: an iPad window at "iPhone size" draws CSS px at ~132 px/inch against a phone's ~150–160, so everything there is physically ~20% larger — that is the device, and sizing per platform would break the one-look rule
+- Do not size the phone's bottom bar to its tabs, or let it run the full width of a tablet — it is `MOBILE_PILL_WIDTH`, the screen less the panel gutter each side (the same edges as a flight card, so the same proportion of every phone), capped at 25rem so an iPad in portrait keeps a bar rather than a slab. The tab padding still gives way below ~346px (`clamp(6px, (100vw − 250px)/8, 12px)`) so five tabs fit an iPad Split View window of 320. The bar's HEIGHT is not scaled: an iPad window at "iPhone size" draws CSS px at ~132 px/inch against a phone's ~150–160, so everything there is physically ~20% larger — that is the device, and sizing per platform would break the one-look rule
 - Do not put per-row `measureElement` on ANY virtualised list of same-height rows (airports, aircraft, crew, logbook) — calibrate once with `useCalibratedRowHeight`, and keep the card one height by construction (truncate, reserve empty lines). And never pass `useVirtualizer` an inline `getItemKey`: its measurements are memoised on that function's identity, so a new arrow per render rebuilds every row's position on every scroll-driven render (29k rows on the airports list)
 - Do not hand-roll a suggestion list under a field — `SuggestionList` (`components/ui/suggestion-list.tsx`) is the one (an inset well, 44px rows, inset dividers), and `AircraftTypeSuggestions` and the add-aircraft / add-airport candidate lists all render through it; the aircraft form, panel and page each carried a bordered `hover:bg-accent` web dropdown
 - Do not ask an online lookup per keystroke or by itself on a form — a flight is looked up on the Lookup button (or Enter), a fleet on opening By fleet or on Find. And do not put Gates or Inbound back in the flight form: the form is for logging; they live on the dashboard's duty band and its panel (`useDutyLookups`, one cache). A lookup over an earlier one replaces what the EARLIER LOOKUP wrote (`lookupPatch`'s `previous`), never what the pilot entered — that is "Replace"
