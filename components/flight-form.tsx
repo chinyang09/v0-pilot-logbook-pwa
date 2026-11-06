@@ -480,10 +480,13 @@ function TimeRow({
    */
   derivedValue?: string;
 }) {
-  const localValue = utcToLocal(utcValue, timezoneOffset);
   const tzLabel = formatTimezoneOffset(timezoneOffset);
   const hasValue = isValidHHMM(utcValue);
   const hasDerived = !hasValue && isValidHHMM(derivedValue || "");
+  // A derived value is in force, so its local time is shown beside it (muted,
+  // like the UTC) rather than NOW — the Report row read "20:55 UTC | NOW"
+  // under rows that each carried both clocks.
+  const localValue = utcToLocal(hasValue ? utcValue : hasDerived ? derivedValue! : "", timezoneOffset);
 
   const shown = hasValue ? utcValue : hasDerived ? derivedValue! : "not set";
   return (
@@ -510,7 +513,7 @@ function TimeRow({
           <span className="text-xs text-muted-foreground">UTC</span>
         </div>
         <div className="flex flex-col items-end">
-          {showNow && !hasValue ? (
+          {showNow && !hasValue && !hasDerived ? (
             <Button
               variant="outline"
               size="sm"
@@ -528,7 +531,7 @@ function TimeRow({
             <div
               {...clockColumn(
                 () => onTap("local"),
-                `${label}, ${hasValue ? localValue : "not set"} ${tzLabel}`
+                `${label}, ${hasValue || hasDerived ? localValue : "not set"} ${tzLabel}`
               )}
             >
               <span
@@ -536,7 +539,7 @@ function TimeRow({
                   hasValue ? "text-foreground" : "text-muted-foreground"
                 }`}
               >
-                {hasValue
+                {hasValue || hasDerived
                   ? formatClockDisplay(localValue, clockSeparator)
                   : "--:--"}
               </span>

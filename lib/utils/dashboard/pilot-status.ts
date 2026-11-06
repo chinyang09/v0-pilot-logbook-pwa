@@ -13,6 +13,7 @@
 
 import type { LegalityModel, Requirement, RequirementState } from "./legality"
 import type { DutyStatus } from "./duty-status"
+import { tzFormatter } from "@/lib/utils/tz-format"
 
 /**
  * The master annunciator, in the EFB sense: a pilot glancing at a phone in a
@@ -73,15 +74,22 @@ function hoursMinutes(minutes: number): string {
   return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, "0")}`
 }
 
+let localZone: string | undefined
+/** The device's zone, resolved once (resolving it builds a formatter). */
+function deviceZone(): string {
+  return (localZone ??= Intl.DateTimeFormat().resolvedOptions().timeZone)
+}
+
 function clock(ms: number, tz?: string): string {
   const d = new Date(ms)
   try {
-    return new Intl.DateTimeFormat("en-GB", {
+    // One cached formatter per zone (`tz-format`): this runs for every
+    // headline the model builds, once a minute.
+    return tzFormatter(tz ?? deviceZone(), {
       hour: "2-digit",
       minute: "2-digit",
-      hour12: false,
-      timeZone: tz,
-    }).format(d)
+      hourCycle: "h23",
+    }, "hh:mm-h23").format(d)
   } catch {
     return d.toISOString().slice(11, 16)
   }

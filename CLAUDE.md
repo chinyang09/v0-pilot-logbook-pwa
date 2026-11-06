@@ -2354,8 +2354,9 @@ report watermarks). Do not go back to an allowlist.
   At either end it compresses against the track instead of riding the
   rubber-band.
 
-  **That box is re-read per update AND followed per frame while the thumb is
-  up.** A cached copy plus a ResizeObserver looks sufficient and is not:
+  **That box is measured as the thumb appears, and FOLLOWED per frame while a
+  transition runs outside the scroller.** A cached copy plus a ResizeObserver
+  looks sufficient and is not:
   opening the sidebar SLIDES the main panel across without changing its width
   (measured: `0..360` → `199..559`), so nothing resizes and no observer fires.
   The thumb stayed at the closed layout's right edge — 199px inside the list,
@@ -2365,10 +2366,13 @@ report watermarks). Do not go back to an allowlist.
 
   Re-reading on scroll frames alone still leaves a visible flash, because the
   morph takes ~300ms during which there is no scroll at all — so `follow()` is
-  a rAF that tracks the box while the thumb is visible and stops the moment it
-  hides (~800ms after the last scroll). It writes nothing unless the box
-  actually moved. Measured across the whole morph, sampled every 40ms: the
-  thumb is at the scroller's right edge in every frame.
+  a rAF that tracks the box while a `transitionrun` OUTSIDE the scroller is
+  unfinished (the push is a transition on the sidebar BESIDE the panel, not on
+  an ancestor of it) and the thumb is up. It used to follow for the thumb's
+  whole visible window, which put a rect read in a rAF on every frame of every
+  fling, while the list was mounting rows: 103ms of `getBoundingClientRect` in
+  four flings at 4×, 24ms now. Measured across the morph, sampled every 45ms:
+  the thumb is at the scroller's right edge in every frame.
 - **`MODAL_SCRIM`** — `bg-black/15 dark:bg-black/50`. A flat `bg-black/50` is
   invisible over a dark app and turns the light theme (white panels, glass
   sidebar) into grey mush. Used by every dialog overlay, the nav sidebar
@@ -2589,7 +2593,10 @@ re-renders).
   `dragControls` and no action panel — a row is mostly read, and the flight
   form's ~50 of them mounting all that on the tap that opened it was ~800ms at
   a 4× throttle. The first pointerdown (or focus) arms it and is handed to
-  `dragControls.start` in a layout effect, so that same touch swipes.
+  `dragControls.start` in a layout effect, so that same touch swipes. The
+  content's `x` motion value is bound only while armed (`UNARMED_STYLE`): a
+  bound value is a framer frame-loop render for every row as it mounts, and a
+  fling mounts a dozen a frame (up to 47ms of a frame at 4×, gone).
 - **Gesture:** `drag="x"` with `dragDirectionLock` + `touchAction: "pan-y"` — a
   vertical gesture scrolls the list natively and never fights the horizontal
   swipe. Release settles to open/closed with a spring (`SPRING`); a fast flick

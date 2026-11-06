@@ -447,9 +447,10 @@ function DutyBand({
   const clockAt = (ms: number) => formatInstant(ms, display, zone)
   const dayAt = (ms: number) =>
     tzFormatter(display?.useZuluTime === false ? zone : "UTC", {
-      day: "2-digit",
+      // "NOV 6", as every other date in the app writes a day — not "NOV 06".
+      day: "numeric",
       month: "short",
-    }, "daymon")
+    }, "monthday")
       .format(new Date(ms))
       .toUpperCase()
 

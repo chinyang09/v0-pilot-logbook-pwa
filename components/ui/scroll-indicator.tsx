@@ -99,13 +99,20 @@ export function ScrollIndicator() {
     // cards, which is the flash the owner saw. A ResizeObserver does not help;
     // the panel's SIZE never changes.
     //
-    // So the box is followed frame by frame, but only for the ~800ms the thumb
-    // is up and only while something is actually moving: `follow` stops as
-    // soon as the thumb hides. It writes nothing unless the box has changed.
+    // The box is followed frame by frame only while that can happen: while a
+    // TRANSITION runs outside the scroller (the slide is one), and the thumb
+    // is up. It used to follow for the whole ~800ms the thumb shows
+    // — a rect read on every frame of every fling, each a layout forced in a
+    // rAF while the list was mounting rows (measured 24–36ms a frame at 4×).
     let visible = false
+    let moving = 0
+    let following = false
     let last = ""
     const follow = () => {
-      if (!visible) return
+      if (!visible || moving === 0) {
+        following = false
+        return
+      }
       const r = scroller.getBoundingClientRect()
       const key = `${r.right}|${r.top}|${r.height}`
       if (key !== last) {
@@ -115,6 +122,27 @@ export function ScrollIndicator() {
         thumb.style.top = `${box.top}px`
       }
       requestAnimationFrame(follow)
+    }
+    const startFollowing = () => {
+      if (following || !visible || moving === 0) return
+      following = true
+      requestAnimationFrame(follow)
+    }
+    // Any transition OUTSIDE the scroller can move it: the sidebar push is a
+    // transition on the sidebar BESIDE the panel, which slides the panel by
+    // layout, not on any of the scroller's ancestors. Transitions inside it
+    // (a card's hover, a row's colour) cannot.
+    const isOutside = (t: EventTarget | null) => t instanceof Node && !scroller.contains(t)
+    const onTransitionRun = (e: TransitionEvent) => {
+      if (!isOutside(e.target)) return
+      moving++
+      startFollowing()
+    }
+    const onTransitionEnd = (e: TransitionEvent) => {
+      if (!isOutside(e.target)) return
+      moving = Math.max(0, moving - 1)
+      // The slide has landed: one last read puts the thumb on the final edge.
+      if (moving === 0 && visible) measureBox()
     }
 
     const update = () => {
@@ -137,9 +165,9 @@ export function ScrollIndicator() {
         thumb.style.opacity = "0"
         return
       }
-      // While the thumb is up, `follow` is already tracking the box every
-      // frame — measuring again here is a second forced layout for the same
-      // rect. Only measure when nothing else is watching.
+      // Measured as the thumb appears; while it is up the box only moves under
+      // a transition, which `follow` tracks, or a resize, which the observer
+      // reports — so a scroll frame reads no rect.
       if (!visible) measureBox()
       const topInset = topProbe.offsetHeight
       const bottomInset = bottomProbe.offsetHeight + 6
@@ -186,12 +214,14 @@ export function ScrollIndicator() {
       hideTimer = window.setTimeout(() => {
         thumb.style.opacity = "0"
         visible = false
+        // An end that never arrived (an element removed mid-transition) must
+        // not leave every later fling following the box.
+        moving = 0
       }, 800)
-      // The thumb is now on screen, so the box has to be tracked rather than
-      // sampled — see `follow`.
       if (!visible) {
         visible = true
-        requestAnimationFrame(follow)
+        // A slide already under way when the thumb appears.
+        startFollowing()
       }
     }
 
@@ -211,12 +241,18 @@ export function ScrollIndicator() {
     scroller.addEventListener("scroll", onScroll, { passive: true })
     window.addEventListener("resize", measureBox)
     window.addEventListener("orientationchange", measureBox)
+    document.addEventListener("transitionrun", onTransitionRun, true)
+    document.addEventListener("transitionend", onTransitionEnd, true)
+    document.addEventListener("transitioncancel", onTransitionEnd, true)
 
     return () => {
       visible = false
       scroller.removeEventListener("scroll", onScroll)
       window.removeEventListener("resize", measureBox)
       window.removeEventListener("orientationchange", measureBox)
+      document.removeEventListener("transitionrun", onTransitionRun, true)
+      document.removeEventListener("transitionend", onTransitionEnd, true)
+      document.removeEventListener("transitioncancel", onTransitionEnd, true)
       ro.disconnect()
       window.clearTimeout(hideTimer)
       if (raf) cancelAnimationFrame(raf)
