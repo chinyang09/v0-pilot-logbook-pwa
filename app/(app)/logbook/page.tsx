@@ -362,6 +362,22 @@ export default function LogbookPage() {
     })
   }, [flights])
 
+  // A flight opened from ELSEWHERE — a note's "Open flight", Next Leg, a link
+  // with ?selected= — was lit in the list but left wherever the list was, so
+  // on a tablet the panel showed one flight and the list another month. Bring
+  // the row into view once, when the selection changes; a row the pilot just
+  // tapped is already on screen, so that is a no-op. In a timeout, after the
+  // commit has painted, so the visibility check reads a clean layout.
+  const revealedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!isActive || !selectedFlightId || revealedRef.current === selectedFlightId) return
+    const id = selectedFlightId
+    const t = window.setTimeout(() => {
+      if (flightListRef.current?.revealFlight(id)) revealedRef.current = id
+    }, 0)
+    return () => window.clearTimeout(t)
+  }, [isActive, selectedFlightId, flights])
+
   // Handle flight selection from list
   // Sets selectedId which the AppShell renders as:
   // - Desktop: FlightForm in right detail panel

@@ -684,11 +684,13 @@ function ToggleRow({
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
+  const id = useId();
+  // The whole row toggles (a <label> for the switch), like Settings' rows.
   return (
-    <div className="flex items-center justify-between py-3.5 px-4 row-divider">
+    <label htmlFor={id} className="flex cursor-pointer items-center justify-between py-3.5 px-4 row-divider active:bg-secondary/50">
       <span className="text-foreground">{label}</span>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} aria-label={label} />
-    </div>
+      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} aria-label={label} />
+    </label>
   );
 }
 
@@ -2333,17 +2335,21 @@ function FlightFormImpl({
             />
           </SwipeableRow>
 
-          <div className="flex items-center justify-center py-2 row-divider">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={swapCrew}
-              className="text-xs"
-            >
-              <ArrowLeftRight className="h-3.5 w-3.5 mr-1" />
-              Swap Crew
-            </Button>
-          </div>
+          {/* Only when there is someone to swap: with both seats empty it was
+              a button that did nothing, between two "Select" rows. */}
+          {(formData.picName || formData.sicName) && (
+            <div className="flex items-center justify-center py-2 row-divider">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={swapCrew}
+                className="text-xs"
+              >
+                <ArrowLeftRight className="h-3.5 w-3.5 mr-1" />
+                Swap Crew
+              </Button>
+            </div>
+          )}
 
           <SwipeableRow
             onClear={() => {

@@ -220,29 +220,42 @@ function DisplaySection({ preferences, updateDisplay }: {
   preferences: ReturnType<typeof usePreferences>["preferences"]
   updateDisplay: ReturnType<typeof usePreferences>["updateDisplay"]
 }) {
+  const display = preferences.display
   return (
     <ReadingPanel title="Display Options">
 
       <FormSection>
-        <SelectRow<DisplayPreferences["timeFormat"]>
-          label="Time Format"
-          description="Durations never show AM/PM."
-          value={preferences.display.timeFormat}
-          onValueChange={(value) => updateDisplay({ timeFormat: value })}
+        {/* Two questions, one row each: how a TIME OF DAY is written and how
+            a DURATION is. The stored settings split them differently —
+            `timeFormat` holds both the 12-hour clock and padded durations,
+            `clockSeparator` the colon — and as "Time Format" / "Clock Times"
+            rows each changed a mix of the two. A 12-hour clock has no padded
+            durations in that model, so Durations reads 2:30 under it. */}
+        <SelectRow<"colon" | "none" | "12h">
+          label="Clock"
+          value={display.timeFormat === "12h" ? "12h" : display.clockSeparator}
+          onValueChange={(value) =>
+            updateDisplay(
+              value === "12h"
+                ? { timeFormat: "12h" }
+                : { clockSeparator: value, ...(display.timeFormat === "12h" ? { timeFormat: "24h" as const } : {}) },
+            )
+          }
           options={[
-            { value: "24h", label: "24h (2:30)" },
-            { value: "24h-padded", label: "24h (02:30)" },
-            { value: "12h", label: "12h Clock (2:30 PM)" },
+            { value: "colon", label: "24-Hour (14:30)" },
+            { value: "none", label: "24-Hour (1430)" },
+            { value: "12h", label: "12-Hour (2:30 PM)" },
           ]}
         />
-        <SelectRow<DisplayPreferences["clockSeparator"]>
-          label="Clock Times"
-          description="Durations keep the colon."
-          value={preferences.display.clockSeparator}
-          onValueChange={(value) => updateDisplay({ clockSeparator: value })}
+        <SelectRow<"24h" | "24h-padded">
+          label="Durations"
+          description={display.timeFormat === "12h" ? "Set by the 12-hour clock." : undefined}
+          value={display.timeFormat === "24h-padded" ? "24h-padded" : "24h"}
+          disabled={display.timeFormat === "12h"}
+          onValueChange={(value) => updateDisplay({ timeFormat: value })}
           options={[
-            { value: "colon", label: "With Colon (02:30)" },
-            { value: "none", label: "No Colon (0230)" },
+            { value: "24h", label: "2:30" },
+            { value: "24h-padded", label: "02:30" },
           ]}
         />
         <ToggleRow

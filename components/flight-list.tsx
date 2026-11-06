@@ -48,6 +48,9 @@ import { useCalibratedRowHeight, useRemeasureOnCalibration } from "@/hooks/use-c
 
 export interface FlightListRef {
   scrollToFlight: (flightId: string, instant?: boolean) => void;
+  /** Bring a flight into view only if it is not already on screen. False when
+   *  the list does not hold it (yet). */
+  revealFlight: (flightId: string) => boolean;
   /**
    * Absorb a change in the top spacer's height without the rows appearing to
    * move.
@@ -407,6 +410,21 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     useImperativeHandle(
       ref,
       () => ({
+        revealFlight: (flightId: string) => {
+          const index = flights.findIndex((f) => f.id === flightId);
+          const container = scrollContainerRef.current;
+          if (index === -1 || !container) return false;
+          // Rows are one fixed height, so whether it is on screen is arithmetic
+          // on the virtualizer's own offsets — no row is measured.
+          const item = rowVirtualizer.measurementsCache[index];
+          if (item) {
+            const top = item.start - container.scrollTop;
+            const bottom = item.end - container.scrollTop;
+            if (top >= 0 && bottom <= container.clientHeight) return true;
+          }
+          rowVirtualizer.scrollToIndex(index, { align: "center", behavior: "auto" });
+          return true;
+        },
         scrollToFlight: (flightId: string, instant?: boolean) => {
           const index = flights.findIndex((f) => f.id === flightId);
           if (index !== -1) {

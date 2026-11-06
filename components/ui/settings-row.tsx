@@ -2,7 +2,7 @@
 
 import { CODE_INPUT_PROPS } from "@/lib/utils/input-props"
 import type React from "react"
-import { useRef } from "react"
+import { useId, useRef } from "react"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { ChevronsUpDown } from "lucide-react"
@@ -159,16 +159,28 @@ export function ToggleRow({
   readOnly?: boolean
   disabled?: boolean
 }) {
+  const id = useId()
+  const inert = readOnly || disabled
+  // The ROW is the control, as a native settings row is: a <label> for the
+  // switch, so a tap anywhere on it toggles. Only the 32×18 switch used to
+  // take the tap, well under the 36px a thumb needs.
   return (
-    <div className="flex items-center justify-between px-4 py-3.5 row-divider">
+    <label
+      htmlFor={id}
+      className={cn(
+        "flex items-center justify-between gap-3 px-4 py-3.5 row-divider",
+        !inert && "cursor-pointer active:bg-secondary/50",
+      )}
+    >
       <RowLabel label={label} description={description} disabled={disabled} />
       <Switch
+        id={id}
         aria-label={label}
         checked={checked}
         onCheckedChange={readOnly ? undefined : onCheckedChange}
-        disabled={readOnly || disabled}
+        disabled={inert}
       />
-    </div>
+    </label>
   )
 }
 

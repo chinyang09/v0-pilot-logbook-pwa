@@ -3083,6 +3083,19 @@ identical:
   Compare"). Helper text under a label and a question in a dialog are
   sentences. Helper text is ONE short line where it can be ("Prefixes flight
   numbers: 288 → TR288.") — the label already names the thing.
+- **A switch's ROW is the control** (`ToggleRow` is a `<label>` for its
+  switch, in Settings and the flight form alike): only the 32×18 switch took a
+  tap. The switch is 24×40 with a track you can see OFF (`foreground/15`, `/25`
+  dark) — at `--input` it was ΔL ≈ 0.01 on a dark card, a white knob floating
+  at the row's end.
+- **Settings › Display asks two questions, one row each** — Clock (24-hour
+  14:30 / 1430, or 12-hour) and Durations (2:30 / 02:30). The stored fields
+  split them differently (`timeFormat` holds the 12-hour clock AND padded
+  durations, `clockSeparator` the colon), so the rows are derived: a 12-hour
+  clock has no padded durations in that model, and Durations says so.
+- **A flight selected from ELSEWHERE is brought into view in the logbook
+  list** (`revealFlight`, once per selection) — a note's Open flight or a deep
+  link lit a row the tablet's list had not scrolled to.
 - **A short code field is sized to its code** (`SettingsRow`'s `maxLength`):
   a text input claims ~200px, which squeezed the Airline row's helper text
   into a narrower column than every other row's.
