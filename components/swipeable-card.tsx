@@ -25,6 +25,9 @@ import {
 import { HoldProgressBorder } from "@/components/ui/hold-progress-border"
 import { useMenuOpen } from "@/lib/utils/menu-lock"
 
+/** An unarmed row's content style — stable, so it is not a new prop each render. */
+const UNARMED_STYLE = { touchAction: "pan-y" } as const
+
 const SWIPE_CLOSE_EVENT = "swipe-card-close-others"
 
 /** Width of each revealed action button (px) */
@@ -657,7 +660,12 @@ export function SwipeableCard({
         onDragEnd={handleDragEnd}
         onClickCapture={handleClickCapture}
         onClick={handleClick}
-        style={{ x, touchAction: "pan-y" }}
+        // `x` is bound only while armed. An unarmed row sits at 0, and a bound
+        // motion value is a frame-loop render scheduled for every row as it
+        // mounts — a fling mounts a dozen a frame. Unbound, the element keeps
+        // its last transform, which is 0: a row disarms only once settled
+        // shut.
+        style={armed ? { x, touchAction: "pan-y" } : UNARMED_STYLE}
         className={cn("relative z-[1]", className)}
       >
         <div

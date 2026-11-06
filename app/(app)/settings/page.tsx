@@ -96,11 +96,11 @@ function LoggingSection({ preferences, updateLogging }: {
   const authority = preferences.logging.authority
 
   return (
-    <ReadingPanel title="Logging" description="How new and imported flights are logged. Synced to every device.">
+    <ReadingPanel title="Logging" description="Synced to every device.">
       <FormSection>
         <SelectRow<LogbookAuthority>
           label="Logbook Rules"
-          description={`${LOGBOOK_AUTHORITIES.find((a) => a.value === authority)?.description}. Names only; figures never change.`}
+          description={LOGBOOK_AUTHORITIES.find((a) => a.value === authority)?.description}
           value={authority}
           onValueChange={(v) => updateLogging({ authority: v })}
           options={OFFERED_AUTHORITIES.map((a) => ({ value: a.value, label: a.label }))}
@@ -149,7 +149,7 @@ function LoggingSection({ preferences, updateLogging }: {
         <AirlineRow value={preferences.logging.airline} onCommit={(airline) => updateLogging({ airline })} />
         <SelectRow<"pf" | "pm">
           label="New Flights Start As"
-          description="For flights you add. Imports keep the report's."
+          description="Imports keep the report's."
           value={preferences.logging.newFlightPilotFlying ? "pf" : "pm"}
           onValueChange={(v) => updateLogging({ newFlightPilotFlying: v === "pf" })}
           options={[
@@ -221,7 +221,7 @@ function DisplaySection({ preferences, updateDisplay }: {
   updateDisplay: ReturnType<typeof usePreferences>["updateDisplay"]
 }) {
   return (
-    <ReadingPanel title="Display Options" description="How times, airports and coordinates appear.">
+    <ReadingPanel title="Display Options">
 
       <FormSection>
         <SelectRow<DisplayPreferences["timeFormat"]>
@@ -247,13 +247,11 @@ function DisplaySection({ preferences, updateDisplay }: {
         />
         <ToggleRow
           label="Use Zulu Time (UTC)"
-          description="Show all times in UTC."
           checked={preferences.display.useZuluTime}
           onCheckedChange={(checked) => updateDisplay({ useZuluTime: checked })}
         />
         <SelectRow<DisplayPreferences["airportIdentifier"]>
           label="Airport Identifier"
-          description="Code shown for airports."
           value={preferences.display.airportIdentifier}
           onValueChange={(value) => updateDisplay({ airportIdentifier: value })}
           options={[
@@ -264,7 +262,6 @@ function DisplaySection({ preferences, updateDisplay }: {
         />
         <SelectRow<DisplayPreferences["coordinateFormat"]>
           label="Coordinate Format"
-          description="Latitude and longitude."
           value={preferences.display.coordinateFormat}
           onValueChange={(value) => updateDisplay({ coordinateFormat: value })}
           options={[

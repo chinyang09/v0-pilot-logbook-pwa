@@ -137,8 +137,7 @@ export function SortableNavList({ tabs, selectedTabs, onUpdate }: SortableNavLis
       </div>
 
       <p className="pt-3 text-xs text-muted-foreground">
-        These four tabs appear in the bottom tab bar on mobile and the navigation pill on desktop.
-        Drag the handle to reorder, or tap to swap one out.
+        Drag to reorder. Tap one below to swap it in.
       </p>
     </div>
   )

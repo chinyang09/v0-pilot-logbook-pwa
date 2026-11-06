@@ -348,8 +348,8 @@
      last row lands above the floating nav pill and above the home indicator /
      gesture bar rather than under them.
 
-     The pill occupies the 56px above --nav-bottom-offset, so 4.5rem (56px +
-     16px breathing) + the offset leaves a real gap above it. Declared once
+     The pill occupies the 52px above --nav-bottom-offset, so 4.5rem (52px +
+     20px breathing) + the offset leaves a real gap above it. Declared once
      and applied once per scroller: page content used to carry `pb-safe`
      INSIDE a container that already had this, which on iOS meant 96px + TWO
      home-indicator insets of dead space at the end of every list — the "the

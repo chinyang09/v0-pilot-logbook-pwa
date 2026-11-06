@@ -9,6 +9,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, use
 import { useRouter } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { userDb } from "@/lib/db/user-db";
+import { formatDay, formatDayAt } from "@/lib/utils/date";
 import {
   ChevronDown,
   ChevronRight,
@@ -121,12 +122,7 @@ function lookupSummary(
   airportPref: DisplayPreferences["airportIdentifier"],
   clockSeparator: DisplayPreferences["clockSeparator"]
 ): string[] {
-  const day = new Date(`${state.date}T00:00:00Z`).toLocaleDateString("en-GB", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-  });
+  const day = formatDay(state.date);
   if (state.status === "loading") return [`Looking up ${state.number}…`];
   if (state.status === "missing") return [`No ${state.number} found on ${day}`, "it may not operate that day"];
   if (state.status === "failed") return ["The lookup is unavailable right now", "try again later"];
@@ -137,7 +133,7 @@ function lookupSummary(
   const route = `${code(s.origin)} → ${code(s.destination)}`;
   if (s.basis === "usual") {
     const based = s.basedOn
-      ? new Date(`${s.basedOn}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })
+      ? formatDay(s.basedOn, { weekday: false, year: false })
       : "";
     return [`Usual times${based ? ` (${based})` : ""}`, route, times].filter(Boolean);
   }
@@ -480,10 +476,13 @@ function TimeRow({
    */
   derivedValue?: string;
 }) {
-  const localValue = utcToLocal(utcValue, timezoneOffset);
   const tzLabel = formatTimezoneOffset(timezoneOffset);
   const hasValue = isValidHHMM(utcValue);
   const hasDerived = !hasValue && isValidHHMM(derivedValue || "");
+  // A derived value is in force, so its local time is shown beside it (muted,
+  // like the UTC) rather than NOW — the Report row read "20:55 UTC | NOW"
+  // under rows that each carried both clocks.
+  const localValue = utcToLocal(hasValue ? utcValue : hasDerived ? derivedValue! : "", timezoneOffset);
 
   const shown = hasValue ? utcValue : hasDerived ? derivedValue! : "not set";
   return (
@@ -510,7 +509,7 @@ function TimeRow({
           <span className="text-xs text-muted-foreground">UTC</span>
         </div>
         <div className="flex flex-col items-end">
-          {showNow && !hasValue ? (
+          {showNow && !hasValue && !hasDerived ? (
             <Button
               variant="outline"
               size="sm"
@@ -528,7 +527,7 @@ function TimeRow({
             <div
               {...clockColumn(
                 () => onTap("local"),
-                `${label}, ${hasValue ? localValue : "not set"} ${tzLabel}`
+                `${label}, ${hasValue || hasDerived ? localValue : "not set"} ${tzLabel}`
               )}
             >
               <span
@@ -536,7 +535,7 @@ function TimeRow({
                   hasValue ? "text-foreground" : "text-muted-foreground"
                 }`}
               >
-                {hasValue
+                {hasValue || hasDerived
                   ? formatClockDisplay(localValue, clockSeparator)
                   : "--:--"}
               </span>
@@ -2100,17 +2099,7 @@ function FlightFormImpl({
             <SettingsRow
               label="Date"
               value={
-                formData.date
-                  ? new Date(formData.date + "T00:00:00").toLocaleDateString(
-                      "en-GB",
-                      {
-                        weekday: "short",
-                        day: "2-digit",
-                        month: "short",
-                        year: "2-digit",
-                      }
-                    )
-                  : undefined
+                formData.date ? formatDay(formData.date) : undefined
               }
               onClick={() => setDatePickerOpen(true)}
             />
@@ -2796,11 +2785,7 @@ function FlightFormImpl({
                       </span>
                       <span className="block text-xs text-muted-foreground">
                         Signed{" "}
-                        {new Date(formData.signature.capturedAt).toLocaleDateString(undefined, {
-                          year: "numeric",
-                          month: "short",
-                          day: "numeric",
-                        })}
+                        {formatDayAt(formData.signature.capturedAt)}
                       </span>
                     </span>
                   ) : (

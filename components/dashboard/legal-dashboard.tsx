@@ -1,5 +1,6 @@
 "use client"
 
+import { formatDayAt } from "@/lib/utils/date"
 import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -10,11 +11,11 @@ import { usePageActive } from "@/hooks/use-page-active"
 import { useFlights } from "@/hooks/data/use-flights"
 import { useDayKey } from "@/hooks/use-day-key"
 import { ninetyDayRecency } from "@/lib/utils/dashboard-aggregate"
-import { formatDutyClock, type SectorLeg } from "@/lib/utils/dashboard/duty-status"
+import { formatDutyClock, formatRestSpan, type SectorLeg } from "@/lib/utils/dashboard/duty-status"
 import { ANNUNCIATOR_WORD, type AnnunciatorState } from "@/lib/utils/dashboard/pilot-status"
 import type { PilotStatus } from "@/lib/utils/dashboard/pilot-status"
 import type { Requirement, RequirementState } from "@/lib/utils/dashboard/legality"
-import { formatInstant, tzFormatter } from "@/lib/utils/tz-format"
+import { formatInstant } from "@/lib/utils/tz-format"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import type { DisplayPreferences } from "@/types/db/stores.types"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -445,13 +446,10 @@ function DutyBand({
 
   const zone = React.useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, [])
   const clockAt = (ms: number) => formatInstant(ms, display, zone)
+  // "6 NOV" — the app's day (`formatDay`), less the weekday and year a
+  // caption has no room for.
   const dayAt = (ms: number) =>
-    tzFormatter(display?.useZuluTime === false ? zone : "UTC", {
-      day: "2-digit",
-      month: "short",
-    }, "daymon")
-      .format(new Date(ms))
-      .toUpperCase()
+    formatDayAt(ms, display?.useZuluTime === false ? zone : "UTC", { weekday: false, year: false }).toUpperCase()
 
   const onDuty = phase === "on_duty" && active !== null
   // A standby IS a duty. It is not a FLIGHT duty period — paragraph 14's
@@ -576,7 +574,7 @@ function DutyBand({
             label: lastDuty ? `Ended ${clockAt(lastDuty.debriefMs)}` : "Rest from",
           },
           {
-            value: formatDutyClock(next.restAvailableMinutes),
+            value: formatRestSpan(next.restAvailableMinutes),
             label: short
               ? `Short ${formatDutyClock(next.restShortfallMinutes)}`
               : `Of ${formatDutyClock(next.restRequiredMinutes)}`,
@@ -629,7 +627,7 @@ function DutyBand({
             label: lastDuty ? `Ended ${clockAt(lastDuty.debriefMs)}` : "Rest from",
           },
           {
-            value: formatDutyClock(rest.elapsedMinutes),
+            value: formatRestSpan(rest.elapsedMinutes),
             label: `Of ${formatDutyClock(rest.requiredMinutes)}`,
             live: true,
           },

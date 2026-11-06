@@ -1,5 +1,6 @@
 "use client"
 
+import { formatDay } from "@/lib/utils/date"
 import { useState, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -40,20 +41,18 @@ function tomorrow(): string {
   return d.toISOString().split("T")[0]
 }
 
-const MONTH_UTC = new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" })
-
+/** "Fri, 27 Nov" — the app's day; the check looks days ahead, never a year. */
 function formatDateShort(dateStr: string): string {
-  const d = new Date(dateStr + "T00:00:00Z")
-  return `${d.getUTCDate().toString().padStart(2, "0")} ${MONTH_UTC.format(d)}`
+  return formatDay(dateStr, { year: false })
 }
 
 const VIOLATION_TYPE_LABELS: Record<string, string> = {
   rest: "Rest",
   fdp: "FDP",
-  duty14: "14d Duty",
-  duty28: "28d Duty",
-  flight28: "28d Flight",
-  flight365: "12mo Flight",
+  duty14: "Duty 14d",
+  duty28: "Duty 28d",
+  flight28: "Flight 28d",
+  flight365: "Flight 12m",
 }
 
 /**

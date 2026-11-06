@@ -7,7 +7,9 @@ import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 
 import { usePreferences } from "@/components/providers/preferences-provider"
-import { formatDecimalHours, type PeriodFlight } from "@/lib/utils/dashboard-aggregate"
+import type { PeriodFlight } from "@/lib/utils/dashboard-aggregate"
+import { formatHHMMDisplay, minutesToHHMM } from "@/lib/utils/time"
+import type { DisplayPreferences } from "@/types/db/stores.types"
 import { getAirportDisplayCode } from "@/lib/utils/airport-display"
 import { formatYMDShort } from "@/lib/utils/date"
 import { cn } from "@/lib/utils"
@@ -82,6 +84,7 @@ export function PeriodFlights({
               selected={isDesktop && selectedId === f.id}
               onOpen={setSelectedId}
               airportPref={preferences.display.airportIdentifier}
+              timeFormat={preferences.display.timeFormat}
             />
           ))}
         </ul>
@@ -105,11 +108,13 @@ function FlightRow({
   selected,
   onOpen,
   airportPref,
+  timeFormat,
 }: {
   flight: PeriodFlight
   selected: boolean
   onOpen: (id: string) => void
   airportPref: "icao" | "iata" | "both"
+  timeFormat: DisplayPreferences["timeFormat"]
 }) {
   const dep = getAirportDisplayCode(flight.departureIcao, flight.departureIata, airportPref)
   const arr = getAirportDisplayCode(flight.arrivalIcao, flight.arrivalIata, airportPref)
@@ -138,7 +143,10 @@ function FlightRow({
           {dep || "—"}–{arr || "—"}
         </span>
         <span className="ml-auto shrink-0 tabular-nums text-foreground">
-          {formatDecimalHours(flight.blockMinutes)}h
+          {/* The block as the logbook card writes it — the pilot's duration
+              format — so a row reads the same here as there. The period's
+              TOTAL above stays in decimal hours. */}
+          {formatHHMMDisplay(minutesToHHMM(flight.blockMinutes), timeFormat === "12h" ? "24h" : timeFormat)}
         </span>
         <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
       </button>

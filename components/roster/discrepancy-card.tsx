@@ -10,6 +10,7 @@
  * (`DiscrepancyDetailPanel`).
  */
 
+import { formatDayAt, formatStamp } from "@/lib/utils/date"
 import { memo } from "react"
 import type { Discrepancy, DiscrepancyType } from "@/types/entities/roster.types"
 import {
@@ -28,15 +29,8 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-/** One formatter for every card's timestamps — `toLocaleDateString` built two
- *  per card, per render of the list. */
-export const STAMP = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-})
+/** A card's timestamp, the app's way (`formatStamp`). */
+export const STAMP = { format: (at: Date) => formatStamp(at) }
 
 export const DISCREPANCY_TYPE_CONFIG: Record<
   DiscrepancyType,
@@ -133,7 +127,7 @@ export const RESOLUTION_LABELS = {
 }
 
 /** A day-month stamp for the row; the panel carries the full one. */
-const ROW_DATE = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" })
+const ROW_DATE = { format: (at: Date) => formatDayAt(at, undefined, { weekday: false, year: false }) }
 
 interface DiscrepancyRowProps {
   discrepancy: Discrepancy

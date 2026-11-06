@@ -26,6 +26,7 @@
  * Pure: no React, no Dexie, no clock of its own beyond the `now` handed in.
  */
 
+import { formatDay } from "@/lib/utils/date"
 import type { CurrencyWithStatus } from "@/types/entities/roster.types"
 import type { NinetyDayCurrency } from "@/lib/utils/dashboard-aggregate"
 
@@ -334,7 +335,7 @@ export function buildLegalityModel({
     { id: "duty-14", label: "Duty 14d", forecastName: "14-day duty", cap: capacity.duty14Days },
     { id: "duty-28", label: "Duty 28d", forecastName: "28-day duty", cap: capacity.duty28Days },
     { id: "flight-28", label: "Flight 28d", forecastName: "28-day flight", cap: capacity.flight28Days },
-    { id: "flight-365", label: "Flight 1y", forecastName: "12-month flight", cap: capacity.flight365Days },
+    { id: "flight-365", label: "Flight 12m", forecastName: "12-month flight", cap: capacity.flight365Days },
   ]
   for (const row of limitRows) {
     const { used, limit } = row.cap
@@ -421,20 +422,11 @@ function describesMoreThanCode(description: string | undefined, code: string): b
   return !d.includes(c) && !c.includes(d)
 }
 
-/** One formatter for every date on the panel — constructing one per call was
- *  the single biggest line in the legality model's first build. */
-const EXPIRY_DATE = new Intl.DateTimeFormat("en-GB", {
-  day: "2-digit",
-  month: "short",
-  year: "2-digit",
-  timeZone: "UTC",
-})
-
-/** "12 Jan 27" — a date a pilot reads, not an ISO string. */
+/** "Tue, 12 Jan 27" — a date a pilot reads, not an ISO string. Read off the
+ *  string: constructing a formatter per call was the single biggest line in
+ *  the legality model's first build. */
 function formatExpiry(iso: string): string {
-  const at = Date.parse(`${iso}T00:00:00Z`)
-  if (!Number.isFinite(at)) return iso
-  return EXPIRY_DATE.format(new Date(at))
+  return formatDay(iso)
 }
 
 function shortfallAction(toShort: number, ldgShort: number): string {

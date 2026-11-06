@@ -1022,7 +1022,7 @@ every screen that names a category reads ONE table, `TIME_CATEGORIES`:
 | Column | What it holds |
 |---|---|
 | `field` | the STORED time field — changing the rules never changes a logged figure, only its name |
-| `names` | per authority: the column `label`, the role `designation` where it differs (CAAS P/UT → the Dual column), a `note` that always shows (CAAS PIC U/S "Counts in P1 once the PIC certifies it"), and the `full` name |
+| `names` | per authority: the column `label`, the role `designation` where it differs (CAAS P/UT → the Dual column), a `note` that always shows (CAAS PIC U/S "Counts in P1 once the PIC certifies it"), and the `full` name. The flight form's TIME rows show the label and the `note` ONLY — the other authorities' names and the `full` definition put a second line under all thirteen rows, and the one rule that matters read as more of the same |
 | `autoFill` | the Settings › Auto-fill switch that fills it — the switch list and the dashboard's totals map are both derived from the table |
 | `recognisedBy` | the authorities whose logbook keeps it; the flight form offers any other only once it holds time (`showsCategory`), so nothing logged is ever hidden |
 
@@ -2354,8 +2354,9 @@ report watermarks). Do not go back to an allowlist.
   At either end it compresses against the track instead of riding the
   rubber-band.
 
-  **That box is re-read per update AND followed per frame while the thumb is
-  up.** A cached copy plus a ResizeObserver looks sufficient and is not:
+  **That box is measured as the thumb appears, and FOLLOWED per frame while a
+  transition runs outside the scroller.** A cached copy plus a ResizeObserver
+  looks sufficient and is not:
   opening the sidebar SLIDES the main panel across without changing its width
   (measured: `0..360` → `199..559`), so nothing resizes and no observer fires.
   The thumb stayed at the closed layout's right edge — 199px inside the list,
@@ -2365,10 +2366,13 @@ report watermarks). Do not go back to an allowlist.
 
   Re-reading on scroll frames alone still leaves a visible flash, because the
   morph takes ~300ms during which there is no scroll at all — so `follow()` is
-  a rAF that tracks the box while the thumb is visible and stops the moment it
-  hides (~800ms after the last scroll). It writes nothing unless the box
-  actually moved. Measured across the whole morph, sampled every 40ms: the
-  thumb is at the scroller's right edge in every frame.
+  a rAF that tracks the box while a `transitionrun` OUTSIDE the scroller is
+  unfinished (the push is a transition on the sidebar BESIDE the panel, not on
+  an ancestor of it) and the thumb is up. It used to follow for the thumb's
+  whole visible window, which put a rect read in a rAF on every frame of every
+  fling, while the list was mounting rows: 103ms of `getBoundingClientRect` in
+  four flings at 4×, 24ms now. Measured across the morph, sampled every 45ms:
+  the thumb is at the scroller's right edge in every frame.
 - **`MODAL_SCRIM`** — `bg-black/15 dark:bg-black/50`. A flat `bg-black/50` is
   invisible over a dark app and turns the light theme (white panels, glass
   sidebar) into grey mush. Used by every dialog overlay, the nav sidebar
@@ -2589,7 +2593,10 @@ re-renders).
   `dragControls` and no action panel — a row is mostly read, and the flight
   form's ~50 of them mounting all that on the tap that opened it was ~800ms at
   a 4× throttle. The first pointerdown (or focus) arms it and is handed to
-  `dragControls.start` in a layout effect, so that same touch swipes.
+  `dragControls.start` in a layout effect, so that same touch swipes. The
+  content's `x` motion value is bound only while armed (`UNARMED_STYLE`): a
+  bound value is a framer frame-loop render for every row as it mounts, and a
+  fling mounts a dozen a frame (up to 47ms of a frame at 4×, gone).
 - **Gesture:** `drag="x"` with `dragDirectionLock` + `touchAction: "pan-y"` — a
   vertical gesture scrolls the list natively and never fights the horizontal
   swipe. Release settles to open/closed with a spring (`SPRING`); a fast flick
@@ -2766,11 +2773,13 @@ re-renders).
   active transition. Desktop has no backdrop at all — its sidebar sits
   alongside the content rather than over it.
 
-  **The phone's bottom bar spans the screen, as a flight card does, up to
-  25rem** — `MOBILE_PILL_WIDTH`, `min(calc(100% - 2 * var(--panel-gutter)),
-  25rem)`, so it keeps one proportion to the screen on every phone (it used to
-  hug its tabs, ~330px whatever the width) without becoming a slab across an
-  iPad in portrait (the owner's report: full width there was too much). A
+  **The phone's bottom bar is 12px inside a flight card's edges, up to
+  25rem** — `MOBILE_PILL_WIDTH`, `min(calc(100% - 2 * var(--panel-gutter) -
+  1.5rem), 25rem)`, 52px tall (`MOBILE_PILL_HEIGHT`, a 44px tab inside), so it
+  keeps one proportion to the screen on every phone (it used to hug its tabs,
+  ~330px whatever the width; then edge to edge at 56px, which the owner read
+  as too big: 342×52 on a 390 phone now) without becoming a slab across an
+  iPad in portrait (400px there). A
   `min()`/`calc` interpolates against the sidebar's px width, so the morph
   needs no measurement there.
 
@@ -3120,10 +3129,14 @@ identical:
   follow-up. The trigger is the WHOLE row, and its accessible name carries the
   value ("Pilot role: P2"). A record holding a value the list lacks (LogTen's
   "VISUAL" approach) keeps it as an option rather than showing nothing.
-- **The camera button opens the OS photo sheet directly** — one image input
-  with no `capture`, which iOS and Android already present as Take Photo /
-  Photo Library. An in-app dropdown offering the same two choices was a web
-  menu and an extra tap before the camera.
+- **The camera button offers Take Photo / Choose Photo** (`PhotoSourceMenu`,
+  the app's menu face) over TWO inputs — one with `capture="environment"`, one
+  without. A single input with no `capture` was meant to bring up the OS sheet
+  with both, and on iOS it does, but Android 14+ answers `image/*` with its
+  Photo Picker, which has no camera: the pilot could only choose a photo. Each
+  row is a `<label>` for its input, so the picker opens as the tap's own
+  default action — iOS opens a file input only inside the gesture, and a
+  choice applied after `OptionMenu`'s history round trip is outside it.
 - **No `alert()` for a form error** — an inline `role="alert"` line in the
   dialog, cleared when it closes. And no browser `confirm`/`alert` anywhere:
   a question that must be answered goes through `appConfirm` / `appAlert`
@@ -3315,6 +3328,37 @@ does NOT clear: the next person is looking at the same screen).
 the device's look); `saveUserPreferences()` splits a save between the two. The
 provider reloads the synced half on `onDataChanged`, so a change on one device
 reaches the others' screens, and skips that while its own save is pending.
+
+### One way to write a day (`lib/utils/date.ts`)
+
+Every date a pilot reads is **`Fri, 27 Nov 26`** — weekday, day, month, two-
+digit year (the owner's choice, Nov 2026) — through `formatDay` (a stored
+"YYYY-MM-DD"), `formatDayAt` (an instant, on the calendar of a zone or the
+device) or `formatStamp` (when something happened: `Fri, 27 Nov 26 14:05`). Half
+the app read "Nov 27" and half "27 Nov": the flight form, the roster, the FDP
+page, the dashboard and the Bin each built their own `Intl.DateTimeFormat`, in
+`en-US` or `en-GB` or the device's locale.
+
+- Where a context makes a part redundant or there is no room, a part is
+  DROPPED, never reordered: `27 Nov` on a chart axis or a caption, `Fri, 27 Nov`
+  in the Quick Check (it looks days ahead), `16 Oct – 6 Nov 26` never — a range
+  inside one year carries no year, across two each end carries its own.
+- The parts are put together by hand, not by a locale: `en-GB` and `en-US`
+  disagree on order and comma, and Node's ICU and a browser's can disagree with
+  each other, which is a hydration mismatch.
+- The logbook card's stacked `27 / NOV 26` and the calendar's month labels are
+  the same order already and stay as they are.
+
+**A rest's length reads the same everywhere** (`formatRestSpan`,
+`duty-status.ts`): `10:42` under 100 hours, `21d 6h` from there. The dashboard
+printed `510:13` where the FDP page printed `21d 6h`.
+
+**The four rolling limits have one name each**: Duty 14d, Duty 28d, Flight 28d,
+Flight 12m — on the dashboard's limits band, the FDP page's tabs and the Quick
+Check alike (they were "1y", "12M Flight" and "12mo Flight"). The dashboard's
+figure and the FDP page's may differ by hours: the dashboard counts whole UTC
+days, the timeline the continuous 24-hour windows ending at its pointer (see
+"Rolling windows are whole UTC DAYS" and "The FDP page").
 
 ### Display Preferences
 
@@ -4124,8 +4168,8 @@ period and where it is focused", so they are ONE scroller on ONE time axis:
 | | Shows |
 |---|---|
 | the header | the POINTER's instant ("Nov 4 03:11Z", the other clock under it: "11:11 SGT") beside − / + / Now — no "Timeline" title, and no Next Duty card above it (the row below says the same) |
-| the state row | THREE fixed cells, never prose (`PointerStateRow`, `stateCells`): on duty, the leg (WSSS-RPLL) under its state / FDP x/max / Flight (a duty that is not an FDP — standby, simulator, positioning, ground — its code / Elapsed / Flight —); at rest, Next Duty / Next FDP x/max, both DIMMED / Rest x/minimum (from 100 hours, "19d 21h" under "Rest · Min 12:00" — "477:23/11…" did not fit a phone's third). A line of prose wrapped as it changed and moved the card's height |
-| the tabs | 14D duty, 28D duty, 28D flight, 12M flight AS AT THE POINTER (`rollingAt`); the chosen one is drawn |
+| the state row | THREE fixed cells, never prose (`PointerStateRow`, `stateCells`): on duty, the leg (WSSS-RPLL) under its state / FDP x/max / Flight (a duty that is not an FDP — standby, simulator, positioning, ground — its code / Elapsed / Flight —); at rest, Next Duty / Next FDP x/max, both DIMMED / Rest x/minimum (from 100 hours, "19d 21h" (`formatRestSpan`, which the dashboard's rest figure uses too) under "Rest · Min 12:00" — "477:23/11…" did not fit a phone's third). A line of prose wrapped as it changed and moved the card's height |
+| the tabs | Duty 14d, Duty 28d, Flight 28d, Flight 12m AS AT THE POINTER (`rollingAt`) — the same names the dashboard's limits band and the Quick Check use; the chosen one is drawn |
 | the rolling chart | that limit's running total — flown solid, scheduled dashed yellow from now, what-if orange — against the limit line and its 90% |
 | the deck | each duty bar (sign-on → sign-off) the full row height with its sectors' block time INSIDE it, full height too; the rest directly under it with no gap |
 
@@ -4152,7 +4196,7 @@ period and where it is focused", so they are ONE scroller on ONE time axis:
   time under them (so it pans too), ctrl-wheel on a trackpad, − / + for a
   keyboard; 3 hours to 180 days. There are no 24h / 7d / 28d presets. Gridlines
   run the FULL height at the finest step that leaves 42px for a label (hours
-  under a day, dates beyond; midnights stronger), dates as "Nov 4", no weekday.
+  under a day, dates beyond; midnights stronger), dates as "4 Nov" (`formatDayAt`, no weekday or year).
 - **Duty and FDP are drawn apart.** The duty bar runs sign-on → sign-off; the
   FDP inside it, darker, runs sign-on → the last on-blocks (`fdpEndMs`); what is
   left after it is the post-flight half hour, duty but not FDP. The flying sits
@@ -5318,6 +5362,7 @@ When making changes, be aware of these high-impact files:
 - Do not make `values.ts` throw. A corrupt cell degrades to a blank and the row parser decides whether that is fatal — that is what stops one bad line taking down a 4,000-flight migration. Keep `toDuration` and `toClock` separate too: a duration may exceed 24h, a clock time may not, and a four-figure totals row wrapping into a plausible departure time is a silent error
 
 **Formatting & chrome:**
+- Do not build a date with `toLocaleDateString` or an `Intl.DateTimeFormat` of your own — every day a pilot reads is `formatDay` / `formatDayAt` / `formatStamp` (`Fri, 27 Nov 26`), with parts dropped where there is no room, never reordered. Month-first crept back in one page at a time, through `en-US` formatters and the device locale
 - Do not format a clock time with `formatHHMMDisplay` — that is for durations (which always keep their colon). Points in time go through `formatClockDisplay` so `clockSeparator` governs them all
 - Do not use a flat `bg-black/50` for a modal overlay — use `MODAL_SCRIM`; black at 50% is invisible over a dark app and turns the light theme into grey mush
 - Do not add the sidebar's floating-strip treatment to only one morph — `DesktopPillMorph` and `MobilePillMorph` must both float the toggle/sync strip over the nav with `topInset`, or the scroll-under silently works on desktop and not on a phone. And keep the dissolve mask on the blob overlay as well as the nav (on the OUTER, untranslated element), or the blob stays solid in a band where its own row has faded out
@@ -5354,6 +5399,7 @@ When making changes, be aware of these high-impact files:
 - Do not hardcode the panel widths — they live in `lib/layout/panel-widths.ts` and are a single budget. `DUAL_MONTH_PX` is 600 rather than 620 because 620 + 360 detail is EXACTLY the space iPad Air 5 landscape has with the sidebar open, so it fit with zero slack and any rounding took the dual-month toggle away on the owner's device
 - Do not let a single calendar month be wider than a DUAL pane in the split layout — the cells are square, so its width is its height, and a taller single month means the width toggle resizes the calendar under the flight list on every switch. Cap it at `MONTH_PANE_PX` and give it the same month caption a dual pane has (the caption alone was 12px of the difference). Uncapped entirely it grew from 313px to 519px tall for the frames before the dual-month switch caught up
 - Do not thin the rim by dropping the conic's FLANKS — iOS's controls have a hairline you can see ALL THE WAY ROUND, and at flanks of ~0.05 three-quarters of the perimeter had none. Keep the lobes concentrated (that is what reads as light on a curve) and the flanks around 0.22; the ring's WIDTH (`--softness`, and `.Highlight`'s padding with it) is the separate knob, and it is only free to be fine BECAUSE the flanks hold the continuity
+- Do not go back to ONE image input for the camera button — Android 14+ answers `accept="image/*"` with its Photo Picker, which has no camera. Two inputs (one `capture="environment"`), chosen from `PhotoSourceMenu`, whose rows are `<label>`s so the picker opens inside the tap (iOS refuses a file input opened outside the gesture)
 - Do not open the flight card's `…` cascade behind a blocking scrim — the page must stay scrollable underneath (a scroll dismisses it) while taps are swallowed at the capture phase so nothing activates. And arm that swallow on a short timer, or the click from the tap that OPENED it closes it on the same gesture
 - Do not let the `…` cascade leave `pointerdown`/`touchstart` alone — they must be `stopPropagation`'d in the CAPTURE phase, or a swipe elsewhere still reaches framer-motion and reveals that row's swipe panel with the menu up. And do not add `preventDefault` to them: that is what would kill the compositor's touch scroll, which is the one interaction the menu is supposed to allow (`preventDefault` belongs on `mousedown`, to stop desktop focus, and on the swallowed `click`/`pointerup`)
 - Do not put `themeColor` back in the layout's `viewport` export, and do not sync the status bar from an effect keyed on `resolvedTheme` — Next re-renders the static tags on every client navigation (the bar went dark again on the second page), and the effect runs before next-themes sets the class (the bar lagged a launch behind). The boot script owns the tag and follows the class
@@ -5365,7 +5411,7 @@ When making changes, be aware of these high-impact files:
 - Do not bring back the month-capsule grid or a year stepper in the calendar's month/year picker — it is two wheels, live, closed by the date selector; and in the dual layout it takes the RIGHT pane with the month being chosen still drawn on the left. Keep `WHEEL_ITEM_PX` small enough that the wheel fits a dual pane's grid, or the panel grows (or clips) when it opens
 - Do not cap a date wheel's past at a few years — a pilot back-filling a paper logbook enters flights from decades ago; the default is 70
 - Do not make "Add Crew" open the crew picker directly, and do not lay an additional crew member out differently from the PIC/SIC rows — role on the LEFT (the menu), name on the RIGHT (the picker, for THAT row), a swipe to clear. The pick carries the row's role and index (`additionalCrewField`); address rows by index, never by crew-card id
-- Do not size the phone's bottom bar to its tabs, or let it run the full width of a tablet — it is `MOBILE_PILL_WIDTH`, the screen less the panel gutter each side (the same edges as a flight card, so the same proportion of every phone), capped at 25rem so an iPad in portrait keeps a bar rather than a slab. The tab padding still gives way below ~346px (`clamp(6px, (100vw − 250px)/8, 12px)`) so five tabs fit an iPad Split View window of 320. The bar's HEIGHT is not scaled: an iPad window at "iPhone size" draws CSS px at ~132 px/inch against a phone's ~150–160, so everything there is physically ~20% larger — that is the device, and sizing per platform would break the one-look rule
+- Do not size the phone's bottom bar to its tabs, or let it run the full width of a tablet — it is `MOBILE_PILL_WIDTH`, the screen less the panel gutter and 12px more each side (the same proportion of every phone), capped at 25rem so an iPad in portrait keeps a bar rather than a slab. The tab padding gives way below ~362px (`clamp(5px, (100vw − 262px)/10, 10px)`) so five tabs fit an iPad Split View window of 320. The bar's HEIGHT is not scaled: an iPad window at "iPhone size" draws CSS px at ~132 px/inch against a phone's ~150–160, so everything there is physically ~20% larger — that is the device, and sizing per platform would break the one-look rule
 - Do not put per-row `measureElement` on ANY virtualised list of same-height rows (airports, aircraft, crew, logbook) — calibrate once with `useCalibratedRowHeight`, and keep the card one height by construction (truncate, reserve empty lines). And never pass `useVirtualizer` an inline `getItemKey`: its measurements are memoised on that function's identity, so a new arrow per render rebuilds every row's position on every scroll-driven render (29k rows on the airports list)
 - Do not hand-roll a suggestion list under a field — `SuggestionList` (`components/ui/suggestion-list.tsx`) is the one (an inset well, 44px rows, inset dividers), and `AircraftTypeSuggestions` and the add-aircraft / add-airport candidate lists all render through it; the aircraft form, panel and page each carried a bordered `hover:bg-accent` web dropdown
 - Do not ask an online lookup per keystroke or by itself on a form — a flight is looked up on the Lookup button (or Enter), a fleet on opening By fleet or on Find. And do not put Gates or Inbound back in the flight form: the form is for logging; they live on the dashboard's duty band and its panel (`useDutyLookups`, one cache). A lookup over an earlier one replaces what the EARLIER LOOKUP wrote (`lookupPatch`'s `previous`), never what the pilot entered — that is "Replace"
@@ -5469,7 +5515,7 @@ When making changes, be aware of these high-impact files:
 - Do not hang a floating panel under the action buttons without holding `useFloatingPanelUnderHeader` while it is open (and its page active) — or the tap-to-top strip takes its first control's tap and the fade's tail dims and blurs its top as if it were content scrolling away. And do not try to fix that with a z-index: the page is in its keep-alive stacking context, below the shell's header. Clear the tail with a mask on the fade's LAYERS, never on the `ChromeFade` wrapper (an ancestor mask is a backdrop root, so the blur would sample nothing). And do not hide the calendar's date selector when the month/year picker opens: the picker REPLACES the grid in the same box, under the same selector, so the panel's height does not move
 - Do not leave a sign-out (or any action that awaits a network round trip before its first visible change) silent until the round trip returns — change its label on the TAP, and bound the wait (`flushBeforeSignOut(maxWaitMs)`)
 - Do not hand-roll a spinner — waiting is one thing and should look like one thing. `PageLoading` is the route-level state (every `loading.tsx`, the keep-alive Suspense fallback) and `PanelLoading` is the detail-panel one, both in `components/ui/page-loading.tsx`. The aircraft, airports and crew pages each carried an identical copy of a `border-2 border-primary border-t-transparent` ring, so waiting for a pane looked like a different kind of waiting depending on which tab you were on
-- Do not size the mobile bottom pill from `PILL_HEIGHT` — it is `MOBILE_PILL_HEIGHT` (56 against the desktop 44). They are not the same control: one is a row of text tabs in a dense header, the other is the phone's only navigation, aimed at with a thumb
+- Do not size the mobile bottom pill from `PILL_HEIGHT` — it is `MOBILE_PILL_HEIGHT` (52 against the desktop 44). They are not the same control: one is a row of text tabs in a dense header, the other is the phone's only navigation, aimed at with a thumb
 - Do not give the bottom bar a squarer corner than a stadium — `MOBILE_PILL_RADIUS` is half its own height, the same rule the 44px controls follow; it is a separate constant only because the bar is a different height. A third-of-the-height radius was tried (the proportion the reference tab bars use) and rejected on the look: what reads as a squircle there is CONTINUOUS CURVATURE, not a smaller radius, and a circular arc at that radius is just a rounded rectangle. Drawing the real thing needs `corner-shape`, and a corner shape one engine falls back from would leave iOS and Android with different bars
 - Do not give the gravity blob a colour of its own — it is `--on-glass-active`, THE selected-thing fill, shared with an action button's active state so the nav and the header say "this is the one you are on" the same way. It must stay a mix of two OPAQUE colours: any translucency shows up as the blob letting the page through, which is the one thing it must not do
 - Do not put `--primary` on `--on-glass-active` — a 32% tint of a colour is the same hue at a similar lightness, which is exactly why the active action button read as barely selected. The label is `--on-glass-active-fg`, the primary pushed AWAY from the fill (lighter on dark, darker on light) so it still reads as the accent

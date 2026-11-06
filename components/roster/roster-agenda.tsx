@@ -23,7 +23,7 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { observeRectAfterLayout, viewportRect } from "@/lib/utils/virtual-scroll"
 import { Plane, MonitorPlay, Trash2, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { parseYMDLocal } from "@/lib/utils/date"
+import { formatDayAt, parseYMDLocal } from "@/lib/utils/date"
 import { formatInstant } from "@/lib/utils/tz-format"
 import { getDepartureDisplay, getArrivalDisplay } from "@/lib/utils/airport-display"
 import type { RosterItem } from "@/lib/utils/roster/roster-days"
@@ -109,7 +109,7 @@ interface RosterAgendaProps {
 }
 
 /** One formatter for every day heading — `toLocaleDateString` builds one per call. */
-const DAY_HEADING = new Intl.DateTimeFormat("en-US", { weekday: "short", day: "numeric", month: "short" })
+const DAY_HEADING = { format: (day: Date) => formatDayAt(day) }
 
 export const RosterAgenda = memo(function RosterAgenda({
   agenda,

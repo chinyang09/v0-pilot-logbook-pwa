@@ -1,5 +1,6 @@
 "use client"
 
+import { formatDay } from "@/lib/utils/date"
 import * as React from "react"
 import { useDayKey } from "@/hooks/use-day-key"
 
@@ -78,12 +79,10 @@ function isoDaysAgo(days: number): string {
   return `${y}-${m}-${d}`
 }
 
-const RANGE_DAY = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" })
-
+/** "16 Oct – 6 Nov", with the years once they differ. */
 function formatRangeLabel(fromIso: string, toIso: string): string {
-  const from = new Date(`${fromIso}T00:00:00`)
-  const to = new Date(`${toIso}T00:00:00`)
-  return `${RANGE_DAY.format(from)} – ${RANGE_DAY.format(to)}`
+  const year = fromIso.slice(0, 4) !== toIso.slice(0, 4)
+  return `${formatDay(fromIso, { weekday: false, year })} – ${formatDay(toIso, { weekday: false, year })}`
 }
 
 export function resolvePeriod(period: DashboardPeriod): ResolvedPeriod {

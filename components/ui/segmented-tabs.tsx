@@ -110,7 +110,10 @@ export function SegmentedTabs<T extends string>({
               className={cn(
                 // h-9: a segment is a thing a thumb has to hit. They were
                 // `py-1.5` (~28px).
-                "relative z-10 flex h-9 shrink-0 items-center rounded-full px-3.5 text-xs font-medium",
+                // flex-1: the segments share the control's width, as a native
+                // segmented control's do — content-sized, a full-width control
+                // ended in an empty strip after the last one.
+                "relative z-10 flex h-9 flex-1 shrink-0 items-center justify-center rounded-full px-3.5 text-xs font-medium whitespace-nowrap",
                 "transition-colors active:scale-[0.97]",
                 active ? "text-primary" : "text-muted-foreground hover:text-foreground"
               )}

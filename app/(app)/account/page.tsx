@@ -142,7 +142,7 @@ export default function AccountPage() {
       summary:
         passkeyCount == null
           ? ""
-          : `${passkeyCount} · ${deviceHasPasskey(profile?.passkeys, myDeviceId) ? "this device has one" : "none on this device"}`,
+          : `${passkeyCount} · ${deviceHasPasskey(profile?.passkeys, myDeviceId) ? "on this device" : "not on this device"}`,
     },
     sessions: {
       label: "Active Sessions",
@@ -191,7 +191,7 @@ export default function AccountPage() {
               back. Two red capsules stacked read as two alarms. */}
           <ActionRow
             icon={<LogOut />}
-            label={isSigningOut ? "Signing out…" : "Sign out"}
+            label={isSigningOut ? "Signing Out…" : "Sign Out"}
             disabled={isSigningOut || isLoggingOutAll}
             onClick={handleSignOut}
           />
@@ -213,7 +213,7 @@ export default function AccountPage() {
             <ActionRow
               destructive
               icon={<LogOut />}
-              label={isLoggingOutAll ? "Signing out…" : "Sign out of all devices"}
+              label={isLoggingOutAll ? "Signing Out…" : "Sign Out of All Devices"}
               disabled={isLoggingOutAll || isSigningOut}
               onClick={() => setLogoutArmed(true)}
             />

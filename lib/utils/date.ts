@@ -50,41 +50,87 @@ export function formatLocalYMD(date: Date): string {
   return `${year}-${month}-${day}`
 }
 
-/** Formatters by (locale × options). `toLocaleDateString` constructs a new
- *  one per call, and these run per ROW (the dashboard's period list). */
-const ymdFormatters = new Map<string, Intl.DateTimeFormat>()
+/**
+ * THE way the app writes a day: `Fri, 27 Nov 26` — weekday, day, month, two-
+ * digit year (the owner's choice, Nov 2026). Every date a pilot reads goes
+ * through here, so the flight form, the roster, the FDP page and the dashboard
+ * cannot drift apart again (they did: half the app read "Nov 27", half
+ * "27 Nov"). Where a context makes a part redundant or there is no room for
+ * it — a chart axis, a range inside one period — a part is DROPPED, never
+ * reordered: `27 Nov`, `Fri, 27 Nov`, `27 Nov 26`.
+ *
+ * Built from the parts by hand rather than through an Intl locale: `en-GB`
+ * and `en-US` disagree on order and comma, and Node's ICU and a browser's can
+ * disagree with each other, which is a hydration mismatch.
+ */
+export interface DayFormat {
+  /** "Fri, " — default true */
+  weekday?: boolean
+  /** " 26" — default true */
+  year?: boolean
+}
 
-/** Format "YYYY-MM-DD" with arbitrary Intl options (local, no TZ shift). */
-export function formatYMD(
-  ymd: string,
-  options: Intl.DateTimeFormatOptions,
-  locale?: string
-): string {
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+/** Year, month (0–11) and day of a CALENDAR date, written the app's way. */
+export function formatDayParts(year: number, month0: number, day: number, opts: DayFormat = {}): string {
+  const { weekday = true, year: withYear = true } = opts
+  const body = `${day} ${MON[month0]}${withYear ? ` ${String(((year % 100) + 100) % 100).padStart(2, "0")}` : ""}`
+  if (!weekday) return body
+  return `${WD[new Date(Date.UTC(year, month0, day)).getUTCDay()]}, ${body}`
+}
+
+/** A stored "YYYY-MM-DD" date — a calendar date, no zone. */
+export function formatDay(ymd: string, opts?: DayFormat): string {
   if (!ymd) return ""
-  const key = `${locale ?? ""}|${JSON.stringify(options)}`
-  let fmt = ymdFormatters.get(key)
+  const y = Number(ymd.slice(0, 4))
+  const m = Number(ymd.slice(5, 7))
+  const d = Number(ymd.slice(8, 10))
+  if (!y || !m || !d) return ymd
+  return formatDayParts(y, m - 1, d, opts)
+}
+
+/**
+ * The day an INSTANT falls on in `timeZone` ("UTC", an IANA zone), or on the
+ * device's own calendar when omitted.
+ */
+export function formatDayAt(at: number | Date, timeZone?: string, opts?: DayFormat): string {
+  const date = typeof at === "number" ? new Date(at) : at
+  if (!Number.isFinite(date.getTime())) return ""
+  if (!timeZone) return formatDayParts(date.getFullYear(), date.getMonth(), date.getDate(), opts)
+  if (timeZone === "UTC") return formatDayParts(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), opts)
+  let fmt = zoneDay.get(timeZone)
   if (!fmt) {
-    fmt = new Intl.DateTimeFormat(locale, options)
-    ymdFormatters.set(key, fmt)
+    fmt = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "numeric", day: "numeric" })
+    zoneDay.set(timeZone, fmt)
   }
-  return fmt.format(parseYMDLocal(ymd))
+  let y = 0, m = 0, d = 0
+  for (const p of fmt.formatToParts(date)) {
+    if (p.type === "year") y = Number(p.value)
+    else if (p.type === "month") m = Number(p.value)
+    else if (p.type === "day") d = Number(p.value)
+  }
+  return formatDayParts(y, m - 1, d, opts)
+}
+const zoneDay = new Map<string, Intl.DateTimeFormat>()
+
+const CLOCK = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+
+/** A moment something HAPPENED on this device — signed, deleted, noted:
+ *  `Fri, 27 Nov 26 14:05`, in the device's own clock. */
+export function formatStamp(at: number | string | Date): string {
+  const date = at instanceof Date ? at : new Date(at)
+  if (!Number.isFinite(date.getTime())) return ""
+  return `${formatDayAt(date)} ${CLOCK.format(date)}`
 }
 
-/** "Apr 16" */
+/** "16 Apr" */
 export function formatYMDShort(ymd: string): string {
-  return formatYMD(ymd, { month: "short", day: "numeric" })
+  return formatDay(ymd, { weekday: false, year: false })
 }
 
-/** "Apr 16, 2026" */
+/** "Thu, 16 Apr 26" */
 export function formatYMDMedium(ymd: string): string {
-  return formatYMD(ymd, { month: "short", day: "numeric", year: "numeric" }, "en-US")
-}
-
-/** Format a minute count as "Xh Ym" (e.g. 95 → "1h 35m", 60 → "1h", 45 → "45m"). */
-export function formatMinutesHM(minutes: number): string {
-  const h = Math.floor(minutes / 60)
-  const m = minutes % 60
-  if (h === 0) return `${m}m`
-  if (m === 0) return `${h}h`
-  return `${h}h ${m}m`
+  return formatDay(ymd)
 }

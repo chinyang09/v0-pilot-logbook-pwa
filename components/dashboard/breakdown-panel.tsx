@@ -120,10 +120,10 @@ export function BreakdownPanel({
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Aircraft</p>
               <Link
                 href="/aircraft"
-                className="group inline-flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                className="relative inline-flex items-center gap-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground after:absolute after:-inset-x-2 after:-inset-y-3 after:content-['']"
               >
                 Fleet
-                <ArrowUpRight className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
+                <ArrowUpRight className="h-3 w-3" aria-hidden />
               </Link>
             </div>
 

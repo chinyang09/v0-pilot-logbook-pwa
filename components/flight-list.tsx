@@ -315,7 +315,9 @@ function generateFlightYearItems(flights: FlightLog[]): FastScrollItem[] {
 
   return sorted.map((year) => ({
     key: year,
-    label: year.slice(-2), // Show last 2 digits (e.g., "24" for 2024)
+    // "'24", not "24": bare, beside cards that open with a day number, it
+    // read as a date.
+    label: `'${year.slice(-2)}`,
   }));
 }
 

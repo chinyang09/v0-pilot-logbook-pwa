@@ -176,9 +176,9 @@ export const TIME_CATEGORIES: TimeCategory[] = [
     autoFill: "multiPilot",
     kind: "condition",
     names: {
-      CAAS: { label: "Multi-crew", full: "Multi-pilot operation" },
-      EASA: { label: "Multi-pilot", full: "Multi-pilot operation" },
-      FAA: { label: "Multi-crew", full: "Multi-pilot operation" },
+      CAAS: { label: "Multi-Crew", full: "Multi-pilot operation" },
+      EASA: { label: "Multi-Pilot", full: "Multi-pilot operation" },
+      FAA: { label: "Multi-Crew", full: "Multi-pilot operation" },
     },
     recognisedBy: ["CAAS", "EASA"],
   },
@@ -200,7 +200,7 @@ export const TIME_CATEGORIES: TimeCategory[] = [
     field: "actualInstrumentTime",
     autoFill: "actualInst",
     kind: "condition",
-    names: same("Actual instrument", "Solely by reference to instruments, in IMC"),
+    names: same("Actual Instrument", "Solely by reference to instruments, in IMC"),
     recognisedBy: ["CAAS", "FAA"],
   },
   {
@@ -209,7 +209,7 @@ export const TIME_CATEGORIES: TimeCategory[] = [
     kind: "condition",
     // On a FLIGHT this is hood time. A simulator session keeps its length in
     // the same field and is told apart by its entry type, not a second field.
-    names: same("Simulated instrument", "Under the hood, in an aircraft"),
+    names: same("Simulated Instrument", "Under the hood, in an aircraft"),
     recognisedBy: ["CAAS", "FAA"],
   },
   {
@@ -217,9 +217,9 @@ export const TIME_CATEGORIES: TimeCategory[] = [
     autoFill: "xc",
     kind: "condition",
     names: {
-      CAAS: { label: "Cross-country", full: "To a point other than departure" },
-      EASA: { label: "Cross-country", full: "Along a pre-planned route" },
-      FAA: { label: "Cross-country", full: "Landing over 50 NM from departure (61.1)" },
+      CAAS: { label: "Cross-Country", full: "To a point other than departure" },
+      EASA: { label: "Cross-Country", full: "Along a pre-planned route" },
+      FAA: { label: "Cross-Country", full: "Landing over 50 NM from departure (61.1)" },
     },
     recognisedBy: ["CAAS", "FAA"],
   },
@@ -241,21 +241,20 @@ export function roleTimeField(role: PilotRole): TimeField {
 }
 
 /**
- * The heading and the helper for a category under `authority`. The helper
- * carries the authority's own logging rule where it has one, then what the
- * OTHER offered authorities call it where that differs ("FAA SIC"); with
- * neither, it spells the category out, so the helper always adds something.
+ * The heading and the helper for a category under `authority`. The helper is
+ * the authority's own logging RULE where it has one ("Counts in P1 once the
+ * PIC certifies it") and nothing otherwise. It used to fall back to what the
+ * other authorities call the category ("FAA SIC") and then to a definition
+ * ("Under the hood, in an aircraft"), so all thirteen rows of the TIME
+ * section carried a second line, and the one that matters read as more of
+ * the same.
  */
 export function categoryLabel(
   category: TimeCategory,
   authority: LogbookAuthority
 ): { label: string; helper: string } {
   const own = category.names[authority]
-  const others = OFFERED_AUTHORITIES.map((a) => a.value)
-    .filter((a) => a !== authority && category.names[a].label !== own.label)
-    .map((a) => `${a} ${category.names[a].label}`)
-  const parts = [own.note, ...others].filter(Boolean)
-  return { label: own.label, helper: parts.length > 0 ? parts.join(" · ") : own.full }
+  return { label: own.label, helper: own.note ?? "" }
 }
 
 /** What a role is called under `authority` — the role picker's options. */
