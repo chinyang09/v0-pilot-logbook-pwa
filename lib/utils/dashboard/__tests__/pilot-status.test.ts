@@ -119,7 +119,7 @@ describe("buildPilotStatus — governing constraint", () => {
     const s = status({
       recency: { takeoffs: 3, landings: 3, current: true, lapseIso: "2026-08-20" },
     })
-    expect(s.governing?.label).toBe("90-day recency")
+    expect(s.governing?.label).toBe("90-Day Recency")
     expect(s.governing?.value).toBe("6d")
   })
 })

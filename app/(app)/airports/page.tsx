@@ -19,7 +19,7 @@ import {
 } from "@/lib/db";
 import { syncService } from "@/lib/sync";
 import { submitAirportToServer } from "@/lib/submissions/submit";
-import { Star, Plus, MapPin, Loader2 } from "lucide-react";
+import { Star, Plus, MapPin, Loader2, ChevronLeft } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -646,8 +646,17 @@ export default function AirportsPage() {
     : "Arrival";
 
   // Desktop floating glass bar actions — expandable search + glass add button
+  const picking = !!(fieldType && flightId);
   const airportActions = useMemo(() => (
     <>
+      {/* Picking for a flight: the way back to it comes first. This page is
+          also the tab, and without it nothing said the list was a choice or
+          how to leave it but the system back gesture. */}
+      {picking && (
+        <GlassIconButton ariaLabel="Back to the flight" onClick={() => router.back()}>
+          <ChevronLeft className="h-5 w-5" />
+        </GlassIconButton>
+      )}
       <GlassSearchButton
         isOpen={desktopSearchOpen}
         onToggle={() => setDesktopSearchOpen(prev => !prev)}
@@ -659,13 +668,13 @@ export default function AirportsPage() {
         <Plus className="h-5 w-5" />
       </GlassIconButton>
     </>
-  ), [handleAddClick, searchQuery, desktopSearchOpen]);
+  ), [handleAddClick, searchQuery, desktopSearchOpen, picking, router]);
 
   useRegisterMainActions(airportActions, isActive);
 
   return (
     <PageContainer
-      title="Airports"
+      title={picking ? (fieldType === "arrivalIcao" ? "Choose Arrival" : "Choose Departure") : "Airports"}
       rightContent={
         showFastScroll ? (
           <FastScroll

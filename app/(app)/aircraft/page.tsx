@@ -6,7 +6,7 @@ import type React from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useCalibratedRowHeight, useRemeasureOnCalibration } from "@/hooks/use-calibrated-row"
-import { Plane, Loader2, Star, Plus, Trash2, ChevronRight } from "lucide-react"
+import { Plane, Loader2, Star, Plus, Trash2, ChevronRight, ChevronLeft } from "lucide-react"
 import { EmptyState } from "@/components/ui/empty-state"
 import { useDebounce } from "@/hooks/use-debounce"
 import {
@@ -712,8 +712,17 @@ export default function AircraftPage() {
   const showFastScroll = fastScrollItems.length > 1 && !debouncedSearchQuery.trim()
 
   // Desktop floating glass bar actions — expandable search + glass add button
+  const picking = selectMode && !!flightId
   const aircraftActions = useMemo(() => (
     <>
+      {/* Picking for a flight: the way back to it comes first. This page is
+          also the tab, and without it nothing said the list was a choice or
+          how to leave it but the system back gesture. */}
+      {picking && (
+        <GlassIconButton ariaLabel="Back to the flight" onClick={() => router.back()}>
+          <ChevronLeft className="h-5 w-5" />
+        </GlassIconButton>
+      )}
       <GlassSearchButton
         isOpen={desktopSearchOpen}
         onToggle={() => setDesktopSearchOpen(prev => !prev)}
@@ -725,13 +734,13 @@ export default function AircraftPage() {
         <Plus className="h-5 w-5" />
       </GlassIconButton>
     </>
-  ), [handleAddClick, searchQuery, desktopSearchOpen])
+  ), [handleAddClick, searchQuery, desktopSearchOpen, picking, router])
 
   useRegisterMainActions(aircraftActions, isActive)
 
   return (
     <PageContainer
-      title="Aircraft"
+      title={picking ? "Choose Aircraft" : "Aircraft"}
       rightContent={
         showFastScroll ? (
           <FastScroll

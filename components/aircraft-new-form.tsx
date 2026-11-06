@@ -27,7 +27,8 @@ import { getAircraftType } from "@/lib/db/stores/reference/aircraft-types.store"
 import type { AircraftType } from "@/types/entities/aircraft-type.types"
 import type { AircraftRecord } from "@/types/entities/aircraft.types"
 import { useAircraftTypeSearch } from "@/hooks/use-aircraft-type-search"
-import { useRegisterDetailActions, useRegisterMainActions } from "@/hooks/use-page-actions"
+import { useRegisterMainActions } from "@/hooks/use-page-actions"
+import { DetailFormPanel } from "@/components/ui/detail-form-panel"
 
 /** An aircraft the online lookup answered with. */
 interface OnlineAircraft {
@@ -311,11 +312,12 @@ export function AircraftNewForm({
     )
   }, [canSave, isSaving])
 
-  useRegisterDetailActions(actions, isDetailPanel)
+  // In the detail panel the commits come from DetailFormPanel, like every
+  // other new record's; the standalone route still puts them in the bar.
   useRegisterMainActions(actions, !isDetailPanel)
 
   const formContent = (
-    <div className="container mx-auto px-2 pt-4">
+    <>
       {!selectMode && (
         <div className="mb-4 flex justify-center">
           <SegmentedTabs tabs={ADD_MODES} value={mode} onChange={setMode} />
@@ -330,7 +332,7 @@ export function AircraftNewForm({
             label="Registration"
             value={registration}
             onChange={setRegistration}
-            placeholder="e.g. 9V-TNK"
+            placeholder="9V-TNK"
             required
             uppercase
           />
@@ -495,36 +497,40 @@ export function AircraftNewForm({
           )}
       </FormSection>
 
-      <p className="text-xs text-muted-foreground px-4 mb-6">
-        {fr24Found
-          ? "Aircraft details found and will be saved automatically."
-          : "Enter the aircraft registration. Type code can be entered manually if not found online."
-        }
-      </p>
+      {/* Said once there is something to say — before any lookup it read
+          "not found" over an empty field. */}
+      {(fr24Found || showManualTypeField) && (
+        <p className="text-xs text-muted-foreground px-4 mb-6">
+          {fr24Found ? "Found. Save adds it with these details." : "Not found online. Enter the type yourself."}
+        </p>
+      )}
 
       </>
       )}
-    </div>
+    </>
   )
 
   if (isDetailPanel) {
-    // Detail panel mode: actions live in the floating right-side glass bar,
-    // registered above via useRegisterDetailActions. Content scrolls behind
-    // the global header (matches AircraftDetailPanel layout).
+    // The same pane every new record opens in — title, scroller, Cancel /
+    // Save in the detail header. It had no title of its own, so "New Duty"
+    // and "New Currency" named themselves and this did not.
     return (
-      <div className="h-full relative flex flex-col">
-        <div className="flex-1 overflow-y-auto">
-          <div className="h-chrome-top" />
-          {formContent}
-          <div className="h-chrome-bottom" />
-        </div>
-      </div>
+      <DetailFormPanel
+        title="New Aircraft"
+        dirty
+        canSave={canSave}
+        saving={isSaving}
+        onSave={() => saveRef.current()}
+        onCancel={() => cancelRef.current()}
+      >
+        {formContent}
+      </DetailFormPanel>
     )
   }
 
   return (
-    <PageContainer>
-      {formContent}
+    <PageContainer title="New Aircraft">
+      <div className="px-panel pt-4">{formContent}</div>
     </PageContainer>
   )
 }

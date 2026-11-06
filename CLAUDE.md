@@ -3096,6 +3096,20 @@ identical:
 - **A flight selected from ELSEWHERE is brought into view in the logbook
   list** (`revealFlight`, once per selection) — a note's Open flight or a deep
   link lit a row the tablet's list had not scrolled to.
+- **A picker says it is one.** The flight form's Aircraft / From / To / crew
+  rows open the Aircraft, Airports and Crew pages in select mode; they looked
+  exactly like the tabs, with the tab's title and no way back but the system
+  gesture. In select mode the title is the question ("Choose Aircraft",
+  "Choose Departure", "Choose PIC", "Choose Relief Pilot") and Back to the
+  flight leads the header.
+- **NOW is for a time that HAPPENS** (Report, OUT, OFF, ON, IN) — not for
+  Scheduled Out / In, which are published, not stamped. Five NOW buttons ran
+  down an empty form. An empty row with no NOW shows its one `--:--`, not a
+  second one under the zone's name.
+- **Every new record names itself the same way**: New Aircraft is a
+  `DetailFormPanel` like New Duty and New Currency (it was a bare scroller with
+  no title), and a helper line says something only once there is something to
+  say ("Not found online…" read over an empty field).
 - **A short code field is sized to its code** (`SettingsRow`'s `maxLength`):
   a text input claims ~200px, which squeezed the Airline row's helper text
   into a narrower column than every other row's.
@@ -4297,6 +4311,14 @@ assessment on record:
   any change of model, detection size or threshold has to read all seven.
 
 ### Deferred design work (owner-approved to-do)
+
+- **Fewer "USE x:xx" buttons in the flight form's TIME section.** An airline
+  sector shows up to seven (P2, PIC U/S, Dual, Instructor, IFR, Actual and
+  Simulated Instrument), which reads as noise. A likely shape: offer USE only
+  on the role times the pilot's seat logs (Settings › Logging) plus the
+  categories the flight already holds, with the rest a tap away. It changes
+  what the logbook rules show, so it waits for the owner (Nov 2026: "keep that
+  as future Todo").
 
 - **The split-view detail panel on every route** — no longer deferred: the
   owner set the rule (Oct 2026), see "Main / Detail on every page".

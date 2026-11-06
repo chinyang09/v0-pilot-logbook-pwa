@@ -213,7 +213,7 @@ export function buildLegalityModel({
   if (!logbookEmpty) requirements.push({
     id: "recency",
     group: "currency",
-    label: "90-day recency",
+    label: "90-Day Recency",
     state: !recencyMet ? "fail" : lapsingSoon ? "caution" : "ok",
     value: lapsedByDate
       ? "Lapsed"
@@ -247,7 +247,7 @@ export function buildLegalityModel({
     requirements.push({
       id: `unavailable-${what}`,
       group: "currency",
-      label: what === "duty" ? "Duty limits" : "Logbook",
+      label: what === "duty" ? "Duty Limits" : "Logbook",
       state: "unknown",
       value: "—",
       detail: [{ label: "Status", value: what === "duty" ? "Could not be computed" : "Could not be read" }],

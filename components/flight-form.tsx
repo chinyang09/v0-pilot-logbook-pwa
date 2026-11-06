@@ -508,6 +508,9 @@ function TimeRow({
           </span>
           <span className="text-xs text-muted-foreground">UTC</span>
         </div>
+        {/* An empty row with no NOW shows its one blank: a second "--:--"
+            under the zone's name said nothing the first did not. */}
+        {(showNow || hasValue || hasDerived) && (
         <div className="flex flex-col items-end">
           {showNow && !hasValue && !hasDerived ? (
             <Button
@@ -543,6 +546,7 @@ function TimeRow({
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   );
@@ -2113,7 +2117,7 @@ function FlightFormImpl({
                 ref={flightNumberRef}
                 type="text"
                 className="text-right bg-transparent outline-none text-foreground w-28 min-w-0 placeholder:text-muted-foreground"
-                placeholder="-"
+                placeholder="Optional"
                 aria-label="Flight number"
                 {...CODE_INPUT_PROPS}
                 value={formData.flightNumber || ""}
@@ -2251,7 +2255,11 @@ function FlightFormImpl({
               timezoneOffset={depTimezone}
               onTap={(frame) => openTimePicker("scheduledOut", frame)}
               onNow={() => setNowTime("scheduledOut")}
-            clockSeparator={clockSeparator}
+              // A schedule is published, not stamped: NOW is for the times
+              // that happen (report, OOOI), and five of them down an empty
+              // form read as five things to press.
+              showNow={false}
+              clockSeparator={clockSeparator}
             />
           </SwipeableRow>
 
@@ -2262,7 +2270,11 @@ function FlightFormImpl({
               timezoneOffset={arrTimezone}
               onTap={(frame) => openTimePicker("scheduledIn", frame)}
               onNow={() => setNowTime("scheduledIn")}
-            clockSeparator={clockSeparator}
+              // A schedule is published, not stamped: NOW is for the times
+              // that happen (report, OOOI), and five of them down an empty
+              // form read as five things to press.
+              showNow={false}
+              clockSeparator={clockSeparator}
             />
           </SwipeableRow>
 

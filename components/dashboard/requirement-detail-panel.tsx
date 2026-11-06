@@ -36,17 +36,20 @@ function destination(href: string): string {
 export function RequirementDetailPanel({ requirement }: { requirement: Requirement }) {
   const router = useRouter()
   const { label, state, value, detail, action, href } = requirement
+  // A detail row that only repeats the state above ("Status · Not met" twice
+  // in one panel) is left out.
+  const rows = (detail ?? []).filter((d) => !(d.label === "Status" && d.value === STATE_WORD[state]))
 
   return (
     <ReadingPanel title={label}>
       <FormSection>
         <ReadOnlyRow label="Status" value={STATE_WORD[state]} />
-        <ReadOnlyRow label="Reads" value={value} />
+        <ReadOnlyRow label="Now" value={value} />
         {action && <ReadOnlyRow label="To Do" value={action} />}
       </FormSection>
-      {detail && detail.length > 0 && (
+      {rows.length > 0 && (
         <FormSection title="Detail">
-          {detail.map((d) => (
+          {rows.map((d) => (
             <ReadOnlyRow key={d.label} label={d.label} value={d.value} />
           ))}
         </FormSection>
