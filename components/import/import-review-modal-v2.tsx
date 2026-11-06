@@ -15,6 +15,7 @@
 
 "use client";
 
+import { formatDayAt } from "@/lib/utils/date";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -368,11 +369,7 @@ export function ImportReviewModalV2({
     .join(" · ");
 
   const generatedDate = plan.generatedAt
-    ? new Date(plan.generatedAt).toLocaleString(undefined, {
-        timeZone: "UTC",
-        dateStyle: "medium",
-        timeStyle: "short",
-      })
+    ? `${formatDayAt(plan.generatedAt, "UTC")} ${new Date(plan.generatedAt).toISOString().slice(11, 16)}Z`
     : null;
 
   const entries = current ? partitioned[current] : [];

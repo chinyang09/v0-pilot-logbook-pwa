@@ -45,7 +45,7 @@ import { ReadOnlyRow } from "@/components/ui/settings-row"
 import { ActionRow, ActionStack } from "@/components/ui/action-row"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
-import { formatYMDMedium } from "@/lib/utils/date"
+import { formatStamp, formatYMDMedium } from "@/lib/utils/date"
 import { LIST_ITEM_TRANSITION } from "@/lib/motion"
 import {
   getDeletedFlights,
@@ -79,14 +79,6 @@ import {
 } from "@/lib/utils/retention"
 import { cn } from "@/lib/utils"
 
-/** "Deleted today" / "Deleted 4 days ago". */
-function deletedAgo(at: number, now = Date.now()): string {
-  const days = Math.floor((now - at) / (24 * 60 * 60 * 1000))
-  if (days <= 0) return "Deleted today"
-  if (days === 1) return "Deleted yesterday"
-  return `Deleted ${days} days ago`
-}
-
 /** One deleted thing, flattened so the page can treat all four the same. */
 type Binned = {
   id: string
@@ -103,13 +95,7 @@ type Binned = {
 /** One selection for every kind: ids from different tables can collide. */
 const binKey = (row: Pick<Binned, "kind" | "id">) => `${row.kind}:${row.id}`
 
-const STAMP = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-})
+const STAMP = { format: (at: Date) => formatStamp(at) }
 
 /** Drop the empty pairs, so a panel lists only what the record holds. */
 const filled = (pairs: [string, string | null | undefined][]): [string, string][] =>
@@ -359,7 +345,7 @@ export default function RecentlyDeletedPage() {
           <FormSection title="Deleted">
             <ReadOnlyRow label="On" value={STAMP.format(new Date(selected.deletedAt))} />
             <ReadOnlyRow
-              label="Kept For"
+              label="Kept"
               value={retentionLabel(selected.deletedAt, Date.now(), DELETED_RETENTION_MS)}
             />
           </FormSection>
@@ -377,9 +363,7 @@ export default function RecentlyDeletedPage() {
       <div className="px-panel pt-4 space-y-3">
         {!isLoading && !isEmpty && (
           <p className="text-xs text-muted-foreground">
-            Deleted items are kept for 30 days and count towards nothing while
-            they are here. After that they are gone for good. Tap an item to
-            see it, or swipe it left to restore it.
+            Kept 30 days, counted nowhere. Swipe left to restore.
           </p>
         )}
 
@@ -465,10 +449,10 @@ export default function RecentlyDeletedPage() {
                                   </div>
                                 )}
                               </div>
-                              <div className="mt-1 flex items-baseline justify-between gap-2 px-0 pb-2 text-[11px]">
-                                <span className="text-muted-foreground">
-                                  {deletedAgo(row.deletedAt)}
-                                </span>
+                              {/* Only what is LEFT: when it was deleted is in
+                                  its panel, and the two summed to 30 on every
+                                  card. */}
+                              <div className="mt-1 flex items-baseline justify-end gap-2 px-0 pb-2 text-[11px]">
                                 <span
                                   className={cn(
                                     "tabular-nums",

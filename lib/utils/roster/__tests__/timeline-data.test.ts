@@ -82,7 +82,7 @@ describe("generateTimelineData — rolling sums", () => {
 
   it("labels each day without the locale formatter", () => {
     const points = generateTimelineData([duty("2026-04-04", 60, 30), duty("2026-12-31", 60, 30)], LIMITS)
-    expect(points[0].dateLabel).toBe("04 Apr")
+    expect(points[0].dateLabel).toBe("4 Apr")
     expect(points.find((p) => p.date === "2026-12-31")?.dateLabel).toBe("31 Dec")
   })
 })

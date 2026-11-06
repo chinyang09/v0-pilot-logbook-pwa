@@ -1,5 +1,6 @@
 "use client";
 
+import { formatStamp } from "@/lib/utils/date"
 import { useRef, useState, useEffect, useCallback, useId } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -473,16 +474,7 @@ export function SignatureCanvas({
         <div className="px-4 py-2 bg-muted/30 border-t border-border">
           <p className="text-[10px] text-muted-foreground text-center">
             Signed on{" "}
-            {new Date(initialSignature.capturedAt).toLocaleDateString(
-              undefined,
-              {
-                year: "numeric",
-                month: "short",
-                day: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              }
-            )}
+            {formatStamp(initialSignature.capturedAt)}
           </p>
         </div>
       </div>

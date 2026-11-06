@@ -12,6 +12,7 @@
  * from lingering here.
  */
 
+import { formatDayAt } from "@/lib/utils/date"
 import useSWR from "swr"
 import { useAuth } from "@/components/providers/auth-provider"
 import { Monitor, Smartphone, Tablet } from "lucide-react"
@@ -98,9 +99,7 @@ export function deviceIconFor(os: string) {
   return Monitor
 }
 
-const DATE = new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" })
-
-export const formatDate = (dateInput: string | number) => DATE.format(new Date(dateInput))
+export const formatDate = (dateInput: string | number) => formatDayAt(new Date(dateInput))
 
 export function formatRelativeTime(dateInput: string | number) {
   const diffMs = Date.now() - new Date(dateInput).getTime()

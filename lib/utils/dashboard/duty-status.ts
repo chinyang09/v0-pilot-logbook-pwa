@@ -653,3 +653,17 @@ export function formatDutyClock(minutes: number): string {
   const safe = Math.max(0, Math.round(minutes))
   return `${Math.floor(safe / 60)}:${(safe % 60).toString().padStart(2, "0")}`
 }
+
+/** A rest this long is read in days, not hours and minutes. */
+export const LONG_REST_MIN = 100 * 60
+
+/**
+ * A rest's length: "10:42" while it is a matter of hours, "19d 21h" from 100
+ * hours — minutes are noise there, and "510:13" is a number nobody reads. The
+ * dashboard and the FDP page both say a rest this way.
+ */
+export function formatRestSpan(minutes: number, clock: (min: number) => string = formatDutyClock): string {
+  if (minutes < LONG_REST_MIN) return clock(minutes)
+  const h = Math.floor(minutes / 60)
+  return `${Math.floor(h / 24)}d ${h % 24}h`
+}

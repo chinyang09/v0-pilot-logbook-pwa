@@ -9,6 +9,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, use
 import { useRouter } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { userDb } from "@/lib/db/user-db";
+import { formatDay, formatDayAt } from "@/lib/utils/date";
 import {
   ChevronDown,
   ChevronRight,
@@ -121,12 +122,7 @@ function lookupSummary(
   airportPref: DisplayPreferences["airportIdentifier"],
   clockSeparator: DisplayPreferences["clockSeparator"]
 ): string[] {
-  const day = new Date(`${state.date}T00:00:00Z`).toLocaleDateString("en-GB", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-  });
+  const day = formatDay(state.date);
   if (state.status === "loading") return [`Looking up ${state.number}…`];
   if (state.status === "missing") return [`No ${state.number} found on ${day}`, "it may not operate that day"];
   if (state.status === "failed") return ["The lookup is unavailable right now", "try again later"];
@@ -137,7 +133,7 @@ function lookupSummary(
   const route = `${code(s.origin)} → ${code(s.destination)}`;
   if (s.basis === "usual") {
     const based = s.basedOn
-      ? new Date(`${s.basedOn}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })
+      ? formatDay(s.basedOn, { weekday: false, year: false })
       : "";
     return [`Usual times${based ? ` (${based})` : ""}`, route, times].filter(Boolean);
   }
@@ -2103,17 +2099,7 @@ function FlightFormImpl({
             <SettingsRow
               label="Date"
               value={
-                formData.date
-                  ? new Date(formData.date + "T00:00:00").toLocaleDateString(
-                      "en-GB",
-                      {
-                        weekday: "short",
-                        day: "2-digit",
-                        month: "short",
-                        year: "2-digit",
-                      }
-                    )
-                  : undefined
+                formData.date ? formatDay(formData.date) : undefined
               }
               onClick={() => setDatePickerOpen(true)}
             />
@@ -2799,11 +2785,7 @@ function FlightFormImpl({
                       </span>
                       <span className="block text-xs text-muted-foreground">
                         Signed{" "}
-                        {new Date(formData.signature.capturedAt).toLocaleDateString(undefined, {
-                          year: "numeric",
-                          month: "short",
-                          day: "numeric",
-                        })}
+                        {formatDayAt(formData.signature.capturedAt)}
                       </span>
                     </span>
                   ) : (

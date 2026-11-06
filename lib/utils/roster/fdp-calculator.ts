@@ -1927,12 +1927,12 @@ export interface TimelineDataPoint {
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 /**
- * Format a UTC date as "dd MMM" (e.g. "04 Apr"). Read straight off the string:
+ * Format a UTC date as "d Mmm" (e.g. "4 Apr" — the app's day, `formatDay`, less weekday and year). Read straight off the string:
  * this runs once per DAY of the timeline, and `toLocaleDateString` there was a
  * quarter of the dashboard's first render on a long logbook.
  */
 function formatDateLabel(dateStr: string): string {
-  return `${dateStr.slice(8, 10)} ${MONTH_SHORT[Number(dateStr.slice(5, 7)) - 1]}`
+  return `${Number(dateStr.slice(8, 10))} ${MONTH_SHORT[Number(dateStr.slice(5, 7)) - 1]}`
 }
 
 /**

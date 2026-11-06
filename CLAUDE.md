@@ -3329,6 +3329,37 @@ the device's look); `saveUserPreferences()` splits a save between the two. The
 provider reloads the synced half on `onDataChanged`, so a change on one device
 reaches the others' screens, and skips that while its own save is pending.
 
+### One way to write a day (`lib/utils/date.ts`)
+
+Every date a pilot reads is **`Fri, 27 Nov 26`** — weekday, day, month, two-
+digit year (the owner's choice, Nov 2026) — through `formatDay` (a stored
+"YYYY-MM-DD"), `formatDayAt` (an instant, on the calendar of a zone or the
+device) or `formatStamp` (when something happened: `Fri, 27 Nov 26 14:05`). Half
+the app read "Nov 27" and half "27 Nov": the flight form, the roster, the FDP
+page, the dashboard and the Bin each built their own `Intl.DateTimeFormat`, in
+`en-US` or `en-GB` or the device's locale.
+
+- Where a context makes a part redundant or there is no room, a part is
+  DROPPED, never reordered: `27 Nov` on a chart axis or a caption, `Fri, 27 Nov`
+  in the Quick Check (it looks days ahead), `16 Oct – 6 Nov 26` never — a range
+  inside one year carries no year, across two each end carries its own.
+- The parts are put together by hand, not by a locale: `en-GB` and `en-US`
+  disagree on order and comma, and Node's ICU and a browser's can disagree with
+  each other, which is a hydration mismatch.
+- The logbook card's stacked `27 / NOV 26` and the calendar's month labels are
+  the same order already and stay as they are.
+
+**A rest's length reads the same everywhere** (`formatRestSpan`,
+`duty-status.ts`): `10:42` under 100 hours, `21d 6h` from there. The dashboard
+printed `510:13` where the FDP page printed `21d 6h`.
+
+**The four rolling limits have one name each**: Duty 14d, Duty 28d, Flight 28d,
+Flight 12m — on the dashboard's limits band, the FDP page's tabs and the Quick
+Check alike (they were "1y", "12M Flight" and "12mo Flight"). The dashboard's
+figure and the FDP page's may differ by hours: the dashboard counts whole UTC
+days, the timeline the continuous 24-hour windows ending at its pointer (see
+"Rolling windows are whole UTC DAYS" and "The FDP page").
+
 ### Display Preferences
 
 `DisplayPreferences` (`types/db/stores.types.ts`) drives formatting app-wide.
@@ -4137,8 +4168,8 @@ period and where it is focused", so they are ONE scroller on ONE time axis:
 | | Shows |
 |---|---|
 | the header | the POINTER's instant ("Nov 4 03:11Z", the other clock under it: "11:11 SGT") beside − / + / Now — no "Timeline" title, and no Next Duty card above it (the row below says the same) |
-| the state row | THREE fixed cells, never prose (`PointerStateRow`, `stateCells`): on duty, the leg (WSSS-RPLL) under its state / FDP x/max / Flight (a duty that is not an FDP — standby, simulator, positioning, ground — its code / Elapsed / Flight —); at rest, Next Duty / Next FDP x/max, both DIMMED / Rest x/minimum (from 100 hours, "19d 21h" under "Rest · Min 12:00" — "477:23/11…" did not fit a phone's third). A line of prose wrapped as it changed and moved the card's height |
-| the tabs | 14D duty, 28D duty, 28D flight, 12M flight AS AT THE POINTER (`rollingAt`); the chosen one is drawn |
+| the state row | THREE fixed cells, never prose (`PointerStateRow`, `stateCells`): on duty, the leg (WSSS-RPLL) under its state / FDP x/max / Flight (a duty that is not an FDP — standby, simulator, positioning, ground — its code / Elapsed / Flight —); at rest, Next Duty / Next FDP x/max, both DIMMED / Rest x/minimum (from 100 hours, "19d 21h" (`formatRestSpan`, which the dashboard's rest figure uses too) under "Rest · Min 12:00" — "477:23/11…" did not fit a phone's third). A line of prose wrapped as it changed and moved the card's height |
+| the tabs | Duty 14d, Duty 28d, Flight 28d, Flight 12m AS AT THE POINTER (`rollingAt`) — the same names the dashboard's limits band and the Quick Check use; the chosen one is drawn |
 | the rolling chart | that limit's running total — flown solid, scheduled dashed yellow from now, what-if orange — against the limit line and its 90% |
 | the deck | each duty bar (sign-on → sign-off) the full row height with its sectors' block time INSIDE it, full height too; the rest directly under it with no gap |
 
@@ -4165,7 +4196,7 @@ period and where it is focused", so they are ONE scroller on ONE time axis:
   time under them (so it pans too), ctrl-wheel on a trackpad, − / + for a
   keyboard; 3 hours to 180 days. There are no 24h / 7d / 28d presets. Gridlines
   run the FULL height at the finest step that leaves 42px for a label (hours
-  under a day, dates beyond; midnights stronger), dates as "Nov 4", no weekday.
+  under a day, dates beyond; midnights stronger), dates as "4 Nov" (`formatDayAt`, no weekday or year).
 - **Duty and FDP are drawn apart.** The duty bar runs sign-on → sign-off; the
   FDP inside it, darker, runs sign-on → the last on-blocks (`fdpEndMs`); what is
   left after it is the post-flight half hour, duty but not FDP. The flying sits
@@ -5331,6 +5362,7 @@ When making changes, be aware of these high-impact files:
 - Do not make `values.ts` throw. A corrupt cell degrades to a blank and the row parser decides whether that is fatal — that is what stops one bad line taking down a 4,000-flight migration. Keep `toDuration` and `toClock` separate too: a duration may exceed 24h, a clock time may not, and a four-figure totals row wrapping into a plausible departure time is a silent error
 
 **Formatting & chrome:**
+- Do not build a date with `toLocaleDateString` or an `Intl.DateTimeFormat` of your own — every day a pilot reads is `formatDay` / `formatDayAt` / `formatStamp` (`Fri, 27 Nov 26`), with parts dropped where there is no room, never reordered. Month-first crept back in one page at a time, through `en-US` formatters and the device locale
 - Do not format a clock time with `formatHHMMDisplay` — that is for durations (which always keep their colon). Points in time go through `formatClockDisplay` so `clockSeparator` governs them all
 - Do not use a flat `bg-black/50` for a modal overlay — use `MODAL_SCRIM`; black at 50% is invisible over a dark app and turns the light theme into grey mush
 - Do not add the sidebar's floating-strip treatment to only one morph — `DesktopPillMorph` and `MobilePillMorph` must both float the toggle/sync strip over the nav with `topInset`, or the scroll-under silently works on desktop and not on a phone. And keep the dissolve mask on the blob overlay as well as the nav (on the OUTER, untranslated element), or the blob stays solid in a band where its own row has faded out

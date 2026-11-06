@@ -51,7 +51,7 @@ interface RosterMonthProps {
  * new one per call — 42 per render of the grid, which was most of the month's
  * cost on the roster's first visit.
  */
-const CELL_DATE = new Intl.DateTimeFormat("en-US", { weekday: "long", day: "numeric", month: "long" })
+const CELL_DATE = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long" })
 
 export const RosterMonth = memo(function RosterMonth({
   selectedKey,

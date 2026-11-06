@@ -27,6 +27,7 @@
  * duties on one axis.
  */
 
+import { formatDayAt } from "@/lib/utils/date"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { AlertTriangle, ChevronRight, Minus, Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -39,6 +40,7 @@ import { formatHHMMDisplay, minutesToHHMM } from "@/lib/utils/time"
 import { pointerState, REST_RULE_LABEL, type DutyBlock, type RestBefore } from "@/lib/utils/roster/duty-timeline"
 import { createRollingIndex, rollingAt, rollingSeries, type RollingIndex, type RollingKind } from "@/lib/utils/roster/rolling-at"
 import { analyseDaysOff } from "@/lib/utils/roster/days-off"
+import { formatRestSpan, LONG_REST_MIN } from "@/lib/utils/dashboard/duty-status"
 import type { ForecastResult, FTLLimits } from "@/types/entities/roster.types"
 
 const MIN = 60_000
@@ -221,20 +223,20 @@ export function DutyTimeline({
   )
   const sep = display.clockSeparator === "none" ? "" : ":"
   const fmt = useMemo(() => {
-    const dm = tzFormatter(zone, { day: "numeric", month: "short" }, "d-mon")
     const hr = tzFormatter(zone, { hour: "2-digit", hourCycle: "h23" }, "hh")
     return {
-      dayMonth: (ms: number) => dm.format(new Date(ms)),
+      // "4 Nov" — the app's day (`formatDay`), less weekday and year.
+      dayMonth: (ms: number) => formatDayAt(ms, zone, { weekday: false, year: false }),
       hour: (ms: number) => `${hr.format(new Date(ms))}${sep}00`,
     }
   }, [zone, sep])
 
   const views: RollingView[] = useMemo(
     () => [
-      { key: "duty14", label: "14D Duty", limit: limits.maxDuty14Days * 60, limitName: "14-day duty", color: FDP_COLORS.duty },
-      { key: "duty28", label: "28D Duty", limit: limits.maxDuty28Days * 60, limitName: "28-day duty", color: "#8a7aa5" },
-      { key: "flight28", label: "28D Flight", limit: limits.maxFlight28Days * 60, limitName: "28-day flight", color: FDP_COLORS.flight },
-      { key: "flight365", label: "12M Flight", limit: limits.maxFlight365Days * 60, limitName: "12-month flight", color: "#6fa3b0" },
+      { key: "duty14", label: "Duty 14d", limit: limits.maxDuty14Days * 60, limitName: "14-day duty", color: FDP_COLORS.duty },
+      { key: "duty28", label: "Duty 28d", limit: limits.maxDuty28Days * 60, limitName: "28-day duty", color: "#8a7aa5" },
+      { key: "flight28", label: "Flight 28d", limit: limits.maxFlight28Days * 60, limitName: "28-day flight", color: FDP_COLORS.flight },
+      { key: "flight365", label: "Flight 12m", limit: limits.maxFlight365Days * 60, limitName: "12-month flight", color: "#6fa3b0" },
     ],
     [limits],
   )
@@ -920,15 +922,6 @@ function legAt(b: DutyBlock, t: number): string {
 }
 
 /** The three cells of the state row, at the instant `t`. */
-/** A rest this long is read in days, not hours and minutes. */
-const LONG_REST_MIN = 100 * 60
-
-/** "19d 21h" — whole hours, for a rest long enough that minutes are noise. */
-function daysHours(minutes: number): string {
-  const h = Math.floor(minutes / 60)
-  return `${Math.floor(h / 24)}d ${h % 24}h`
-}
-
 function stateCells(
   blocks: readonly DutyBlock[],
   t: number,
@@ -941,7 +934,7 @@ function stateCells(
   // A duty ahead: when it signs on, and the FDP it asks for against its max.
   const ahead = (next: DutyBlock | null): [StateCell, StateCell] => {
     if (!next) return [{ caption: "Next Duty", value: "None", muted: true }, { ...none, caption: "FDP" }]
-    // The date only when it is not the pointer's own day — "Nov 5 01:00Z"
+    // The date only when it is not the pointer's own day — "5 Nov 01:00Z"
     // did not fit a phone's third of the row.
     const when = dayMonth(next.startMs) === dayMonth(t) ? clock(next.startMs) : `${dayMonth(next.startMs)} ${clock(next.startMs)}`
     if (next.kind !== "flight" || next.maxFdpMinutes <= 0) {
@@ -992,7 +985,7 @@ function stateCells(
       s.minutes < 0
         ? { caption: "Rest", value: `In ${duration(-s.minutes)}`, muted: true }
         : long
-          ? { caption: req != null ? `Rest · Min ${duration(req)}` : "Rest", value: daysHours(s.minutes), over: s.rest.status === "short" }
+          ? { caption: req != null ? `Rest · Min ${duration(req)}` : "Rest", value: formatRestSpan(s.minutes), over: s.rest.status === "short" }
           : { caption: "Rest", value: req != null ? `${duration(s.minutes)}/${duration(req)}` : duration(s.minutes), over: s.rest.status === "short" }
     return [...ahead(s.block), rest]
   }
