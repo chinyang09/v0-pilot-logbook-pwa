@@ -1022,7 +1022,7 @@ every screen that names a category reads ONE table, `TIME_CATEGORIES`:
 | Column | What it holds |
 |---|---|
 | `field` | the STORED time field — changing the rules never changes a logged figure, only its name |
-| `names` | per authority: the column `label`, the role `designation` where it differs (CAAS P/UT → the Dual column), a `note` that always shows (CAAS PIC U/S "Counts in P1 once the PIC certifies it"), and the `full` name |
+| `names` | per authority: the column `label`, the role `designation` where it differs (CAAS P/UT → the Dual column), a `note` that always shows (CAAS PIC U/S "Counts in P1 once the PIC certifies it"), and the `full` name. The flight form's TIME rows show the label and the `note` ONLY — the other authorities' names and the `full` definition put a second line under all thirteen rows, and the one rule that matters read as more of the same |
 | `autoFill` | the Settings › Auto-fill switch that fills it — the switch list and the dashboard's totals map are both derived from the table |
 | `recognisedBy` | the authorities whose logbook keeps it; the flight form offers any other only once it holds time (`showsCategory`), so nothing logged is ever hidden |
 
@@ -2766,11 +2766,13 @@ re-renders).
   active transition. Desktop has no backdrop at all — its sidebar sits
   alongside the content rather than over it.
 
-  **The phone's bottom bar spans the screen, as a flight card does, up to
-  25rem** — `MOBILE_PILL_WIDTH`, `min(calc(100% - 2 * var(--panel-gutter)),
-  25rem)`, so it keeps one proportion to the screen on every phone (it used to
-  hug its tabs, ~330px whatever the width) without becoming a slab across an
-  iPad in portrait (the owner's report: full width there was too much). A
+  **The phone's bottom bar is 12px inside a flight card's edges, up to
+  25rem** — `MOBILE_PILL_WIDTH`, `min(calc(100% - 2 * var(--panel-gutter) -
+  1.5rem), 25rem)`, 52px tall (`MOBILE_PILL_HEIGHT`, a 44px tab inside), so it
+  keeps one proportion to the screen on every phone (it used to hug its tabs,
+  ~330px whatever the width; then edge to edge at 56px, which the owner read
+  as too big: 342×52 on a 390 phone now) without becoming a slab across an
+  iPad in portrait (400px there). A
   `min()`/`calc` interpolates against the sidebar's px width, so the morph
   needs no measurement there.
 
@@ -3120,10 +3122,14 @@ identical:
   follow-up. The trigger is the WHOLE row, and its accessible name carries the
   value ("Pilot role: P2"). A record holding a value the list lacks (LogTen's
   "VISUAL" approach) keeps it as an option rather than showing nothing.
-- **The camera button opens the OS photo sheet directly** — one image input
-  with no `capture`, which iOS and Android already present as Take Photo /
-  Photo Library. An in-app dropdown offering the same two choices was a web
-  menu and an extra tap before the camera.
+- **The camera button offers Take Photo / Choose Photo** (`PhotoSourceMenu`,
+  the app's menu face) over TWO inputs — one with `capture="environment"`, one
+  without. A single input with no `capture` was meant to bring up the OS sheet
+  with both, and on iOS it does, but Android 14+ answers `image/*` with its
+  Photo Picker, which has no camera: the pilot could only choose a photo. Each
+  row is a `<label>` for its input, so the picker opens as the tap's own
+  default action — iOS opens a file input only inside the gesture, and a
+  choice applied after `OptionMenu`'s history round trip is outside it.
 - **No `alert()` for a form error** — an inline `role="alert"` line in the
   dialog, cleared when it closes. And no browser `confirm`/`alert` anywhere:
   a question that must be answered goes through `appConfirm` / `appAlert`
@@ -5354,6 +5360,7 @@ When making changes, be aware of these high-impact files:
 - Do not hardcode the panel widths — they live in `lib/layout/panel-widths.ts` and are a single budget. `DUAL_MONTH_PX` is 600 rather than 620 because 620 + 360 detail is EXACTLY the space iPad Air 5 landscape has with the sidebar open, so it fit with zero slack and any rounding took the dual-month toggle away on the owner's device
 - Do not let a single calendar month be wider than a DUAL pane in the split layout — the cells are square, so its width is its height, and a taller single month means the width toggle resizes the calendar under the flight list on every switch. Cap it at `MONTH_PANE_PX` and give it the same month caption a dual pane has (the caption alone was 12px of the difference). Uncapped entirely it grew from 313px to 519px tall for the frames before the dual-month switch caught up
 - Do not thin the rim by dropping the conic's FLANKS — iOS's controls have a hairline you can see ALL THE WAY ROUND, and at flanks of ~0.05 three-quarters of the perimeter had none. Keep the lobes concentrated (that is what reads as light on a curve) and the flanks around 0.22; the ring's WIDTH (`--softness`, and `.Highlight`'s padding with it) is the separate knob, and it is only free to be fine BECAUSE the flanks hold the continuity
+- Do not go back to ONE image input for the camera button — Android 14+ answers `accept="image/*"` with its Photo Picker, which has no camera. Two inputs (one `capture="environment"`), chosen from `PhotoSourceMenu`, whose rows are `<label>`s so the picker opens inside the tap (iOS refuses a file input opened outside the gesture)
 - Do not open the flight card's `…` cascade behind a blocking scrim — the page must stay scrollable underneath (a scroll dismisses it) while taps are swallowed at the capture phase so nothing activates. And arm that swallow on a short timer, or the click from the tap that OPENED it closes it on the same gesture
 - Do not let the `…` cascade leave `pointerdown`/`touchstart` alone — they must be `stopPropagation`'d in the CAPTURE phase, or a swipe elsewhere still reaches framer-motion and reveals that row's swipe panel with the menu up. And do not add `preventDefault` to them: that is what would kill the compositor's touch scroll, which is the one interaction the menu is supposed to allow (`preventDefault` belongs on `mousedown`, to stop desktop focus, and on the swallowed `click`/`pointerup`)
 - Do not put `themeColor` back in the layout's `viewport` export, and do not sync the status bar from an effect keyed on `resolvedTheme` — Next re-renders the static tags on every client navigation (the bar went dark again on the second page), and the effect runs before next-themes sets the class (the bar lagged a launch behind). The boot script owns the tag and follows the class
@@ -5365,7 +5372,7 @@ When making changes, be aware of these high-impact files:
 - Do not bring back the month-capsule grid or a year stepper in the calendar's month/year picker — it is two wheels, live, closed by the date selector; and in the dual layout it takes the RIGHT pane with the month being chosen still drawn on the left. Keep `WHEEL_ITEM_PX` small enough that the wheel fits a dual pane's grid, or the panel grows (or clips) when it opens
 - Do not cap a date wheel's past at a few years — a pilot back-filling a paper logbook enters flights from decades ago; the default is 70
 - Do not make "Add Crew" open the crew picker directly, and do not lay an additional crew member out differently from the PIC/SIC rows — role on the LEFT (the menu), name on the RIGHT (the picker, for THAT row), a swipe to clear. The pick carries the row's role and index (`additionalCrewField`); address rows by index, never by crew-card id
-- Do not size the phone's bottom bar to its tabs, or let it run the full width of a tablet — it is `MOBILE_PILL_WIDTH`, the screen less the panel gutter each side (the same edges as a flight card, so the same proportion of every phone), capped at 25rem so an iPad in portrait keeps a bar rather than a slab. The tab padding still gives way below ~346px (`clamp(6px, (100vw − 250px)/8, 12px)`) so five tabs fit an iPad Split View window of 320. The bar's HEIGHT is not scaled: an iPad window at "iPhone size" draws CSS px at ~132 px/inch against a phone's ~150–160, so everything there is physically ~20% larger — that is the device, and sizing per platform would break the one-look rule
+- Do not size the phone's bottom bar to its tabs, or let it run the full width of a tablet — it is `MOBILE_PILL_WIDTH`, the screen less the panel gutter and 12px more each side (the same proportion of every phone), capped at 25rem so an iPad in portrait keeps a bar rather than a slab. The tab padding gives way below ~362px (`clamp(5px, (100vw − 262px)/10, 10px)`) so five tabs fit an iPad Split View window of 320. The bar's HEIGHT is not scaled: an iPad window at "iPhone size" draws CSS px at ~132 px/inch against a phone's ~150–160, so everything there is physically ~20% larger — that is the device, and sizing per platform would break the one-look rule
 - Do not put per-row `measureElement` on ANY virtualised list of same-height rows (airports, aircraft, crew, logbook) — calibrate once with `useCalibratedRowHeight`, and keep the card one height by construction (truncate, reserve empty lines). And never pass `useVirtualizer` an inline `getItemKey`: its measurements are memoised on that function's identity, so a new arrow per render rebuilds every row's position on every scroll-driven render (29k rows on the airports list)
 - Do not hand-roll a suggestion list under a field — `SuggestionList` (`components/ui/suggestion-list.tsx`) is the one (an inset well, 44px rows, inset dividers), and `AircraftTypeSuggestions` and the add-aircraft / add-airport candidate lists all render through it; the aircraft form, panel and page each carried a bordered `hover:bg-accent` web dropdown
 - Do not ask an online lookup per keystroke or by itself on a form — a flight is looked up on the Lookup button (or Enter), a fleet on opening By fleet or on Find. And do not put Gates or Inbound back in the flight form: the form is for logging; they live on the dashboard's duty band and its panel (`useDutyLookups`, one cache). A lookup over an earlier one replaces what the EARLIER LOOKUP wrote (`lookupPatch`'s `previous`), never what the pilot entered — that is "Replace"
@@ -5469,7 +5476,7 @@ When making changes, be aware of these high-impact files:
 - Do not hang a floating panel under the action buttons without holding `useFloatingPanelUnderHeader` while it is open (and its page active) — or the tap-to-top strip takes its first control's tap and the fade's tail dims and blurs its top as if it were content scrolling away. And do not try to fix that with a z-index: the page is in its keep-alive stacking context, below the shell's header. Clear the tail with a mask on the fade's LAYERS, never on the `ChromeFade` wrapper (an ancestor mask is a backdrop root, so the blur would sample nothing). And do not hide the calendar's date selector when the month/year picker opens: the picker REPLACES the grid in the same box, under the same selector, so the panel's height does not move
 - Do not leave a sign-out (or any action that awaits a network round trip before its first visible change) silent until the round trip returns — change its label on the TAP, and bound the wait (`flushBeforeSignOut(maxWaitMs)`)
 - Do not hand-roll a spinner — waiting is one thing and should look like one thing. `PageLoading` is the route-level state (every `loading.tsx`, the keep-alive Suspense fallback) and `PanelLoading` is the detail-panel one, both in `components/ui/page-loading.tsx`. The aircraft, airports and crew pages each carried an identical copy of a `border-2 border-primary border-t-transparent` ring, so waiting for a pane looked like a different kind of waiting depending on which tab you were on
-- Do not size the mobile bottom pill from `PILL_HEIGHT` — it is `MOBILE_PILL_HEIGHT` (56 against the desktop 44). They are not the same control: one is a row of text tabs in a dense header, the other is the phone's only navigation, aimed at with a thumb
+- Do not size the mobile bottom pill from `PILL_HEIGHT` — it is `MOBILE_PILL_HEIGHT` (52 against the desktop 44). They are not the same control: one is a row of text tabs in a dense header, the other is the phone's only navigation, aimed at with a thumb
 - Do not give the bottom bar a squarer corner than a stadium — `MOBILE_PILL_RADIUS` is half its own height, the same rule the 44px controls follow; it is a separate constant only because the bar is a different height. A third-of-the-height radius was tried (the proportion the reference tab bars use) and rejected on the look: what reads as a squircle there is CONTINUOUS CURVATURE, not a smaller radius, and a circular arc at that radius is just a rounded rectangle. Drawing the real thing needs `corner-shape`, and a corner shape one engine falls back from would leave iOS and Android with different bars
 - Do not give the gravity blob a colour of its own — it is `--on-glass-active`, THE selected-thing fill, shared with an action button's active state so the nav and the header say "this is the one you are on" the same way. It must stay a mix of two OPAQUE colours: any translucency shows up as the blob letting the page through, which is the one thing it must not do
 - Do not put `--primary` on `--on-glass-active` — a 32% tint of a colour is the same hue at a similar lightness, which is exactly why the active action button read as barely selected. The label is `--on-glass-active-fg`, the primary pushed AWAY from the fill (lighter on dark, darker on light) so it still reads as the accent

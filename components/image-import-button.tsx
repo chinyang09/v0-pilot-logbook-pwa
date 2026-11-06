@@ -1,7 +1,9 @@
 "use client"
 
-import { useRef, useState } from "react"
-import { Camera } from "lucide-react"
+import { useId, useRef, useState } from "react"
+import { createPortal } from "react-dom"
+import { AnimatePresence, motion } from "framer-motion"
+import { Camera, Images } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   extractTextFromImage,
@@ -11,6 +13,7 @@ import {
   type ExtractedFlightData,
 } from "@/lib/ocr"
 import { ImportStatusDialog } from "@/components/import/import-status-dialog"
+import { useBackDismiss } from "@/hooks/use-back-dismiss"
 
 interface ImageImportButtonProps {
   onDataExtracted: (data: ExtractedFlightData) => void
@@ -31,7 +34,14 @@ export function ImageImportButton({
   // A failed read stays on screen until it is dismissed. It used to show as
   // "Error" for two seconds and close itself — gone before it could be read.
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
+  const libraryInputRef = useRef<HTMLInputElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  // Where the source menu hangs, read off the button in the tap.
+  const [menuAt, setMenuAt] = useState<{ top: number; right: number } | null>(null)
+  const ids = useId()
+  const cameraId = `${ids}-camera`
+  const libraryId = `${ids}-library`
 
   const processImage = async (file: File) => {
     setLoading(true)
@@ -73,7 +83,7 @@ export function ImageImportButton({
     } finally {
       setLoading(false)
       setProgress(null)
-      if (fileInputRef.current) fileInputRef.current.value = ""
+      for (const input of [cameraInputRef.current, libraryInputRef.current]) if (input) input.value = ""
     }
   }
 
@@ -86,30 +96,44 @@ export function ImageImportButton({
 
   return (
     <>
-      {/* ONE image input, no `capture`: the operating system's own sheet
-          offers the camera and the library (iOS: Take Photo / Photo Library;
-          Android: Camera / Files). An in-app "Take Photo / Choose from
-          Gallery" dropdown in front of it was a web menu restating that
-          sheet, and a second tap before the camera. */}
+      {/* TWO inputs, one per source. A single image input with no `capture`
+          was meant to bring up the OS sheet offering both — and on iOS it
+          does — but Android 14+ answers `image/*` with its Photo Picker,
+          which has no camera: the pilot could only choose a photo. With
+          `capture` the camera opens directly; without it, the library. */}
       <input
+        id={cameraId}
         type="file"
-        ref={fileInputRef}
+        ref={cameraInputRef}
+        className="hidden"
+        accept="image/*"
+        capture="environment"
+        onChange={handleFileChange}
+      />
+      <input
+        id={libraryId}
+        type="file"
+        ref={libraryInputRef}
         className="hidden"
         accept="image/*"
         onChange={handleFileChange}
       />
       <Button
+        ref={buttonRef}
         variant={variant}
         size={size}
         className={className}
         disabled={loading}
         aria-label="Read times from a photo"
+        aria-haspopup="menu"
+        aria-expanded={menuAt !== null}
         // The press is the earliest sign a photo is coming: wake the engine
         // that will read it while the pilot is still taking it.
         onPointerDown={() => warmOCR()}
         onClick={() => {
           warmOCR()
-          fileInputRef.current?.click()
+          const r = buttonRef.current?.getBoundingClientRect()
+          if (r) setMenuAt({ top: r.bottom + 6, right: Math.max(12, window.innerWidth - r.right) })
         }}
       >
         {/* No spinner: the processing dialog covers this button and says
@@ -117,6 +141,7 @@ export function ImageImportButton({
             every frame while the photo is being read. */}
         <Camera className="h-4 w-4" />
       </Button>
+      <PhotoSourceMenu at={menuAt} cameraId={cameraId} libraryId={libraryId} onClosed={() => setMenuAt(null)} />
 
       {/* The app's one progress surface — the same dialog a report import
           shows — rather than a stock dialog with a bare progress bar. */}
@@ -135,5 +160,68 @@ export function ImageImportButton({
         }}
       />
     </>
+  )
+}
+
+/**
+ * Camera or library — the app's own menu face (`.menu-surface`, 44px rows),
+ * hung off the button. Each row is a LABEL for its input, so the picker opens
+ * as the tap's own default action: iOS opens a file input only inside the
+ * gesture, and the OptionMenu applies a choice after a history round trip,
+ * which is outside it.
+ */
+function PhotoSourceMenu({
+  at,
+  cameraId,
+  libraryId,
+  onClosed,
+}: {
+  at: { top: number; right: number } | null
+  cameraId: string
+  libraryId: string
+  onClosed: () => void
+}) {
+  const dismiss = useBackDismiss(at !== null, onClosed)
+  if (typeof document === "undefined") return null
+  // A label is not activated by Enter/Space, so the keyboard opens the input
+  // itself — a key press is a gesture, so the browser allows it.
+  const onKey = (inputId: string) => (e: React.KeyboardEvent) => {
+    if (e.key !== "Enter" && e.key !== " ") return
+    e.preventDefault()
+    document.getElementById(inputId)?.click()
+    dismiss()
+  }
+  const row =
+    "relative z-[2] flex min-h-11 w-full cursor-pointer items-center gap-3 px-4 text-[15px] hover:bg-[var(--on-glass-fill-soft)] active:bg-[var(--on-glass-fill)]"
+  return createPortal(
+    <AnimatePresence>
+      {at && (
+        <>
+          <div key="scrim" aria-hidden className="fixed inset-0 z-[200]" onPointerDown={(e) => (e.preventDefault(), dismiss())} />
+          <motion.div
+            key="menu"
+            role="menu"
+            aria-label="Photo"
+            initial={{ opacity: 0, scale: 0.92 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.96 }}
+            transition={{ duration: 0.16, ease: [0.2, 0.9, 0.3, 1] }}
+            className="menu-surface fixed z-[201] w-52 py-1.5"
+            style={{ top: at.top, right: at.right, transformOrigin: "top right" }}
+            onKeyDown={(e) => e.key === "Escape" && dismiss()}
+          >
+            <label htmlFor={cameraId} role="menuitem" tabIndex={0} className={row} onClick={() => dismiss()} onKeyDown={onKey(cameraId)}>
+              <Camera className="h-4 w-4 text-muted-foreground" aria-hidden />
+              Take Photo
+            </label>
+            <label htmlFor={libraryId} role="menuitem" tabIndex={0} className={row} onClick={() => dismiss()} onKeyDown={onKey(libraryId)}>
+              <Images className="h-4 w-4 text-muted-foreground" aria-hidden />
+              Choose Photo
+            </label>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>,
+    document.body
   )
 }

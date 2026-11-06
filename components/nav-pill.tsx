@@ -53,7 +53,11 @@ const TAB_CONFIG: Record<
     label: "Logbook",
     icon: Book,
     href: "/logbook",
-    isActive: (p) => p === "/logbook" || p?.startsWith("/flights/"),
+    // The sidebar's Logbook group: Currencies and the Bin light this tab, the
+    // way FDP and Discrepancies light Roster. Currencies lit Roster while the
+    // sidebar filed it under Logbook, so the two navs disagreed.
+    isActive: (p) =>
+      p === "/logbook" || p?.startsWith("/flights/") || p === "/currencies" || p === "/recently-deleted",
   },
   roster: {
     label: "Roster",
@@ -61,7 +65,6 @@ const TAB_CONFIG: Record<
     href: "/roster",
     isActive: (p) =>
       p === "/roster" ||
-      p === "/currencies" ||
       p === "/discrepancies" ||
       p === "/fdp",
   },
@@ -115,9 +118,10 @@ const PILL_HEIGHT = 44 // h-11
  * They are not the same control at the same size: the desktop pill is a row of
  * text tabs in a dense header, the phone's is the app's primary navigation and
  * the only one, with an icon over a label and a thumb rather than a cursor
- * aiming at it. Matched to the platform's own bottom bars (and to Claude's).
+ * aiming at it. 52px holds a 44px tab (the touch-target floor) with 4px of
+ * glass above and below; at 56 the owner read the bar as too big.
  */
-const MOBILE_PILL_HEIGHT = 56
+const MOBILE_PILL_HEIGHT = 52
 /**
  * The bottom bar is a STADIUM — half its own height, so its ends are
  * semicircular and it reads as one continuous capsule, the same rule the 44px
@@ -135,13 +139,12 @@ const MOBILE_PILL_HEIGHT = 56
  */
 const MOBILE_PILL_RADIUS = MOBILE_PILL_HEIGHT / 2
 /**
- * The bottom bar's width: the screen less the panel gutter each side, as a
- * flight card — but never wider than 25rem. On a phone (≤ ~424px) that is the
- * full width; on an iPad in portrait the full width read as a slab across the
- * screen (the owner's report), so it stops a little wider than the 330px the
- * bar used to hug its tabs at.
+ * The bottom bar's width: the screen less the panel gutter each side and
+ * 12px more, never wider than 25rem. A phone gets a bar a little inside a
+ * flight card's edges (the owner's report: edge to edge read as too big),
+ * and an iPad in portrait stops at 400px rather than a slab across the screen.
  */
-const MOBILE_PILL_WIDTH = "min(calc(100% - 2 * var(--panel-gutter)), 25rem)"
+const MOBILE_PILL_WIDTH = "min(calc(100% - 2 * var(--panel-gutter) - 1.5rem), 25rem)"
 const PILL_TOP = SIDEBAR_MARGIN // top offset — aligns pill center with header center
 
 // ─── Morph timing ────────────────────────────────────────────
@@ -1001,7 +1004,7 @@ const PillBarContent = memo(function PillBarContent({
       className={cn(
         "flex items-center px-1.5",
         // The bottom bar is the taller of the two — see MOBILE_PILL_HEIGHT.
-        mode === "desktop" ? "h-11" : "h-14"
+        mode === "desktop" ? "h-11" : "h-13"
       )}
     >
       {/* Sidebar toggle — fixed width bookend */}
@@ -1087,17 +1090,16 @@ const PillBarContent = memo(function PillBarContent({
                 <span
                   data-grav-item
                   className={cn(
-                    // The padding gives way below ~346px (an iPad window in
-                    // Split View is 320): at a fixed 12px the bar was 330px
-                    // wide and ran off both edges of a 320px screen. Above
-                    // that it is 12px, so every phone gets the same bar.
-                    "inline-flex flex-col items-center justify-center gap-0.5 h-12 px-[clamp(6px,calc((100vw-250px)/8),12px)] rounded-full transition-colors",
+                    // The padding gives way below ~362px (an iPad window in
+                    // Split View is 320) so five tabs always fit the bar;
+                    // above that it is 10px, so every phone gets the same bar.
+                    "inline-flex flex-col items-center justify-center gap-0.5 h-11 px-[clamp(5px,calc((100vw-262px)/10),10px)] rounded-full transition-colors",
                     highlighted
                       ? "text-[var(--on-glass-active-fg)]"
                       : "text-foreground"
                   )}
                 >
-                  <Icon className="h-[22px] w-[22px]" />
+                  <Icon className="h-5 w-5" />
                   <span className="text-[10px] leading-none">{tab.label}</span>
                 </span>
               )}
@@ -1416,7 +1418,7 @@ const EXPANDED_HEIGHT =
 
 /**
  * Which tab a route lights. A tab's OWN page wins over a family match: the
- * Roster tab also stands for Currencies, FDP and Discrepancies, so with a
+ * Logbook tab also stands for Currencies, so with a
  * Currencies tab in the bar as well `/currencies` matched both — the blob went
  * to whichever came first and BOTH labels read as selected.
  */

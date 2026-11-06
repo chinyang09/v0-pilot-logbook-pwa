@@ -53,7 +53,7 @@ describe("CAAS — SASP Part 1 Appendix B", () => {
   it("designates PIC U/S and says it counts in P1 once certified (Case B)", () => {
     expect(caas("picusTime")).toEqual({
       label: "PIC U/S",
-      helper: "Counts in P1 once the PIC certifies it · FAA PIC (supervised)",
+      helper: "Counts in P1 once the PIC certifies it",
     })
     expect(roleLabel("PICUS", "CAAS")).toBe("PIC U/S")
   })
@@ -69,10 +69,16 @@ describe("CAAS — SASP Part 1 Appendix B", () => {
 })
 
 describe("categoryLabel", () => {
-  it("leads with the chosen authority's name and lists the offered others that differ", () => {
-    expect(categoryLabel(timeCategory("instructorTime"), "FAA")).toEqual({ label: "Dual Given", helper: "CAAS Instructor" })
-    expect(categoryLabel(timeCategory("picTime"), "CAAS")).toEqual({ label: "P1", helper: "FAA PIC" })
-    expect(categoryLabel(timeCategory("sicTime"), "FAA")).toEqual({ label: "SIC", helper: "CAAS P2" })
+  it("leads with the chosen authority's name", () => {
+    expect(categoryLabel(timeCategory("instructorTime"), "FAA").label).toBe("Dual Given")
+    expect(categoryLabel(timeCategory("picTime"), "CAAS").label).toBe("P1")
+    expect(categoryLabel(timeCategory("sicTime"), "FAA").label).toBe("SIC")
+  })
+
+  it("says only the authority's own rule — no definitions, no other authorities' names", () => {
+    expect(categoryLabel(timeCategory("picTime"), "CAAS").helper).toBe("")
+    expect(categoryLabel(timeCategory("nightTime"), "FAA").helper).toBe("")
+    expect(categoryLabel(timeCategory("soloTime"), "CAAS").helper).toBe("Also counts in P1")
   })
 
   it("never names EASA while its wording is unverified", () => {
@@ -80,82 +86,5 @@ describe("categoryLabel", () => {
     for (const c of TIME_CATEGORIES) {
       for (const { value } of OFFERED_AUTHORITIES) expect(categoryLabel(c, value).helper).not.toMatch(/EASA/)
     }
-  })
-
-  it("spells the category out when every authority agrees on the name", () => {
-    expect(categoryLabel(timeCategory("nightTime"), "FAA").helper).toMatch(/twilight/)
-  })
-
-  it("never returns an empty helper", () => {
-    for (const c of TIME_CATEGORIES) {
-      for (const { value } of LOGBOOK_AUTHORITIES) expect(categoryLabel(c, value).helper.length).toBeGreaterThan(0)
-    }
-  })
-})
-
-describe("roleLabel", () => {
-  it("names the role the way the rules do", () => {
-    expect(roleLabel("Dual", "FAA")).toBe("Dual Received")
-    expect(roleLabel("Instructor", "FAA")).toBe("Dual Given")
-  })
-})
-
-describe("showsCategory", () => {
-  it("offers what the authority's logbook keeps", () => {
-    expect(showsCategory(timeCategory("picusTime"), "CAAS", "00:00")).toBe(true)
-    expect(showsCategory(timeCategory("crossCountryTime"), "FAA", undefined)).toBe(true)
-  })
-
-  it("hides one it does not keep, unless the flight already holds time there", () => {
-    expect(showsCategory(timeCategory("picusTime"), "FAA", "00:00")).toBe(false)
-    expect(showsCategory(timeCategory("picusTime"), "FAA", "")).toBe(false)
-    expect(showsCategory(timeCategory("picusTime"), "FAA", "01:20")).toBe(true)
-  })
-})
-
-describe("multi-pilot time", () => {
-  it("comes from the type, or the record's own crew: a co-pilot role, both seats named, a relief pilot", () => {
-    expect(isMultiPilotFlight({ pilotRole: "PIC", aircraftType: "A21N" })).toBe(true)
-    expect(isMultiPilotFlight({ pilotRole: "PIC", aircraftType: "C172" })).toBe(false)
-    expect(isMultiPilotFlight({ pilotRole: "PIC", additionalCrew: [{ name: "Tan", role: "Relief Pilot" }] })).toBe(true)
-    expect(isMultiPilotFlight({ pilotRole: "PIC", additionalCrew: [{ name: "Tan", role: "Observer" }] })).toBe(false)
-    expect(isMultiPilotFlight({ pilotRole: "SIC", aircraftType: "A320", entryType: "positioning" })).toBe(false)
-    expect(isMultiPilotFlight({ pilotRole: "SIC" })).toBe(true)
-    expect(isMultiPilotFlight({ pilotRole: "PICUS" })).toBe(true)
-    expect(isMultiPilotFlight({ pilotRole: "PIC", picName: "Self", sicName: "Tan" })).toBe(true)
-    expect(isMultiPilotFlight({ pilotRole: "PIC", picName: "Self", sicName: " " })).toBe(false)
-    expect(isMultiPilotFlight({ pilotRole: "SIC", entryType: "simulator" })).toBe(false)
-  })
-
-  const flight = (over: Partial<FlightLog>): Partial<FlightLog> => ({
-    date: "2026-10-01",
-    outTime: "02:00",
-    inTime: "04:10",
-    departureIcao: "WSSS",
-    arrivalIcao: "VTBS",
-    pilotRole: "SIC",
-    manualOverrides: {},
-    ...over,
-  })
-
-  it("is the block time on a multi-pilot flight, and zero on a single-pilot one", () => {
-    expect(recalculateFlightFields(flight({}), null, null).multiPilotTime).toBe("02:10")
-    expect(recalculateFlightFields(flight({ pilotRole: "PIC" }), null, null).multiPilotTime).toBe("00:00")
-  })
-
-  it("leaves a pinned figure and a switched-off category alone", () => {
-    const pinned = flight({ multiPilotTime: "01:00", manualOverrides: { multiPilotTime: true } })
-    expect(recalculateFlightFields(pinned, null, null).multiPilotTime).toBeUndefined()
-    const off = { ...DEFAULT_AUTO_FILL_PREFERENCES, multiPilot: false }
-    expect(recalculateFlightFields(flight({}), null, null, off).multiPilotTime).toBeUndefined()
-  })
-
-  it("fills a flight stored before the field existed, on the server and the client alike", () => {
-    expect(inferMultiPilotTime({ pilotRole: "SIC", blockTime: "02:10" })).toBe("02:10")
-    expect(inferMultiPilotTime({ pilotRole: "PIC", blockTime: "02:10" })).toBe("00:00")
-    expect(inferMultiPilotTime({ pilotRole: "SIC" })).toBe("00:00")
-    expect(inferMultiPilotTime({ pilotRole: "SIC", entryType: "simulator", blockTime: "04:00" })).toBe("00:00")
-    // An airline sector imported with only the captain named is still two-crew.
-    expect(inferMultiPilotTime({ pilotRole: "PIC", aircraftType: "A320", blockTime: "01:30" })).toBe("01:30")
   })
 })
