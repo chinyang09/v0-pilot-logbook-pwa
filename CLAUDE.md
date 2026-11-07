@@ -48,7 +48,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 
 | Area | What it pins down |
 |---|---|
-| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp, that the single-pass timeline sums and acclimatisation equal their per-item definitions, the rolling windows in six time zones, the duty timeline's blocks (duty vs FDP, the FDP's limit at the last on-blocks) and the state at its pointer, the rolling limits at an instant (equal to the day figure once duties end), the Quick Check's violations, and `fifth-schedule-scenarios.test.ts` — the Fifth and First Schedules clause by clause as worked scenarios through the real pipeline, days off (para 5) included |
+| `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp, that the single-pass timeline sums and acclimatisation equal their per-item definitions, the rolling windows in six time zones, the duty timeline's blocks (duty vs FDP, the FDP's limit at the last on-blocks) and the state at its pointer, the rolling limits at an instant (equal to the day figure once duties end), the Quick Check's violations, and `fifth-schedule-scenarios.test.ts` — the Fifth and First Schedules clause by clause as worked scenarios through the real pipeline, days off (para 5) included; `fdp-pipeline.test.ts` — `runFDPPipeline` itself on the owner's part-flown day (7 Nov 26) and the dashboard on a late last leg |
 | `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation, and a REAL schedule PDF (`fixtures/schedule-oct-2026-local-base.pdf`) run through the actual extractor |
 | `lib/utils/parsers/shared/__tests__/pooled-map.test.ts` | the bounded fan-out both enrichment chains end in |
 | `lib/lookup/__tests__/search-candidates.test.ts`, `lib/lookup/__tests__/composite.test.ts`, `app/api/lookup/__tests__/` | search candidates — airframe and live-flight hits, exact / begins / inside ranking, one row per tail, airport codes off the label; the composed `aircraft/candidates` asking the flight history only for a whole registration search missed, and `exact=1` answering 404 only when every source answered; the door's sign-in rule over both kinds of route; enrichment never taking a near miss |
@@ -1291,8 +1291,24 @@ the pipeline builds duties from flown flights, so nothing past today reached
 it: the FDP page read "Next · None scheduled" over a week of rostered
 sectors, and the forecast, the chart's projection and para 4's look-ahead saw
 no duty ahead. Future duties never reach the cumulative limits (those read
-`!isFuture`). A part-flown duty is left to the dashboard's own plan; a date
-an older import put a schedule FLIGHT duty on keeps that one.
+`!isFuture`). A date an older import put a schedule FLIGHT duty on keeps that
+one.
+
+**A PART-flown duty takes its plan in the pipeline itself**
+(`completePartFlownDuties`). It was left to the dashboard's own plan — so on
+the FDP page, the Quick Check and para 5, the duty ended at the first arrival:
+the owner's WSSS–WBKK–WSSS on 7 Nov 26, between the sectors, drew one leg,
+started a rest at BKI with a one-sector FDP maximum (13:00 for 12:15), and with
+the next duty a week away read "18h at base after 9 days away" — a para 5(5)
+violation on a turnaround. The record's duty takes the plan's shape (report,
+debrief, sectors, route, maximum, flight ids — the timeline draws the rest as
+scheduled) and keeps the record's flight minutes.
+
+**The pipeline is ONE pure function, `runFDPPipeline`**
+(`lib/utils/roster/fdp-pipeline.ts`): flights + roster + `nowMs` in, the whole
+`FDPResult` out. `useFDPData` only caches it. It lived inside the hook and the
+scenario suites assembled their own copy, which is how the part-flown gap got
+past them; `fdp-pipeline.test.ts` runs the real one on the owner's day.
 
 #### The FDP ends at the last ON-BLOCKS, not at the debrief
 
@@ -1304,7 +1320,11 @@ hour after the aeroplane was parked and both sectors logged.
 `fdpEndOf` closes the active window at the last arrival once EVERY sector of
 the duty is on blocks. Until then the duty is still running however far past
 its planned debrief it goes — an unlogged sector is not a finished one, which
-is what keeps a delayed duty from falling out of the panel early.
+is what keeps a delayed duty from falling out of the panel early. That was
+written here long before the code did it: `fdpEndOf` returned the PLANNED end,
+so a late last leg still airborne read "Duty complete · Rest until …". It now
+runs to now, capped at report + the FDP maximum + the commander's 3 hours
+(para 13) so a sector never logged cannot hold the duty open forever.
 
 #### What the duty band says, and what it does not
 
@@ -1399,6 +1419,9 @@ standing requirement** — it is the only thing on the page happening right now
 rather than being true today. Outstanding REST also raises an otherwise-clear
 pilot to CAUTION: rest lives in the duty state, so it is not one of the
 requirements the verdict is drawn from and the annunciator has to fold it in.
+Not while ON DUTY: the rest clock then counts the rest owed AFTER the duty in
+progress, nothing to act on yet, and it used to lead the panel mid-duty ("Rest
+until 20:05Z" over a duty with a sector still to fly).
 
 The state also tints the surface (`TONE.glow`) — a soft wash bled into the top
 of the panel, so it takes on the mood of its own state before a word is read.
@@ -2059,6 +2082,10 @@ JUL  WSSS                             WICA        ← "SIMULATOR" for a sim
 
 - An optional `diffs` map turns any covered slot into `old struck through in
   grey` + `new in the accent colour` — that is how the import review renders.
+  A SCHEDULED-time change is drawn in the OUT/IN slot only while the slot
+  shows the scheduled time; on a flown flight it is listed under the card
+  ("Scheduled In 02:59 → 03:10"). Drawn in the slot it read as the import
+  moving the time the aeroplane actually arrived.
 - Clock times honour `displayPrefs.clockSeparator`; the duration always keeps
   its colon.
 - The out—block—in connector is `bg-current` (the same colour as the times it
@@ -3083,6 +3110,33 @@ identical:
   Compare"). Helper text under a label and a question in a dialog are
   sentences. Helper text is ONE short line where it can be ("Prefixes flight
   numbers: 288 → TR288.") — the label already names the thing.
+- **A switch's ROW is the control** (`ToggleRow` is a `<label>` for its
+  switch, in Settings and the flight form alike): only the 32×18 switch took a
+  tap. The switch is 24×40 with a track you can see OFF (`foreground/15`, `/25`
+  dark) — at `--input` it was ΔL ≈ 0.01 on a dark card, a white knob floating
+  at the row's end.
+- **Settings › Display asks two questions, one row each** — Clock (24-hour
+  14:30 / 1430, or 12-hour) and Durations (2:30 / 02:30). The stored fields
+  split them differently (`timeFormat` holds the 12-hour clock AND padded
+  durations, `clockSeparator` the colon), so the rows are derived: a 12-hour
+  clock has no padded durations in that model, and Durations says so.
+- **A flight selected from ELSEWHERE is brought into view in the logbook
+  list** (`revealFlight`, once per selection) — a note's Open flight or a deep
+  link lit a row the tablet's list had not scrolled to.
+- **A picker says it is one.** The flight form's Aircraft / From / To / crew
+  rows open the Aircraft, Airports and Crew pages in select mode; they looked
+  exactly like the tabs, with the tab's title and no way back but the system
+  gesture. In select mode the title is the question ("Choose Aircraft",
+  "Choose Departure", "Choose PIC", "Choose Relief Pilot") and Back to the
+  flight leads the header.
+- **NOW is for a time that HAPPENS** (Report, OUT, OFF, ON, IN) — not for
+  Scheduled Out / In, which are published, not stamped. Five NOW buttons ran
+  down an empty form. An empty row with no NOW shows its one `--:--`, not a
+  second one under the zone's name.
+- **Every new record names itself the same way**: New Aircraft is a
+  `DetailFormPanel` like New Duty and New Currency (it was a bare scroller with
+  no title), and a helper line says something only once there is something to
+  say ("Not found online…" read over an empty field).
 - **A short code field is sized to its code** (`SettingsRow`'s `maxLength`):
   a text input claims ~200px, which squeezed the Airline row's helper text
   into a narrower column than every other row's.
@@ -3342,7 +3396,8 @@ page, the dashboard and the Bin each built their own `Intl.DateTimeFormat`, in
 - Where a context makes a part redundant or there is no room, a part is
   DROPPED, never reordered: `27 Nov` on a chart axis or a caption, `Fri, 27 Nov`
   in the Quick Check (it looks days ahead), `16 Oct – 6 Nov 26` never — a range
-  inside one year carries no year, across two each end carries its own.
+  inside one year carries no year, across two each end carries its own
+  (`formatDayRange`: `1 Nov – 30 Nov 26`, `28 Dec 26 – 3 Jan 27`).
 - The parts are put together by hand, not by a locale: `en-GB` and `en-US`
   disagree on order and comma, and Node's ICU and a browser's can disagree with
   each other, which is a hydration mismatch.
@@ -4285,6 +4340,14 @@ assessment on record:
 
 ### Deferred design work (owner-approved to-do)
 
+- **Fewer "USE x:xx" buttons in the flight form's TIME section.** An airline
+  sector shows up to seven (P2, PIC U/S, Dual, Instructor, IFR, Actual and
+  Simulated Instrument), which reads as noise. A likely shape: offer USE only
+  on the role times the pilot's seat logs (Settings › Logging) plus the
+  categories the flight already holds, with the rest a tap away. It changes
+  what the logbook rules show, so it waits for the owner (Nov 2026: "keep that
+  as future Todo").
+
 - **The split-view detail panel on every route** — no longer deferred: the
   owner set the rule (Oct 2026), see "Main / Detail on every page".
 
@@ -4613,7 +4676,7 @@ When making changes, be aware of these high-impact files:
     | header controls (`GlassIconButton`/`GlassButtonGroup`/`GlassSearchButton` — they ARE the `ChromeFade` band by construction) | the mobile bottom pill — `bottom-edge-blur` is a DARKEN with no blur in it, so the flight cards would read straight through the tabs |
     | the DESKTOP pill in pill shape (same header band) | the DESKTOP sidebar — no backdrop at all, it stands beside the content |
     | the MOBILE nav in sidebar shape (over `SIDEBAR_BACKDROP_BLUR`) | the logbook calendar and its panels, the login page, the import segmented tabs |
-    | the review modal's footer controls (over a bottom `ChromeFade`) | the import status dialog's Done button (plain dialog surface) |
+    | | the import dialogs — the review is a plain card (see Things to Avoid) |
 
     The nav is deliberately on BOTH lists, one per shape, and in opposite
     directions on the two morphs — which is why `background-color` rides the
@@ -5246,6 +5309,8 @@ When making changes, be aware of these high-impact files:
 - Do not replace the sector chain with a list of recent flights — that list showed history, not THIS duty, and could not answer "where am I in a four-sector day". The chain comes from `deriveSectorLegs` off the duty's own route
 - Do not let the summary page's flight list grow the page — it scrolls in its own bounded box, so a year-long period cannot push the breakdown below it out of reach
 - Do not read an in-progress duty from the logbook alone. `mergeDutyPeriods` prefers the logbook for today, and mid-duty the logbook holds only the sectors already flown — so a two-sector day with one sector logged reads as a duty that ended at lunchtime and the panel falls through to a rest countdown. Pass `scheduleDutyPeriods` into `deriveDutyStatus`; where the roster runs later, the duty is still on
+- Do not let a part-flown duty end at its first arrival in the pipeline — `completePartFlownDuties` gives it the plan's shape before rest, para 4 and para 5 see it, and the pipeline runs only through `runFDPPipeline` (one function, tested as the app runs it). And do not end an active duty at its planned end while a sector is still off blocks
+- Do not float glass or a blur fade over a dialog's scrolling list. The import review's header and footer floated over its cards on glass — seventeen `backdrop-filter`s (the segmented tabs, two glass buttons, two `ChromeFade`s) re-blurred on every scroll frame: 23 frames over 50ms in a short scroll at 4×, worst 550ms, against 1 frame (117ms) as a plain card, and on a phone the cards faded out under ~300px of blur before reaching the title. A dialog is header / scroller / footer bands on its own surface, with `Button` outline + default. `SegmentedTabs` is on `.control-surface` for the same reason — it always sits in a panel over a flat backdrop
 - Do not treat the FDP pipeline's duty periods as the whole plan. `computeFDPResult` filters to `isFlownFlight`, so a sector sitting in the logbook as `scheduledOut`/`scheduledIn` contributes nothing — on a part-flown day with no roster imported there is no plan anywhere, and the panel reads "Roster Clear" and counts down rest between sectors. `buildPlannedDuties` rebuilds the day from the flight rows with scheduled fallbacks; it is for duty shape and FDP only, never cumulative limits
 - Do not end the ACTIVE duty at the debrief — the FDP ends at the last ON-BLOCKS, and the duty window carries para 7(2)'s 30 minutes of post-flight checks after it. Keyed off the window the panel kept counting an FDP down for half an hour after the aeroplane was parked. `fdpEndOf` closes it at the last arrival once EVERY sector is on blocks, and not before: an unlogged sector is not a finished one
 - Do not measure a duty's FDP to the DEBRIEF — that carries para 7(2)'s 30 minutes of post-flight checks, which are duty but not FLIGHT duty. `DutyPeriod.fdpEndTime` is the last on-blocks and every FDP figure is measured to it
@@ -5287,6 +5352,7 @@ When making changes, be aware of these high-impact files:
 - Do not wire a detail's Back to `setSelectedId(null)` — that closes onto the CURRENT page's list, and a detail opened from another page (a link carrying `?selected=`) must go back to the page it came from. The overlay's Back is `backFromDetail`; a link that opens another page's detail needs nothing more than its `?selected=`
 - Do not open a detail with a REPLACE — an explicit open must PUSH, or the system back gesture skips the whole section instead of closing the detail. Decide "is it already open" from the URL, not the stored selection (a section keeps its selection while closed). And do not make the "re-sync `?selected=`" effect unconditional: it runs in the same commit as both the open and the back-clear, and will replace the pushed entry / put the param straight back
 - Do not remove `overflow-anchor: none` from the logbook scroller — growing the top spacer is how the floating panels push the list, and scroll anchoring exists to cancel exactly that (it bumps `scrollTop` to keep the view still). With it on, the calendar only pushed the list when it was already scrolled to the top, and the compensating adjustment read as a downward scroll that hid the nav pill
+- Do not leave a collapsed panel's content painting — the calendar and the logbook's search are mounted at `height: 0` (their natural height must stay measurable), and clipped to nothing their GLASS was still composited: ten backdrop-filters on the logbook for two panels nobody could see. `useStowedWhenClosed` (`calendar-panel.tsx`) hides the content (`visibility`, so it is still laid out) once the collapse has finished, and shows it on the commit that opens it
 - Do not give the calendar's collapse and the list spacer separate animations — they share `PANEL_MOTION`, or the panel opens and the list catches up afterwards as a visible second stage. The calendar stays MOUNTED at `height: 0` so its natural height is measurable and the collapse is a px transition the spacer can match
 - Do not make the panel divider draggable again, and do not raise the main panel's `minSize` percent above what 360px needs — the two widths are a toggle, and a free drag flips the calendar's layout mid-gesture
 - Do not step the dual-month calendar by one month — the panes are a fixed odd|even pair, so a step moves two; stepping by one swaps which side each month is on. The pair only re-anchors when the top flight card leaves it entirely
@@ -5417,7 +5483,7 @@ When making changes, be aware of these high-impact files:
 - Do not ask an online lookup per keystroke or by itself on a form — a flight is looked up on the Lookup button (or Enter), a fleet on opening By fleet or on Find. And do not put Gates or Inbound back in the flight form: the form is for logging; they live on the dashboard's duty band and its panel (`useDutyLookups`, one cache). A lookup over an earlier one replaces what the EARLIER LOOKUP wrote (`lookupPatch`'s `previous`), never what the pilot entered — that is "Replace"
 - Do not take the first result of an aircraft or airport search as THE answer — a partial registration ("9VB") is a question. Only a candidate marked `exact` fills a form, an import or a submission by itself; anything else is listed for the pilot to choose, or is no match
 - Do not hand the year wheel a new options array per render — `yearOptions` keeps the SAME array while the range holds, and the range is anchored on TODAY (widened only when the viewed year falls outside). Anchored on the viewed year, every year spun rebuilt ~75 rows
-- Do not put a segmented choice back as a pair of filled rectangles — it is `SegmentedTabs` (glass, a sliding indicator, `h-9` segments), as in the import dialogs, the Quick Check and the custom palette's vividness and depth (`components/ui/segmented-tabs.tsx`). And measure its segments from ONE ResizeObserver: reading `offsetLeft` in a ref callback that is rebuilt on every selection forced a layout per tap and attached a new observer to every segment each time, never disconnecting the old ones
+- Do not put a segmented choice back as a pair of filled rectangles — it is `SegmentedTabs` (the action surface, a sliding indicator, `h-9` segments), as in the import dialogs, the Quick Check and the custom palette's vividness and depth (`components/ui/segmented-tabs.tsx`). And measure its segments from ONE ResizeObserver: reading `offsetLeft` in a ref callback that is rebuilt on every selection forced a layout per tap and attached a new observer to every segment each time, never disconnecting the old ones
 - Do not put an action back on the card surface (`bg-secondary`, `bg-card`, `bg-muted`) or give it a rectangle's corners — a thing you press is a CAPSULE or circle on `.control-surface`, a thing you read is a rounded rectangle. On the card surface the context preview's action row read as more card. And do not use the REAL glass (`GlassContainer`) for an action that sits over a scrim, a row or a panel: the painted surface is the same look with no `backdrop-filter`, and these pop in on exactly the frames a readback would cost most
 - Do not group header controls page by page — a header is VIEW (search, calendar, period) → TOOLS (import, Quick Check, alerts, read-from-photo) → CREATE (+, alone and last), one capsule per role, with a page switch first and detail commits (Cancel / Save / Edit, Back) one capsule each (`glass-icon-button.tsx`). And do not add a Refresh button: every list follows every write and every sync, so it re-reads the same rows, and it reads as "sync" — which is the cloud in the nav
 - Do not give the context preview's compact body `layout="position"` — it is the one block that exists in BOTH states, so it takes a FULL `layout`. Its height is unchanged either way, which makes its delta scaleX only: the row's content is condensed at the first frame and relaxes out as the card widens. `layout="position"` cancels the horizontal scale too, which lays it out at the RESTING width from frame one and lets the card clip it — on a tablet the arrival time and ICAO are missing until the card widens past them. The detail and the actions DO take `layout="position"`; they exist only while open. And keep the lift a static shadow on its own PROJECTED (`layout`) node faded by opacity, outside the clip: an interpolated `boxShadow` is rebuilt as a string every frame, and `overflow: hidden` on an ancestor eats a shadow entirely

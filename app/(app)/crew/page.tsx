@@ -19,6 +19,7 @@ import {
   Trash2,
   ChevronRight,
   Star,
+  ChevronLeft,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -559,12 +560,16 @@ export default function CrewPage() {
     });
   }, []);
 
+  // Picking for a flight's seat, the page says which: "Choose PIC",
+  // "Choose Relief Pilot". This title was computed and never shown.
   const pageTitle = fieldType
-    ? `Select ${
+    ? `Choose ${
         fieldType === "pic" || fieldType === "picId"
           ? "PIC"
           : fieldType === "sic" || fieldType === "sicId"
           ? "SIC"
+          : fieldType.startsWith("additionalCrew:")
+          ? fieldType.split(":")[1] || "Crew"
           : "Crew"
       }`
     : "Crew";
@@ -574,6 +579,14 @@ export default function CrewPage() {
   // Desktop floating glass bar actions — expandable search + glass add button
   const crewActions = useMemo(() => (
     <>
+      {/* Picking for a flight: the way back to it comes first. This page is
+          also the tab, and without it nothing said the list was a choice or
+          how to leave it but the system back gesture. */}
+      {fieldType && (
+        <GlassIconButton ariaLabel="Back to the flight" onClick={() => router.back()}>
+          <ChevronLeft className="h-5 w-5" />
+        </GlassIconButton>
+      )}
       <GlassSearchButton
         isOpen={desktopSearchOpen}
         onToggle={() => setDesktopSearchOpen(prev => !prev)}
@@ -585,13 +598,13 @@ export default function CrewPage() {
         <Plus className="h-5 w-5" />
       </GlassIconButton>
     </>
-  ), [handleAddCrew, searchQuery, desktopSearchOpen]);
+  ), [handleAddCrew, searchQuery, desktopSearchOpen, fieldType, router]);
 
   useRegisterMainActions(crewActions, isActive);
 
   return (
     <PageContainer
-      title="Crew"
+      title={pageTitle}
       rightContent={
         showFastScroll ? (
           <FastScroll

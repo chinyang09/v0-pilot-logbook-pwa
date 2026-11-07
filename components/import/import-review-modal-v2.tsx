@@ -15,8 +15,8 @@
 
 "use client";
 
-import { formatDayAt } from "@/lib/utils/date";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { formatDayAt, formatDayRange } from "@/lib/utils/date";
+import { useCallback, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,12 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
-import {
-  MODAL_SCRIM,
-  ChromeFade,
-  RadialBlurBackdrop,
-} from "@/components/ui/chrome-overlays";
-import { GlassContainer } from "@/components/ui/glass-container";
+import { MODAL_SCRIM, RadialBlurBackdrop } from "@/components/ui/chrome-overlays";
 import { cn } from "@/lib/utils";
 import type {
   AcceptableOperation,
@@ -153,24 +148,6 @@ export function ImportReviewModalV2({
   // Op indices where the user chose to KEEP the pilot-flying value already in
   // their logbook rather than take the report's.
   const [useRecordedPf, setUseRecordedPf] = useState<Set<number>>(new Set());
-  // Header and footer float OVER the scroll area (like the main panel), so the
-  // list dissolves into a progressive blur instead of stopping at a hard edge.
-  // Their heights are measured so the scroll padding always clears them.
-  const [chromeHeights, setChromeHeights] = useState({ top: 96, bottom: 64 });
-  const observeChrome = useCallback(
-    (edge: "top" | "bottom") => (node: HTMLDivElement | null) => {
-      if (!node) return;
-      const ro = new ResizeObserver(() => {
-        const h = node.offsetHeight;
-        setChromeHeights((prev) =>
-          prev[edge] === h ? prev : { ...prev, [edge]: h }
-        );
-      });
-      ro.observe(node);
-    },
-    []
-  );
-  const headerRef = useRef<HTMLDivElement | null>(null);
   const [activeTab, setActiveTab] = useState<Bucket | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const { preferences } = usePreferences();
@@ -384,67 +361,50 @@ export function ImportReviewModalV2({
         // isn't hidden behind it. Constrain to the visible viewport with
         // safe-area insets top + bottom so it never extends under the nav
         // pill or the mobile bottom nav.
-        // Reads as an app surface rather than a plain modal: translucent panel
-        // over a blurred backdrop, matching the glass chrome used by the nav
-        // pill and the floating action buttons.
-        className="z-[110] block max-w-[calc(100%-2rem)] sm:max-w-3xl gap-0 overflow-hidden rounded-3xl border-white/10 bg-card p-0 shadow-2xl h-[calc(100dvh-7rem-var(--install-banner-height))] max-h-[46rem] top-[calc(var(--install-banner-height)+var(--top-inset)+4.5rem)] translate-y-0 sm:top-[50%] sm:-translate-y-1/2"
-        // The backdrop blur is strongest around the dialog and clears toward
-        // the screen edges, so the app stays readable behind it.
+        className="z-[110] flex flex-col max-w-[calc(100%-2rem)] sm:max-w-3xl gap-0 overflow-hidden rounded-3xl border-white/10 bg-card p-0 shadow-2xl h-[calc(100dvh-7rem-var(--install-banner-height))] max-h-[46rem] top-[calc(var(--install-banner-height)+var(--top-inset)+4.5rem)] translate-y-0 sm:top-[50%] sm:-translate-y-1/2"
+        // The scrim is heaviest around the dialog and clears toward the
+        // screen edges, so the app stays readable behind it.
         overlayClassName={cn("z-[105]", MODAL_SCRIM)}
         // Rendered inside the dialog's own portal, between the overlay and the
         // panel — the panel itself is `overflow-hidden` AND transformed, so it
         // would clip even a fixed-position child.
         backdropSlot={<RadialBlurBackdrop className="fixed inset-0 z-[106]" />}
       >
-        {/* Floating top chrome: title + tab chips over a progressive blur. */}
-        <div
-          ref={(node) => {
-            headerRef.current = node;
-            observeChrome("top")(node);
-          }}
-          className="absolute inset-x-0 top-0 z-20"
-        >
-          <ChromeFade side="top" />
-          <div className="relative">
-            {/* Title and report meta share one row — stacked, the meta wrapped
-                to two lines and pushed the tabs (and the whole list) down. */}
-            <DialogHeader className="flex-row items-baseline gap-x-3 gap-y-0 space-y-0 px-4 pt-4 sm:px-6 sm:pt-5">
-              <DialogTitle className="shrink-0 text-base">
-                Review Import
-              </DialogTitle>
-              <DialogDescription className="min-w-0 flex-1 truncate text-right text-xs tabular-nums">
-                {plan.dateRange.start} – {plan.dateRange.end}
-                {generatedDate ? ` · ${generatedDate}` : ""}
-                {unchangedCount > 0 ? ` · ${unchangedCount} match` : ""}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="px-4 pb-3 pt-2.5 sm:px-6">
-              <SegmentedTabs
-                tabs={tabs}
-                value={(current ?? tabs[0]?.value) as Bucket}
-                onChange={(v) => {
-                  setActiveTab(v);
-                  setVisibleCount(PAGE_SIZE);
-                }}
-              />
-            </div>
+        {/* Header, list, footer — one column, each in its own band.
+            The header and footer used to FLOAT over the list on blurred
+            glass: seventeen backdrop-filters (the tabs, two glass buttons,
+            two fades) re-blurred on every scroll frame — 23 long frames in a
+            short scroll at 4× (550ms worst) against 2 without them — and on a
+            phone the cards faded out under ~300px of blur before they reached
+            the title. On a card the list simply scrolls between two edges. */}
+        <div className="shrink-0 border-b border-border/60">
+          {/* Title and report meta share one row — stacked, the meta wrapped
+              to two lines and pushed the tabs (and the whole list) down. */}
+          <DialogHeader className="flex-row items-baseline gap-x-3 gap-y-0 space-y-0 px-4 pt-4 pr-12 sm:px-6 sm:pt-5 sm:pr-12">
+            <DialogTitle className="shrink-0 text-base">
+              Review Import
+            </DialogTitle>
+            <DialogDescription className="min-w-0 flex-1 truncate text-right text-xs tabular-nums">
+              {formatDayRange(plan.dateRange.start, plan.dateRange.end)}
+              {generatedDate ? ` · ${generatedDate}` : ""}
+              {unchangedCount > 0 ? ` · ${unchangedCount} match` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-4 pb-3 pt-2.5 sm:px-6">
+            <SegmentedTabs
+              tabs={tabs}
+              value={(current ?? tabs[0]?.value) as Bucket}
+              onChange={(v) => {
+                setActiveTab(v);
+                setVisibleCount(PAGE_SIZE);
+              }}
+            />
           </div>
         </div>
 
-        {/* Panel.
-            `overscroll-contain` stops the scroll chaining into the page behind
-            the dialog once this list hits its end — that chaining scrolled the
-            flight list underneath, and the glass action buttons re-sampled
-            their backdrop as it moved, which read as them being tapped. */}
-        <div
-          className="h-full overflow-y-auto overflow-x-hidden overscroll-contain px-4 sm:px-6"
-          style={{
-            // Exactly the chrome height, like the main panel's pt-16 under its
-            // h-16 header: content starts where the gradient has faded out.
-            paddingTop: chromeHeights.top,
-            paddingBottom: chromeHeights.bottom,
-          }}
-        >
+        {/* `overscroll-contain` stops the scroll chaining into the page behind
+            the dialog once this list hits its end. */}
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-3 sm:px-6">
           {meta && (
             <div className="mb-3 flex items-start justify-between gap-3">
               <p className="text-xs text-muted-foreground">{meta.hint}</p>
@@ -507,43 +467,22 @@ export function ImportReviewModalV2({
           </div>
         </div>
 
-        {/* Floating bottom chrome: glass actions over a progressive blur. */}
-        <div
-          ref={observeChrome("bottom")}
-          className="absolute inset-x-0 bottom-0 z-20"
-        >
-          <ChromeFade side="bottom" />
-          <DialogFooter className="relative flex-row items-center justify-between gap-3 px-4 py-3 sm:px-6">
-            <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-              {breakdown || "No changes selected"}
-            </p>
-            {/* Both carry `overBlur`: the footer sits on a bottom ChromeFade,
-                so the rows scrolling under them are already blurred. */}
-            <div className="flex shrink-0 items-center gap-2">
-              <GlassContainer cornerRadius={20} overBlur>
-                <Button
-                  variant="ghost"
-                  onClick={onCancel}
-                  className="h-10 rounded-full px-4"
-                >
-                  Cancel
-                </Button>
-              </GlassContainer>
-              <GlassContainer cornerRadius={20} overBlur>
-                <Button
-                  variant="ghost"
-                  onClick={handleConfirm}
-                  className="h-10 rounded-full px-5 font-semibold text-primary"
-                >
-                  Apply
-                  {totalActions > 0 && (
-                    <span className="ml-1 tabular-nums">{totalActions}</span>
-                  )}
-                </Button>
-              </GlassContainer>
-            </div>
-          </DialogFooter>
-        </div>
+        <DialogFooter className="shrink-0 flex-row items-center justify-between gap-3 border-t border-border/60 px-4 py-3 sm:px-6">
+          <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+            {breakdown || "No changes selected"}
+          </p>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button variant="outline" onClick={onCancel}>
+              Cancel
+            </Button>
+            <Button onClick={handleConfirm} className="font-semibold">
+              Apply
+              {totalActions > 0 && (
+                <span className="ml-1 tabular-nums">{totalActions}</span>
+              )}
+            </Button>
+          </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

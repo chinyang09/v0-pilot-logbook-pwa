@@ -109,7 +109,7 @@ describe("buildLegalityModel — recency is ONE requirement", () => {
 
     const rows = model.requirements.filter((r) => r.id.startsWith("recency"))
     expect(rows).toHaveLength(1)
-    expect(rows[0].label).toBe("90-day recency")
+    expect(rows[0].label).toBe("90-Day Recency")
     expect(rows[0].detail).toContainEqual({ label: "Takeoffs", value: "6 / 3" })
     expect(rows[0].detail).toContainEqual({ label: "Landings", value: "4 / 3" })
   })

@@ -176,13 +176,13 @@ function OrganizationField({ value, onChange }: { value: string; onChange: (v: s
   return (
     <>
       <SettingsRow
-        label="Organization"
+        label="Company"
         value={value}
         onChange={(v) => {
           setTyping(true)
           onChange(v)
         }}
-        placeholder="Company"
+        placeholder="Airline"
       />
       {matches.length > 0 && (
         <div className="px-4 pb-3 row-divider">

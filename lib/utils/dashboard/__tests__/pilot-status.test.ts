@@ -119,7 +119,7 @@ describe("buildPilotStatus — governing constraint", () => {
     const s = status({
       recency: { takeoffs: 3, landings: 3, current: true, lapseIso: "2026-08-20" },
     })
-    expect(s.governing?.label).toBe("90-day recency")
+    expect(s.governing?.label).toBe("90-Day Recency")
     expect(s.governing?.value).toBe("6d")
   })
 })
@@ -168,6 +168,22 @@ describe("buildPilotStatus — next action", () => {
       legalAtUtc: "2026-08-14T22:42:00Z",
     })
     expect(s.state).toBe("warning")
+  })
+
+  it("does not lead with the rest AFTER the duty in progress", () => {
+    // On duty, the rest clock is the rest owed once this duty ends — there is
+    // nothing to do about it yet. It used to read "Rest until 20:05Z" over a
+    // duty with a sector still to fly.
+    const s = status({}, [duty({ reportTime: "06:00", debriefTime: "18:00", sectorCount: 2 })], {
+      isLegalNow: false,
+      elapsedMinutes: 0,
+      requiredMinutes: 720,
+      legalAtUtc: "2026-08-15T07:00:00Z",
+    })
+    expect(s.duty.phase).toBe("on_duty")
+    expect(s.nextAction.headline).not.toMatch(/^Rest/)
+    expect(s.state).toBe("current")
+    expect(s.legalAtUtc).toBeNull()
   })
 
   it("says where the pilot is in the duty rather than 'nothing required'", () => {

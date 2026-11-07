@@ -508,6 +508,9 @@ function TimeRow({
           </span>
           <span className="text-xs text-muted-foreground">UTC</span>
         </div>
+        {/* An empty row with no NOW shows its one blank: a second "--:--"
+            under the zone's name said nothing the first did not. */}
+        {(showNow || hasValue || hasDerived) && (
         <div className="flex flex-col items-end">
           {showNow && !hasValue && !hasDerived ? (
             <Button
@@ -543,6 +546,7 @@ function TimeRow({
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   );
@@ -684,11 +688,13 @@ function ToggleRow({
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
+  const id = useId();
+  // The whole row toggles (a <label> for the switch), like Settings' rows.
   return (
-    <div className="flex items-center justify-between py-3.5 px-4 row-divider">
+    <label htmlFor={id} className="flex cursor-pointer items-center justify-between py-3.5 px-4 row-divider active:bg-secondary/50">
       <span className="text-foreground">{label}</span>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} aria-label={label} />
-    </div>
+      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} aria-label={label} />
+    </label>
   );
 }
 
@@ -2111,7 +2117,7 @@ function FlightFormImpl({
                 ref={flightNumberRef}
                 type="text"
                 className="text-right bg-transparent outline-none text-foreground w-28 min-w-0 placeholder:text-muted-foreground"
-                placeholder="-"
+                placeholder="Optional"
                 aria-label="Flight number"
                 {...CODE_INPUT_PROPS}
                 value={formData.flightNumber || ""}
@@ -2249,7 +2255,11 @@ function FlightFormImpl({
               timezoneOffset={depTimezone}
               onTap={(frame) => openTimePicker("scheduledOut", frame)}
               onNow={() => setNowTime("scheduledOut")}
-            clockSeparator={clockSeparator}
+              // A schedule is published, not stamped: NOW is for the times
+              // that happen (report, OOOI), and five of them down an empty
+              // form read as five things to press.
+              showNow={false}
+              clockSeparator={clockSeparator}
             />
           </SwipeableRow>
 
@@ -2260,7 +2270,11 @@ function FlightFormImpl({
               timezoneOffset={arrTimezone}
               onTap={(frame) => openTimePicker("scheduledIn", frame)}
               onNow={() => setNowTime("scheduledIn")}
-            clockSeparator={clockSeparator}
+              // A schedule is published, not stamped: NOW is for the times
+              // that happen (report, OOOI), and five of them down an empty
+              // form read as five things to press.
+              showNow={false}
+              clockSeparator={clockSeparator}
             />
           </SwipeableRow>
 
@@ -2333,17 +2347,21 @@ function FlightFormImpl({
             />
           </SwipeableRow>
 
-          <div className="flex items-center justify-center py-2 row-divider">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={swapCrew}
-              className="text-xs"
-            >
-              <ArrowLeftRight className="h-3.5 w-3.5 mr-1" />
-              Swap Crew
-            </Button>
-          </div>
+          {/* Only when there is someone to swap: with both seats empty it was
+              a button that did nothing, between two "Select" rows. */}
+          {(formData.picName || formData.sicName) && (
+            <div className="flex items-center justify-center py-2 row-divider">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={swapCrew}
+                className="text-xs"
+              >
+                <ArrowLeftRight className="h-3.5 w-3.5 mr-1" />
+                Swap Crew
+              </Button>
+            </div>
+          )}
 
           <SwipeableRow
             onClear={() => {

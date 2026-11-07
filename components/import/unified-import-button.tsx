@@ -238,7 +238,9 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           parts.push(`${count(result.simDuplicatesRemoved, "duplicate sim")} removed`);
         if (result.groundDutiesCreated || result.groundDutiesUpdated)
           parts.push(
-            `${result.groundDutiesCreated + result.groundDutiesUpdated} standby/ground duties`
+            // Standby, ground duties, leave and days off — everything the
+            // roster holds. "standby/ground duties" named 17 days of leave.
+            `${count(result.groundDutiesCreated + result.groundDutiesUpdated, "roster day")}`
           );
         if (result.aircraftCreated)
           parts.push(`${result.aircraftCreated} aircraft`);

@@ -49,16 +49,35 @@ function relativeDay(dayKey: string, todayKey: string): string | null {
   return null
 }
 
-function timeRange(item: RosterItem, display: DisplayPreferences | undefined): string | null {
+function timeRange(item: RosterItem, display: DisplayPreferences | undefined): { start: string; end: string | null } | null {
   if (item.startMs === null) return null
   const start = formatInstant(item.startMs, display)
-  if (item.endMs === null) return start
+  if (item.endMs === null) return { start, end: null }
   const end = formatInstant(item.endMs, display)
   // An end on a later display day carries "+1", as a flight strip does.
   const zulu = display?.useZuluTime ?? true
   const dayOf = (ms: number) => (zulu ? Math.floor(ms / DAY_MS) : Math.floor((ms - new Date(ms).getTimezoneOffset() * 60_000) / DAY_MS))
   const plus = dayOf(item.endMs) - dayOf(item.startMs)
-  return `${start} – ${end}${plus > 0 ? ` +${plus}` : ""}`
+  return { start, end: `${end}${plus > 0 ? ` +${plus}` : ""}` }
+}
+
+/**
+ * Start over end, beside the card's two lines. On one line ("00:40Z – 03:10Z")
+ * the times took a third of a 360px row and cut the route to "WSSS → W…".
+ */
+function TimeStack({ range, empty }: { range: ReturnType<typeof timeRange>; empty: string }) {
+  return (
+    <span className="flex shrink-0 flex-col items-end text-xs leading-tight tabular-nums text-muted-foreground">
+      {range ? (
+        <>
+          <span>{range.start}</span>
+          {range.end && <span>{range.end}</span>}
+        </>
+      ) : (
+        empty
+      )}
+    </span>
+  )
 }
 
 /** One row of the virtual list. */
@@ -442,7 +461,7 @@ function DutyRow({
           {activation ? ` · called out ${activation.at}Z` : ""}
         </span>
       </span>
-      <span className="shrink-0 text-right text-xs tabular-nums text-muted-foreground">{range ?? "All day"}</span>
+      <TimeStack range={range} empty="All day" />
     </div>
   )
 }
@@ -486,7 +505,7 @@ function FlightRow({
           {aircraft ? ` · ${aircraft}` : ""}
         </span>
       </span>
-      <span className="shrink-0 text-right text-xs tabular-nums text-muted-foreground">{range ?? ""}</span>
+      <TimeStack range={range} empty="" />
     </button>
   )
 }
