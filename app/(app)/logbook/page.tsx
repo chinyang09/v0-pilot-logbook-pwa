@@ -5,7 +5,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } fr
 import { FlightList, type FlightListRef } from "@/components/flight-list"
 import { useDebounce } from "@/hooks/use-debounce"
 import { type CalendarHandle } from "@/components/logbook-calendar"
-import { CalendarPanel, PANEL_MS, PANEL_MOTION } from "@/components/calendar-panel"
+import { CalendarPanel, PANEL_MS, PANEL_MOTION, useStowedWhenClosed } from "@/components/calendar-panel"
 import { type FlightLog } from "@/lib/db"
 import { useCreateFlight } from "@/hooks/use-create-flight"
 import {
@@ -95,6 +95,7 @@ export default function LogbookPage() {
    *  "TR647" + "WSSS" is that flight number AND that airport. */
   const [searchTerms, setSearchTerms] = useState<string[]>([])
   const [showSearch, setShowSearch] = useState(false)
+  const searchStow = useStowedWhenClosed(showSearch)
   const [showMonthPicker, setShowMonthPicker] = useState(false)
 
   // Detail panel integration
@@ -622,6 +623,7 @@ export default function LogbookPage() {
             whichever of the two is opening. */}
         <div
           className="overflow-hidden"
+          onTransitionEnd={searchStow.onTransitionEnd}
           style={{
             height: showSearch ? searchBlockHeight : 0,
             transition: PANEL_MOTION,
@@ -632,7 +634,7 @@ export default function LogbookPage() {
           // the tab order (see CalendarPanel).
           inert={!showSearch}
         >
-          <div ref={searchBlockRef} className="px-2 pt-1 pb-2">
+          <div ref={searchBlockRef} className="px-2 pt-1 pb-2" style={searchStow.contentStyle}>
             <GlassContainer cornerRadius={20} className="w-full">
               <div className="flex flex-wrap items-center gap-1.5 px-3 py-2">
                 <Search className="h-4 w-4 flex-shrink-0 text-muted-foreground" />

@@ -37,6 +37,27 @@ import { MORPH_EASE } from "@/lib/motion"
 export const PANEL_MS = 300
 export const PANEL_MOTION = `height ${PANEL_MS}ms ${MORPH_EASE}`
 
+/**
+ * A collapsing panel's content, STOWED once the collapse has finished: hidden
+ * (still laid out, so its natural height stays measurable) until it opens
+ * again. Collapsed to 0px and clipped, the calendar's and the search field's
+ * glass was still composited — ten backdrop-filters on the logbook for two
+ * panels nobody could see.
+ */
+export function useStowedWhenClosed(open: boolean) {
+  const [settled, setSettled] = React.useState(!open)
+  const onTransitionEnd = React.useCallback(
+    (e: React.TransitionEvent) => {
+      if (e.target !== e.currentTarget || e.propertyName !== "height") return
+      setSettled(!open)
+    },
+    [open],
+  )
+  const contentStyle: React.CSSProperties | undefined =
+    !open && settled ? { visibility: "hidden" } : undefined
+  return { onTransitionEnd, contentStyle }
+}
+
 type CalendarProps = React.ComponentProps<typeof LogbookCalendar>
 
 export interface CalendarPanelProps
@@ -92,9 +113,12 @@ export const CalendarPanel = React.forwardRef<CalendarHandle, CalendarPanelProps
       return () => observer.disconnect()
     }, [onNaturalHeight])
 
+    const stow = useStowedWhenClosed(open)
+
     return (
       <div
         className="overflow-hidden"
+        onTransitionEnd={stow.onTransitionEnd}
         style={{
           height: open ? naturalHeight : 0,
           transition: PANEL_MOTION,
@@ -107,7 +131,7 @@ export const CalendarPanel = React.forwardRef<CalendarHandle, CalendarPanelProps
         // reader while leaving them focusable, which is worse than either.
         inert={!open}
       >
-        <div ref={contentRef} className="px-2 pb-2">
+        <div ref={contentRef} className="px-2 pb-2" style={stow.contentStyle}>
           <LogbookCalendar
             ref={ref}
             // Transparent INSIDE the panel's glass — the surrounding surface is
