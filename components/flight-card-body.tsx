@@ -127,8 +127,12 @@ export function FlightCardBody({
   const hasIn = !!flight.inTime;
   const isScheduled = !hasOut || !hasIn;
 
-  const outDiff = d("outTime") ?? d("scheduledOut");
-  const inDiff = d("inTime") ?? d("scheduledIn");
+  // A scheduled-time change is drawn in the slot only while the slot SHOWS
+  // the scheduled time. On a flown flight the slot is the actual OUT/IN, and
+  // drawing the schedule's change there read as the import moving the time
+  // the aeroplane actually arrived (TR490: "02:59 → 03:10" over an IN of 03:11).
+  const outDiff = d("outTime") ?? (hasOut ? undefined : d("scheduledOut"));
+  const inDiff = d("inTime") ?? (hasIn ? undefined : d("scheduledIn"));
 
   const displayOut = hasOut
     ? flight.outTime!.slice(0, 5)

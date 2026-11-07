@@ -1,10 +1,11 @@
 /**
- * Glass segmented tabs — THE segmented choice: the import dialogs' bucket
+ * Segmented tabs — THE segmented choice: the import dialogs' bucket
  * switcher, the Quick Check's mode, the discrepancy tabs, the add-aircraft
  * mode, and the custom palette's vividness and depth.
  *
- * Built on `GlassContainer` so it reads as the same material as the nav pill
- * and the floating action buttons, rather than as loose chips. The active
+ * On the ACTION SURFACE (`.control-surface`, the glass face's painted half),
+ * so it reads as the same material as the header controls without carrying
+ * the glass's backdrop-filters into every panel it sits in. The active
  * segment is marked by a sliding indicator driven by a CSS `transform`
  * transition (compositor-driven — the same reason the nav's gravity blob
  * avoids a JS spring).
@@ -23,7 +24,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { GlassContainer } from "@/components/ui/glass-container";
 
 export interface SegmentedTab<T extends string> {
   value: T;
@@ -77,8 +77,12 @@ export function SegmentedTabs<T extends string>({
 
   const indicator = boxes[value];
 
+  // The action surface, not the real glass: a segmented control sits in a
+  // panel or a dialog over a flat backdrop, where a blur returns the backdrop
+  // unchanged — and the glass's five backdrop-filters were re-rasterised on
+  // every scroll frame of whatever moved under them (the import review).
   return (
-    <GlassContainer cornerRadius={22}>
+    <div className="control-surface rounded-full">
       <div
         ref={listRef}
         role="tablist"
@@ -133,6 +137,6 @@ export function SegmentedTabs<T extends string>({
           );
         })}
       </div>
-    </GlassContainer>
+    </div>
   );
 }

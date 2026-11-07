@@ -100,3 +100,67 @@ export function upcomingPlannedDuties(
   }
   return ahead
 }
+
+/**
+ * The record's duties with every PART-flown one given its whole plan.
+ *
+ * The pipeline builds duties from flown flights only, so with sector one on
+ * blocks and sector two still a scheduled row, the logbook duty ended at the
+ * first arrival — at the outstation — and the sector still to fly reached
+ * nothing: `upcomingPlannedDuties` leaves a part-flown duty out, and the
+ * record cannot see it. The FDP timeline then drew one leg, began a rest at
+ * the outstation, and judged the next duty against it (a "violation" on the
+ * owner's WSSS–WBKK–WSSS day of 7 Nov 26).
+ *
+ * Such a duty takes the plan's SHAPE — report, debrief, sectors, route, the
+ * FDP maximum Reg 14 sets by the sectors PLANNED, the flight ids the
+ * timeline draws — and keeps the record's flight minutes, so nothing not yet
+ * flown reaches a flight-hour total. Two logged pieces of one plan (a long
+ * gap between sectors) become the one duty the plan says it is.
+ */
+export function completePartFlownDuties(
+  logged: DutyPeriod[],
+  flights: FlightLog[],
+  planned: DutyPeriod[] = buildPlannedDuties(flights)
+): DutyPeriod[] {
+  const flown = new Set<string>()
+  for (const f of flights) if (isFlownFlight(f)) flown.add(f.id)
+
+  const planOf = new Map<string, DutyPeriod>()
+  for (const plan of planned) {
+    const anyFlown = plan.flightIds.some((id) => flown.has(id))
+    const anyToFly = plan.flightIds.some((id) => !flown.has(id))
+    if (!anyFlown || !anyToFly) continue
+    for (const id of plan.flightIds) if (flown.has(id)) planOf.set(id, plan)
+  }
+  if (planOf.size === 0) return logged
+
+  const planFor = (dp: DutyPeriod) => {
+    for (const id of dp.flightIds) {
+      const plan = planOf.get(id)
+      if (plan) return plan
+    }
+    return undefined
+  }
+
+  const done = new Set<DutyPeriod>()
+  const out: DutyPeriod[] = []
+  for (const dp of logged) {
+    const plan = planFor(dp)
+    if (!plan) {
+      out.push(dp)
+      continue
+    }
+    if (done.has(plan)) continue
+    done.add(plan)
+    const pieces = logged.filter((l) => planFor(l) === plan)
+    out.push({
+      ...plan,
+      id: dp.id,
+      source: dp.source,
+      isFuture: false,
+      flightMinutes: pieces.reduce((sum, p) => sum + (p.flightMinutes || 0), 0),
+    })
+  }
+  return out
+}

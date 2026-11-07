@@ -18,7 +18,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AlertTriangle, ArrowRight, FileText, Info } from "lucide-react";
+import { AlertTriangle, FileText, Info } from "lucide-react";
+import { formatDayRange } from "@/lib/utils/date";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -124,9 +125,7 @@ export function LogtenReviewDialog({
         <div className="-mx-1 mt-4 min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-1 scrollbar-hide">
           {plan.flights.dateRange.start && (
             <p className="text-xs text-muted-foreground">
-              {plan.flights.dateRange.start}
-              <ArrowRight className="mx-1 inline size-3 align-[-1px]" />
-              {plan.flights.dateRange.end}
+              {formatDayRange(plan.flights.dateRange.start, plan.flights.dateRange.end)}
             </p>
           )}
 

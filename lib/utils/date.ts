@@ -92,6 +92,18 @@ export function formatDay(ymd: string, opts?: DayFormat): string {
 }
 
 /**
+ * A span of stored dates: `16 Oct – 6 Nov 26` inside one year, `28 Dec 26 –
+ * 3 Jan 27` across two (each end carries its own year). No weekdays — a range
+ * is read as a span, not as two days.
+ */
+export function formatDayRange(start: string, end: string): string {
+  if (!start || !end) return formatDay(start || end, { weekday: false })
+  if (start === end) return formatDay(start, { weekday: false })
+  const sameYear = start.slice(0, 4) === end.slice(0, 4)
+  return `${formatDay(start, { weekday: false, year: !sameYear })} – ${formatDay(end, { weekday: false })}`
+}
+
+/**
  * The day an INSTANT falls on in `timeZone` ("UTC", an IANA zone), or on the
  * device's own calendar when omitted.
  */

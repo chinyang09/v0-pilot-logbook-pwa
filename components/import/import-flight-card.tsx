@@ -436,8 +436,14 @@ export function ImportFlightCard({
 
   const flight = displayFlight(op);
 
+  // A scheduled time the card's slot is not showing (the flight is flown, so
+  // the slot is the actual time) is listed as a change of its own.
+  const shownInSlot = (field: string) =>
+    CHROME_FIELDS.has(field) &&
+    !(field === "scheduledOut" && flight.outTime) &&
+    !(field === "scheduledIn" && flight.inTime);
   const extraChanges = changes.filter(
-    (c) => !CHROME_FIELDS.has(c.field) && !HIDDEN_FIELDS.has(c.field)
+    (c) => !shownInSlot(c.field) && !HIDDEN_FIELDS.has(c.field)
   );
 
   const selectable = typeof onCheckedChange === "function";

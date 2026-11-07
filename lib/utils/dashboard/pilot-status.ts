@@ -139,7 +139,10 @@ export function buildPilotStatus({
     logbookEmpty && verdictState === "current" ? "getting_started" : verdictState
 
   const governing = legality.binding
-  const restOutstanding = duty.rest !== null && !duty.rest.isLegalNow
+  // ON DUTY the rest clock is the rest AFTER the duty in progress — nothing to
+  // do about it yet. It used to lead the panel mid-duty: "Rest until 20:05Z"
+  // over a duty with a sector still to fly.
+  const restOutstanding = duty.phase !== "on_duty" && duty.rest !== null && !duty.rest.isLegalNow
 
   // A next duty the rest requirement does not reach. This is the pilot's to
   // catch — a roster can be wrong, and nothing else on the screen would say so
@@ -214,7 +217,7 @@ function deriveNextAction({
     }
   }
 
-  if (duty.rest && !duty.rest.isLegalNow) {
+  if (duty.phase !== "on_duty" && duty.rest && !duty.rest.isLegalNow) {
     const at = Date.parse(duty.rest.legalAtUtc)
     return {
       tone: "action_required",

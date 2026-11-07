@@ -170,6 +170,22 @@ describe("buildPilotStatus — next action", () => {
     expect(s.state).toBe("warning")
   })
 
+  it("does not lead with the rest AFTER the duty in progress", () => {
+    // On duty, the rest clock is the rest owed once this duty ends — there is
+    // nothing to do about it yet. It used to read "Rest until 20:05Z" over a
+    // duty with a sector still to fly.
+    const s = status({}, [duty({ reportTime: "06:00", debriefTime: "18:00", sectorCount: 2 })], {
+      isLegalNow: false,
+      elapsedMinutes: 0,
+      requiredMinutes: 720,
+      legalAtUtc: "2026-08-15T07:00:00Z",
+    })
+    expect(s.duty.phase).toBe("on_duty")
+    expect(s.nextAction.headline).not.toMatch(/^Rest/)
+    expect(s.state).toBe("current")
+    expect(s.legalAtUtc).toBeNull()
+  })
+
   it("says where the pilot is in the duty rather than 'nothing required'", () => {
     // Mid-duty, everything clear. "Nothing required" is true and useless while
     // sitting at the gate between sectors.

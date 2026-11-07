@@ -432,17 +432,27 @@ export function deriveDutyStatus(
    * then the duty is still running, however far past its planned debrief it
    * goes — an unlogged sector is not a finished one.
    */
-  const fdpEndOf = (dp: DutyPeriod, planned: DutyWindow, sectors: number): number => {
+  const fdpEndOf = (dp: DutyPeriod, planned: DutyWindow, sectors: number, maxFdpMinutes: number): number => {
     if (!flightArrivals || !dp.flightIds?.length) return planned.endMs
+    // A sector not on blocks keeps the duty running past its planned end — a
+    // delayed last leg is still being flown. It used to return the planned
+    // end, so at 07:35 with the return leg due in at 06:35 and still airborne
+    // the panel read "Duty complete · Rest until …". Bounded by the most the
+    // FDP could legally run (its maximum and the commander's 3 hours, para
+    // 13), so a sector that is never logged cannot hold a duty open forever.
+    const stillRunning = () => {
+      const capMs = planned.startMs + ((maxFdpMinutes || 0) + 180) * 60_000
+      return Math.max(planned.endMs, Math.min(nowMs, capMs))
+    }
     let latest = -Infinity
     for (const id of dp.flightIds) {
       const at = flightArrivals.get(id)
-      if (at === undefined) return planned.endMs
+      if (at === undefined) return stillRunning()
       if (at > latest) latest = at
     }
     // Every sector the PLAN knows about has to be accounted for, or a
     // part-flown duty would look finished at the first arrival.
-    if (dp.flightIds.length < sectors) return planned.endMs
+    if (dp.flightIds.length < sectors) return stillRunning()
     return latest
   }
 
@@ -508,7 +518,7 @@ export function deriveDutyStatus(
       : dp
 
     // The FDP ends at the last on-blocks, not at the debrief.
-    const fdpEnd = fdpEndOf(dp, w, effective.sectorCount || dp.sectorCount)
+    const fdpEnd = fdpEndOf(dp, w, effective.sectorCount || dp.sectorCount, effective.maxFdpMinutes)
     const inProgress: DutyWindow = { startMs: w.startMs, endMs: fdpEnd }
 
     if (nowMs >= inProgress.startMs && nowMs <= inProgress.endMs) {

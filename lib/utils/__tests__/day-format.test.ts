@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { formatRestSpan } from "../dashboard/duty-status"
-import { formatDay, formatDayAt, formatDayParts, formatStamp, formatYMDMedium, formatYMDShort } from "../date"
+import { formatDay, formatDayAt, formatDayParts, formatStamp, formatYMDMedium, formatYMDShort, formatDayRange } from "../date"
 
 describe("the app's day: Ddd, d Mmm yy", () => {
   it("writes a stored date with weekday, unpadded day, month and two-digit year", () => {
@@ -45,5 +45,16 @@ describe("a rest's length reads the same on the dashboard and the FDP page", () 
     expect(formatRestSpan(99 * 60 + 59)).toBe("99:59")
     expect(formatRestSpan(100 * 60)).toBe("4d 4h")
     expect(formatRestSpan(510 * 60 + 13)).toBe("21d 6h")
+  })
+})
+describe("formatDayRange", () => {
+  it("inside one year carries the year once, on the end", () => {
+    expect(formatDayRange("2026-11-01", "2026-11-30")).toBe("1 Nov – 30 Nov 26")
+  })
+  it("across two years carries each end's own", () => {
+    expect(formatDayRange("2026-12-28", "2027-01-03")).toBe("28 Dec 26 – 3 Jan 27")
+  })
+  it("a single day is just that day", () => {
+    expect(formatDayRange("2026-11-07", "2026-11-07")).toBe("7 Nov 26")
   })
 })

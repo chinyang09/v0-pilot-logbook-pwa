@@ -2,31 +2,13 @@
 
 import { useMemo, useState, useEffect } from "react"
 import { useFlights } from "./use-flights"
-import { hhmmToMinutes } from "@/lib/utils/time"
-import { buildPlannedDuties, upcomingPlannedDuties } from "@/lib/utils/dashboard/planned-duties"
-import {
-  applyAcclimatisation,
-  truncateActivatedStandby,
-} from "@/lib/utils/roster/fdp-calculator"
 import { useScheduleEntries } from "./use-schedule"
 import { useDBReady } from "./use-db"
-import { DEFAULT_FTL_LIMITS } from "@/types/entities/roster.types"
 import type { DutyPeriod } from "@/types/entities/roster.types"
-import {
-  createDutyPeriodsFromFlights,
-  getDutyPeriodsFromSchedule,
-  mergeDutyPeriods,
-  mergeAdjacentDutyPeriods,
-  calculateAllRestPeriods,
-  calculateCumulativeLimits,
-  calculateCapacity,
-  forecastExceedances,
-  calculateRestUntilLegal,
-} from "@/lib/utils/roster/fdp-calculator"
+import { runFDPPipeline } from "@/lib/utils/roster/fdp-pipeline"
 import type { RestUntilLegalResult } from "@/lib/utils/roster/fdp-calculator"
 import { getAirportByIata } from "@/lib/db/stores/reference/airports.store"
 import { getAirportTimeInfo } from "@/lib/db/stores/reference/airports.store"
-import { isFlownFlight } from "@/lib/utils/flight-calculations"
 
 /** Safe empty defaults — avoids recreating objects on every render */
 const EMPTY_CAPACITY = {
@@ -93,8 +75,8 @@ type FDPResult = typeof EMPTY_RESULT
 let fdpCache: { key: string; value: FDPResult } | null = null
 
 function computeFDPResult(
-  flights: Parameters<typeof createDutyPeriodsFromFlights>[0],
-  scheduleEntries: Parameters<typeof getDutyPeriodsFromSchedule>[0],
+  flights: Parameters<typeof runFDPPipeline>[0],
+  scheduleEntries: Parameters<typeof runFDPPipeline>[1],
   airportTimezones: Map<string, number>,
 ): FDPResult {
   // Cheap content key: any add/edit/delete changes a count or max updatedAt
@@ -117,88 +99,7 @@ function computeFDPResult(
   if (fdpCache?.key === cacheKey) return fdpCache.value
 
   try {
-    // Only flown logbook entries count toward duty periods. Placeholder /
-    // scheduled flights without OOOI times would otherwise create spurious
-    // duty periods and inflate cumulative limits.
-    const flownFlights = flights.filter(isFlownFlight)
-    const logbookDPs = mergeAdjacentDutyPeriods(createDutyPeriodsFromFlights(flownFlights))
-    const scheduleDPs = mergeAdjacentDutyPeriods(
-      getDutyPeriodsFromSchedule(scheduleEntries, airportTimezones)
-    )
-
-    // Para 6(6): a standby ends the moment the crew member is activated, so a
-    // standby that was called out is cut back to the following duty's report.
-    // Left whole, those hours are counted twice — once at 20% as standby and
-    // again in full as the duty they turned into.
-    //
-    // The duties AHEAD come from the flight rows too (`upcomingPlannedDuties`):
-    // rostered flights are scheduled logbook rows, not schedule entries, so
-    // without them the next duty, the forecast and para 4's look-ahead saw
-    // nothing past today. A date the roster already carries a flight duty for
-    // (an older import) keeps that one.
-    const plannedDPs = buildPlannedDuties(flights)
-    const rosteredFlightDates = new Set(
-      scheduleDPs.filter((dp) => !dp.dutyKind || dp.dutyKind === "flight").map((dp) => dp.date)
-    )
-    const ahead = upcomingPlannedDuties(flights, Date.now(), plannedDPs).filter(
-      (dp) => !rosteredFlightDates.has(dp.date)
-    )
-    const merged = truncateActivatedStandby(
-      [...mergeDutyPeriods(logbookDPs, scheduleDPs), ...ahead].sort(
-        (a, b) => a.date.localeCompare(b.date) || hhmmToMinutes(a.reportTime) - hhmmToMinutes(b.reportTime)
-      )
-    )
-    // Correct each duty's FDP table against the crew member's ACTUAL
-    // acclimatised zone, which only the whole timeline can tell us — a duty
-    // period is built before anything knows the three-nights history that
-    // decides it. Must run before the rest calculation, which reads the
-    // corrected duty figures.
-    const acclimatised = applyAcclimatisation(merged)
-    const withRest = calculateAllRestPeriods(acclimatised)
-
-    const today = new Date()
-    const limits = DEFAULT_FTL_LIMITS
-
-    // Use only non-future DPs for current cumulative/capacity calculations
-    const currentDPs = withRest.filter((dp) => !dp.isFuture)
-    const cumulativeLimits = calculateCumulativeLimits(currentDPs, today, limits)
-    const capacity = calculateCapacity(currentDPs, today, limits)
-
-    // Forecast uses all DPs (past + future) to project exceedances
-    const forecast = forecastExceedances(withRest, limits)
-
-    // Split for display
-    const pastDuties = withRest.filter((dp) => !dp.isFuture)
-    const futureDuties = withRest.filter((dp) => dp.isFuture)
-
-    // Rest violations
-    const restViolations = withRest.filter(
-      (dp) => dp.restBefore && !dp.restBefore.compliant
-    )
-
-    // No day-by-day timeline is built here: the FDP page's timeline reads the
-    // rolling limits at an instant (`rolling-at.ts`) over what it draws.
-
-    // Rest until legal for the next duty. Given the WHOLE timeline, not just
-    // the past: it picks the last COMPLETED duty itself, and para 4's 24-hour
-    // requirement turns on whether the duty AHEAD encompasses an early start,
-    // a late finish or a take-off or landing in the window of circadian low —
-    // which is invisible in a past-only list.
-    const restUntilLegal = calculateRestUntilLegal(withRest)
-
-    const value: FDPResult = {
-      allDutyPeriods: withRest,
-      scheduleDutyPeriods: scheduleDPs,
-      plannedDutyPeriods: plannedDPs,
-      pastDuties,
-      futureDuties,
-      cumulativeLimits,
-      capacity,
-      forecast,
-      restViolations,
-      restUntilLegal,
-      failed: false,
-    }
+    const value: FDPResult = runFDPPipeline(flights, scheduleEntries, airportTimezones, Date.now())
     fdpCache = { key: cacheKey, value }
     return value
   } catch (err) {
