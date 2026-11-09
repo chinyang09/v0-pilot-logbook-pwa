@@ -3057,6 +3057,42 @@ card above it, so the owner could not tell the actions from the card.
   (settings sections, a time row) — they are navigation, not actions — and
   segmented tabs.
 
+### Press feedback — iOS glass outside, Material ink inside (Nov 2026)
+
+The owner asked for "a fusion between iOS liquid glass and Android UI" that
+costs the PWA nothing. The split is by MATERIAL, not by platform — iOS and
+Android still render the app identically:
+
+| Surface | Press feedback | Where it lives |
+|---|---|---|
+| floating GLASS chrome (header controls, the nav pill, the sidebar) | iOS: the glass blooms, a spotlight follows the finger, light ripples out on release | `GlassContainer` |
+| everything else you press — `.control-surface` capsules, and the rows and cards marked `data-ink` | Material: a STATE LAYER (hover 6%, pressed/focused 10% of the control's own text colour, `.control-surface::after`), an INK circle spreading from where the finger landed (`lib/ui/press-ink.ts`), and a 3% squish on the `scale` property | `globals.css`, `components/press-ink.tsx` (root layout) |
+
+- **One delegated listener** on the window (`installPressInk`), not a handler
+  per control. The ink is two spans appended to the pressed element and
+  removed when they have faded; only `transform` and `opacity` animate (WAAPI).
+  The one layout read is the element's rect, at pointerdown, on a clean page.
+- **A press that becomes a scroll draws nothing.** A touch waits 60ms
+  (`TOUCH_DELAY_MS`, Android's tap timeout) and a move past 8px, a
+  `pointercancel` or a scroll event ends it; a tap shorter than the delay still
+  gets its ink. Reduced motion: no ink (the state layer stays).
+- **Opt in with `data-ink` on a POSITIONED element.** An unpositioned one is
+  skipped rather than made `relative` behind its back. Tagged today: every
+  `SwipeableCard` with an `onClick` (all the list cards and currency rows), the
+  flight form's pressable rows (the ROW, not a clock column inside it),
+  `ToggleRow`, `ChoicePicker`, the Settings and Account section rows, the
+  discrepancy and roster agenda rows, the dashboard's period flights.
+- **The state layer and the squish are scoped to things that ARE pressed**
+  (`:is(button, a, [role=button], label).control-surface`): `:active` also
+  matches every ancestor of the pressed element, so the segmented control's
+  `div` wrapper would light (and shrink) whenever a segment was pressed. The
+  squish skips `-float` (it carries a backdrop-filter, and scaling it
+  re-samples the backdrop each frame).
+- Measured at 4× CPU on the owner's logbook: six held presses on flight cards,
+  ink on vs off (reduced motion) — 3 vs 3 frames over 33ms, 0ms of long tasks
+  either way; flings, the sidebar and the calendar unchanged against the
+  previous build.
+
 ### Header controls — one capsule per role (`glass-icon-button.tsx`)
 
 | Role | Controls | Capsule |
@@ -5502,6 +5538,8 @@ When making changes, be aware of these high-impact files:
 - Do not take the first result of an aircraft or airport search as THE answer — a partial registration ("9VB") is a question. Only a candidate marked `exact` fills a form, an import or a submission by itself; anything else is listed for the pilot to choose, or is no match
 - Do not hand the year wheel a new options array per render — `yearOptions` keeps the SAME array while the range holds, and the range is anchored on TODAY (widened only when the viewed year falls outside). Anchored on the viewed year, every year spun rebuilt ~75 rows
 - Do not put a segmented choice back as a pair of filled rectangles — it is `SegmentedTabs` (the action surface, a sliding indicator, `h-9` segments), as in the import dialogs, the Quick Check and the custom palette's vividness and depth (`components/ui/segmented-tabs.tsx`). And measure its segments from ONE ResizeObserver: reading `offsetLeft` in a ref callback that is rebuilt on every selection forced a layout per tap and attached a new observer to every segment each time, never disconnecting the old ones
+- Do not give the glass chrome the ink, or an opaque surface the glass's spotlight — glass answers a press with light (iOS), everything else with ink and a state layer (Material); mixing them on one surface reads as two materials. And do not attach a press handler per control for feedback: `installPressInk` is the one delegated listener, opted into with `data-ink` on a POSITIONED element
+- Do not scope a `.control-surface` `:active` rule to the bare class — `:active` matches every ancestor of the pressed element, so a wrapper on the surface (the segmented control's `div`) lights and shrinks with its children. Scope it to `:is(button, a, [role=button], label).control-surface`
 - Do not put an action back on the card surface (`bg-secondary`, `bg-card`, `bg-muted`) or give it a rectangle's corners — a thing you press is a CAPSULE or circle on `.control-surface`, a thing you read is a rounded rectangle. On the card surface the context preview's action row read as more card. And do not use the REAL glass (`GlassContainer`) for an action that sits over a scrim, a row or a panel: the painted surface is the same look with no `backdrop-filter`, and these pop in on exactly the frames a readback would cost most
 - Do not group header controls page by page — a header is VIEW (search, calendar, period) → TOOLS (import, Quick Check, alerts, read-from-photo) → CREATE (+, alone and last), one capsule per role, with a page switch first and detail commits (Cancel / Save / Edit, Back) one capsule each (`glass-icon-button.tsx`). And do not add a Refresh button: every list follows every write and every sync, so it re-reads the same rows, and it reads as "sync" — which is the cloud in the nav
 - Do not give the context preview's compact body `layout="position"` — it is the one block that exists in BOTH states, so it takes a FULL `layout`. Its height is unchanged either way, which makes its delta scaleX only: the row's content is condensed at the first frame and relaxes out as the card widens. `layout="position"` cancels the horizontal scale too, which lays it out at the RESTING width from frame one and lets the card clip it — on a tablet the arrival time and ICAO are missing until the card widens past them. The detail and the actions DO take `layout="position"`; they exist only while open. And keep the lift a static shadow on its own PROJECTED (`layout`) node faded by opacity, outside the clip: an interpolated `boxShadow` is rebuilt as a string every frame, and `overflow: hidden` on an ancestor eats a shadow entirely

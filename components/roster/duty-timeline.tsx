@@ -1042,7 +1042,7 @@ function NowButton({ store, nowMs, span, onNow }: { store: PointerStore; nowMs: 
       type="button"
       onClick={onNow}
       disabled={atNow}
-      className="control-surface h-9 shrink-0 rounded-full px-3.5 text-sm font-medium transition-opacity disabled:opacity-40"
+      className="control-surface h-9 shrink-0 rounded-full px-3.5 text-sm font-medium transition-[opacity,scale] disabled:opacity-40"
     >
       Now
     </button>

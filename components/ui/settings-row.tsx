@@ -167,6 +167,7 @@ export function ToggleRow({
   return (
     <label
       htmlFor={id}
+      data-ink={inert ? undefined : ""}
       className={cn(
         "flex items-center justify-between gap-3 px-4 py-3.5 row-divider",
         !inert && "cursor-pointer active:bg-secondary/50",

@@ -164,6 +164,7 @@ export default function AccountPage() {
               <button
                 key={key}
                 type="button"
+                data-ink=""
                 aria-current={isActive || undefined}
                 className={cn(
                   "row-divider flex w-full items-center px-4 py-3.5 text-left transition-colors",
