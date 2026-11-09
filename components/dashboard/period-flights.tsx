@@ -124,9 +124,10 @@ function FlightRow({
       <button
         type="button"
         onClick={() => onOpen(flight.id)}
+        data-ink=""
         aria-current={selected || undefined}
         className={cn(
-          "flex min-h-9 w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-xs transition-colors hover:bg-[var(--on-glass-fill-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "relative flex min-h-9 w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-xs transition-colors hover:bg-[var(--on-glass-fill-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           selected && "bg-primary/10",
         )}
       >

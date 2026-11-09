@@ -7,6 +7,7 @@ import { ThemeProvider } from "@/components/providers/theme-provider"
 
 import { OCRModelsPreloader } from "@/components/ocr-models-preloader"
 import { AppAlertHost } from "@/components/ui/app-alert-host"
+import { PressInk } from "@/components/press-ink"
 import { PALETTE_BOOT_SCRIPT } from "@/lib/theme/apply"
 import "./globals.css"
 
@@ -77,6 +78,8 @@ export default function RootLayout({
           </AuthProvider>
           {/* The app's own confirm/alert — asked from anywhere, login included. */}
           <AppAlertHost />
+          {/* Touch ink on everything pressable outside the glass chrome. */}
+          <PressInk />
         </ThemeProvider>
       </body>
     </html>
