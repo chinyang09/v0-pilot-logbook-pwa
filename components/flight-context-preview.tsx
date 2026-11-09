@@ -225,6 +225,7 @@ export function FlightContextPreview({
   // inside, and it returns to whatever held it before the hold.
   const dialogRef = useRef<HTMLDivElement>(null);
   useDialogFocus(dialogRef, true);
+  const scrimPressRef = useRef(false);
 
   /**
    * The card is laid out COLLAPSED on the first commit and EXPANDED on the
@@ -334,9 +335,20 @@ export function FlightContextPreview({
         initial={{ opacity: 0 }}
         animate={{ opacity: open ? 1 : 0 }}
         transition={SCRIM_FADE}
+        // Only a tap that STARTED here dismisses. Lifting the finger that
+        // held the row is the same gesture, and an engine may still turn that
+        // release into a click — which lands on this scrim, because the card
+        // has moved out from under the finger — and the preview closed the
+        // moment it was let go.
+        onPointerDown={() => {
+          scrimPressRef.current = true;
+        }}
         // Wrapped, not passed directly — the handler's MouseEvent would
         // otherwise arrive as `requestClose`'s follow-up action.
-        onClick={() => requestClose()}
+        onClick={() => {
+          if (scrimPressRef.current) requestClose();
+          scrimPressRef.current = false;
+        }}
       />
 
       {/* The positioning wrapper is `pointer-events-none` and only the card and

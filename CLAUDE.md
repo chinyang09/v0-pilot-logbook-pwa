@@ -5068,6 +5068,12 @@ When making changes, be aware of these high-impact files:
   The actions come along because once you are looking at it, acting on it is
   the obvious next thing.
 
+  Its scrim dismisses only a tap that STARTED on it (`scrimPressRef`): the
+  finger lifting off the hold is the same gesture, and an engine may still
+  turn that release into a click — which lands on the scrim, since the card
+  has moved out from under the finger — so the preview closed the moment it
+  was let go.
+
   Its positioning wrapper is `pointer-events-none` with the card and the action
   row taking pointers back. The wrapper spans nearly the whole screen so the
   card can be centred, and with pointers on it swallowed almost every tap meant
