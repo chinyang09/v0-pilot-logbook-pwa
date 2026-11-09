@@ -596,7 +596,7 @@ export function SignatureCanvas({
             {/* Placeholder text */}
             {!hasSignature && !isDrawing && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <span className="text-muted-foreground/50 text-sm">
+                <span className="text-muted-foreground text-sm">
                   Sign above the line
                 </span>
               </div>

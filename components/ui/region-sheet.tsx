@@ -15,11 +15,12 @@
  * with a close button, a scrolling body of `FormSection`s, a footer.
  */
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 import { useDesktopPill, useIsDesktop } from "@/hooks/use-is-desktop";
+import { useDialogFocus } from "@/hooks/use-dialog-focus";
 import { useSidebar } from "@/hooks/use-sidebar-context";
 import { SIDEBAR_WIDTH_PX } from "@/lib/layout/panel-widths";
 import { cn } from "@/lib/utils";
@@ -70,6 +71,11 @@ export function RegionSheet({
   children: React.ReactNode;
 }) {
   const { style, isDesktop } = useContentRegionStyle();
+  // Focus moves in (to the close button — never a field, which would raise a
+  // phone's keyboard over the form), Tab stays inside, and it returns to the
+  // control that opened the sheet. The sheet is mounted only while open.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialogRef, true);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onDismiss();
@@ -81,6 +87,7 @@ export function RegionSheet({
 
   return createPortal(
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}

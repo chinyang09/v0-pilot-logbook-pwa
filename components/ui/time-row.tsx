@@ -45,7 +45,7 @@ export function TimeRow({
           </span>
           {description && <span className="mt-0.5 block text-xs text-muted-foreground">{description}</span>}
         </span>
-        <span className={value ? "tabular-nums text-muted-foreground" : "text-muted-foreground/50"}>
+        <span className="tabular-nums text-muted-foreground">
           {value || placeholder}
         </span>
       </button>

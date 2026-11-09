@@ -31,7 +31,7 @@ export function wheelClassNames(edge: Edge, numeric = true, surface: "card" | "g
   // Whole class names, so Tailwind's scan finds them.
   const round = surface === "glass" ? { l: " rounded-l-full", r: " rounded-r-full" } : { l: " rounded-l-lg", r: " rounded-r-lg" }
   return {
-    optionItem: `text-lg${nums} text-muted-foreground/50 font-medium`,
+    optionItem: `text-lg${nums} text-muted-foreground font-medium`,
     highlightItem: `text-xl${nums} text-foreground font-semibold`,
     // On glass the strip is a capsule, the shape of every selected thing there.
     highlightWrapper: `${fill}${edge === "start" ? round.l : edge === "end" ? round.r : ""}`,

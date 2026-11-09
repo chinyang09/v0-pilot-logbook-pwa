@@ -21,7 +21,7 @@ Deployed on **Vercel** and synced from [v0.app](https://v0.app/chat/eXgJay4h1Jy)
 | Data Fetching | SWR + Dexie React hooks |
 | Forms | Custom hooks (`useCrewForm`, `useDraft`) — no form library |
 | OCR | PP-OCRv4 models (`@gutenye/ocr-models`) on ONNX Runtime — our own pipeline, `lib/ocr/engine/` |
-| Charts | Recharts |
+| Charts | Hand-drawn SVG/DOM (the FDP timeline) — no chart library; Recharts was removed with its last chart |
 | Package Manager | pnpm (not npm) |
 | Bundler | Webpack (not Turbopack) |
 
@@ -1701,9 +1701,10 @@ found the work that RECURS rather than the work that is merely large:
 | Airports first open (A/B) | 2306ms | 1795ms |
 | a hidden airports page during a new install's seed | a re-render per 250-row chunk | none |
 
-- **Recharts does not animate** the FDP chart's series (`isAnimationActive={false}`):
+- **Recharts did not animate** the FDP chart's series (`isAnimationActive={false}`):
   its animation is a JS rAF loop committing through React every frame, on
-  mount and on every zoom or pan step. The chart fades in on the compositor.
+  mount and on every zoom or pan step. (The chart has since been replaced by
+  the hand-drawn timeline and the dependency removed, Nov 2026.)
 - **The gravity blob never reads style back** — an interrupted move's position
   is computed from its own spring track and the animation's `currentTime`.
 - **The legal page reads recency with `ninetyDayRecency`**, not the period
@@ -3136,6 +3137,21 @@ open flight, both themes (Nov 2026: zero violations). What it took:
   row's clocks and NOW, an hour row's USE, a crew card's star) is a plain tap
   target, and a control inside it — the UTC clock, the label, the name block —
   is the keyboard's way to the same action.
+- **A modal the app draws itself takes focus IN and gives it BACK**
+  (`useDialogFocus`, `hooks/use-dialog-focus.ts`) — the date and time
+  wheels (onto the first wheel, which takes the arrow keys), `RegionSheet`
+  (onto its close button, never a field: that would raise a phone's
+  keyboard), the context preview and the signature pad. They carried
+  `role="dialog"`/`aria-modal` but left focus on the row behind, Tab walked
+  the page underneath, and closing dropped it on `<body>`. Focus moves a
+  frame after the open paints, Tab wraps inside, and focus in a layer the
+  dialog opened (an option menu, portalled above it) is left to that layer.
+  NOT `inert` on the page behind: toggling it restyles the keep-alive stack
+  (~1,400 elements) on the frame the dialog opens.
+- **Placeholder and secondary text is `text-muted-foreground`, never a
+  fraction of it** — the wheels' unselected rows and the date/time rows'
+  `--:--` were `/50` (2.4:1); a struck-through old value keeps the muted
+  colour and dims only its line.
 - **Every focusable thing shows focus** — a zero-specificity `:focus-visible`
   ring in the base layer for anything that draws none of its own.
 
@@ -5268,6 +5284,7 @@ When making changes, be aware of these high-impact files:
 - Do not write or delete a synced record by `{ userId, id }` "first match" — pick the stored copy with `newestCopies` and replace it by `_id`, and purge with `deleteMany`. Until the unique index exists a record can have two copies, and first-match updated the stale one and left a purged record standing
 - Do not make `entryType`/`isSimulator` REQUIRED in the flight field table. The table's default is applied BEFORE `NORMALIZE`, so a required `entryType` would stamp "flight" on an old build's `isSimulator: true` row and turn a simulator into a flight; they are `opt` so the normalizer can still see the legacy flag
 - Do not write synced documents by hand with EJSON `$numberLong` values — the engine stores numbers as BSON double, and a long is one more spelling of the same field. An admin correction must also take a fresh seq per record (reserved from `counters`), stamp `fieldVersions`, and bump the counter once more at the end, or no device ever pulls it
+- Do not ship a `role="dialog"` without `useDialogFocus` (or Radix's own focus scope) — `aria-modal` hides the page from assistive tech but moves no focus; and do not fake the modality with `inert` on the app, which restyles every kept-alive page
 - Do not issue a session from a passkey route without calling `verifyAuthenticationResponse` — a `credential.id` lookup is not proof of possession (credential IDs aren't secret). Same for `register/complete`/`add-passkey`: bind the attestation to the server-issued challenge (`webauthn.create` + matching challenge)
 - Do not trust client-supplied `userId`/`callsign`/`totpSecret` in `register/complete` — read them from the consumed server-issued challenge doc
 - Do not re-tighten the WebAuthn counter check to always-strict — synced/platform passkeys report `signCount 0` forever; only enforce strict increase when a counter is in use (either side non-zero)

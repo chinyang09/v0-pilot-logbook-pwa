@@ -122,7 +122,6 @@ export const CalendarPanel = React.forwardRef<CalendarHandle, CalendarPanelProps
         style={{
           height: open ? naturalHeight : 0,
           transition: PANEL_MOTION,
-          willChange: "height",
         }}
         aria-hidden={!open}
         // Collapsed to 0px but still MOUNTED (its height has to stay

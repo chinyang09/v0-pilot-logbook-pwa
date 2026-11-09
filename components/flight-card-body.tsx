@@ -70,7 +70,7 @@ function Slot({
   return (
     <span className={cn("inline-flex items-baseline gap-1", className)}>
       {from && (
-        <span className="font-normal text-muted-foreground/50 line-through decoration-muted-foreground/40">
+        <span className="font-normal text-muted-foreground line-through decoration-muted-foreground/60">
           {format(from)}
         </span>
       )}
@@ -444,7 +444,7 @@ export function FlightCardBody({
               <span className="inline-flex items-baseline gap-1">
                 {pfDiff ? (
                   <>
-                    <span className="text-muted-foreground/50 line-through decoration-muted-foreground/40">
+                    <span className="text-muted-foreground line-through decoration-muted-foreground/60">
                       {pfLabel(pfDiff.from)}
                     </span>
                     <span className="font-semibold text-primary">
