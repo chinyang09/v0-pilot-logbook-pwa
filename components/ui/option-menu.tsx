@@ -128,7 +128,6 @@ export function ChoicePicker<T extends string>({
         aria-controls={placement ? listId : undefined}
         aria-label={current ? `${label}: ${current}` : label}
         onClick={open}
-        data-ink=""
         className={className}
       >
         {children}

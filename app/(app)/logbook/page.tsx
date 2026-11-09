@@ -672,7 +672,7 @@ export default function LogbookPage() {
                   placeholder={searchTerms.length ? "Add filter…" : "Search flights…"}
                   aria-label="Search flights"
                   {...SEARCH_INPUT_PROPS}
-                  className="min-w-[6rem] flex-1 border-0 bg-transparent p-0 text-sm outline-none placeholder:text-muted-foreground"
+                  className="min-w-[6rem] flex-1 border-0 bg-transparent p-0 text-base outline-none placeholder:text-muted-foreground"
                 />
 
                 {hasActiveFilters && (

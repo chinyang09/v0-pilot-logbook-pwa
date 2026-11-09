@@ -45,6 +45,9 @@ import {
 import { deriveFlight, type DeriveKind } from "@/lib/utils/derive-flight";
 import { insertFlightSorted } from "@/lib/utils/flight-sort";
 import { useCalibratedRowHeight, useRemeasureOnCalibration } from "@/hooks/use-calibrated-row";
+import { useFlipPush } from "@/hooks/use-flip-push";
+import { PANEL_MS } from "@/components/calendar-panel";
+import { MORPH_EASE } from "@/lib/motion";
 
 export interface FlightListRef {
   scrollToFlight: (flightId: string, instant?: boolean) => void;
@@ -359,6 +362,8 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     const newFlightPilotFlying = preferences.logging.newFlightPilotFlying;
 
     const scrollContainerRef = useRef<HTMLDivElement>(null);
+    // The panels above push the list on a transform, not a height (see hook).
+    const { spacerRef, pushedRef } = useFlipPush(topSpacerTransition !== "none", PANEL_MS, MORPH_EASE);
     const isExternalScrollRef = useRef(false);
     const lastDetectedFlightRef = useRef<string | null>(null);
     const [activeYearKey, setActiveYearKey] = useState<string | undefined>(undefined);
@@ -826,12 +831,13 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             onWheel={handleWheelStart}
           >
             <ScrollIndicator />
-            {/* Top spacer: the floating chrome, plus the calendar when open */}
-            <div
-              style={{ height: topSpacerHeight, transition: topSpacerTransition }}
-              className={topSpacerTransition ? undefined : "transition-[height] duration-300 ease-in-out"}
-            />
+            {/* Top spacer: the floating chrome, plus the calendar when open.
+                It takes its new height in ONE layout; the content under it is
+                slid there on a transform (useFlipPush), so the rows are never
+                re-laid out or repainted while the panels push them. */}
+            <div ref={spacerRef} style={{ height: topSpacerHeight }} />
 
+            <div ref={pushedRef}>
             {headerContent}
 
             {/* Virtual list container */}
@@ -917,6 +923,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                 line as the sidebar's lower end and the other panels' last
                 rows (they end flush with their spacers; this list doesn't) */}
             <div style={{ height: `calc(var(--chrome-bottom) - ${ROW_GAP_PX}px)` }} />
+            </div>
           </div>
 
           {/* FastScroll rail (year-based navigation) - positioned in visible area below calendar/header */}

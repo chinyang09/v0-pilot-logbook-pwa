@@ -419,9 +419,6 @@ function pressableRow(onActivate: () => void, name: string) {
   return {
     role: "button" as const,
     tabIndex: 0,
-    // The touch ink (lib/ui/press-ink.ts) — the row is `.row-divider`, which
-    // positions it.
-    "data-ink": "",
     "aria-label": name,
     onClick: onActivate,
     onKeyDown: (e: React.KeyboardEvent) => {
@@ -442,9 +439,6 @@ function pressableRow(onActivate: () => void, name: string) {
 function clockColumn(onActivate: () => void, name: string) {
   return {
     ...pressableRow(onActivate, name),
-    // The ROW inks, not the column: a circle the size of a time read as a
-    // smudge on the digits.
-    "data-ink": undefined,
     onClick: (e: React.MouseEvent) => {
       e.stopPropagation();
       onActivate();
@@ -494,9 +488,13 @@ function TimeRow({
   return (
     // The WHOLE row opens the picker — it was only the time column, so a tap
     // on "Out" itself did nothing.
+    // A tap anywhere on it — but it is NOT a button to assistive tech: it
+    // holds its own (the two clocks, NOW), and a button inside a button is
+    // announced and focused twice (axe nested-interactive). The UTC column is
+    // the same action from a keyboard.
     <div
-      className="flex items-center justify-between py-3.5 px-4 row-divider cursor-pointer focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2"
-      {...pressableRow(() => onTap("utc"), `${label}, ${shown} UTC`)}
+      className="flex items-center justify-between py-3.5 px-4 row-divider cursor-pointer"
+      onClick={() => onTap("utc")}
     >
       <span className="text-foreground">{label}</span>
       <div className="flex items-center gap-3">
@@ -588,20 +586,40 @@ function TimeDisplayRow({
   useLabel?: string;
   showUseButton?: boolean;
 }) {
+  const hasInnerButton = !(secondaryLabel && secondaryValue) && showUseButton && !!onUse;
+  // The label as the keyboard's target when the row itself cannot be one.
+  const labelPress =
+    onEdit && hasInnerButton
+      ? {
+          ...pressableRow(onEdit, `${label}: ${formatTimeShort(value)}`),
+          onClick: (e: React.MouseEvent) => {
+            e.stopPropagation();
+            onEdit();
+          },
+          className: "text-foreground rounded-sm focus-visible:outline-2 focus-visible:outline-ring",
+        }
+      : {};
   return (
     <div
       className={cn("flex items-center justify-between gap-3 py-3.5 px-4 row-divider", onEdit && "cursor-pointer")}
-      {...(onEdit ? pressableRow(onEdit, `${label}: ${formatTimeShort(value)}`) : {})}
+      {...(onEdit
+        ? // With USE inside it, the row cannot also be a button (axe
+          // nested-interactive): it stays a tap target and its LABEL is the
+          // keyboard's way to the picker.
+          hasInnerButton
+          ? { onClick: onEdit }
+          : pressableRow(onEdit, `${label}: ${formatTimeShort(value)}`)
+        : {})}
     >
       {helper ? (
         <span className="flex min-w-0 flex-col">
-          <span className="text-foreground">{label}</span>
+          <span className="text-foreground" {...labelPress}>{label}</span>
           <span className={cn("text-xs", warning ? "text-destructive" : "text-muted-foreground")} role={warning ? "alert" : undefined}>
             {helper}
           </span>
         </span>
       ) : (
-        <span className="text-foreground">{label}</span>
+        <span className="text-foreground" {...labelPress}>{label}</span>
       )}
       <div className="flex shrink-0 items-center gap-4">
         {secondaryLabel && secondaryValue ? (

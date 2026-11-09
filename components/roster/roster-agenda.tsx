@@ -418,7 +418,7 @@ function DayHeading({ dayKey, todayKey }: { dayKey: string; todayKey: string }) 
 }
 
 // Fixed height: the virtual list depends on it (see HEADER_H / ITEM_H).
-const ROW = "relative flex h-[58px] w-full items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-secondary/40"
+const ROW = "flex h-[58px] w-full items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-secondary/40"
 
 function DutyRow({
   item,
@@ -448,7 +448,6 @@ function DutyRow({
           onClick()
         }
       }}
-      data-ink=""
       aria-current={selected || undefined}
       className={cn(ROW, selected && "border-primary/40 bg-primary/10")}
     >
@@ -490,7 +489,6 @@ function FlightRow({
     <button
       type="button"
       onClick={() => onOpen(f.id)}
-      data-ink=""
       aria-current={selected || undefined}
       className={cn(ROW, selected && "border-primary/40 bg-primary/10")}
     >

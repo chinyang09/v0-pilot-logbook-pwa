@@ -46,7 +46,7 @@ export function PeriodSummary({
   return (
     <section
       className={cn(
-        "@container rounded-3xl border border-border/60 bg-card/70 p-4 shadow-sm",
+        "@container rounded-3xl border border-border bg-card p-4",
         className,
       )}
       aria-label="Period totals"

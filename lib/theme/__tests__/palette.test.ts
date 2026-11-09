@@ -28,6 +28,15 @@ function expectReadable(seed: PaletteSeed, mode: ThemeMode) {
   expect(contrast(colors.primary, colors.card), `primary/card ${ctx}`).toBeGreaterThanOrEqual(4.5)
   expect(contrast(colors.primary, colors.background), `primary/bg ${ctx}`).toBeGreaterThanOrEqual(4.5)
   expect(contrast(colors.primaryForeground, colors.primary), `on-primary ${ctx}`).toBeGreaterThanOrEqual(4.5)
+  // The three layers are told apart by their own TONE, not by a shadow or a
+  // rim: a card stands off the ground, and a control off the card. Measured
+  // as a lightness step (oklch L, perceptual) — the WCAG ratio's flare term
+  // flattens every difference near black, where an OLED ground lives.
+  expect(Math.abs(colors.card.l - colors.background.l), `card/bg ${ctx}`).toBeGreaterThanOrEqual(0.03)
+  expect(Math.abs(colors.control.l - colors.card.l), `control/card ${ctx}`).toBeGreaterThanOrEqual(0.06)
+  expect(contrast(colors.primary, colors.control), `primary/control ${ctx}`).toBeGreaterThanOrEqual(4.5)
+  // Text on a control is the body text, at full reading contrast.
+  expect(contrast(colors.foreground, colors.control), `fg/control ${ctx}`).toBeGreaterThanOrEqual(7)
 }
 
 describe("palette presets", () => {

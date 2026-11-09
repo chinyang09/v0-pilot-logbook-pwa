@@ -455,7 +455,6 @@ export default function SettingsPage() {
               <button
                 key={section.key}
                 type="button"
-                data-ink=""
                 className={cn(
                   "flex items-center w-full px-4 py-3.5 text-left transition-colors row-divider",
                   isActive

@@ -132,10 +132,11 @@ export default function Dashboard() {
     // being cancelled by scroll anchoring (the logbook's rule).
     <div className="relative h-full">
       <PageContainer className="[overflow-anchor:none]">
-        <DashboardCalendarSpacer height={calendarHeight} />
-        <div className="mx-auto max-w-[1600px] px-panel">
-          <SummaryDashboard />
-        </div>
+        <DashboardCalendarSpacer height={calendarHeight}>
+          <div className="mx-auto max-w-[1600px] px-panel">
+            <SummaryDashboard />
+          </div>
+        </DashboardCalendarSpacer>
       </PageContainer>
       <DashboardCalendarPanel onNaturalHeight={setCalendarHeight} />
     </div>

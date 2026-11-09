@@ -28,7 +28,7 @@ interface StoredPalette {
  * The default (Graphite) grounds, for a launch with no stored palette yet.
  * `palette.test.ts` pins them to what the generator builds for the default.
  */
-export const DEFAULT_GROUND: Record<ThemeMode, string> = { light: "#f5f6f7", dark: "#06070a" }
+export const DEFAULT_GROUND: Record<ThemeMode, string> = { light: "#f1f2f4", dark: "#06070a" }
 
 /**
  * Inlined into `<head>` (see `app/layout.tsx`): re-applies the last palette

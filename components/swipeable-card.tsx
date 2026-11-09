@@ -669,9 +669,6 @@ export function SwipeableCard({
         className={cn("relative z-[1]", className)}
       >
         <div
-          // A row that opens something inks where it was touched
-          // (lib/ui/press-ink.ts).
-          data-ink={onClick ? "" : undefined}
           className={cn(
             "relative overflow-hidden bg-card transition-[background-color,border-radius] duration-150",
             isCard && "rounded-lg",

@@ -119,7 +119,7 @@ export function SyncStatus({ className }: { className?: string }) {
         // -top-1/-right-1 lost its right half to the curve ("128" read as
         // "12"). This position clears the curve on both the 56px mobile bar
         // and the 44px desktop pill. Capped at 99+ so it cannot grow back out.
-        <span className="pointer-events-none absolute top-0 right-1 bg-[var(--status-pending)] text-background text-[9px] leading-none min-w-[14px] h-[14px] flex items-center justify-center px-[3px] rounded-full font-semibold tabular-nums">
+        <span className="pointer-events-none absolute top-0 right-1 bg-[var(--status-pending-fill)] text-background text-[9px] leading-none min-w-[14px] h-[14px] flex items-center justify-center px-[3px] rounded-full font-semibold tabular-nums">
           {pendingCount > 99 ? "99+" : pendingCount}
         </span>
       )}

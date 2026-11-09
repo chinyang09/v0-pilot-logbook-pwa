@@ -790,7 +790,9 @@ export function DutyTimeline({
           {chart && (
             <span
               className="pointer-events-none absolute left-1.5 -translate-y-full rounded bg-card/80 px-1 text-[10px] font-semibold tabular-nums"
-              style={{ top: chart.limitY - 1, color: FDP_COLORS.violation }}
+              // The line is FDP_COLORS.violation; the FIGURE is text, which
+              // has to clear 4.5:1 (#b04e3a measured 3.6 on the dark card).
+              style={{ top: chart.limitY - 1, color: "var(--destructive-text)" }}
             >
               {duration(view.limit)}
             </span>
@@ -1042,7 +1044,7 @@ function NowButton({ store, nowMs, span, onNow }: { store: PointerStore; nowMs: 
       type="button"
       onClick={onNow}
       disabled={atNow}
-      className="control-surface h-9 shrink-0 rounded-full px-3.5 text-sm font-medium transition-[opacity,scale] disabled:opacity-40"
+      className="control-surface h-9 shrink-0 rounded-full px-3.5 text-sm font-medium transition-opacity disabled:opacity-40"
     >
       Now
     </button>

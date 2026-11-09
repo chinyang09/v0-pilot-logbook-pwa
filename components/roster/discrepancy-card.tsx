@@ -149,7 +149,6 @@ export const DiscrepancyRow = memo(function DiscrepancyRow({
     <button
       type="button"
       onClick={() => onOpen(discrepancy)}
-      data-ink=""
       aria-current={selected || undefined}
       className={cn(
         "row-divider flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors active:bg-muted/50",

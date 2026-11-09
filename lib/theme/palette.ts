@@ -104,8 +104,15 @@ export function resolveSeed(id: string | undefined, custom: PaletteSeed | undefi
 }
 
 const DEPTH_L: Record<DarkDepth, number> = { dim: 0.17, deep: 0.13, black: 0.075 }
-/** Cards on a black ground sit a little further above it, or they vanish. */
-const DEPTH_CARD_STEP: Record<DarkDepth, number> = { dim: 0.04, deep: 0.04, black: 0.055 }
+/**
+ * THREE LAYERS, each a visible step from the one under it (Nov 2026): the
+ * ground, the CARD on it, and the CONTROL (a thing you press) on the card.
+ * They were 1.05:1 card-on-ground and 1.01:1 button-on-card in the light theme
+ * — white on white — so only a shadow and a rim told them apart, which is the
+ * noise the owner asked to cut. Cards on a black ground sit a little further
+ * above it, or they vanish.
+ */
+const DEPTH_CARD_STEP: Record<DarkDepth, number> = { dim: 0.05, deep: 0.055, black: 0.065 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 const wrapHue = (h: number) => ((h % 360) + 360) % 360
@@ -239,6 +246,7 @@ export const PALETTE_TOKENS = [
   "sidebar-accent-foreground",
   "sidebar-border",
   "sidebar-ring",
+  "control",
 ] as const
 
 export type PaletteToken = (typeof PALETTE_TOKENS)[number]
@@ -248,7 +256,7 @@ export interface GeneratedPalette {
   /** The ground as #rrggbb, for the browser/OS chrome (`theme-color`). */
   groundHex: string
   /** The resolved colours, for previews and tests. */
-  colors: { background: Oklch; card: Oklch; foreground: Oklch; muted: Oklch; primary: Oklch; primaryForeground: Oklch }
+  colors: { background: Oklch; card: Oklch; control: Oklch; foreground: Oklch; muted: Oklch; primary: Oklch; primaryForeground: Oklch }
 }
 
 export function generatePalette(input: PaletteSeed, mode: ThemeMode): GeneratedPalette {
@@ -263,26 +271,33 @@ export function generatePalette(input: PaletteSeed, mode: ThemeMode): GeneratedP
   const surface = (l: number, cScale = 1): Oklch => toGamut({ l, c: groundC * cScale, h: gh })
   const ink = (l: number): Oklch => toGamut({ l, c: Math.min(groundC * 0.5, 0.014), h: gh })
 
-  let background: Oklch, card: Oklch, popover: Oklch, raised: Oklch, border: Oklch, sidebar: Oklch
+  let background: Oklch, card: Oklch, popover: Oklch, raised: Oklch, border: Oklch, sidebar: Oklch, control: Oklch
   let foreground: Oklch, secondaryForeground: Oklch, muted: Oklch
   if (dark) {
     const base = DEPTH_L[seed.depth]
     background = surface(base)
     card = surface(base + DEPTH_CARD_STEP[seed.depth], 1.1)
     popover = surface(card.l + 0.01, 1.1)
-    raised = surface(base + 0.08, 1.1)
-    border = surface(base + 0.125, 1.1)
+    raised = surface(card.l + 0.045, 1.1)
+    // A control is the step above a raised row, so a button on a secondary
+    // surface still reads as one.
+    control = surface(card.l + 0.065, 1.1)
+    border = surface(card.l + 0.085, 1.1)
     sidebar = surface(base + 0.02)
     // Dimmed off-white: a large field of #fff is what costs dark adaptation.
     foreground = ink(0.9)
     secondaryForeground = ink(0.82)
     muted = ensureContrast(ink(0.66), [card, raised], 4.5, 1)
   } else {
-    background = surface(0.972)
+    // iOS's grouped ground (#F2F2F7 sits at L 0.962): white cards on it read
+    // as cards without a shadow to lift them.
+    background = surface(0.962)
     card = surface(0.995, 0.4)
     popover = card
     raised = surface(0.945)
-    border = surface(0.9)
+    // Below the ground as well as the card, so a button reads as one on both.
+    control = surface(0.925)
+    border = surface(0.885)
     sidebar = surface(0.982)
     foreground = ink(0.22)
     secondaryForeground = ink(0.32)
@@ -291,9 +306,17 @@ export function generatePalette(input: PaletteSeed, mode: ThemeMode): GeneratedP
 
   // The accent carries text (links, the scheduled-flight card, "Undo"), so it
   // has to read as text on every surface it lands on.
+  // It also lands on a control (NOW, USE, a segmented tab) and on a light
+  // tint of ITSELF (a selected chip, the active segment) — axe measured 4.2
+  // to 4.4:1 on those when only the cards were checked.
+  const accentTint = toGamut({
+    l: dark ? card.l + 0.1 : 0.89,
+    c: seed.accentChroma * 0.35,
+    h: seed.accentHue,
+  })
   const primary = ensureContrast(
     { l: dark ? 0.74 : 0.52, c: seed.accentChroma, h: seed.accentHue },
-    [card, background, popover],
+    [card, background, popover, control, accentTint],
     4.5,
     dark ? 1 : -1
   )
@@ -332,12 +355,13 @@ export function generatePalette(input: PaletteSeed, mode: ThemeMode): GeneratedP
     "sidebar-accent-foreground": css(foreground),
     "sidebar-border": css(border),
     "sidebar-ring": css(primary),
+    control: css(control),
   }
 
   return {
     tokens,
     groundHex: toHex(background),
-    colors: { background, card, foreground, muted, primary, primaryForeground },
+    colors: { background, card, control, foreground, muted, primary, primaryForeground },
   }
 }
 
