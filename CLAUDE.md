@@ -3564,7 +3564,10 @@ device.
   the row and the next launch flipped a light-mode pilot to dark.
 
 Scheduled (unflown) flights are drawn in the accent (`text-primary` on the
-logbook card and the roster chip): planned is the accent, whatever it is.
+logbook card and the roster chip): planned is the accent, whatever it is. Their SECONDARY text
+(month, aircraft, flight number) is `.text-primary-muted`, the accent mixed
+toward `--muted-foreground` — never the accent at a fraction of its opacity,
+which let the card through at 3.6:1.
 
 ### State Management
 

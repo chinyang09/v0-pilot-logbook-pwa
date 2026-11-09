@@ -1903,3 +1903,12 @@ textarea:focus-within {
     color: var(--destructive-text);
   }
 }
+
+/* A SCHEDULED flight's secondary text — the accent, quietened toward the
+   muted grey. It was the accent at 60–75% opacity, which let the card show
+   through: 3.6:1 in both themes. Both ends of this mix clear 4.5:1 on a card
+   in every palette (the generator checks them), so the mix does too, and it
+   still reads as "planned" beside a flown card's plain grey. */
+.text-primary-muted {
+  color: color-mix(in oklch, var(--primary) 55%, var(--muted-foreground));
+}

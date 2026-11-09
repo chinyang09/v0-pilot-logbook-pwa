@@ -259,7 +259,7 @@ export function FlightCardBody({
           className={cn(
             "text-base mt-0.5 tracking-wide",
             isScheduled
-              ? "text-primary/75 dark:text-primary/60"
+              ? "text-primary-muted"
               : "text-muted-foreground"
           )}
         >
@@ -347,7 +347,7 @@ export function FlightCardBody({
             // in-progress fling. 1.25em is `leading-tight` at this font size.
             "flex h-[1.25em] items-center gap-1.5 text-[13px] leading-tight mt-0.5",
             isScheduled
-              ? "text-primary/75 dark:text-primary/60"
+              ? "text-primary-muted"
               : "text-muted-foreground"
           )}
         >
@@ -390,7 +390,7 @@ export function FlightCardBody({
             className={cn(
               "flex flex-1 min-w-0 overflow-hidden text-[13px] leading-tight",
               isScheduled
-                ? "text-primary/75 dark:text-primary/60"
+                ? "text-primary-muted"
                 : "text-muted-foreground"
             )}
           >
