@@ -10,6 +10,7 @@ import { formatClockDisplay, formatHHMMDisplay } from "@/lib/utils/time";
 import type { DisplayPreferences } from "@/types/db/stores.types";
 import { setMenuOpen } from "@/lib/utils/menu-lock";
 import { useBackDismiss } from "@/hooks/use-back-dismiss";
+import { useDialogFocus } from "@/hooks/use-dialog-focus";
 import { POP_SPRING } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import {
@@ -220,6 +221,12 @@ export function FlightContextPreview({
     closeRef.current = onClose;
   }, [onClose]);
 
+  // Mounted only while shown: focus moves to its first action, Tab stays
+  // inside, and it returns to whatever held it before the hold.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialogRef, true);
+  const scrimPressRef = useRef(false);
+
   /**
    * The card is laid out COLLAPSED on the first commit and EXPANDED on the
    * next, and the flip between them is the whole animation.
@@ -328,9 +335,20 @@ export function FlightContextPreview({
         initial={{ opacity: 0 }}
         animate={{ opacity: open ? 1 : 0 }}
         transition={SCRIM_FADE}
+        // Only a tap that STARTED here dismisses. Lifting the finger that
+        // held the row is the same gesture, and an engine may still turn that
+        // release into a click — which lands on this scrim, because the card
+        // has moved out from under the finger — and the preview closed the
+        // moment it was let go.
+        onPointerDown={() => {
+          scrimPressRef.current = true;
+        }}
         // Wrapped, not passed directly — the handler's MouseEvent would
         // otherwise arrive as `requestClose`'s follow-up action.
-        onClick={() => requestClose()}
+        onClick={() => {
+          if (scrimPressRef.current) requestClose();
+          scrimPressRef.current = false;
+        }}
       />
 
       {/* The positioning wrapper is `pointer-events-none` and only the card and
@@ -340,7 +358,9 @@ export function FlightContextPreview({
           scrim. On a phone, where there is barely any scrim left uncovered,
           that meant the preview could not be dismissed at all. */}
       <div
+        ref={dialogRef}
         role="dialog"
+        aria-modal="true"
         aria-label="Flight preview"
         className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center"
         // Vertical only. The card carries the ROW's width, which is already

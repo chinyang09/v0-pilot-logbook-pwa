@@ -1,12 +1,13 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useRef, useState, useEffect, useCallback } from "react"
 import { WheelPicker, WheelPickerWrapper } from "@ncdai/react-wheel-picker"
 import "@ncdai/react-wheel-picker/style.css"
 import { createPortal } from "react-dom"
 import { MODAL_SCRIM } from "@/components/ui/chrome-overlays"
 import { WHEEL_FILL, wheelClassNames } from "@/components/ui/wheel-styles"
 import { useBackDismiss } from "@/hooks/use-back-dismiss"
+import { useDialogFocus } from "@/hooks/use-dialog-focus"
 import { cn } from "@/lib/utils"
 import { formatTimezoneOffset, getCurrentTimeUTC, isValidHHMM, localToUTC, utcToLocal } from "@/lib/utils/time"
 
@@ -112,6 +113,11 @@ export function TimePicker({
     : { label: "Local", value: utcToLocal(shown, timezoneOffset) }
   const frameLabel = duration ? null : local ? `Local ${formatTimezoneOffset(timezoneOffset)}` : "UTC"
 
+  // Focus goes IN to the first wheel (they take the arrow keys), Tab stays
+  // inside, and closing hands it back to the row that opened the picker.
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useDialogFocus(dialogRef, isOpen, '[data-rwp][tabindex="0"]')
+
   if (!isOpen || typeof document === "undefined") return null
 
   // Portalled, and above the app chrome (header z-99, nav pill z-100). It used
@@ -128,6 +134,7 @@ export function TimePicker({
       onClick={() => dismiss()}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={label || "Select time"}

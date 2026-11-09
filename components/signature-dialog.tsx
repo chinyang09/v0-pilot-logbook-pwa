@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import {
@@ -9,6 +9,7 @@ import {
 } from "@/components/signature-canvas";
 import type { FlightSignature } from "@/types/entities/flight.types";
 import { useBackDismiss } from "@/hooks/use-back-dismiss";
+import { useDialogFocus } from "@/hooks/use-dialog-focus";
 import { useContentRegionStyle } from "@/components/ui/region-sheet";
 import { cn } from "@/lib/utils";
 
@@ -83,6 +84,9 @@ export function SignatureDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, dismiss]);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialogRef, open);
+
   if (!open || typeof document === "undefined") return null;
 
   // z-[110]: above the app chrome (header z-99, nav pill z-100) and BELOW
@@ -93,6 +97,7 @@ export function SignatureDialog({
   // drew over the dialog on a phone and hid its Save button.
   return createPortal(
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-labelledby="signature-dialog-title"

@@ -53,7 +53,7 @@ export function DateRow({
           </span>
           {description && <span className="mt-0.5 block text-xs text-muted-foreground">{description}</span>}
         </span>
-        <span className={value ? "text-muted-foreground tabular-nums" : "text-muted-foreground/50"}>
+        <span className="text-muted-foreground tabular-nums">
           {value ? formatYMDMedium(value) : placeholder}
         </span>
       </button>

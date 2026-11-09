@@ -627,7 +627,6 @@ export default function LogbookPage() {
           style={{
             height: showSearch ? searchBlockHeight : 0,
             transition: PANEL_MOTION,
-            willChange: "height",
           }}
           aria-hidden={!showSearch}
           // Stowed at 0px but mounted — inert keeps the hidden field out of

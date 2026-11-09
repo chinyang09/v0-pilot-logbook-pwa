@@ -501,7 +501,7 @@ export function ImportFlightCard({
               <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
                 {fieldLabel(c.field, authority)}
               </span>
-              <span className="text-muted-foreground/50 line-through decoration-muted-foreground/40">
+              <span className="text-muted-foreground line-through decoration-muted-foreground/60">
                 {c.from || "—"}
               </span>
               <span className="font-semibold text-primary">{c.to}</span>
