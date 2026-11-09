@@ -1281,6 +1281,30 @@ textarea:focus-within {
 }
 
 /**
+ * RIM BLURS OFF — the owner's call, 9 Nov 2026. TO REVERT: delete this rule.
+ *
+ * The four edge layers above draw NOTHING but their `backdrop-filter` (no
+ * background, masked to a ~2px ring), so hiding them leaves each glass surface
+ * with ONE blur, its face (`.GlassBlur`). Measured at 4× on the owner's
+ * logbook (390×844): 22 blur layers on screen → 6, and frames over 33ms
+ * during the sidebar open 16 → 8, close 6 → 2, calendar open 13 → 6, close
+ * 10 → 1 — nearly all of what removing EVERY blur bought (9 / 2 / 4 / 1).
+ * Scrolling was already 60fps either way. The rim you see stays: the specular
+ * hairline is `.GlassMaterial::before`, a painted conic, not one of these.
+ * What goes is the 1–2px of refracted backdrop inside that hairline.
+ *
+ * The rules above are left exactly as they were so the revert is this one
+ * rule, and `data-quiet` (which drops the same four during the nav morph)
+ * still does its job if it comes back.
+ */
+.GlassMaterial .GlassEdgeReflection,
+.GlassMaterial .GlassEmbossReflection,
+.GlassMaterial .GlassRefraction,
+.GlassMaterial .Highlight {
+  display: none;
+}
+
+/**
  * THE ACTION SURFACE — what a thing you can PRESS looks like, everywhere.
  *
  * The header controls and the nav are glass capsules; the context preview's

@@ -4357,12 +4357,30 @@ Each of these was measured or read closely during a performance pass and left
 alone on purpose. The reason is recorded so the next pass doesn't re-derive it
 — and so that anyone who *does* action one knows what they are trading.
 
-- **The glass rim adds three more `backdrop-filter`s per surface** on top of
-  `.GlassBlur`'s one (`.GlassEdgeReflection`, `.GlassEmbossReflection`,
-  `.GlassRefraction`). They are masked to a ~2px band but the filter still
-  processes the whole element box. This IS the material — only touch it with
-  the owner. (The specular DRIFT that used to sit beside it in this list was
-  actioned — see "Smoothness" — because it turned out to move nothing.)
+- **The glass rim's edge blurs — ACTIONED 9 Nov 2026, on the owner's say,
+  and marked for a possible REVERT.** Each glass surface carried five
+  `backdrop-filter`s: the face (`.GlassBlur`) and four edge layers
+  (`.GlassEdgeReflection`, `.GlassEmbossReflection`, `.GlassRefraction`,
+  `.Highlight`) masked to a ~2px ring but filtering the whole box. A/B on the
+  owner's logbook at 4× (390×844, frames over 33ms):
+
+  | | now (22 blurs) | edge blurs off (6) | no blur at all (0) |
+  |---|---|---|---|
+  | scroll logbook / roster / airports | 60fps | 60fps | 60fps |
+  | sidebar open / close | 16 / 6 | 8 / 2 | 9 / 2 |
+  | calendar open / close | 13 / 10 | 6 / 1 | 4 / 1 |
+
+  The edge layers were nearly all of the cost; darken-only bought almost
+  nothing more and let the cards read through the bottom bar. So ONE rule at
+  the end of the glass block in `globals.css` ("RIM BLURS OFF") hides the
+  four layers — they draw nothing but their filter. The painted hairline
+  (`.GlassMaterial::before`, the conic) stays; what goes is the 1–2px of
+  refracted backdrop inside it. **To revert: delete that rule** (or
+  `git revert` the commit "Glass keeps one blur per surface"); every original
+  declaration was left in place, so nothing else needs restoring. The owner is
+  judging it on device. (The specular DRIFT that used to sit beside this in
+  the list was actioned — see "Smoothness" — because it turned out to move
+  nothing.)
 - **`dedupingInterval: 0` on every data hook** means the five keep-alive pages
   reading `useFlights()` each fire their own full IndexedDB read on first
   mount. Raising it is safe *in principle* — SWR only consults the interval for
