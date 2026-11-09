@@ -1341,9 +1341,7 @@ textarea:focus-within {
        material from the header capsule beside it: a dark smudge under a white
        disc where the glass carries a soft warm lift. */
     box-shadow: var(--glass-shadow);
-    transition:
-      background-color 120ms ease,
-      scale 180ms cubic-bezier(0.2, 0, 0, 1);
+    transition: background-color 120ms ease;
   }
   /* Set INTO a surface rather than floating over one — the swipe panel's
      buttons, which sit inside the row they belong to. A drop shadow there is
@@ -1385,42 +1383,8 @@ textarea:focus-within {
     mask-composite: exclude, exclude;
     pointer-events: none;
   }
-  /* THE STATE LAYER — Material's answer to "is this being pressed / hovered /
-     focused", where the glass chrome answers with its spotlight. A sheet of
-     the control's OWN text colour over its face at a low opacity, so it is
-     right on every fill (the primary, the red one, the plain face) without a
-     colour per variant; only its opacity moves, which composites.
-
-     Scoped to things that ARE pressed (`button`, `a`, `role=button`, a switch
-     label): `:active` also matches every ANCESTOR of the pressed element, so
-     on the segmented control's wrapper (a `div` on this surface) it lit the
-     whole strip whenever a segment was pressed. */
-  .control-surface::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background-color: currentColor;
-    opacity: 0;
-    transition: opacity 120ms ease;
-    pointer-events: none;
-  }
-  @media (hover: hover) {
-    :is(button, a, [role="button"], label).control-surface:hover:not(:disabled)::after {
-      opacity: 0.06;
-    }
-  }
-  :is(button, a, [role="button"], label).control-surface:focus-visible::after,
-  :is(button, a, [role="button"], label).control-surface:active:not(:disabled)::after {
-    opacity: 0.1;
-  }
-  /* The press GIVES a little — iOS's and Material Expressive's shared answer,
-     on the composited `scale` property (a transform of its own, so it never
-     fights a `transform` someone else animates). Not on `-float`: that one
-     carries a backdrop-filter, and scaling it re-samples the backdrop every
-     frame of the squish. */
-  :is(button, a, [role="button"], label).control-surface:active:not(:disabled):not(.control-surface-float) {
-    scale: 0.97;
+  .control-surface:active:not(:disabled) {
+    background-color: color-mix(in oklab, var(--on-glass), var(--foreground) 12%);
   }
   /* A MENU hung off a control — the option picker (`OptionMenu`). It floats
      over live content, so it is the glass's own translucent face exactly as
@@ -1459,28 +1423,8 @@ textarea:focus-within {
     background-color: var(--destructive);
     color: var(--destructive-foreground);
   }
-
-  /* The INK (`lib/ui/press-ink.ts`): a circle of the pressed thing's text
-     colour spreading from where the finger landed, clipped to the thing's own
-     shape by its host. Only `transform` and `opacity` are ever animated. */
-  .press-ink-host {
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    overflow: hidden;
-    pointer-events: none;
-    contain: strict;
-  }
-  .press-ink {
-    position: absolute;
-    border-radius: 9999px;
-    background-color: currentColor;
-    opacity: 0.12;
-    transform: scale(0.15);
-    will-change: transform;
-  }
-  .dark .press-ink {
-    opacity: 0.16;
+  .control-surface.control-surface-destructive:active:not(:disabled) {
+    background-color: color-mix(in oklab, var(--destructive), black 15%);
   }
 }
 

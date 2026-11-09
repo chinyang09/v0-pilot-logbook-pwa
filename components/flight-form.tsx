@@ -419,9 +419,6 @@ function pressableRow(onActivate: () => void, name: string) {
   return {
     role: "button" as const,
     tabIndex: 0,
-    // The touch ink (lib/ui/press-ink.ts) — the row is `.row-divider`, which
-    // positions it.
-    "data-ink": "",
     "aria-label": name,
     onClick: onActivate,
     onKeyDown: (e: React.KeyboardEvent) => {
@@ -442,9 +439,6 @@ function pressableRow(onActivate: () => void, name: string) {
 function clockColumn(onActivate: () => void, name: string) {
   return {
     ...pressableRow(onActivate, name),
-    // The ROW inks, not the column: a circle the size of a time read as a
-    // smudge on the digits.
-    "data-ink": undefined,
     onClick: (e: React.MouseEvent) => {
       e.stopPropagation();
       onActivate();
