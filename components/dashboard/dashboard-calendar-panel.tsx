@@ -2,7 +2,9 @@
 
 import * as React from "react"
 
-import { CalendarPanel, PANEL_MOTION, PANEL_MS } from "@/components/calendar-panel"
+import { CalendarPanel, PANEL_MS } from "@/components/calendar-panel"
+import { useFlipPush } from "@/hooks/use-flip-push"
+import { MORPH_EASE } from "@/lib/motion"
 import { useFlights } from "@/hooks/data/use-flights"
 import { useDashboardPeriod } from "@/hooks/use-dashboard-period"
 import { usePanelDualMonth, useFloatingPanelUnderHeader } from "@/lib/layout/panel-mode"
@@ -126,7 +128,15 @@ export function DashboardCalendarPanel({
  * movement. Its own component so only it reads the period context — the page
  * around it does not re-render with every period change.
  */
-export function DashboardCalendarSpacer({ height }: { height: number }) {
+export function DashboardCalendarSpacer({ height, children }: { height: number; children: React.ReactNode }) {
   const { showCalendar } = useDashboardPeriod()
-  return <div aria-hidden style={{ height: showCalendar ? height : 0, transition: PANEL_MOTION }} />
+  // The page under it is slid on a transform (useFlipPush), not re-laid out
+  // per frame by an animated height — the logbook's rule.
+  const { spacerRef, pushedRef } = useFlipPush(true, PANEL_MS, MORPH_EASE)
+  return (
+    <>
+      <div ref={spacerRef} aria-hidden style={{ height: showCalendar ? height : 0 }} />
+      <div ref={pushedRef}>{children}</div>
+    </>
+  )
 }

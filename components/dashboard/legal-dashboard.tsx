@@ -279,7 +279,7 @@ export function LegalDashboardView({
         // `max-h-full`, NOT `h-full`: stretching the surface to the viewport
         // makes one section absorb every spare pixel, which on a tall phone
         // left ~200px of empty grid below the last row.
-        "@container relative flex max-h-full flex-col overflow-hidden rounded-3xl border border-border/60 bg-card/70 shadow-sm",
+        "@container relative flex max-h-full flex-col overflow-hidden rounded-3xl border border-border bg-card",
         className,
       )}
     >

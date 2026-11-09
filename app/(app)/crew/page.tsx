@@ -91,15 +91,6 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
           hydration error). Still a keyboard target — Enter/Space click it,
           which bubbles to the SwipeableCard's onClick like a tap. */}
       <div
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.target !== e.currentTarget) return;
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            e.currentTarget.click();
-          }
-        }}
         className={cn(
           "w-full text-left bg-card border border-border rounded-lg py-2 pl-3 pr-6 transition-colors hover:bg-accent",
           isRecent &&
@@ -108,7 +99,21 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
         )}
       >
         <div className="flex items-center justify-between gap-2">
-          <div className="flex-1 min-w-0">
+          {/* The keyboard target is the NAME block, not the whole card: the
+              card holds the favourite button, and a button inside a button
+              is focused and announced twice (axe nested-interactive). */}
+          <div
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.target !== e.currentTarget) return;
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.currentTarget.click();
+              }
+            }}
+            className="flex-1 min-w-0 rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-ring"
+          >
             <div className="flex items-center gap-2">
               <span className="font-semibold text-foreground truncate">
                 {displayName}

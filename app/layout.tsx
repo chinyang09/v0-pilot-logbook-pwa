@@ -38,8 +38,11 @@ export const viewport: Viewport = {
   colorScheme: "dark light",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
+  // Pinch-zoom stays ON (WCAG 1.4.4): a pilot who needs larger text must be
+  // able to get it. Every text field is 16px or more on a phone, so iOS has
+  // no reason to zoom on focus, and `touch-action: manipulation` on <html>
+  // (globals.css) keeps double-tap from zooming. The FDP chart takes its own
+  // pinch (`touch-action: pan-x pan-y` on its surface).
   viewportFit: "cover",
 }
 

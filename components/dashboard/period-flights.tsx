@@ -55,7 +55,7 @@ export function PeriodFlights({
   return (
     <section
       className={cn(
-        "@container flex min-h-0 flex-col rounded-3xl border border-border/60 bg-card/70 p-4 shadow-sm",
+        "@container flex min-h-0 flex-col rounded-3xl border border-border bg-card p-4",
         className,
       )}
       aria-label="Flights in period"

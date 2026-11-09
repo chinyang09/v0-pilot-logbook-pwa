@@ -123,7 +123,7 @@ export function GlassSearchButton({
               aria-label={placeholder}
               {...SEARCH_INPUT_PROPS}
               tabIndex={isOpen ? 0 : -1}
-              className="flex-1 bg-transparent text-sm outline-none min-w-0 placeholder:text-[var(--on-glass-muted)]"
+              className="flex-1 bg-transparent text-base outline-none min-w-0 placeholder:text-[var(--on-glass-muted)]"
             />
             <button
               type="button"

@@ -572,8 +572,8 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                         : "font-semibold text-primary bg-[var(--on-glass-accent)]"
                     ),
                     isCurrentMonth && isToday && !isSelected && !isRangeStart && !isRangeEnd && "bg-[var(--on-glass-accent-strong)] ring-2 ring-inset ring-primary font-bold",
-                    isSelected && "bg-primary text-primary-foreground shadow-md z-10",
-                    (isRangeStart || isRangeEnd) && "bg-primary text-primary-foreground shadow-md z-10",
+                    isSelected && "bg-primary text-primary-foreground z-10",
+                    (isRangeStart || isRangeEnd) && "bg-primary text-primary-foreground z-10",
                   )}
                 >
                   {dayInfo.date.getDate()}

@@ -1862,8 +1862,17 @@ at `--chrome-top`, and the list reserves their combined height in its
   which is what hid the nav pill. With anchoring off the push is identical at
   every scroll position (measured: 358px at scrollTop 0, 600 and 1500, with
   `scrollTop` unchanged).
-- **`PANEL_MOTION` — one clock.** The calendar's collapse and the list
-  spacer use the same `height 300ms MORPH_EASE` string. They used to be a
+- **The list is PUSHED on a transform, not by an animated height**
+  (`useFlipPush`, `hooks/use-flip-push.ts`). The spacer takes its new height
+  in ONE layout; the content after it starts where it visually was and slides
+  home on a WAAPI transform, the delta read in a ResizeObserver callback
+  (after layout, before paint — no flash, no forced layout). Animating the
+  spacer's height re-laid out and repainted the whole list every frame — half
+  the calendar's cost: measured at 4×, calendar open 9 → 3 frames over 33ms,
+  close 4 → 1, paint 329 → 154ms. The dashboard's summary spacer does the
+  same. `absorbSpacerDelta`'s no-animation case passes `animate: false`.
+- **`PANEL_MOTION` — one clock.** The calendar's collapse and the list's push
+  run the same 300ms on `MORPH_EASE`. They used to be a
   framer spring and a CSS transition of a different duration, which read as
   two stages: the panel opening, then the list catching up. The calendar is
   therefore always MOUNTED and collapsed to `height: 0` (rather than
@@ -3019,13 +3028,24 @@ card above it, so the owner could not tell the actions from the card.
 | Where | Is |
 |---|---|
 | floating chrome over moving content (header, nav) | the real glass (`GlassContainer`) |
-| everything else you press — swipe actions, the `…` cascade, the preview's actions, `Button` (`outline` / `secondary`), panel actions (`ActionRow`), error and notice buttons | `.control-surface` — the glass face's PAINTED half: `--on-glass` (the colour the finished glass reads as) and its specular rim, no `backdrop-filter` |
+| everything else you press — swipe actions, the preview's actions, `Button` (`outline` / `secondary`), panel actions (`ActionRow`), error and notice buttons | `.control-surface` — a FLAT capsule on `--control`, the palette's third layer: no rim, no shadow, no `backdrop-filter` |
 | the primary act among several (Restore, Reload) | `.control-surface-primary` — the selected-thing fill |
 | delete / sign out | `.control-surface-destructive` |
 
-- The painted surface is the same look as the glass wherever the backdrop is a
-  flat row or panel (blurring a flat field returns the field), and it costs no
-  readback.
+- **THREE LAYERS, told apart by TONE (Nov 2026):** the ground
+  (`--background`), the CARD on it (`--card`), and the CONTROL on the card
+  (`--control`) — each a generated step from the one under it, in every
+  palette (`palette.test.ts` pins card/ground ≥ 0.03 and control/card ≥ 0.06
+  in oklch L). They measured 1.05:1 card-on-ground and 1.01:1 button-on-card
+  in the light theme — white on white — so a masked conic rim and a drop
+  shadow on every button and card were all that told them apart: the noise the
+  owner asked to cut. Light is iOS's grouped look (white cards on a 0.962
+  ground, grey controls below both). Cards carry a hairline border and NO
+  shadow; the dashboard's blocks are solid `bg-card` (they were `bg-card/70`
+  with a shadow, which belonged to no layer). The rim and the glass shadow
+  stay only where a surface really FLOATS: `-float`, `.menu-surface`, the
+  glass chrome. Measured at 4× on the logbook: the rim and the card shadows
+  cost nothing either way — this is about legibility, not paint.
 - **Two placements, two modifiers.** `.control-surface-inset` — set INTO a
   surface that clips (the swipe panel: the row has to clip, its content slides
   out of it) — drops the shadow, which the row's edge cut off into a grey band
@@ -3098,6 +3118,26 @@ identical:
   wraps the shared `SwipeableCard` and its rows use the same `.row-divider`.
 
 ### Readability and Touch Targets
+
+**Accessibility is measured, not assumed** — axe-core over every route plus an
+open flight, both themes (Nov 2026: zero violations). What it took:
+
+- **Pinch-zoom is allowed** (WCAG 1.4.4) — the viewport no longer sets
+  `maximumScale: 1` / `userScalable: false`. Every text field is ≥16px on a
+  phone so iOS never zooms on focus, `<html>` carries `touch-action:
+  manipulation` so a double-tap does not zoom, and the FDP chart keeps its own
+  pinch (`touch-action: pan-x pan-y`).
+- **Red text is not red fill** — `text-destructive` reads `--destructive-text`
+  (4.5:1 on a card and on the red-tinted notices); `--destructive` is the fill
+  under a light label. The pending badge sits on `--status-pending-fill`.
+- **The accent clears 4.5:1 on a control and on a tint of itself** (the
+  generator checks `--control` and an accent tint as well as the cards).
+- **No button inside a button.** A row that holds its own controls (a time
+  row's clocks and NOW, an hour row's USE, a crew card's star) is a plain tap
+  target, and a control inside it — the UTC clock, the label, the name block —
+  is the keyboard's way to the same action.
+- **Every focusable thing shows focus** — a zero-specificity `:focus-visible`
+  ring in the base layer for anything that draws none of its own.
 
 - **Every control a thumb has to hit is at least 36px** (`h-9`). Where a row
   must keep a fixed height (the virtualised lists' favourite star, a search
@@ -5502,6 +5542,9 @@ When making changes, be aware of these high-impact files:
 - Do not take the first result of an aircraft or airport search as THE answer — a partial registration ("9VB") is a question. Only a candidate marked `exact` fills a form, an import or a submission by itself; anything else is listed for the pilot to choose, or is no match
 - Do not hand the year wheel a new options array per render — `yearOptions` keeps the SAME array while the range holds, and the range is anchored on TODAY (widened only when the viewed year falls outside). Anchored on the viewed year, every year spun rebuilt ~75 rows
 - Do not put a segmented choice back as a pair of filled rectangles — it is `SegmentedTabs` (the action surface, a sliding indicator, `h-9` segments), as in the import dialogs, the Quick Check and the custom palette's vividness and depth (`components/ui/segmented-tabs.tsx`). And measure its segments from ONE ResizeObserver: reading `offsetLeft` in a ref callback that is rebuilt on every selection forced a layout per tap and attached a new observer to every segment each time, never disconnecting the old ones
+- Do not animate a spacer's `height` to push content — it lays out and repaints everything after it every frame. Push with `useFlipPush` (one layout, a compositor transform)
+- Do not tell the layers apart with shadows and rims — ground, card and control are generated tones (`--background` / `--card` / `--control`), each a visible step from the one under it; a rim and a shadow belong only to a surface that floats. Do not put `bg-card/70` or a `shadow-sm` on a card
+- Do not forbid zoom in the viewport, and do not give a text field less than 16px on a phone (iOS zooms on focus once zoom is allowed). Do not read `--destructive` as text — `text-destructive` is `--destructive-text`. Do not nest a focusable control inside a `role="button"` row; make the row a plain tap target and an inner element the keyboard target
 - Do not put an action back on the card surface (`bg-secondary`, `bg-card`, `bg-muted`) or give it a rectangle's corners — a thing you press is a CAPSULE or circle on `.control-surface`, a thing you read is a rounded rectangle. On the card surface the context preview's action row read as more card. And do not use the REAL glass (`GlassContainer`) for an action that sits over a scrim, a row or a panel: the painted surface is the same look with no `backdrop-filter`, and these pop in on exactly the frames a readback would cost most
 - Do not group header controls page by page — a header is VIEW (search, calendar, period) → TOOLS (import, Quick Check, alerts, read-from-photo) → CREATE (+, alone and last), one capsule per role, with a page switch first and detail commits (Cancel / Save / Edit, Back) one capsule each (`glass-icon-button.tsx`). And do not add a Refresh button: every list follows every write and every sync, so it re-reads the same rows, and it reads as "sync" — which is the cloud in the nav
 - Do not give the context preview's compact body `layout="position"` — it is the one block that exists in BOTH states, so it takes a FULL `layout`. Its height is unchanged either way, which makes its delta scaleX only: the row's content is condensed at the first frame and relaxes out as the card widens. `layout="position"` cancels the horizontal scale too, which lays it out at the RESTING width from frame one and lets the card clip it — on a tablet the arrival time and ICAO are missing until the card widens past them. The detail and the actions DO take `layout="position"`; they exist only while open. And keep the lift a static shadow on its own PROJECTED (`layout`) node faded by opacity, outside the clip: an interpolated `boxShadow` is rebuilt as a string every frame, and `overflow: hidden` on an ancestor eats a shadow entirely

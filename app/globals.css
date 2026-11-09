@@ -29,34 +29,41 @@
 /* Light theme */
 :root {
   /* palette:light */
-  --background: oklch(0.972 0.002 260);
+  --control: oklch(0.925 0.002 260);
+  --background: oklch(0.962 0.002 260);
   --foreground: oklch(0.22 0.001 260);
   --card: oklch(0.995 0.001 260);
   --card-foreground: oklch(0.22 0.001 260);
   --popover: oklch(0.995 0.001 260);
   --popover-foreground: oklch(0.22 0.001 260);
-  --primary: oklch(0.52 0.13 252);
+  --primary: oklch(0.49 0.13 252);
   --primary-foreground: oklch(0.985 0.004 252);
-  --ring: oklch(0.52 0.13 252);
+  --ring: oklch(0.49 0.13 252);
   --secondary: oklch(0.945 0.002 260);
   --secondary-foreground: oklch(0.32 0.001 260);
   --muted: oklch(0.945 0.002 260);
   --muted-foreground: oklch(0.47 0.001 260);
   --accent: oklch(0.945 0.002 260);
   --accent-foreground: oklch(0.32 0.001 260);
-  --border: oklch(0.9 0.002 260);
+  --border: oklch(0.885 0.002 260);
   --input: oklch(0.945 0.002 260);
-  --chart-1: oklch(0.52 0.13 252);
+  --chart-1: oklch(0.49 0.13 252);
   --sidebar: oklch(0.982 0.002 260);
   --sidebar-foreground: oklch(0.22 0.001 260);
-  --sidebar-primary: oklch(0.52 0.13 252);
+  --sidebar-primary: oklch(0.49 0.13 252);
   --sidebar-primary-foreground: oklch(0.985 0.004 252);
   --sidebar-accent: oklch(0.945 0.002 260);
   --sidebar-accent-foreground: oklch(0.22 0.001 260);
-  --sidebar-border: oklch(0.9 0.002 260);
-  --sidebar-ring: oklch(0.52 0.13 252);
+  --sidebar-border: oklch(0.885 0.002 260);
+  --sidebar-ring: oklch(0.49 0.13 252);
   --destructive: oklch(0.55 0.2 25);
   --destructive-foreground: oklch(0.985 0.002 260);
+  /* Red TEXT is not red FILL: text has to clear 4.5:1 on a card and on the
+     red-tinted alerts it sits in, which the fill (white text on it) cannot
+     also be. `text-destructive` reads this. */
+  --destructive-text: oklch(0.5 0.2 25);
+  /* The pending/amber mark as a FILL under white text (the sync badge). */
+  --status-pending-fill: oklch(0.5 0.12 80);
   --chart-2: oklch(0.5 0.12 150);
   --chart-3: oklch(0.52 0.1 210);
   --chart-4: oklch(0.62 0.12 85);
@@ -80,34 +87,40 @@
    EVERY palette (a large field of #fff is what costs dark adaptation). */
 .dark {
   /* palette:dark */
+  --control: oklch(0.25 0.007 260);
   --background: oklch(0.13 0.006 260);
   --foreground: oklch(0.9 0.003 260);
-  --card: oklch(0.17 0.007 260);
+  --card: oklch(0.185 0.007 260);
   --card-foreground: oklch(0.9 0.003 260);
-  --popover: oklch(0.18 0.007 260);
+  --popover: oklch(0.195 0.007 260);
   --popover-foreground: oklch(0.9 0.003 260);
   --primary: oklch(0.74 0.13 252);
   --primary-foreground: oklch(0.16 0.04 252);
   --ring: oklch(0.74 0.13 252);
-  --secondary: oklch(0.21 0.007 260);
+  --secondary: oklch(0.23 0.007 260);
   --secondary-foreground: oklch(0.82 0.003 260);
-  --muted: oklch(0.21 0.007 260);
+  --muted: oklch(0.23 0.007 260);
   --muted-foreground: oklch(0.66 0.003 260);
-  --accent: oklch(0.21 0.007 260);
+  --accent: oklch(0.23 0.007 260);
   --accent-foreground: oklch(0.9 0.003 260);
-  --border: oklch(0.255 0.007 260);
-  --input: oklch(0.21 0.007 260);
+  --border: oklch(0.27 0.007 260);
+  --input: oklch(0.23 0.007 260);
   --chart-1: oklch(0.74 0.13 252);
   --sidebar: oklch(0.15 0.006 260);
   --sidebar-foreground: oklch(0.9 0.003 260);
   --sidebar-primary: oklch(0.74 0.13 252);
   --sidebar-primary-foreground: oklch(0.16 0.04 252);
-  --sidebar-accent: oklch(0.21 0.007 260);
+  --sidebar-accent: oklch(0.23 0.007 260);
   --sidebar-accent-foreground: oklch(0.9 0.003 260);
-  --sidebar-border: oklch(0.255 0.007 260);
+  --sidebar-border: oklch(0.27 0.007 260);
   --sidebar-ring: oklch(0.74 0.13 252);
-  --destructive: oklch(0.6 0.19 25);
+  /* A red FILL dark enough to carry its light label (5.8:1); red TEXT is the
+     lighter `--destructive-text` below. At 0.6 the "Sign Out of All Devices"
+     label read 3.4:1. */
+  --destructive: oklch(0.52 0.19 25);
   --destructive-foreground: oklch(0.92 0.003 260);
+  --destructive-text: oklch(0.72 0.16 25);
+  --status-pending-fill: oklch(0.78 0.14 85);
   --chart-2: oklch(0.66 0.13 150);
   --chart-3: oklch(0.66 0.09 210);
   --chart-4: oklch(0.76 0.12 85);
@@ -147,6 +160,7 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-control: var(--control);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
@@ -222,8 +236,19 @@
     overflow: hidden;
     overscroll-behavior: none;
   }
+  /* A keyboard user can always see where they are: anything focusable that
+     draws no focus style of its own gets the ring. `:where` keeps this at
+     zero specificity, so a control's own utilities (`outline-none` + its
+     ring) still win. Pointer focus does not match `:focus-visible`. */
+  :where(button, a, [role="button"], [tabindex], input, textarea, select, summary):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
   html {
     background-color: var(--background);
+    /* Pinch-zoom is allowed (the viewport no longer forbids it); this keeps a
+       quick double-tap from zooming the app while a pilot taps through it. */
+    touch-action: manipulation;
   }
   body {
     @apply bg-background text-foreground;
@@ -1331,16 +1356,19 @@ textarea:focus-within {
    (outline, over the photo) took the opaque face and dark text however its own
    `bg-transparent text-white/80` read. */
 @layer components {
+  /* THE CONTROL LAYER (Nov 2026). A thing you press is a flat capsule on
+     `--control`, the palette's third layer — a generated tone a visible step
+     off the card and the ground, in every palette and both modes. It used to
+     be the glass face's painted half (`--on-glass`) with the glass's rim and
+     shadow, and that face measured 1.01:1 against a light card: white on
+     white, told apart only by a masked conic rim and a drop shadow on every
+     button. Tone does that job alone; the rim and the shadow stay where the
+     surface really FLOATS (`-float`, `.menu-surface`, the glass chrome). */
   .control-surface {
     position: relative;
     isolation: isolate;
-    background-color: var(--on-glass);
+    background-color: var(--control);
     color: var(--foreground);
-    /* The GLASS's own shadow, not one of its own. It had a hard
-       `0 8px 20px -10px black/55`, which on the light theme read as a different
-       material from the header capsule beside it: a dark smudge under a white
-       disc where the glass carries a soft warm lift. */
-    box-shadow: var(--glass-shadow);
     transition: background-color 120ms ease;
   }
   /* Set INTO a surface rather than floating over one — the swipe panel's
@@ -1364,11 +1392,12 @@ textarea:focus-within {
      a backdrop root, and the blur would sample nothing until the fade ended
      and then snap on. Fade the control itself. */
   .control-surface.control-surface-float {
+    box-shadow: var(--glass-shadow);
     background-color: var(--glass-base);
     background-image: linear-gradient(var(--glass-veil), var(--glass-veil));
     backdrop-filter: blur(var(--glass-face-blur, 4.4px)) brightness(var(--glass-blur-brightness, 1.25)) saturate(1.5);
   }
-  .control-surface::before {
+  .control-surface.control-surface-float::before {
     content: "";
     position: absolute;
     inset: 0;
@@ -1384,7 +1413,7 @@ textarea:focus-within {
     pointer-events: none;
   }
   .control-surface:active:not(:disabled) {
-    background-color: color-mix(in oklab, var(--on-glass), var(--foreground) 12%);
+    background-color: color-mix(in oklab, var(--control), var(--foreground) 12%);
   }
   /* A MENU hung off a control — the option picker (`OptionMenu`). It floats
      over live content, so it is the glass's own translucent face exactly as
@@ -1863,4 +1892,14 @@ textarea:focus-within {
 }
 .roster-month-sticky[data-stuck]::before {
   display: block;
+}
+
+/* Red TEXT reads its own token (`--destructive-text`), not the button fill —
+   axe measured 4.0:1 dark / 4.1:1 light for `text-destructive` on the red
+   tinted notices. Higher specificity than the generated utility, same look
+   everywhere else. */
+@layer utilities {
+  :root .text-destructive {
+    color: var(--destructive-text);
+  }
 }
