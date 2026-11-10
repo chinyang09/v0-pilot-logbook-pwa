@@ -114,16 +114,12 @@ export default function DiscrepanciesPage() {
   const { discrepancies, isLoading, refresh } = useDiscrepancies()
   const { flights } = useFlights()
   const { preferences } = usePreferences()
-  const [storedFilter, setFilterType] = useSessionState<FilterType>(
+  // `null` until the pilot picks a tab — the page then opens on the first one
+  // that HAS something (below).
+  const [storedFilter, setFilterType] = useSessionState<FilterType | null>(
     "discrepancies:filter",
-    "comparisons"
+    null
   )
-  // A session open across the deploy that dropped the "Resolved" tab still has
-  // it in sessionStorage; without this the page comes back on a tab that no
-  // longer renders anything.
-  const filterType: FilterType = TABS.includes(storedFilter)
-    ? storedFilter
-    : "comparisons"
   const { selectedId, setSelectedId, setDetailContent } = useDetailPanel()
   const isDesktop = useIsDesktop()
 
@@ -174,6 +170,20 @@ export default function DiscrepanciesPage() {
         .sort((a, b) => (b.resolvedAt ?? b.createdAt) - (a.resolvedAt ?? a.createdAt)),
     [discrepancies]
   )
+
+  // The tab the pilot chose; until they choose, the first one with something
+  // OPEN in it. It always opened on Comparisons, so a pilot whose only items
+  // were import notes arrived at "Nothing to Compare" — a green tick over a
+  // page that had things waiting one tab along.
+  //
+  // A session open across the deploy that dropped the "Resolved" tab still has
+  // it in sessionStorage; anything that is not a tab is treated as no choice.
+  const filterType: FilterType =
+    storedFilter && TABS.includes(storedFilter)
+      ? storedFilter
+      : mismatches.length === 0 && notes.length > 0
+        ? "notes"
+        : "comparisons"
 
   const groups = useMemo(
     () => groupMismatches(mismatches, flightsById),

@@ -435,7 +435,11 @@ function DutyRow({
 }) {
   const { entry } = item
   const Icon = DUTY_TYPE_ICONS[entry.dutyType] ?? DUTY_TYPE_ICONS.other
-  const range = timeRange(item, display)
+  // A day off or a day of leave is the DAY: the report rosters it as a window
+  // (00:00–23:59 at base), which read "16:00Z / 15:59Z +1" beside a row that
+  // had already said everything — two clocks to parse for nothing.
+  const wholeDay = entry.dutyType === "off" || entry.dutyType === "leave"
+  const range = wholeDay ? null : timeRange(item, display)
   return (
     <div
       role="button"

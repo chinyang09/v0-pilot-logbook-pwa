@@ -542,7 +542,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener("online", onOnline)
     window.addEventListener("auth:unauthorized", onUnauthorized)
     document.addEventListener("visibilitychange", onVisible)
-    const interval = window.setInterval(() => checkSession({ force: true }), 240_000)
+    // Only while the app is on screen: a hidden tab gains nothing from a
+    // network round trip every 4 minutes, and coming back runs `onVisible`.
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") checkSession({ force: true })
+    }, 240_000)
 
     // Initial check shortly after mount/login.
     checkSession({ force: true })

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, type UIEvent } from "react"
+import { useCallback, useEffect, useRef, useState, type RefObject, type UIEvent } from "react"
 import { clearHeaderTitle, setHeaderTitle } from "@/lib/layout/header-title"
 
 /**
@@ -17,10 +17,19 @@ import { clearHeaderTitle, setHeaderTitle } from "@/lib/layout/header-title"
  *   the two changes size.
  * - `onScroll` then costs one comparison per event, and writes to the store
  *   only when the answer flips.
+ *
+ * A panel with no large title can still name itself: `titleRef` goes on
+ * whatever stops identifying it once scrolled away (the flight form's route
+ * row), and `scroller` names the scroller where the spacer is not its direct
+ * child.
  */
-export function useCollapsingTitle(key: string | null, title: string | undefined) {
+export function useCollapsingTitle<T extends HTMLElement = HTMLHeadingElement>(
+  key: string | null,
+  title: string | undefined,
+  scrollerRef?: RefObject<HTMLElement | null>,
+) {
   const [owner] = useState(() => Symbol("header-title"))
-  const titleRef = useRef<HTMLHeadingElement>(null)
+  const titleRef = useRef<T>(null)
   const spacerRef = useRef<HTMLDivElement>(null)
   const thresholdRef = useRef<number | null>(null)
   const collapsedRef = useRef(false)
@@ -52,13 +61,13 @@ export function useCollapsingTitle(key: string | null, title: string | undefined
     const ro = new ResizeObserver(() => {
       thresholdRef.current = titleEl.getBoundingClientRect().bottom - spacer.getBoundingClientRect().bottom
       // A restored scroll position may already be past it.
-      const scroller = spacer.parentElement
+      const scroller = scrollerRef?.current ?? spacer.parentElement
       if (scroller) evaluate(scroller.scrollTop)
     })
     ro.observe(titleEl)
     ro.observe(spacer)
     return () => ro.disconnect()
-  }, [key, title, evaluate])
+  }, [key, title, evaluate, scrollerRef])
 
   const onScroll = useCallback((e: UIEvent<HTMLElement>) => evaluate(e.currentTarget.scrollTop), [evaluate])
 

@@ -11,6 +11,7 @@
  * tap away.
  */
 
+import { describesMoreThanCode } from "@/lib/utils/string"
 import { memo } from "react"
 import type { CurrencyWithStatus, CurrencyStatus } from "@/types/entities/roster.types"
 import { SwipeableCard, type SwipeAction } from "@/components/swipeable-card"
@@ -67,7 +68,11 @@ export const CurrencyCard = memo(function CurrencyCard({ currency, selected = fa
       ]
     : []
 
-  const subtitle = [currency.code !== "CUSTOM" ? currency.code : null, currency.documentNumber]
+  // The code earns its place only when it says something the name does not:
+  // "Passport / PASSPORT" and "CRM / CRM" were the same word twice down half
+  // the list, while "Dangerous Goods / DG" is a second fact.
+  const showCode = currency.code !== "CUSTOM" && describesMoreThanCode(currency.description, currency.code)
+  const subtitle = [showCode ? currency.code : null, currency.documentNumber]
     .filter(Boolean)
     .join(" · ")
 

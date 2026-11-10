@@ -272,3 +272,20 @@ export function showsCategory(category: TimeCategory, authority: LogbookAuthorit
   if (category.recognisedBy.includes(authority)) return true
   return !!value && value !== "00:00" && value !== "0:00"
 }
+
+/**
+ * Whether a category's row LEADS the form's TIME section, or waits behind
+ * "More Categories": one that holds time, and the role time of the seat this
+ * flight is logged in (zero only when its Auto-fill is off — the one row the
+ * pilot is then certain to want).
+ *
+ * An airline sector showed every category the rules keep — P1, PIC U/S, Dual,
+ * Instructor, IFR, Actual and Simulated Instrument… — each at 0:00 with its
+ * own "USE 1:51", so the two or three figures the flight actually holds sat in
+ * a column of seven identical offers. Nothing is hidden that holds a figure,
+ * and nothing is removed: the rest are one tap away, in the same place.
+ */
+export function leadsTimeSection(category: TimeCategory, value: string | undefined, role: PilotRole | undefined): boolean {
+  if (!!value && value !== "00:00" && value !== "0:00") return true
+  return !!role && category.role === role
+}

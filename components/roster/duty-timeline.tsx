@@ -575,7 +575,15 @@ export function DutyTimeline({
       }
       const r = b.restBefore
       if (r) {
-        const text = r.requiredMinutes != null ? `${duration(r.minutes)}/${duration(r.requiredMinutes)}` : duration(r.minutes)
+        // Days once it is days ("8d 8h"), the way the state row and the
+        // dashboard say it — "200:05/12:00" is a number nobody reads, against
+        // a minimum it passed a week ago.
+        const text =
+          r.minutes >= LONG_REST_MIN
+            ? formatRestSpan(r.minutes, duration)
+            : r.requiredMinutes != null
+              ? `${duration(r.minutes)}/${duration(r.requiredMinutes)}`
+              : duration(r.minutes)
         if (fits(xOf(b.startMs) - xOf(r.startMs), text)) rest.push({ key: `r${b.id}`, y: REST_LABEL_Y, x: (xOf(r.startMs) + xOf(b.startMs)) / 2, text, tone: r.status === "short" ? "over" : null, onBar: false })
       }
     }
@@ -1382,7 +1390,7 @@ function DutyDetail({
         {rest && (
           <VerdictRow
             label="Rest Before"
-            value={rest.requiredMinutes ? `${duration(rest.minutes)} of ${duration(rest.requiredMinutes)} required` : duration(rest.minutes)}
+            value={rest.requiredMinutes ? `${formatRestSpan(rest.minutes, duration)} of ${duration(rest.requiredMinutes)} required` : formatRestSpan(rest.minutes, duration)}
             tone={rest.status === "short" ? "over" : rest.status === "tight" ? "near" : null}
           />
         )}
@@ -1452,7 +1460,7 @@ function RestDetail({
   return (
     <div className="space-y-2 pt-1">
       <DetailHeader
-        title={`Rest ${duration(rest.minutes)}`}
+        title={`Rest ${formatRestSpan(rest.minutes, duration)}`}
         subtitle={`${clock(rest.startMs)} – ${clock(after.startMs)}`}
         tag={
           short ? (
@@ -1465,7 +1473,7 @@ function RestDetail({
         closeLabel="Close rest details"
       />
       <div className="overflow-hidden rounded-xl border bg-card">
-        <VerdictRow label="Rest" value={duration(rest.minutes)} tone={short ? "over" : rest.status === "tight" ? "near" : null} />
+        <VerdictRow label="Rest" value={formatRestSpan(rest.minutes, duration)} tone={short ? "over" : rest.status === "tight" ? "near" : null} />
         {rest.requiredMinutes != null && <ReadOnlyRow label="Minimum" value={duration(rest.requiredMinutes)} />}
         {rest.minimumEndMs != null && <ReadOnlyRow label="Minimum Until" value={clock(rest.minimumEndMs)} />}
         {rest.rule && <ReadOnlyRow label="Rule" value={REST_RULE_LABEL[rest.rule]} />}

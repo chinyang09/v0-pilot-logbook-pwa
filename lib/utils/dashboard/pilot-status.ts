@@ -42,6 +42,17 @@ export interface PilotStatus {
    * the thing that will bite first.
    */
   governing: Requirement | null
+  /**
+   * The OTHER flagged requirements, most pressing first, when the headline is
+   * already the governing one's own remedy.
+   *
+   * The second line then has nothing left to say about it — "3 takeoffs
+   * required" over "Tightest 90-Day Recency 0/3" over a cell reading 0/3 is one
+   * fact three times — while a second problem (an expired document) showed only
+   * as a cell the reader had to find. Empty when the headline is about
+   * something else (rest, the duty), where the governing line is new information.
+   */
+  also: Requirement[]
   nextAction: NextAction
   duty: DutyStatus
   legality: LegalityModel
@@ -150,6 +161,21 @@ export function buildPilotStatus({
   // there is still time to move the duty.
   const nextDutyIllegal = duty.next?.legalAtReport === false
 
+  const nextAction = deriveNextAction({
+    legality,
+    duty,
+    state,
+    fdpExceeded,
+    clock: formatClock ?? ((ms: number) => clock(ms, timeZone)),
+    now,
+  })
+  const headlineIsGoverning = governing?.action !== undefined && nextAction.headline === governing.action
+  const also = headlineIsGoverning
+    ? legality.requirements
+        .filter((r) => r.urgency !== undefined && r.id !== governing.id)
+        .sort((a, b) => (b.urgency ?? 0) - (a.urgency ?? 0))
+    : []
+
   return {
     state: nextDutyIllegal
       ? "action_required"
@@ -157,14 +183,8 @@ export function buildPilotStatus({
         ? "warning"
         : state,
     governing,
-    nextAction: deriveNextAction({
-      legality,
-      duty,
-      state,
-      fdpExceeded,
-      clock: formatClock ?? ((ms: number) => clock(ms, timeZone)),
-      now,
-    }),
+    also,
+    nextAction,
     duty,
     legality,
     legalAtUtc: restOutstanding ? (duty.rest?.legalAtUtc ?? null) : null,

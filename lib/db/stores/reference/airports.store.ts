@@ -431,6 +431,30 @@ export function getAirportTimeInfo(tz: string, at: Date = new Date()): { offset:
 }
 
 /**
+ * Build, at idle, the offset formatters a flight's airports will need.
+ *
+ * Opening a flight resolves both of its airports' offsets
+ * (`getAirportTimeInfo`), and the FIRST `Intl.DateTimeFormat` for a zone is
+ * the expensive part — it loads that zone's data (~15ms at a 4× throttle on a
+ * flight open). `tzFormatter` caches the formatter, never the answer, so
+ * building it early changes nothing but when the cost lands. Called once per
+ * session with the airports the pilot has flown most recently.
+ */
+let clocksWarmed = false
+export async function prewarmAirportClocks(icaos: string[]): Promise<void> {
+  if (clocksWarmed) return
+  clocksWarmed = true
+  const codes = [...new Set(icaos.filter(Boolean).map((c) => c.toUpperCase()))]
+  if (codes.length === 0) return
+  try {
+    const airports = await referenceDb.airports.bulkGet(codes)
+    for (const tz of new Set(airports.map((a) => a?.tz).filter(Boolean) as string[])) getAirportTimeInfo(tz)
+  } catch {
+    // Warming is an optimisation; a read that fails costs the first open, nothing more.
+  }
+}
+
+/**
  * Format airport for display
  */
 export function formatAirport(airport: Airport): string {

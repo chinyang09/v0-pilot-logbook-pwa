@@ -26,6 +26,7 @@
  * Pure: no React, no Dexie, no clock of its own beyond the `now` handed in.
  */
 
+import { describesMoreThanCode } from "@/lib/utils/string"
 import { formatDay } from "@/lib/utils/date"
 import type { CurrencyWithStatus } from "@/types/entities/roster.types"
 import type { NinetyDayCurrency } from "@/lib/utils/dashboard-aggregate"
@@ -312,7 +313,9 @@ export function buildLegalityModel({
         state === "fail"
           ? `${doc.code} expired — renew`
           : state === "caution"
-            ? `${doc.code} expires in ${doc.daysRemaining}d`
+            ? doc.daysRemaining === 0
+              ? `${doc.code} expires today`
+              : `${doc.code} expires in ${doc.daysRemaining}d`
             : undefined,
     })
   }
@@ -406,20 +409,6 @@ export function buildLegalityModel({
     binding: flagged[0] ?? nearestExpiry ?? requirements[0] ?? null,
     counts,
   }
-}
-
-/**
- * A currency's own description earns a line only when it is not just the code
- * spelled out. Compared on alphanumerics alone, so "OPC 320" and "OPC320" are
- * recognised as the same thing, and either containing the other counts.
- */
-function describesMoreThanCode(description: string | undefined, code: string): boolean {
-  if (!description) return false
-  const key = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, "")
-  const d = key(description)
-  const c = key(code)
-  if (!d || !c) return false
-  return !d.includes(c) && !c.includes(d)
 }
 
 /** "Tue, 12 Jan 27" — a date a pilot reads, not an ISO string. Read off the
