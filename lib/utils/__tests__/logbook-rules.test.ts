@@ -12,6 +12,7 @@ import {
   PILOT_ROLES,
   TIME_CATEGORIES,
   categoryLabel,
+  leadsTimeSection,
   roleLabel,
   roleTimeField,
   showsCategory,
@@ -86,5 +87,25 @@ describe("categoryLabel", () => {
     for (const c of TIME_CATEGORIES) {
       for (const { value } of OFFERED_AUTHORITIES) expect(categoryLabel(c, value).helper).not.toMatch(/EASA/)
     }
+  })
+})
+
+describe("leadsTimeSection — what the form's TIME section shows before asking", () => {
+  const cat = (field: Parameters<typeof timeCategory>[0]) => timeCategory(field)
+
+  it("leads with every category that holds time", () => {
+    expect(leadsTimeSection(cat("ifrTime"), "01:51", "SIC")).toBe(true)
+    expect(leadsTimeSection(cat("instructorTime"), "0:30", "SIC")).toBe(true)
+  })
+
+  it("leads with the seat's own role time even at zero", () => {
+    expect(leadsTimeSection(cat(roleTimeField("SIC")), "00:00", "SIC")).toBe(true)
+    expect(leadsTimeSection(cat(roleTimeField("PICUS")), undefined, "PICUS")).toBe(true)
+  })
+
+  it("leaves every other empty category behind More Categories", () => {
+    expect(leadsTimeSection(cat(roleTimeField("PIC")), "00:00", "SIC")).toBe(false)
+    expect(leadsTimeSection(cat("ifrTime"), "00:00", "SIC")).toBe(false)
+    expect(leadsTimeSection(cat("ifrTime"), "0:00", undefined)).toBe(false)
   })
 })

@@ -1187,11 +1187,11 @@ a watch, and the annunciator below already carries the state.
 ```
 ⚠ CAUTION                                               ← master annunciator
   Rest short by 3:00                                    ← what to DO (the imperative)
-  Tightest T/O 90d · 8d left                            ← the governing constraint
+  Tightest T/O 90d · 8d left                            ← the governing constraint (or "Also …")
 OFF DUTY                            Last WSSS-VVNB-WSSS ← the duty band's eyebrow
   ▬▬▬▬▬▬▬▬▬▬▬▬▬▮░░░░░░▓▓▓▓▓                            ← ONE picture, a scale in TIME
   09:26          9:24            21:50                    (▮ = report, ▓ = rest still owed)
-  ENDED 08:56    SHORT 3:00      REPORT 17 AUG
+  REST FROM 16 AUG  SHORT 3:00   REPORT 17 AUG
   Next duty · FDP 10:35 of 12:15
   ●━━━━●━━━━○   WSSS   VVNB   WSSS                      ← the chain: this duty, or the next
 CURRENCY                                                ← days that EXPIRE, urgent first
@@ -1342,7 +1342,7 @@ the whole thing once into a `view` object; the JSX below it is flat.
 | | eyebrow (right) | the three captions | footnote | chain |
 |---|---|---|---|---|
 | on duty | `Table A · Max 12:15` | reported / flight / **FDP left** | — | THIS duty |
-| off duty | `Last WSSS-VVNB` | ended / **rest of required** / report + date | next duty's FDP of max | the NEXT duty |
+| off duty | `Last WSSS-VVNB` | rest from + date / **rest, min** / report + date | next duty's FDP of max | the NEXT duty |
 | standby | activated or not | from / **left** / until | the rest clock, still running | the next duty |
 
 **The second row is the one that needed a picture.** The off-duty question is a
@@ -1434,6 +1434,14 @@ of the panel, so it takes on the mood of its own state before a word is read.
   41% used with roughly six months of headroom, as the tightest constraint on an
   otherwise clear pilot. A limit REFILLS; a currency EXPIRES. That is why only
   `currency` requirements carry `daysUntil`.
+- **The second line never repeats the headline** (`PilotStatus.also`). When
+  the headline IS the governing requirement's remedy ("3 takeoffs required"),
+  "Tightest 90-Day Recency 0/3" under it and a cell reading 0/3 below was one
+  fact three times — while a second problem (an expired document) showed only
+  as a cell to be found. The line then reads "Also DG expired — renew · +1
+  More", most pressing first; with one problem it names the requirement
+  without its figure; "Tightest …" is for a headline about something else
+  (rest, the duty, a clear pilot).
 - **The next action states the REMEDY, not the reading** — "2 landings
   required", not "landings 1 / 3". Phrased in `legality.ts` where the shortfall
   is actually in hand (`Requirement.action`). Triage order: something wrong with
@@ -1499,6 +1507,16 @@ separation exists to avoid.
   tinting the met ones green too paints the whole band and leaves the one thing
   needing attention nothing to stand out against. The icon still carries the
   state — colour is never the only carrier.
+- **Beside the page, the panel opens the cell that matters by itself.** On a
+  tablet with nothing chosen, the legal page selects the most pressing
+  currency cell (flagged first, else the nearest expiry) programmatically
+  (`explicit: false`, as Settings does) — the panel said "Select a
+  requirement" beside a page that already knew which one. A phone opens
+  nothing by itself.
+- **A requirement's "To Do" is a REMEDY or it is not shown**
+  (`RequirementDetailPanel`): "SEP expires in 5d" under "Now 5d" over
+  "Expires 15 Nov 26" was the figure three times. "DG expired — renew" and
+  "2 landings required" stay.
 - **ONE cell is open at a time, in the detail panel**, with a ring left on the
   cell it belongs to where the panel is beside it. The open requirement's ID is
   held (the selection), not the requirement, so the model rebuilding every
@@ -1506,6 +1524,10 @@ separation exists to avoid.
 - **Limits are PAIRED by what they limit** — Duty over its 14d and 28d windows,
   then Flight over 28d and 1y. That is how the regulation is written and how a
   pilot holds it; four independent rows sorted by urgency scattered the pairs.
+- **A limit with room in it is NEUTRAL** (`LIMIT_WITH_ROOM`). All four bars
+  were status green, 3% used and 60% used alike — the met cells' rule broken
+  one band down. A bar is grey until its state is caution (amber) or fail
+  (red), and the icon arrives with the colour.
 - **Rest is NOT a currency.** It is a property of the duty just flown, so it
   lives in the duty band (`DutyStatus.rest`). Among a column of expiry dates a
   live countdown read as a different kind of thing — because it is one.
@@ -2172,6 +2194,13 @@ or a dialog over the list.
   (`--header-main-w`, `--detail-pill-clear`), and an open search takes the
   whole region. The panel writes to a module store only when the title
   crosses the bar — a comparison per scroll event, no render.
+- **A flight names itself in the bar too.** The flight form has no large
+  title — its identity is its first rows — so once the route rows scroll
+  under the header, the bar reads "TR269 · WIII–WSSS" ("Simulator · <date>"
+  for a session): `useCollapsingTitle`'s `titleRef` on the "To" row, a
+  zero-height spacer where the chrome spacer would be, and the form's own
+  scroller passed in. Deep in a 50-row form there was nothing saying which
+  flight it was.
 - **Account ends with signing out**: "Sign out" (this device, a NEUTRAL
   capsule — it loses nothing, unsynced edits are pushed or asked about
   first) and "Sign out of all devices" (red, on its countdown) UNDER the
@@ -2220,6 +2249,11 @@ and a settled state, so the settled state is never its own tab:
 |---|---|---|
 | tracked field difference | **Comparisons** | **Accepted** |
 | one-off import note | **Notes** | "Handled", below the open notes in the same tab |
+
+**The page opens on the first tab with something OPEN in it** until the pilot
+picks one (the stored choice is `null` until then): it always opened on
+Comparisons, so a pilot whose only items were import notes arrived at "Nothing
+to Compare" over a page with things waiting one tab along.
 
 A fourth "Resolved" tab put two synonyms side by side in the tab bar and made
 the split look arbitrary — it was only ever the notes' settled half. Both note
@@ -3186,7 +3220,11 @@ open flight, both themes (Nov 2026: zero violations). What it took:
   "Choose Departure", "Choose PIC", "Choose Relief Pilot") and Back to the
   flight leads the header.
 - **NOW is for a time that HAPPENS** (Report, OUT, OFF, ON, IN) — not for
-  Scheduled Out / In, which are published, not stamped. Five NOW buttons ran
+  Scheduled Out / In, which are published, not stamped — **and only on a
+  flight dated within a day of today** (`isWithinADayOfToday`, on the UTC
+  date the flight is keyed on; ±1 covers a duty across midnight and a local
+  day that is not the UTC one). Five NOW buttons stood down a flight from
+  last March, each offering to stamp this minute onto it. Five NOW buttons ran
   down an empty form. An empty row with no NOW shows its one `--:--`, not a
   second one under the zone's name.
 - **Every new record names itself the same way**: New Aircraft is a
@@ -3462,7 +3500,13 @@ page, the dashboard and the Bin each built their own `Intl.DateTimeFormat`, in
 
 **A rest's length reads the same everywhere** (`formatRestSpan`,
 `duty-status.ts`): `10:42` under 100 hours, `21d 6h` from there. The dashboard
-printed `510:13` where the FDP page printed `21d 6h`.
+printed `510:13` where the FDP page printed `21d 6h` — and the FDP chart's own
+rest label and rest detail then still wrote `200:05/12:00`; they go through it
+too (with the pilot's duration format under 100 hours), and a rest that long
+drops the `/minimum` it passed days ago. On the dashboard's duty band the
+middle cell is captioned `Min 12:00`, not `Of 12:00` (a span beside a
+requirement is not a fraction of it), and the first cell is ONE clock:
+`08:05Z` over `REST FROM 2 NOV`, not over a second clock (`ENDED 07:05Z`).
 
 **The four rolling limits have one name each**: Duty 14d, Duty 28d, Flight 28d,
 Flight 12m — on the dashboard's limits band, the FDP page's tabs and the Quick
@@ -3999,6 +4043,9 @@ newest-first with the calendar behind a toggle.
   logbook, so Back from the flight left the roster for the logbook. That is a READ join in
   `lib/utils/roster/roster-days.ts`, not a second copy — `scheduleEntries`
   still holds non-flight duties only (below).
+- A day off or a day of leave shows NO times ("All day"): the report rosters
+  it as a window (00:00–23:59 at base), which read "16:00Z / 15:59Z +1"
+  beside a row that had already said everything.
 - An item sits on the day its START falls on in the DISPLAY clock (Zulu → the
   UTC date; local → the device zone). Both tables key on the UTC date, so a
   06:00 SGT standby is stored on the previous day; with no start time (leave,
@@ -4399,13 +4446,17 @@ assessment on record:
 
 ### Deferred design work (owner-approved to-do)
 
-- **Fewer "USE x:xx" buttons in the flight form's TIME section.** An airline
-  sector shows up to seven (P2, PIC U/S, Dual, Instructor, IFR, Actual and
-  Simulated Instrument), which reads as noise. A likely shape: offer USE only
-  on the role times the pilot's seat logs (Settings › Logging) plus the
-  categories the flight already holds, with the rest a tap away. It changes
-  what the logbook rules show, so it waits for the owner (Nov 2026: "keep that
-  as future Todo").
+- **Fewer "USE x:xx" buttons in the flight form's TIME section — DONE (Nov
+  2026)**, once the owner asked for the audit's findings to be acted on. The
+  section leads with the categories the flight HOLDS and the role time of the
+  seat it is logged in (`leadsTimeSection`, `logbook-rules.ts`); every other
+  category the rules keep waits behind ONE row, "More Categories 7", which
+  opens them in place with their USE buttons as before. Nothing holding a
+  figure is ever folded, and the fold is per flight (a mounted form showing
+  the next flight starts folded). Considered and NOT done, on purpose: hiding
+  the empty Scheduled Out / In rows on a flown flight, and folding
+  Approaches / Holds / IPC — a row that is sometimes there and sometimes not
+  is a row to hunt for, and they are four short rows at the end of the form.
 
 - **The split-view detail panel on every route** — no longer deferred: the
   owner set the rule (Oct 2026), see "Main / Detail on every page".
@@ -5430,6 +5481,9 @@ When making changes, be aware of these high-impact files:
 - Do not print the rolling limits in the duty band as well as the limits band — that was the duplication the rework removed. The duty band carries FDP and flight time for THIS duty only
 - Do not derive the duty band's bar colour from how full it is — state the tone. A nearly-full FDP bar is a warning and a nearly-full REST bar is good news; deriving it painted a fully-rested pilot amber. And do not put a standby's window on the status ramp: how full it is is a magnitude, not a verdict (`RAMP.info`)
 - Do not put the duty band's ring back. The off-duty question is a COMPARISON of two instants on one axis — when the rest becomes legal, and when the next duty reports — and an arc has nowhere to put the second one. It is a timeline with the report as a CARET and the rest still owed as a red band, so a duty rostered inside the rest period is visible before a word is read
+- Do not let the annunciator's second line repeat its headline — when the headline is the governing requirement's own remedy, the line is `status.also` (the NEXT flagged requirement, "+N More"), never "Tightest <the same requirement> <its figure>". And do not paint a limit bar green: a limit with room is neutral, colour arrives with caution or fail
+- Do not stand every hour category in the flight form's TIME section — the ones the flight holds and the seat's role time lead (`leadsTimeSection`), the rest wait behind "More Categories". Never fold a category that holds a figure, and never hide a row conditionally elsewhere in the form to save space (the empty Scheduled rows stay): a row that is sometimes absent is a row to hunt for
+- Do not offer NOW on a flight that is not dated within a day of today (`isWithinADayOfToday`)
 - Do not print a bare rest countdown in the annunciator. The hero is `nextAction.headline`, which is the CONTEXTUAL form of the same fact ("Rest short by 3:00", "Rest until 04:36"); a raw countdown there, a copy inside the ring and an "N to go" line beside "Legal from" were three printings of one number
 - Do not let `pilot-status.ts` format its own clocks — it is pure, so the formatter is INJECTED (`buildPilotStatus({ formatClock })`, wired by `usePilotStatus(recency, now, display)`). Its own `Intl.DateTimeFormat` was device-local 24-hour with a colon, so a Zulu-configured pilot read one convention in the hero line and another two lines below it
 - Do not make the legal page's cells navigate on tap — they open their detail in the detail panel, with the dashboard still in place. The reader came to check a status, and a route change loses the screen they came for. The deep link belongs inside the panel
@@ -5579,7 +5633,7 @@ When making changes, be aware of these high-impact files:
 - Do not put a translucent fill or a `/NN` text colour on a glass surface — contents ON glass are SOLID (`--on-glass-*`). Only the slab is translucent; a translucent highlight over it shows the page twice and changes tone as the content scrolls underneath
 - Do not save or restore the flight form's scroll offset without the flight it belongs to — the restore is for coming BACK to a flight (from a picker, from another section), and saved bare it opened the next, different flight at the depth the last one was read to. A flight changing under a mounted form (desktop) starts at its top. And offer no "USE" while the block is 0:00: a column of "USE 0:00" down an unflown sector offers to copy a zero
 - Do not put a padded `CardContent` in a bare `Card` — the shadcn `Card` carries `py-6 gap-6` of its own, so the two stacked: the currency, discrepancy and duty cards each had ~24px of empty band above their header and below their last line, and every `EmptyState` sat in 72px of top padding. A card whose content brings its own padding takes `py-0 gap-0`
-- Do not turn the currencies page back into a card per currency or put filter chips over it — it is ONE grouped list (`CurrencyCard` is a row), "Needs attention" then "Current", soonest first, and a pilot's ten documents fit one phone screen (measured: 0px overflow at 390×844 and 360×780). A card each was ~210px and five screens of scrolling to learn what runs out next. Thresholds, notes and the auto-update switch are settings OF a currency and live in its editor; past a year the figure is years ("7.9y"), not "2888d"
+- Do not turn the currencies page back into a card per currency or put filter chips over it — it is ONE grouped list (`CurrencyCard` is a row), "Needs attention" then "Current", soonest first, and a pilot's ten documents fit one phone screen (measured: 0px overflow at 390×844 and 360×780). A card each was ~210px and five screens of scrolling to learn what runs out next. Thresholds, notes and the auto-update switch are settings OF a currency and live in its editor; past a year the figure is years ("7.9y"), not "2888d". The code under the name is shown only when it says something the name does not (`describesMoreThanCode`, `lib/utils/string.ts` — the dashboard's rule): "Passport / PASSPORT" and "CRM / CRM" were the same word twice
 - Do not let a `useBackDismiss` overlay close on a popstate that was not its own — every listener hears every pop, so a date picker opened OVER a form sheet closed the sheet too when it saved. Each marker entry carries `__overlayId`, and a listener whose entry is still the current one ignores the pop
 - Do not vertically CENTRE the login form — centred, every step's different card height moved the brand and the card, and on a short phone iOS panned the page to lift a centred field above the keyboard. It is anchored at `clamp(1rem, 12vh, 7rem)` (`vh`: the large viewport, which a toolbar does not change), compact under 500px of height, over a FIXED, still background (the Ken Burns zoom read as the page moving)
 - Do not hand-roll a form dialog — `RegionSheet` (`components/ui/region-sheet.tsx`) is the shell: content-region bounds, header with a close, grouped `FormSection` rows, Cancel/Save in the footer with the reason Save is disabled said beside it. The discrepancy-resolution form uses it (a choice among a few answers is a checked LIST, not a dropdown), and the signature pad takes its bounds from `useContentRegionStyle`. A form for a record chosen from a LIST is not a sheet at all — it opens in the detail panel (`DetailFormPanel`). The currency form was a centred modal of boxed inputs with a full-width button and read as a different app. Mount the form only while open and key it on the record, so `useState` initialisers seed it — never a reset effect

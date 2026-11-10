@@ -39,13 +39,17 @@ export function RequirementDetailPanel({ requirement }: { requirement: Requireme
   // A detail row that only repeats the state above ("Status · Not met" twice
   // in one panel) is left out.
   const rows = (detail ?? []).filter((d) => !(d.label === "Status" && d.value === STATE_WORD[state]))
+  // "To Do" is for a REMEDY ("2 landings required", "DG expired — renew"). A
+  // line that only says the figure again in a sentence — "SEP expires in 5d"
+  // under "Now 5d", over "Expires 15 Nov 26" — is the same fact a third time.
+  const remedy = action && !action.toLowerCase().endsWith(value.toLowerCase()) ? action : null
 
   return (
     <ReadingPanel title={label}>
       <FormSection>
         <ReadOnlyRow label="Status" value={STATE_WORD[state]} />
         <ReadOnlyRow label="Now" value={value} />
-        {action && <ReadOnlyRow label="To Do" value={action} />}
+        {remedy && <ReadOnlyRow label="To Do" value={remedy} />}
       </FormSection>
       {rows.length > 0 && (
         <FormSection title="Detail">

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { formatRestSpan } from "../dashboard/duty-status"
-import { formatDay, formatDayAt, formatDayParts, formatStamp, formatYMDMedium, formatYMDShort, formatDayRange } from "../date"
+import { formatDay, formatDayAt, formatDayParts, formatStamp, formatYMDMedium, formatYMDShort, formatDayRange, isWithinADayOfToday } from "../date"
 
 describe("the app's day: Ddd, d Mmm yy", () => {
   it("writes a stored date with weekday, unpadded day, month and two-digit year", () => {
@@ -56,5 +56,33 @@ describe("formatDayRange", () => {
   })
   it("a single day is just that day", () => {
     expect(formatDayRange("2026-11-07", "2026-11-07")).toBe("7 Nov 26")
+  })
+})
+
+describe("isWithinADayOfToday — what NOW is offered on", () => {
+  // useDayKey()'s shape: "local|utc", months and days unpadded.
+  const key = "2026-11-10|2026-11-10"
+
+  it("is true today and a day either side (UTC)", () => {
+    expect(isWithinADayOfToday("2026-11-10", key)).toBe(true)
+    expect(isWithinADayOfToday("2026-11-09", key)).toBe(true)
+    expect(isWithinADayOfToday("2026-11-11", key)).toBe(true)
+  })
+
+  it("is false for a flight from another week or year", () => {
+    expect(isWithinADayOfToday("2026-11-08", key)).toBe(false)
+    expect(isWithinADayOfToday("2026-11-12", key)).toBe(false)
+    expect(isWithinADayOfToday("2025-06-21", key)).toBe(false)
+  })
+
+  it("reads the UTC half of the key across a month end", () => {
+    expect(isWithinADayOfToday("2026-11-30", "2026-12-1|2026-12-1")).toBe(true)
+    expect(isWithinADayOfToday("2026-11-29", "2026-12-1|2026-12-1")).toBe(false)
+  })
+
+  it("keeps the offer when the date or the key cannot be read", () => {
+    expect(isWithinADayOfToday("", key)).toBe(true)
+    expect(isWithinADayOfToday(undefined, key)).toBe(true)
+    expect(isWithinADayOfToday("2025-06-21", "")).toBe(true)
   })
 })

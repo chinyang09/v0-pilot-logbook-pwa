@@ -203,6 +203,28 @@ export function LegalDashboard({ className }: { className?: string }) {
       openRequirement ? <RequirementDetailPanel key={openRequirement.id} requirement={openRequirement} /> : null,
     )
   }, [isActive, onDashboard, openReqId, openRequirement, openDutyMs, setDetailContent])
+  // Beside the page (a tablet), the detail panel is not left saying "Select a
+  // requirement" next to a page that already knows which one matters: with
+  // nothing chosen it opens the most pressing currency cell — flagged first,
+  // else the nearest expiry. Programmatic (`explicit: false`), as Settings
+  // fills its panel: no `?selected=`, so narrowing the window to a phone does
+  // not raise the overlay over the dashboard.
+  const loading = aggLoading || statusLoading
+  const defaultReqId = React.useMemo(() => {
+    const cells = status.legality.requirements.filter((r) => r.group === "currency" && r.id !== "doc-rest")
+    const flagged = cells
+      .filter((r) => r.urgency !== undefined)
+      .sort((a, b) => (b.urgency ?? 0) - (a.urgency ?? 0))[0]
+    const nearest = cells
+      .filter((r) => r.daysUntil !== undefined)
+      .sort((a, b) => (a.daysUntil ?? 0) - (b.daysUntil ?? 0))[0]
+    return (flagged ?? nearest ?? cells[0])?.id ?? null
+  }, [status.legality.requirements])
+  React.useEffect(() => {
+    if (!isDesktop || !isActive || !onDashboard || loading) return
+    if (selectedId || !defaultReqId) return
+    setSelectedId(`req:${defaultReqId}`, { explicit: false })
+  }, [isDesktop, isActive, onDashboard, loading, selectedId, defaultReqId, setSelectedId])
   // The duty the chain draws — this one on duty, else the next — with its
   // gates and inbound aeroplane asked by themselves once it is close enough
   // for either to be published, and only while the page is on screen.
@@ -217,7 +239,7 @@ export function LegalDashboard({ className }: { className?: string }) {
   const openRequirementCell = React.useCallback((id: string) => setSelectedId(`req:${id}`), [setSelectedId])
   const openDuty = React.useCallback((atMs: number) => setSelectedId(`duty:${atMs}`), [setSelectedId])
 
-  if (aggLoading || statusLoading) {
+  if (loading) {
     return <Skeleton className={cn("h-full min-h-[24rem] rounded-3xl", className)} />
   }
 
@@ -359,6 +381,27 @@ function Annunciator({ status }: { status: PilotStatus }) {
         <p className="mt-1 text-xs leading-tight text-muted-foreground">
           {status.nextAction.detail}
         </p>
+      ) : status.also.length > 0 ? (
+        // The headline IS the governing requirement's remedy, so naming it
+        // again here would be the same fact a third time (its cell is the
+        // second). The line goes to the NEXT problem instead, which otherwise
+        // showed only as a cell to be found.
+        <p className="mt-1 truncate text-xs leading-tight text-muted-foreground">
+          Also{" "}
+          <span className="font-medium text-foreground/80 tabular-nums">
+            {status.also[0].action ?? `${status.also[0].label} ${status.also[0].value}`}
+          </span>
+          {status.also.length > 1 && (
+            <>
+              <span className="mx-1 text-muted-foreground/40">·</span>
+              <span className="tabular-nums">+{status.also.length - 1} More</span>
+            </>
+          )}
+        </p>
+      ) : status.governing && status.nextAction.headline === status.governing.action ? (
+        // One problem, and the headline has said it: the line names WHICH
+        // requirement, without repeating its figure.
+        <p className="mt-1 text-xs leading-tight text-muted-foreground">{status.governing.label}</p>
       ) : status.governing && (
         <p className="mt-1 text-xs leading-tight text-muted-foreground">
           <span className="text-muted-foreground">Tightest</span>{" "}
@@ -450,6 +493,12 @@ function DutyBand({
   // caption has no room for.
   const dayAt = (ms: number) =>
     formatDayAt(ms, display?.useZuluTime === false ? zone : "UTC", { weekday: false, year: false }).toUpperCase()
+  // ONE clock per cell. The figure above it is when rest COMMENCED, so the
+  // caption says that and which day — it read "08:05Z" over "ENDED 07:05Z",
+  // two clocks an hour apart with nothing saying which was which, and no day
+  // on a rest that may have begun a week ago. "Min", not "Of": the middle
+  // cell is a span ("8d 8h") beside a requirement, not a fraction of it.
+  const restFromLabel = (ms: number) => `Rest From ${dayAt(ms)}`
 
   const onDuty = phase === "on_duty" && active !== null
   // A standby IS a duty. It is not a FLIGHT duty period — paragraph 14's
@@ -571,13 +620,13 @@ function DutyBand({
         scale: [
           {
             value: clockAt(restStartMs),
-            label: lastDuty ? `Ended ${clockAt(lastDuty.debriefMs)}` : "Rest from",
+            label: restFromLabel(restStartMs),
           },
           {
             value: formatRestSpan(next.restAvailableMinutes),
             label: short
               ? `Short ${formatDutyClock(next.restShortfallMinutes)}`
-              : `Of ${formatDutyClock(next.restRequiredMinutes)}`,
+              : `Min ${formatDutyClock(next.restRequiredMinutes)}`,
             tone: short ? "fail" : undefined,
           },
           {
@@ -624,11 +673,11 @@ function DutyBand({
         scale: [
           {
             value: clockAt(restStartMs),
-            label: lastDuty ? `Ended ${clockAt(lastDuty.debriefMs)}` : "Rest from",
+            label: restFromLabel(restStartMs),
           },
           {
             value: formatRestSpan(rest.elapsedMinutes),
-            label: `Of ${formatDutyClock(rest.requiredMinutes)}`,
+            label: `Min ${formatDutyClock(rest.requiredMinutes)}`,
             live: true,
           },
           {
@@ -1057,8 +1106,17 @@ function LimitsBand({ requirements }: { requirements: Requirement[] }) {
  */
 const LABEL_FITS_INSIDE = 0.28
 
+/**
+ * A limit with room in it is a MAGNITUDE, not a verdict — so its bar is
+ * neutral, the way a met currency cell carries no tint. All four bars were
+ * status green, 3% used and 60% used alike: a band of green that said "fine"
+ * four times and left an amber one less to stand out against. Colour arrives
+ * with the state (close → amber, over → red), and so does the icon.
+ */
+const LIMIT_WITH_ROOM = { fill: "bg-muted-foreground", track: "bg-muted" }
+
 function LimitRow({ requirement }: { requirement: Requirement }) {
-  const tone = REQ_TONE[requirement.state]
+  const tone = requirement.state === "ok" ? { ...REQ_TONE.ok, ...LIMIT_WITH_ROOM } : REQ_TONE[requirement.state]
   const Icon = STATE_ICON[requirement.state]
   // "Duty 14d" → "14d": the pair's label already says which measure it is.
   const window = requirement.label.split(" ").slice(-1)[0]

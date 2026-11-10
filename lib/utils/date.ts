@@ -146,3 +146,20 @@ export function formatYMDShort(ymd: string): string {
 export function formatYMDMedium(ymd: string): string {
   return formatDay(ymd)
 }
+
+/**
+ * Is a stored "YYYY-MM-DD" (UTC) date today, or a day either side of it?
+ *
+ * `dayKey` is `useDayKey()`'s "local|utc" key, so a caller re-renders when the
+ * date turns without reading the clock in render. An unreadable date or key
+ * answers true: the caller is deciding whether to OFFER something, and a blank
+ * new flight must not lose the offer.
+ */
+export function isWithinADayOfToday(ymd: string | undefined, dayKey: string): boolean {
+  const utc = dayKey.split("|")[1]
+  if (!ymd || !utc) return true
+  const [y, m, d] = utc.split("-").map(Number)
+  const [fy, fm, fd] = ymd.split("-").map(Number)
+  if (![y, m, d, fy, fm, fd].every(Number.isFinite)) return true
+  return Math.abs(Date.UTC(fy, fm - 1, fd) - Date.UTC(y, m - 1, d)) <= 86_400_000
+}

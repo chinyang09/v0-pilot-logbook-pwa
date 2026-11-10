@@ -9,7 +9,10 @@ import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, use
 import { useRouter } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { userDb } from "@/lib/db/user-db";
-import { formatDay, formatDayAt } from "@/lib/utils/date";
+import { formatDay, formatDayAt, isWithinADayOfToday } from "@/lib/utils/date";
+import { useDayKey } from "@/hooks/use-day-key";
+import { useCollapsingTitle } from "@/hooks/use-collapsing-title";
+import { DETAIL_TITLE_KEY } from "@/lib/layout/header-title";
 import {
   ChevronDown,
   ChevronRight,
@@ -65,7 +68,7 @@ import {
   type BlockFollowingField,
 } from "@/lib/utils/flight-calculations";
 import { inferPilotFlying, inferPilotRole, isMultiPilotFlight, isSoloFlight, soloConflict } from "@/lib/utils/flight-evidence";
-import { PILOT_ROLES, TIME_CATEGORIES, categoryLabel, roleLabel, showsCategory } from "@/lib/utils/logbook-rules";
+import { PILOT_ROLES, TIME_CATEGORIES, categoryLabel, leadsTimeSection, roleLabel, showsCategory } from "@/lib/utils/logbook-rules";
 import { calculateNightTimeComplete } from "@/lib/utils/night-time";
 import {
   formatClockDisplay,
@@ -180,6 +183,7 @@ function SettingsRow({
   showChevron = false,
   icon,
   children,
+  rowRef,
 }: {
   label: string;
   value?: string;
@@ -188,9 +192,12 @@ function SettingsRow({
   showChevron?: boolean;
   icon?: React.ReactNode;
   children?: React.ReactNode;
+  /** The row's own box, for a caller that measures against it. */
+  rowRef?: React.Ref<HTMLDivElement>;
 }) {
   return (
     <div
+      ref={rowRef}
       className={`flex items-center justify-between py-3.5 px-4 row-divider ${
         onClick ? "cursor-pointer active:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring focus-visible:-outline-offset-2" : ""
       }`}
@@ -1643,6 +1650,35 @@ function FlightFormImpl({
   // Save scroll position immediately (used right before navigating to a picker).
   const saveScrollPosition = writeScroll;
 
+  // Once the rows that say WHICH flight this is (number, route) have scrolled
+  // under the header, the header carries them — halfway down the hours and
+  // landings nothing on screen named the flight being edited.
+  const headerTitle = useMemo(() => {
+    if (getEntryType(formData) === "simulator") {
+      return ["Simulator", formData.date ? formatDay(formData.date, { weekday: false }) : ""].filter(Boolean).join(" · ");
+    }
+    const route =
+      formData.departureIcao && formData.arrivalIcao
+        ? `${formData.departureIcao}–${formData.arrivalIcao}`
+        : formData.departureIcao || formData.arrivalIcao || "";
+    return (
+      [formData.flightNumber, route].filter(Boolean).join(" · ") ||
+      (formData.date ? formatDay(formData.date, { weekday: false }) : "Flight")
+    );
+  }, [formData]);
+  const {
+    titleRef: identityEndRef,
+    spacerRef: titleSpacerRef,
+    onScroll: onScrollTitle,
+  } = useCollapsingTitle<HTMLDivElement>(DETAIL_TITLE_KEY, headerTitle, scrollContainerRef);
+  const handleScroll = useCallback(
+    (e: React.UIEvent<HTMLElement>) => {
+      handleScrollSave();
+      onScrollTitle(e);
+    },
+    [handleScrollSave, onScrollTitle]
+  );
+
   // Restore the saved scroll position synchronously, BEFORE the browser paints,
   // so there is no flash at the top before jumping to the saved offset.
   // useLayoutEffect runs after the DOM is committed (with the flight's content,
@@ -1857,6 +1893,17 @@ function FlightFormImpl({
     },
     [activeTimePicker, updateField, markManualOverride]
   );
+
+  // NOW stamps the clock as it reads this minute, so it belongs to a flight
+  // happening today (a day either side, for a duty across midnight UTC). On
+  // last June's flight it offered to write today's time into a blank OFF.
+  // "More Categories" in the TIME section: open for ONE flight, so the next
+  // flight shown by a mounted form (the desktop panel) starts folded again.
+  const timeDisclosureKey = flightIdProp ?? "new";
+  const [moreTimeFor, setMoreTimeFor] = useState<string | null>(null);
+  const moreTimeOpen = moreTimeFor === timeDisclosureKey;
+  const dayKey = useDayKey();
+  const canStampNow = isWithinADayOfToday(formData.date, dayKey);
 
   const setNowTime = useCallback(
     (field: keyof FlightLog) => {
@@ -2082,9 +2129,12 @@ function FlightFormImpl({
 
   return (
     <div className="h-full relative">
-    <div ref={scrollContainerRef} onScroll={handleScrollSave} className="h-full overflow-y-auto overscroll-contain bg-background scrollbar-hide">
+    <div ref={scrollContainerRef} onScroll={handleScroll} className="h-full overflow-y-auto overscroll-contain bg-background scrollbar-hide">
       <ScrollIndicator />
       <div className="min-h-full pt-chrome pb-chrome">
+      {/* Zero height: its edge is the header's lower edge at rest, which is
+          what the collapsing title measures the route row against. */}
+      <div ref={titleSpacerRef} aria-hidden />
 
       {/* Form Content — pt only: a pb here would stack under pb-chrome and
           push this panel's rest line 16px above every other panel's */}
@@ -2251,6 +2301,7 @@ function FlightFormImpl({
             }}
           >
             <SettingsRow
+              rowRef={identityEndRef}
               label="To"
               value={formData.arrivalIcao}
               placeholder="Select"
@@ -2268,6 +2319,7 @@ function FlightFormImpl({
               timezoneOffset={depTimezone}
               onTap={(frame) => openTimePicker("reportTime", frame)}
               onNow={() => setNowTime("reportTime")}
+              showNow={canStampNow}
               clockSeparator={clockSeparator}
             />
           </SwipeableRow>
@@ -2309,6 +2361,7 @@ function FlightFormImpl({
               timezoneOffset={depTimezone}
               onTap={(frame) => openTimePicker("outTime", frame)}
               onNow={() => setNowTime("outTime")}
+              showNow={canStampNow}
             clockSeparator={clockSeparator}
             />
           </SwipeableRow>
@@ -2320,6 +2373,7 @@ function FlightFormImpl({
               timezoneOffset={depTimezone}
               onTap={(frame) => openTimePicker("offTime", frame)}
               onNow={() => setNowTime("offTime")}
+              showNow={canStampNow}
             clockSeparator={clockSeparator}
             />
           </SwipeableRow>
@@ -2331,6 +2385,7 @@ function FlightFormImpl({
               timezoneOffset={arrTimezone}
               onTap={(frame) => openTimePicker("onTime", frame)}
               onNow={() => setNowTime("onTime")}
+              showNow={canStampNow}
             clockSeparator={clockSeparator}
             />
           </SwipeableRow>
@@ -2342,6 +2397,7 @@ function FlightFormImpl({
               timezoneOffset={arrTimezone}
               onTap={(frame) => openTimePicker("inTime", frame)}
               onNow={() => setNowTime("inTime")}
+              showNow={canStampNow}
             clockSeparator={clockSeparator}
             />
           </SwipeableRow>
@@ -2510,9 +2566,8 @@ function FlightFormImpl({
                   beneath. Night is the row above; a category the rules do not
                   keep is offered only once it holds time, so nothing logged
                   is hidden. */}
-              {TIME_CATEGORIES.filter(
-                (c) => c.field !== "nightTime" && showsCategory(c, authority, formData[c.field])
-              ).map((category) => {
+              {(() => {
+                const renderCategory = (category: (typeof TIME_CATEGORIES)[number]) => {
                 const { field } = category;
                 const { label, helper } = categoryLabel(category, authority);
                 const value = formData[field] || "00:00";
@@ -2553,7 +2608,38 @@ function FlightFormImpl({
                     />
                   </SwipeableRow>
                 );
-              })}
+                };
+                const offered = TIME_CATEGORIES.filter(
+                  (c) => c.field !== "nightTime" && showsCategory(c, authority, formData[c.field])
+                );
+                // The figures this flight holds (and its seat's role time)
+                // lead; every other category waits behind ONE row instead of
+                // each standing at 0:00 with its own USE (`leadsTimeSection`).
+                const lead = offered.filter((c) => leadsTimeSection(c, formData[c.field], formPilotRole));
+                const more = offered.filter((c) => !leadsTimeSection(c, formData[c.field], formPilotRole));
+                return (
+                  <>
+                    {lead.map(renderCategory)}
+                    {more.length > 0 && (
+                      <div
+                        {...pressableRow(() => setMoreTimeFor(moreTimeOpen ? null : timeDisclosureKey), "More Categories")}
+                        aria-expanded={moreTimeOpen}
+                        className="flex cursor-pointer items-center justify-between gap-3 px-4 py-3.5 row-divider"
+                      >
+                        <span className="text-foreground">More Categories</span>
+                        <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                          {!moreTimeOpen && more.length}
+                          <ChevronDown
+                            className={cn("h-4 w-4 transition-transform", moreTimeOpen && "rotate-180")}
+                            aria-hidden
+                          />
+                        </span>
+                      </div>
+                    )}
+                    {moreTimeOpen && more.map(renderCategory)}
+                  </>
+                );
+              })()}
             </>
           )}
         </div>

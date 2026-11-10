@@ -234,6 +234,41 @@ describe("buildPilotStatus — next action", () => {
     expect(s.nextAction.headline).toBe("OPC320 expires in 6d")
     expect(s.nextAction.tone).toBe("warning")
   })
+
+  it("says an expiry on its last valid day as today, not in 0d", () => {
+    const s = status({
+      currencies: [currency({ code: "OPC320", status: "critical", daysRemaining: 0 })],
+    })
+    expect(s.nextAction.headline).toBe("OPC320 expires today")
+  })
+})
+
+describe("buildPilotStatus — the second problem", () => {
+  it("names the other flagged requirements when the headline is the governing one's remedy", () => {
+    // Recency lapsed AND a document expired: the headline takes the first, and
+    // the second must not be left as a cell to find.
+    const s = status({
+      recency: { takeoffs: 0, landings: 0, current: false, lapseIso: null },
+      currencies: [
+        currency({ code: "DG", status: "expired", daysRemaining: -3 }),
+        currency({ code: "SEP", status: "warning", daysRemaining: 5 }),
+      ],
+    })
+    expect(s.nextAction.headline).toBe(s.governing?.action)
+    expect(s.also.map((r) => r.label)).toEqual(expect.arrayContaining(["DG", "SEP"]))
+    expect(s.also.some((r) => r.id === s.governing?.id)).toBe(false)
+    // Most pressing first: the expired one outranks the one still valid.
+    const dg = s.also.findIndex((r) => r.label === "DG")
+    const sep = s.also.findIndex((r) => r.label === "SEP")
+    expect(dg).toBeLessThan(sep)
+  })
+
+  it("is empty with one problem, and when nothing is flagged", () => {
+    expect(
+      status({ currencies: [currency({ code: "OPC320", status: "critical", daysRemaining: 6 })] }).also,
+    ).toEqual([])
+    expect(status({}).also).toEqual([])
+  })
 })
 
 /**
