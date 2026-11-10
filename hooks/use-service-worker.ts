@@ -67,12 +67,18 @@ export function initServiceWorker() {
         }
       })
 
-      setInterval(
-        () => {
-          reg.update()
-        },
-        60 * 60 * 1000,
-      ) // Every hour
+      // Hourly, and only while the app is on screen — a hidden tab gains
+      // nothing from the request. A check missed while hidden runs when the
+      // app comes back.
+      const HOUR = 60 * 60 * 1000
+      let lastCheck = Date.now()
+      const check = () => {
+        if (document.visibilityState !== "visible" || Date.now() - lastCheck < HOUR) return
+        lastCheck = Date.now()
+        void reg.update()
+      }
+      setInterval(check, HOUR)
+      document.addEventListener("visibilitychange", check)
     })
     .catch((error) => {
       console.error("[SW] Registration failed:", error)

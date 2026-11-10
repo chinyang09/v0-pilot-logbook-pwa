@@ -29,6 +29,7 @@ import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { useSearchParams } from "next/navigation"
 import { usePageActive } from "@/hooks/use-page-active"
 import { whenIdle } from "@/lib/utils/idle"
+import { prewarmAirportClocks } from "@/lib/db/stores/reference/airports.store"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassButtonGroup, GlassGroupButton, GlassIconButton } from "@/components/ui/glass-icon-button"
 
@@ -109,6 +110,17 @@ export default function LogbookPage() {
   // Refresh flight data when this keep-alive page becomes active again — at
   // idle, not in the tab switch (see whenIdle).
   const refreshFlightsWhenIdle = useCallback(() => whenIdle(refreshFlights), [refreshFlights])
+
+  // The first flight opened would otherwise build its airports' offset
+  // formatters inside the tap. Once per session, at idle, for the airports of
+  // the most recent flights (the list is newest first).
+  useEffect(() => {
+    if (flights.length === 0) return
+    whenIdle(() => {
+      const recent = flights.slice(0, 20)
+      void prewarmAirportClocks(recent.flatMap((f) => [f.departureIcao, f.arrivalIcao]))
+    }, 4000)
+  }, [flights])
   const isActive = usePageActive("/logbook", refreshFlightsWhenIdle)
   // The open panel hangs from the bar: the header's tap band and fade tail
   // step aside for it (released once its collapse has run).

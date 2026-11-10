@@ -4466,6 +4466,49 @@ alone on purpose. The reason is recorded so the next pass doesn't re-derive it
   rule and would desync `pnpm-lock.yaml` and break the Vercel build. Delete or
   correct — owner's call.
 
+- **The Nov 2026 resource audit (owner kept these for later).** Baseline,
+  production build, 390×844, real logbook (344 flights), 4× CPU unless noted:
+  cold load 57 scripts / 1,635KB raw / 541KB gzip; first card 1.42s on a
+  repeat launch; idle 20–45ms of main thread per 4–5s, no running animations;
+  heap 12–15MB after GC with every kept-alive tab visited, 2,238 nodes, 703
+  listeners. Waiting:
+  - **The import pipeline is a STATIC import of the logbook and roster pages**
+    (`UnifiedImportButton` → every parser, LogTen, the reconciler, the
+    executor, the review dialogs): ~120KB minified, est. 35–40KB gzip, used
+    only after a tap. On a repeat launch V8's code cache makes it ~7–20ms; the
+    cost is the first launch after install and after every deploy. The shape:
+    a thin button that `import()`s the pipeline on tap, warmed at idle so an
+    offline import still finds it cached.
+  - **Opening a flight** is ~380ms of React reconciliation at 4× (four long
+    tasks, worst 185ms). App code in it is small (the form 19ms, swipe rows
+    28ms). Mounting the lower sections after the first paint would shorten the
+    first task, but it touches the auto-save baseline (see "can lose an edit
+    made in its first half-second") — its own change, with its own approval.
+  - **Heap creeps ~0.3–0.5MB per ~25 interactions** after GC while nodes and
+    listeners stay flat — probably caches. Diff two heap snapshots before
+    changing anything.
+  - **The one-off data repairs write one transaction per flight** (~500ms at
+    4× on the launch that repairs 160 flights; later launches write nothing).
+    Batching them is a change to the sync write path.
+- **Measured and REJECTED (Nov 2026) — do not re-try without new evidence:**
+  - `.GlassMaterial`'s `will-change: transform` + `translate3d` costs 5–6
+    layers and up to 0.7MB per screen, and dropping it is pixel-identical at
+    rest — but it is what keeps the morph and the press composited: without
+    it the sidebar open went from 2–4 frames over 33ms to 6–8, close 0 → 3,
+    a glass press 2–3 → 5.
+  - `scroll: false` on the remaining in-app `router.push`es: no measurable
+    difference (289 vs 327ms, noise).
+  - Dropping `visibility` from hidden kept-alive pages (content-visibility
+    alone): the arriving page is restyled on unskip either way (95–109ms).
+  - The scroll indicator's per-frame reads: its layouts are the frame's own,
+    taken earlier, not extra ones (6 layouts in four flings, 4 of them there).
+  - Fewer overscan rows or a slimmer card: 40 elements a row is already lean,
+    and less overscan risks blank rows on a fast fling.
+  - A sweep of `getComputedStyle` over every element STARTS pending
+    transitions inside the stowed sidebar (`content-visibility: hidden`) that
+    then never finish — it reads as "two animations running forever" and is
+    an artefact of measuring that way, not of the app.
+
 ### Lower-priority items (not yet actioned)
 
 - **Multi-device gaps from the Oct 2026 audit.** Closed since: an IMPORTED
