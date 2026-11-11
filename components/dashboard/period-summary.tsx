@@ -78,7 +78,9 @@ export function PeriodSummary({
 
         <div className="flex items-end gap-4">
           <Stat label="Sectors" value={String(flightCount)} />
-          <Stat label="Sim" value={formatDecimalHours(simMinutes)} unit="h" />
+          {/* Only a period that HAD a session says so. "Sim 0.0h" beside
+              every month of line flying was a figure that told nothing. */}
+          {simMinutes > 0 && <Stat label="Sim" value={formatDecimalHours(simMinutes)} unit="h" />}
         </div>
       </div>
 

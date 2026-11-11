@@ -28,3 +28,34 @@ export function logbookNowIndex(
   }
   return index
 }
+
+/**
+ * A sector whose day is over and which still has no OUT and IN.
+ *
+ * A scheduled flight in the past is not "planned" any more: either it was
+ * flown and never logged, or it was cancelled and is still in the book. Both
+ * are the pilot's to settle — and both quietly change the legal figures (a
+ * flown sector missing from the logbook is missing from recency and the
+ * limits). It looked exactly like next week's roster, in the accent colour
+ * with "sch", so nothing drew the eye to it.
+ *
+ * Judged by DAY, on the UTC date the flight is keyed on: past once the day
+ * it ARRIVES has ended (an overnight sector — scheduled IN before its OUT —
+ * arrives the next day), so a sector in the air across midnight is never
+ * called unlogged. A simulator is left out: a session is logged by its
+ * length, not its gate times.
+ */
+export function isUnloggedPast(
+  flight: Pick<FlightLog, "date" | "outTime" | "inTime" | "scheduledOut" | "scheduledIn" | "entryType" | "isSimulator">,
+  todayUtc: string,
+): boolean {
+  if (!flight.date || !todayUtc) return false
+  if (flight.entryType === "simulator" || flight.isSimulator) return false
+  if (isFlownFlight(flight)) return false
+  let arrival = flight.date
+  if (flight.scheduledOut && flight.scheduledIn && flight.scheduledIn < flight.scheduledOut) {
+    const [y, m, d] = flight.date.split("-").map(Number)
+    arrival = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10)
+  }
+  return arrival < todayUtc
+}

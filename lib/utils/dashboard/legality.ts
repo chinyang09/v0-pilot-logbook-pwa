@@ -27,7 +27,7 @@
  */
 
 import { describesMoreThanCode } from "@/lib/utils/string"
-import { formatDay } from "@/lib/utils/date"
+import { formatDay, formatDayAt } from "@/lib/utils/date"
 import type { CurrencyWithStatus } from "@/types/entities/roster.types"
 import type { NinetyDayCurrency } from "@/lib/utils/dashboard-aggregate"
 
@@ -166,6 +166,14 @@ export interface LegalityInput {
    * which is a number somebody might fly to.
    */
   unavailable?: Array<"duty" | "logbook">
+  /**
+   * Past sectors in the recency window still without OUT and IN
+   * (`isUnloggedPast`), oldest first. Recency and the limits count only what
+   * is LOGGED, so a flown sector missing its times can hold a pilot below 3/3
+   * or under a limit they are really closer to. One caution cell, naming the
+   * sector and opening it.
+   */
+  unlogged?: Array<{ id: string; date: string; label: string }>
   now?: Date
 }
 
@@ -188,6 +196,7 @@ export function buildLegalityModel({
   documentRows = DEFAULT_DOCUMENT_ROWS,
   logbookEmpty = false,
   unavailable = [],
+  unlogged = [],
   now = new Date(),
 }: LegalityInput): LegalityModel {
   const requirements: Requirement[] = []
@@ -255,6 +264,26 @@ export function buildLegalityModel({
       href: what === "duty" ? "/fdp" : "/logbook",
       urgency: 850,
       action: what === "duty" ? "Duty limits unavailable — check manually" : "Logbook could not be read — reload",
+    })
+  }
+
+  // ── Sectors the logbook is missing ──────────────────────────────────────
+  // Not a currency of its own, but it decides whether the two above it can be
+  // trusted: a caution, ranked under any failure and over an expiry that is
+  // still valid. The remedy opens the (oldest) sector itself.
+  if (unlogged.length > 0) {
+    const first = unlogged[0]
+    const one = unlogged.length === 1
+    requirements.push({
+      id: "unlogged",
+      group: "currency",
+      label: "Not Logged",
+      state: "caution",
+      value: one ? first.label : `${unlogged.length} sectors`,
+      detail: unlogged.slice(0, 6).map((u) => ({ label: formatShortDay(u.date), value: u.label })),
+      href: `/logbook?selected=${encodeURIComponent(first.id)}`,
+      urgency: 500,
+      action: one ? `Log ${first.label} (${formatShortDay(first.date)})` : `Log ${unlogged.length} sectors`,
     })
   }
 
@@ -423,4 +452,10 @@ function shortfallAction(toShort: number, ldgShort: number): string {
   if (toShort > 0) parts.push(`${toShort} takeoff${toShort === 1 ? "" : "s"}`)
   if (ldgShort > 0) parts.push(`${ldgShort} landing${ldgShort === 1 ? "" : "s"}`)
   return `${parts.join(" and ")} required`
+}
+
+/** "7 Nov" — a sector's day where the year is never in doubt. */
+function formatShortDay(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number)
+  return formatDayAt(Date.UTC(y, m - 1, d, 12), "UTC", { weekday: false, year: false })
 }

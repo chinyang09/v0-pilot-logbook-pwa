@@ -18,6 +18,8 @@
  * ResizeObserver callback (never mid-commit).
  */
 
+import { isUnloggedPast } from "@/lib/utils/logbook-now"
+import { useDayKey } from "@/hooks/use-day-key"
 import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { observeRectAfterLayout, viewportRect } from "@/lib/utils/virtual-scroll"
@@ -483,6 +485,8 @@ function FlightRow({
 }) {
   const f = item.flight
   const range = timeRange(item, display)
+  // The UTC day — the one flights are keyed on — whatever clock the agenda shows.
+  const unlogged = isUnloggedPast(f, useDayKey().split("|")[1] ?? "")
   const route = item.simulator
     ? "Simulator"
     : `${getDepartureDisplay(f, display?.airportIdentifier)} → ${getArrivalDisplay(f, display?.airportIdentifier)}`
@@ -505,7 +509,14 @@ function FlightRow({
           {route}
         </span>
         <span className="block truncate text-xs text-muted-foreground">
-          {item.flown ? "Flown" : "Scheduled"}
+          {item.flown ? (
+            "Flown"
+          ) : unlogged ? (
+            // A past sector with no times: a gap in the record, not a plan.
+            <span className="text-status-warning">Not Logged</span>
+          ) : (
+            "Scheduled"
+          )}
           {aircraft ? ` · ${aircraft}` : ""}
         </span>
       </span>

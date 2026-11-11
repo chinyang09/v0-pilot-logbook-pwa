@@ -108,7 +108,7 @@ const TONE: Record<
 
 const REQ_TONE: Record<RequirementState, { icon: string; fill: string; track: string }> = {
   ok: { icon: "text-chart-2", fill: "bg-chart-2", track: "bg-chart-2/15" },
-  caution: { icon: "text-chart-4", fill: "bg-chart-4", track: "bg-chart-4/15" },
+  caution: { icon: "text-status-warning", fill: "bg-chart-4", track: "bg-chart-4/15" },
   fail: { icon: "text-destructive", fill: "bg-destructive", track: "bg-destructive/15" },
   unknown: { icon: "text-muted-foreground", fill: "bg-muted-foreground", track: "bg-muted" },
 }

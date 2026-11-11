@@ -22,6 +22,8 @@ import { getDepartureDisplay, getArrivalDisplay } from "@/lib/utils/airport-disp
 import { formatClockDisplay, formatHHMMDisplay } from "@/lib/utils/time";
 import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date";
 import { entryDuration, isPositioningEntry, isSimulatorEntry } from "@/lib/utils/entry-type";
+import { isUnloggedPast } from "@/lib/utils/logbook-now";
+import { useDayKey } from "@/hooks/use-day-key";
 
 const MONTHS = [
   "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
@@ -126,6 +128,16 @@ export function FlightCardBody({
   const hasOut = !!flight.outTime;
   const hasIn = !!flight.inTime;
   const isScheduled = !hasOut || !hasIn;
+  // A past sector with no times is not "planned" any more — it is a gap in
+  // the record (flown and not logged, or cancelled and still here). The
+  // logbook draws it apart from the roster ahead: no accent, the day and a
+  // "not logged" in the caution colour (`isUnloggedPast`). Not in the import
+  // review or a comparison card, which carry `diffs` and show what a report
+  // says, not what the logbook is missing.
+  const dayKey = useDayKey();
+  const unlogged =
+    showStatusIcons && !diffs && isScheduled && isUnloggedPast(flight, dayKey.split("|")[1] ?? "");
+  const planned = isScheduled && !unlogged;
 
   // A scheduled-time change is drawn in the slot only while the slot SHOWS
   // the scheduled time. On a flown flight the slot is the actual OUT/IN, and
@@ -183,7 +195,7 @@ export function FlightCardBody({
   // With no times at all — a just-created entry — there is nothing for the
   // connector to join, and two bare rules across an empty row read as damage.
   const hasTimeStrip = Boolean(
-    displayOut || displayIn || durationInfo.text || outDiff || inDiff || d("blockTime")
+    displayOut || displayIn || durationInfo.text || outDiff || inDiff || d("blockTime") || unlogged
   );
 
   const flightDate = parseDateLocal(flight.date);
@@ -250,15 +262,15 @@ export function FlightCardBody({
     <div
       className={cn(
         "flex items-start gap-2",
-        isScheduled && "text-primary dark:text-primary/85"
+        planned && "text-primary dark:text-primary/85"
       )}
     >
       <div className="flex flex-col items-center justify-start shrink-0 w-16">
-        <div className="text-6xl font-bold leading-none tracking-tight">{day}</div>
+        <div className={cn("text-6xl font-bold leading-none tracking-tight", unlogged && "text-status-warning")}>{day}</div>
         <div
           className={cn(
             "text-base mt-0.5 tracking-wide",
-            isScheduled
+            planned
               ? "text-primary-muted"
               : "text-muted-foreground"
           )}
@@ -280,7 +292,7 @@ export function FlightCardBody({
             <span
               className={cn(
                 "text-base font-semibold leading-tight",
-                isScheduled && hasOut && "text-foreground"
+                planned && hasOut && "text-foreground"
               )}
             >
               <Slot diff={outDiff} current={displayOut} format={clock} />
@@ -295,6 +307,8 @@ export function FlightCardBody({
               <span className="text-base font-medium leading-tight whitespace-nowrap px-1">
                 {blockDiff ? (
                   <Slot diff={blockDiff} />
+                ) : unlogged ? (
+                  <span className="text-status-warning">not logged</span>
                 ) : (
                   <>
                     {durationInfo.text}
@@ -312,7 +326,7 @@ export function FlightCardBody({
             <span
               className={cn(
                 "text-base font-semibold leading-tight",
-                isScheduled && hasIn && "text-foreground"
+                planned && hasIn && "text-foreground"
               )}
             >
               <Slot diff={inDiff} current={displayIn} format={clock} />
@@ -346,7 +360,7 @@ export function FlightCardBody({
             // offset as rows are measured, and a programmatic scroll cancels an
             // in-progress fling. 1.25em is `leading-tight` at this font size.
             "flex h-[1.25em] items-center gap-1.5 text-[13px] leading-tight mt-0.5",
-            isScheduled
+            planned
               ? "text-primary-muted"
               : "text-muted-foreground"
           )}
@@ -389,7 +403,7 @@ export function FlightCardBody({
           <div
             className={cn(
               "flex flex-1 min-w-0 overflow-hidden text-[13px] leading-tight",
-              isScheduled
+              planned
                 ? "text-primary-muted"
                 : "text-muted-foreground"
             )}
