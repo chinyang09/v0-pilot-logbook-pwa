@@ -1939,49 +1939,65 @@ zone).
 - **A day keeps or drops its one-line airports TOGETHER.** Decided per bar, a
   triangle read "100", "101 WMKP", "102 WSSS" — one label a hair wider than the
   next. A two-line bar is not part of that decision.
-- **Every item is a tinted BAR** (`barTone`, `DUTY_BAR`): a flight in the
-  accent — FILLED (`bg-primary/25`, foreground text) once flown, light with
-  accent text still to fly — amber not logged, teal a simulator; a duty its
-  type's hue at 20%. Flown was `--on-glass-fill` grey, which could not be told
-  from a grey day off. A round of bare coloured text and solid -700 duty bars
-  was rejected by the owner: neighbours in one lane ran together and read as
-  overlapping labels. Bars leave a 3px gap (`BAR_INSET_PX`) between neighbours.
-- **Today is the whole DAY lit** (`--on-glass-accent-soft`, its number bold in
-  the accent), not a number in a circle; the selected day is a ring.
-- **The grid's corners follow the glass**: the week block is clipped to a
-  radius concentric with the panel (its radius less the ~8px inset), and the
-  corner cells carry it too, so a lit corner cell — today, a range end, next
-  month's soft days — is not a square against a rounded material.
+- **A GLASS calendar, not a calendar on glass — and what is written on it is
+  SOLID.** Every item is a bar (`barTone`, `DUTY_BAR`, `HUE`) whose hue is
+  MIXED into `--on-glass` (`color-mix`), so it looks like the tint it was but
+  nothing behind the glass shows through it: a flight in the accent — FILLED
+  once flown, light with accent text still to fly — amber not logged, teal a
+  simulator, a duty its type's hue. Another month's bars are the same hue at
+  half strength, never `opacity` (that let the glass through). A round of
+  bare coloured text and solid -700 duty bars was rejected by the owner:
+  neighbours in one lane ran together. Bars leave a 3px gap (`BAR_INSET_PX`).
+- **REST days are ONE hue** (green): a day off and every leave — annual,
+  sick, parental — on the calendar and on the list's duty cards alike
+  (`isRestDay`, `lib/utils/roster/duty-runs.ts`). LOFF grey beside leave green
+  read as two kinds of day.
+- **Another month's days are SHADED, not painted** — a translucent darkening
+  (`bg-black/[0.07]`, `/30` dark) the glass shows through; a solid fill read
+  as a slab under the calendar. They are TAPPABLE: the calendar moves to that
+  month (a pair two months, unless it is the other pane) and the day is
+  chosen.
+- **Day numbers are grey; TODAY is the one in full ink, bold**, its cell lit
+  (`--on-glass-fill`); the selected day is a ring.
+- **The grid runs to the glass's edges** — no inner padding, a dual pane's
+  right half ruled off from its left — and its bottom corners ARE the
+  glass's (`cornerRadius`), so a lit corner cell follows the material's curve.
+  Measured at 390, 360 and 1180 (dual): the grid flush with the glass on both
+  sides and the bottom, nothing overflowing it.
 - **The day's width is read in a ResizeObserver** (`data-cal-week` /7), never
   in a commit, and each week row is `contain: layout paint`.
 - **Bars take no taps.** A tap is the DAY's, which the page scrolls to.
-- **The header is Today, the month selector (the month/year wheels) and the
-  calendar's own Duties switch** (`useCalendarDuties`, a per-device module
-  store): off, standby, ground, leave and days off leave every calendar;
-  simulator sessions are logbook entries and stay. It is a SEPARATE switch
-  from the logbook list's (`useListDuties`), so the month can keep the roster
-  while the list shows flights alone — the owner's ask.
+- **The header is the MONTH on the left** — "November 2026", the month bold
+  and the year light, the control that opens the month/year wheels — **and
+  the tools on the right**: Today and the **Duties** menu.
+- **Duties is ONE control with three states** (`useDutiesView`, a per-device
+  module store): Hidden / On Calendar (the default) / Calendar and List. The
+  combinations are not equal — the month with its roster while the list shows
+  flights alone is the common case; duty cards in the list with the
+  calendar's duties hidden is one nobody asks for — so two independent
+  switches (the round before) offered a useless state and made the common
+  case two taps. A page with no list beside it (the dashboard) offers Hidden /
+  On Calendar. Simulator sessions are logbook entries and show in every
+  state.
 
 ### The roster IS the logbook, with its duties on (Nov 2026)
 
 The roster drew the logbook's flights anyway, and a flight could be added on
 one page and a duty only on the other — so there is ONE page, `/logbook`. Its
 list (`FlightList`) takes the roster's duties as cards among the flights
-(`buildLogbookRows`, `lib/utils/logbook-rows.ts`), and a **Duties** button
-in the header's VIEW group (a briefcase, `aria-pressed`, `useListDuties`)
-switches the list between the logbook alone and the roster. It replaced a
-List | Roster page switch, so the header has one button fewer. The calendar
-has its own switch (above); the list's starts from the calendar's stored
-answer, because before they were split one switch did both.
+(`buildLogbookRows`, `lib/utils/logbook-rows.ts`) when the calendar's
+Duties menu says "Calendar and List" (`useListDuties`). There is no duties
+button in the logbook's header any more: the one control lives where duties
+are looked at.
 
 | | Rule |
 |---|---|
 | order | one newest-first list: a duty sorts as a flight would — UTC date, then report time against the flight's out time, a whole-day duty last in its day; on a tie the flight first. A flight's place never depends on whether duties are shown |
 | the card | `DutyCardBody`: the flight card's four lines and its HEIGHT (the list positions every row at one calibrated height — measured 102px both): date column, report — length — release (UTC, as the flight cards), the code with its icon, the description, "Called out HH:MMZ" for an activated standby. Told apart by the duty type's colour on the date and code and a stripe down its leading edge |
-| runs | consecutive whole-day duties with the same kind, code and description are ONE card ("3 days … to 14 NOV"), at its last day; a swipe bins the whole run and Undo brings it back |
+| runs | consecutive whole-day duties with the same kind, code and description are ONE card ("3 days … to 14 NOV"), at its last day; a swipe bins the whole run and Undo brings it back. The calendar draws a run as ONE bar by the SAME rule (`groupDutyRuns`, `lib/utils/roster/duty-runs.ts`): a day off or leave is the whole day whatever window it carries, a same-day duplicate folds in, the description is whitespace-folded |
 | a run is a PERIOD | it opens as one (`dutyRunOf`): From / To move its ends, its fields change every day of it, and its DAYS are listed under it — tap a day to change only that day (`duty:day:<id>`, `dutyDayKey`), swipe one to remove only that day. A new duty can be entered over several days at once |
 | selection | a duty is `duty:<id>` (`dutyRowKey`) — its period —, one day of it `duty:day:<id>`, a new one `duty:new:<date>`; the shell renders `LogbookDutyPanel` for any of them, as it renders `FlightForm` for a flight id |
-| + | with duties shown nowhere, a new flight in one tap; with them in the list or on the calendar, a menu — Flight or Duty (on the calendar's chosen day, else today; nothing is written until saved) |
+| + | with duties hidden, a new flight in one tap; otherwise a menu — Flight or Duty (on the calendar's chosen day, else today; nothing is written until saved) |
 | search, ↑↓, calendar | search terms match a duty's code, description and kind; the arrows step through rows of both kinds; a calendar day lands on the first row COVERING it (`scrollToFirst`, `rowCoversDate`) |
 | `/roster` | a redirect to `/logbook?duties=1` that carries a selection across; `?duties=1` (the dashboard's duty links) turns the duties on and drops itself |
 
@@ -5782,6 +5798,9 @@ When making changes, be aware of these high-impact files:
 - Do not let a select show blank for a stored value it has no option for — the currency Type row read empty for any company code an import brought in. Offer the record's own value as an option (`typeOptions`); mapping it to "Custom" would rewrite the stored code on the next save
 - Do not use a native `<select>` (laid over a row or bare) or a Radix Select for a choice — it is `ChoicePicker`/`OptionMenu`, the app's own menu on the glass face. The platform's control is a different thing on every device and like nothing else in the app. And give the trigger the whole row, never a corner of it
 - Do not draw a calendar day as a bare number with a dot, or give a page a calendar of its own — every calendar is `LogbookCalendar`'s bar grid, fed by `useCalendarSpans` and governed by its own Duties switch. Keep a flight without its designator ("248 WMKP", condensed by `text-fit.ts`, never a second typeface), a return pair ONE bar ("248/9 WMKP"), a second line ("248/9" over "WMKP") only where the lane under it is empty, a day's one-line airports kept or dropped together, three lanes a day, every item a tinted bar (bare text ran together) with a flown flight FILLED in the accent (never grey — a day off is grey), a midnight crossover on HALF of each day, a run of all-day duties ONE bar, and SIX rows of one fixed height in every month
+- Do not group a run of duty days anywhere but `groupDutyRuns` — the calendar and the list each had their own rule, so a day off with a window was "all day" on its card and a half-day bar on the calendar, and two codes sharing a description were one bar but two cards. And do not let the schedule parser give a day off or leave a window: converted to UTC, a Local Base 00:00–23:59 LOFF moved to the previous day
+- Do not split the duties control back into two switches, and do not put a duties button back in the logbook header — it is ONE three-state menu in the calendar's header (`useDutiesView`), default On Calendar
+- Do not paint a calendar bar translucent (`bg-x/20`, `opacity`) or fill another month's days solid — what is ON the glass is solid (`color-mix` into `--on-glass`), and another month's days are a translucent shade the glass shows through. And do not inset the grid from the glass: it runs edge to edge and takes the glass's bottom corners
 - Do not store a duty period as one record or edit a run day by day — the roster keeps one entry per day (imports, re-import matching, derived ids and para 5 all depend on it), and a run is edited as a PERIOD through `planDutyPeriod`, with its days listed for a one-day change
 - Do not bring back a separate roster page or a List | Roster switch — the roster is the logbook list with its Duties on (`buildLogbookRows`, `useListDuties` — the calendar's switch is its own), one + adds either kind, and a stored "roster" tab goes through `normaliseNavTabs`. A duty card must stay the flight card's exact height (`DutyCardBody` mirrors `FlightCardBody`'s fixed line boxes), or the virtualised list starts correcting its scroll
 - Do not bring back the month-capsule grid or a year stepper in the calendar's month/year picker — it is two wheels, live, closed by the date selector; and in the dual layout it takes the RIGHT pane with the month being chosen still drawn on the left. Keep `WHEEL_ITEM_PX` small enough that the wheel fits a dual pane's grid, or the panel grows (or clips) when it opens
