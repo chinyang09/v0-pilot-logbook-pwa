@@ -7,7 +7,6 @@ import {
   MapPin,
   Users,
   Award,
-  Calendar,
   AlertTriangle,
   Clock,
   UserCircle,
@@ -41,7 +40,6 @@ export const navSections: NavSection[] = [
   {
     label: "Operations",
     items: [
-      { label: "Roster", href: "/roster", icon: <Calendar className="h-4 w-4" /> },
       { label: "FDP", href: "/fdp", icon: <Clock className="h-4 w-4" /> },
       { label: "Discrepancies", href: "/discrepancies", icon: <AlertTriangle className="h-4 w-4" /> },
     ],

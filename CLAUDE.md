@@ -1897,6 +1897,51 @@ arrow is a full pass over the list on every render — and the page re-renders
 on every scroll-driven range change. Measured on the airports fling: the page's
 render 108ms → 15ms inclusive.
 
+### The month calendar is BARS — one calendar everywhere (Nov 2026)
+
+The owner's model was a desktop calendar app: a grid of day cells with what
+each day IS laid over it as bars. `LogbookCalendar` draws that for the logbook,
+the roster and the dashboard alike, on the same glass as before; the layout is
+`lib/utils/roster/calendar-bars.ts` (pure, `calendar-bars.test.ts`), the data
+`useCalendarSpans` (the logbook's flights + the roster's duties, in the display
+zone).
+
+| | Drawn as |
+|---|---|
+| a flight inside one day | that day's cell, full width: "TR560" over "RPMD" |
+| a flight or timed duty across midnight | from the MIDDLE of its first day to the MIDDLE of its last — half of each cell |
+| all-day duties on consecutive days with one code | ONE bar ("Paternal Leave", "LOFF"); leave reads its description, other duties their code |
+| a bar leaving a week row | continues on the next row, its cut ends square |
+
+- **Two lines per lane, two lanes per row, rows only for the weeks the month
+  spans.** "TR560 RPMD" on one line is ~56px of 9px type and a phone's day
+  cell is ~51px, so a flight is its number over its destination; what a day
+  has past two lanes is counted beside its number ("+1"). Clipped, never
+  ellipsed — "TR56…" loses the digit that says which flight. Every row is one
+  fixed height, so stepping weeks moves nothing; a pair of months takes the
+  larger month's row count.
+- **The colours are the roster's vocabulary**: a flight still to fly the
+  accent, flown the plain record, a past sector with no times amber (not
+  logged), a simulator teal, a duty its type's hue at 20% (`DUTY_BAR`) — at the
+  roster chips' 10% a run of leave all but vanished on the glass.
+- **Bars take no taps.** A tap is the DAY's, which the page scrolls to.
+- **The header is three columns**: Today (where the page offers it), the
+  month selector (the month/year wheels), and the **Duties** toggle
+  (`useCalendarDuties`, a per-device module store). Off, standby, ground,
+  leave, off and simulator sessions leave every calendar AND the roster's
+  agenda — the logbook's own picture.
+
+### The roster is the LOGBOOK tab's second view (Nov 2026)
+
+The roster showed the logbook's flights anyway, so two tabs read as
+duplicates. They stay two routes (`/logbook`, `/roster`), each keep-alive with
+its own detail panel, but the nav has ONE Logbook tab: a **List | Roster**
+switch (`LogbookViewSwitch`, icons — with words the left header group reached
+the centred pill at 1180) leads both headers, and the tab goes back to the view
+last used (`useLogbookView`). Roster left the sidebar and the tab picker; a
+stored "roster" tab is folded into Logbook and its slot given to the next tab
+(`normaliseNavTabs`). FDP and Discrepancies light the Logbook tab now.
+
 ### ONE Calendar Panel (`components/calendar-panel.tsx`)
 
 The logbook and the dashboard were already rendering the same
@@ -4097,8 +4142,9 @@ newest-first with the calendar behind a toggle.
 - No Currencies / Discrepancies / FDP links under the month — they are in the
   nav.
 
-- Each cell names what the day IS (`SBY1`, `OFF`, `TR602`, `SIM`) — two labels
-  and a count. A dot only said "busy" and had to be tapped to be read.
+- The month is the app's one bar calendar (see "The month calendar is BARS"),
+  on glass, with Today and the Duties toggle in its header. A dot only said
+  "busy" and had to be tapped to be read.
 - It shows the logbook's FLIGHTS beside the roster's own duties, and tapping
   one opens the flight (`FlightForm`) in the ROSTER's detail panel, as
   `flight:<id>` (the duties use their own ids). It used to be a link into the
@@ -5709,7 +5755,7 @@ When making changes, be aware of these high-impact files:
 - Do not give a full-surface overlay `inset-0` on desktop — the sidebar and the nav pill draw above it, so it ends up BEHIND them with its top unreachable (that was the signature pad on iPad). Take the content region: `--chrome-top`/`--chrome-bottom`, plus `SIDEBAR_WIDTH_PX` on the left only while the sidebar is PUSHING (below 1120 it overlays full-width panels and the region has not moved). Mobile keeps `inset-0` — there the dialog is above the bottom nav and the viewport IS the region
 - Do not redeclare the sidebar's width — it is `SIDEBAR_WIDTH_PX` in `lib/layout/panel-widths.ts`, part of the same budget as the panel widths (1180 − 199 − 1 = 980 on iPad Air 5 landscape). It had drifted into three separate copies
 - Do not hardcode the panel widths — they live in `lib/layout/panel-widths.ts` and are a single budget. `DUAL_MONTH_PX` is 600 rather than 620 because 620 + 360 detail is EXACTLY the space iPad Air 5 landscape has with the sidebar open, so it fit with zero slack and any rounding took the dual-month toggle away on the owner's device
-- Do not let a single calendar month be wider than a DUAL pane in the split layout — the cells are square, so its width is its height, and a taller single month means the width toggle resizes the calendar under the flight list on every switch. Cap it at `MONTH_PANE_PX` and give it the same month caption a dual pane has (the caption alone was 12px of the difference). Uncapped entirely it grew from 313px to 519px tall for the frames before the dual-month switch caught up
+- Do not let a single calendar month be wider than a DUAL pane in the split layout — (written when the cells were square; the bar grid's rows are a fixed height now, but the cap still keeps one month and a pair the same width) the cells were square, so its width was its height, and a taller single month means the width toggle resizes the calendar under the flight list on every switch. Cap it at `MONTH_PANE_PX` and give it the same month caption a dual pane has (the caption alone was 12px of the difference). Uncapped entirely it grew from 313px to 519px tall for the frames before the dual-month switch caught up
 - Do not thin the rim by dropping the conic's FLANKS — iOS's controls have a hairline you can see ALL THE WAY ROUND, and at flanks of ~0.05 three-quarters of the perimeter had none. Keep the lobes concentrated (that is what reads as light on a curve) and the flanks around 0.22; the ring's WIDTH (`--softness`, and `.Highlight`'s padding with it) is the separate knob, and it is only free to be fine BECAUSE the flanks hold the continuity
 - Do not go back to ONE image input for the camera button — Android 14+ answers `accept="image/*"` with its Photo Picker, which has no camera. Two inputs (one `capture="environment"`), chosen from `PhotoSourceMenu`, whose rows are `<label>`s so the picker opens inside the tap (iOS refuses a file input opened outside the gesture)
 - Do not open the flight card's `…` cascade behind a blocking scrim — the page must stay scrollable underneath (a scroll dismisses it) while taps are swallowed at the capture phase so nothing activates. And arm that swallow on a short timer, or the click from the tap that OPENED it closes it on the same gesture
@@ -5720,6 +5766,8 @@ When making changes, be aware of these high-impact files:
 - Do not let a select show blank for a stored value it has no option for — the currency Type row read empty for any company code an import brought in. Offer the record's own value as an option (`typeOptions`); mapping it to "Custom" would rewrite the stored code on the next save
 - Do not use a native `<select>` (laid over a row or bare) or a Radix Select for a choice — it is `ChoicePicker`/`OptionMenu`, the app's own menu on the glass face. The platform's control is a different thing on every device and like nothing else in the app. And give the trigger the whole row, never a corner of it
 - Do not link a roster flight into the logbook — it opens in the ROSTER's detail panel (`flight:<id>`), so Back returns to the roster. And do not let the roster agenda's rows vary in height or be measured: it is virtualized like the logbook (`HEADER_H` / `ITEM_H`), for the same momentum-scroll reason
+- Do not draw a calendar day as a bare number with a dot, or give a page a calendar of its own — every calendar is `LogbookCalendar`'s bar grid, fed by `useCalendarSpans` and governed by one Duties toggle. Keep a flight two lines ("TR560" over "RPMD"), a midnight crossover on HALF of each day, a run of all-day duties ONE bar, and the rows a fixed height
+- Do not put Roster back in the nav as its own tab — it is the Logbook tab's second view (`LogbookViewSwitch`); a stored "roster" tab goes through `normaliseNavTabs`
 - Do not bring back the month-capsule grid or a year stepper in the calendar's month/year picker — it is two wheels, live, closed by the date selector; and in the dual layout it takes the RIGHT pane with the month being chosen still drawn on the left. Keep `WHEEL_ITEM_PX` small enough that the wheel fits a dual pane's grid, or the panel grows (or clips) when it opens
 - Do not cap a date wheel's past at a few years — a pilot back-filling a paper logbook enters flights from decades ago; the default is 70
 - Do not make "Add Crew" open the crew picker directly, and do not lay an additional crew member out differently from the PIC/SIC rows — role on the LEFT (the menu), name on the RIGHT (the picker, for THAT row), a swipe to clear. The pick carries the row's role and index (`additionalCrewField`); address rows by index, never by crew-card id

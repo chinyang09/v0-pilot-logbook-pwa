@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect, useRef, useCallback, memo } from "react"
+import { useState, useEffect, useRef, useCallback, memo, useMemo } from "react"
 import { createPortal } from "react-dom"
 import { usePathname, useRouter } from "next/navigation"
 import Link from "next/link"
@@ -33,6 +33,7 @@ import { SyncStatus } from "@/components/sync-status"
 import { haptic } from "@/lib/utils/haptics"
 import { isShortcut } from "@/lib/utils/shortcuts"
 import type { BottomNavTab } from "@/types/db/stores.types"
+import { normaliseNavTabs, useLogbookView, type LogbookView } from "@/hooks/use-logbook-view"
 
 // ─── Tab config ──────────────────────────────────────────────
 
@@ -55,11 +56,17 @@ const TAB_CONFIG: Record<
     label: "Logbook",
     icon: Book,
     href: "/logbook",
-    // The sidebar's Logbook group: Currencies and the Bin light this tab, the
-    // way FDP and Discrepancies light Roster. Currencies lit Roster while the
-    // sidebar filed it under Logbook, so the two navs disagreed.
+    // The sidebar's Logbook group: Currencies and the Bin light this tab. The
+    // ROSTER is this tab's second view (List | Roster), so it and what used to
+    // light the Roster tab — FDP and Discrepancies — light it too.
     isActive: (p) =>
-      p === "/logbook" || p?.startsWith("/flights/") || p === "/currencies" || p === "/recently-deleted",
+      p === "/logbook" ||
+      p?.startsWith("/flights/") ||
+      p === "/currencies" ||
+      p === "/recently-deleted" ||
+      p === "/roster" ||
+      p === "/discrepancies" ||
+      p === "/fdp",
   },
   roster: {
     label: "Roster",
@@ -106,6 +113,12 @@ const TAB_CONFIG: Record<
     href: "/account",
     isActive: (p) => p === "/account",
   },
+}
+
+/** Where a tab goes: the Logbook tab goes back to the view last used. */
+function tabHref(key: BottomNavTab, logbookView: LogbookView): string | undefined {
+  if (key === "logbook") return logbookView
+  return TAB_CONFIG[key]?.href
 }
 
 // ─── Constants ───────────────────────────────────────────────
@@ -614,6 +627,7 @@ const PillBarContent = memo(function PillBarContent({
 }) {
   const tabsRef = useRef<HTMLDivElement>(null)
   const activeIndex = activeTabIndex(tabs, pathname)
+  const logbookView = useLogbookView()
   const router = useRouter()
   const reduce = useReducedMotion()
 
@@ -979,8 +993,8 @@ const PillBarContent = memo(function PillBarContent({
     lens.style.setProperty("--lens-to-y", `${r.height / lensH}`)
     lens.classList.add("PillDragLens--settle")
     lens.style.translate = `${dx}px ${dy}px`
-    const tab = TAB_CONFIG[tabs[drag.nearest]]
-    if (tab) router.push(tab.href, { scroll: false })
+    const href = tabHref(tabs[drag.nearest], logbookView)
+    if (href) router.push(href, { scroll: false })
     // Outlast the splat's rebound before handing off to the real blob, or the
     // last of the squash gets cut.
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
@@ -992,7 +1006,7 @@ const PillBarContent = memo(function PillBarContent({
       // now already in place and lit, and a wobble after everything has come
       // to rest reads as a second arrival.
     }, 620)
-  }, [tabs, router, squishX, squishY, nudgeX])
+  }, [tabs, router, squishX, squishY, nudgeX, logbookView])
 
   useEffect(() => () => {
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
@@ -1069,7 +1083,7 @@ const PillBarContent = memo(function PillBarContent({
           return (
             <Link
               key={tabKey}
-              href={tab.href}
+              href={tabHref(tabKey, logbookView) ?? tab.href}
               scroll={false}
               data-nav-link
               draggable={false}
@@ -1229,6 +1243,8 @@ const SidebarNav = memo(function SidebarNav({
 
   const isItemActive = (href: string) => {
     if (href === "/") return pathname === "/"
+    // The roster is the Logbook's second view.
+    if (href === "/logbook" && pathname === "/roster") return true
     return pathname === href || pathname?.startsWith(href + "/")
   }
 
@@ -1434,10 +1450,12 @@ const EXPANDED_HEIGHT =
  */
 function useHardwareNav(tabs: readonly BottomNavTab[]) {
   const router = useRouter()
+  const logbookView = useLogbookView()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key < "1" || e.key > "9" || e.key.length !== 1 || !isShortcut(e)) return
-      const href = TAB_CONFIG[tabs[Number(e.key) - 1]]?.href
+      const key = tabs[Number(e.key) - 1]
+      const href = key ? tabHref(key, logbookView) : undefined
       if (!href) return
       e.preventDefault()
       router.push(href, { scroll: false })
@@ -1451,7 +1469,7 @@ function useHardwareNav(tabs: readonly BottomNavTab[]) {
       window.removeEventListener("keydown", onKey)
       window.removeEventListener("click", onClick, true)
     }
-  }, [tabs, router])
+  }, [tabs, router, logbookView])
 }
 
 function activeTabIndex(tabs: readonly BottomNavTab[], pathname: string): number {
@@ -1510,7 +1528,10 @@ export const NavPill = memo(function NavPill() {
   const { preferences } = usePreferences()
   const prefersReducedMotion = useReducedMotion()
 
-  const tabs = preferences.navigation.bottomNavTabs
+  // Roster is the Logbook tab's second view now: a stored "roster" tab is
+  // folded into Logbook and its slot given to the next tab.
+  const storedTabs = preferences.navigation.bottomNavTabs
+  const tabs = useMemo(() => normaliseNavTabs(storedTabs), [storedTabs])
   useHardwareNav(tabs)
 
   const desktopPill = (

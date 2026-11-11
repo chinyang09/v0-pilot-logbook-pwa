@@ -168,7 +168,8 @@ export interface NavigationPreferences {
 }
 
 export const DEFAULT_NAVIGATION_PREFERENCES: NavigationPreferences = {
-  bottomNavTabs: ["dashboard", "logbook", "roster", "aircraft"],
+  // Roster is the Logbook tab's second view (List | Roster), not a tab.
+  bottomNavTabs: ["dashboard", "logbook", "aircraft", "crew"],
 }
 
 export interface UserPreferences {

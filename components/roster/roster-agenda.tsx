@@ -33,7 +33,7 @@ import type { DisplayPreferences } from "@/types/db/stores.types"
 import type { ScheduleEntry } from "@/types/entities/roster.types"
 import { SwipeableCard } from "@/components/swipeable-card"
 import { DUTY_TYPE_ICONS } from "@/components/roster/duty-entry-card"
-import { itemTone } from "@/components/roster/roster-month"
+import { DUTY_TYPE_COLORS } from "@/components/roster/duty-entry-card"
 
 const DAY_MS = 86_400_000
 
@@ -411,9 +411,9 @@ function DayHeading({ dayKey, todayKey }: { dayKey: string; todayKey: string }) 
   const rel = relativeDay(dayKey, todayKey)
   return (
     <div className="flex items-baseline justify-between px-1 pt-4">
-      <h3 className="text-[11px] font-semibold uppercase leading-5 tracking-wider text-muted-foreground">
+      <h2 className="text-[11px] font-semibold uppercase leading-5 tracking-wider text-muted-foreground">
         {DAY_HEADING.format(parseYMDLocal(dayKey))}
-      </h3>
+      </h2>
       {rel && <span className={cn("text-[11px] leading-5", rel === "Today" ? "font-semibold text-primary" : "text-muted-foreground")}>{rel}</span>}
     </div>
   )
@@ -523,4 +523,17 @@ function FlightRow({
       <TimeStack range={range} empty="" />
     </button>
   )
+}
+
+/** A row's icon tint. Flights follow the logbook: the accent until flown. */
+function itemTone(item: RosterItem): string {
+  if (item.kind === "duty") {
+    const c = DUTY_TYPE_COLORS[item.entry.dutyType] ?? DUTY_TYPE_COLORS.other
+    return cn(c.bg, c.text)
+  }
+  // -700 on the light theme for the sim: a -600 on its own 10% tint measured
+  // 4.1:1. A flight still to fly is PLANNED, and planned is the accent, the
+  // same as the logbook's scheduled card; flown is the plain record.
+  if (item.simulator) return "bg-teal-500/10 text-teal-700 dark:text-teal-300"
+  return item.flown ? "bg-secondary text-foreground" : "bg-primary/10 text-primary"
 }

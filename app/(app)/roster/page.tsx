@@ -36,7 +36,10 @@ import { DutyDetailPanel } from "@/components/roster/duty-detail-panel"
 import { PanelLoading } from "@/components/ui/page-loading"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
-import { RosterMonth } from "@/components/roster/roster-month"
+import { LogbookCalendar } from "@/components/logbook-calendar"
+import { LogbookViewSwitch } from "@/components/logbook-view-switch"
+import { useCalendarDuties } from "@/hooks/use-calendar-spans"
+import { isSimulatorEntry } from "@/lib/utils/entry-type"
 import { RosterAgenda, type RosterAgendaHandle } from "@/components/roster/roster-agenda"
 import { useFloatingPanelUnderHeader } from "@/lib/layout/panel-mode"
 import { deleteScheduleEntry, restoreScheduleEntry } from "@/lib/db"
@@ -72,7 +75,17 @@ export default function RosterPage() {
   // would move every row under the reader.
   const [pinnedKey, setPinnedKey] = useState<string | null>(storedSelection)
 
-  const days = useMemo(() => buildRosterDays(scheduleEntries, flights, { zulu }), [scheduleEntries, flights, zulu])
+  // The calendar's Duties toggle governs the agenda too: off, the roster is
+  // the logbook's own picture — its flights, and no standby, ground, leave or
+  // simulator.
+  const showDuties = useCalendarDuties()
+  const days = useMemo(
+    () =>
+      showDuties
+        ? buildRosterDays(scheduleEntries, flights, { zulu })
+        : buildRosterDays([], flights.filter((f) => !isSimulatorEntry(f)), { zulu }),
+    [scheduleEntries, flights, zulu, showDuties]
+  )
   const agenda = useMemo(
     () => rosterAgenda(days, pinnedKey ? [todayKey, pinnedKey] : [todayKey]),
     [days, todayKey, pinnedKey]
@@ -167,6 +180,21 @@ export default function RosterPage() {
     },
     [selectedKey, todayKey, days, goTo]
   )
+
+  // The calendar's month: the selected day's. A swipe or a wheel step on it
+  // moves by month(s), the way the logbook's does; the month/year wheels land
+  // on the month they settle on.
+  // Keyed on the month string, so a new day in the same month keeps the object.
+  const monthKey = selectedKey.slice(0, 7)
+  const calendarMonth = useMemo(() => {
+    const [y, m] = monthKey.split("-").map(Number)
+    return { year: y, month: m - 1 }
+  }, [monthKey])
+  const onCalendarMonthChange = useCallback(
+    (year: number, month: number) => stepMonth(year * 12 + month - (calendarMonth.year * 12 + calendarMonth.month)),
+    [stepMonth, calendarMonth]
+  )
+  const [monthPicker, setMonthPicker] = useState(false)
 
   // Scroll once the list holds the day: after the commit that may have added
   // its row. The first time, once the data has landed, to the day the page
@@ -284,6 +312,8 @@ export default function RosterPage() {
             There is no Refresh: it re-read the local table, which every write
             and every sync already does, so it was a button with nothing to
             show for itself — and easily mistaken for "sync". */}
+        {/* The Logbook tab's page switch, first. */}
+        <LogbookViewSwitch current="/roster" active={isActive} />
         <GlassButtonGroup>
           <UnifiedImportButton
             context="roster"
@@ -298,7 +328,7 @@ export default function RosterPage() {
         </GlassIconButton>
       </>
     ),
-    [refreshEntries, openAddDuty]
+    [refreshEntries, openAddDuty, isActive]
   )
 
   useRegisterMainActions(rosterActions, isActive)
@@ -317,13 +347,21 @@ export default function RosterPage() {
             className="roster-month-sticky sticky z-10 bg-background pb-1 pt-4"
             style={{ top: "var(--chrome-top)" }}
           >
-            <RosterMonth
-              selectedKey={selectedKey}
-              todayKey={todayKey}
-              days={days}
-              onSelect={selectDay}
-              onStep={stepMonth}
+            {/* The app's one calendar, as on the logbook: the month as bars,
+                on glass, with Today and the Duties toggle in its header. */}
+            <LogbookCalendar
+              glass
+              cornerRadius={20}
+              flights={flights}
+              selectedMonth={calendarMonth}
+              onMonthChange={onCalendarMonthChange}
+              onDateSelect={selectDay}
+              selectedDate={selectedKey}
               onToday={selectToday}
+              view={monthPicker ? "monthYear" : "calendar"}
+              headerActive={monthPicker}
+              onHeaderPress={() => setMonthPicker((v) => !v)}
+              onMonthSelect={onCalendarMonthChange}
             />
             {nothingYet && (
               <p className="px-1 pt-3 text-sm text-muted-foreground">Import a schedule or add a duty.</p>
