@@ -39,7 +39,7 @@ const AUTH_FETCH_TIMEOUT_MS = 15_000
  * back to the dashboard's HTML under the wrong URL.
  */
 const OFFLINE_PAGES = [
-  "/", "/logbook", "/aircraft", "/airports", "/crew", "/roster", "/settings", "/account",
+  "/", "/logbook", "/aircraft", "/airports", "/crew", "/settings", "/account",
   "/currencies", "/discrepancies", "/fdp", "/recently-deleted",
 ]
 

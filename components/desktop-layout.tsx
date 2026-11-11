@@ -14,6 +14,8 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable"
 import { FlightForm } from "@/components/flight-form"
+import { LogbookDutyPanel } from "@/components/roster/logbook-duty-panel"
+import { DUTY_KEY_PREFIX } from "@/lib/utils/logbook-rows"
 import { useRef, useCallback, useEffect, useState } from "react"
 import { ChevronLeft } from "lucide-react"
 import { GlassIconButton } from "@/components/ui/glass-icon-button"
@@ -55,11 +57,10 @@ interface AppShellProps {
  */
 const DETAIL_PLACEHOLDER: Record<string, string> = {
   "/": "Select a requirement or a flight",
-  "/logbook": "Select a flight",
+  "/logbook": "Select a flight or a duty",
   "/aircraft": "Select an aircraft",
   "/airports": "Select an airport",
   "/crew": "Select a crew member",
-  "/roster": "Select a duty or a day",
   "/currencies": "Select a currency",
   "/discrepancies": "Select a comparison or a note",
   "/fdp": "Open the Quick Check",
@@ -81,7 +82,17 @@ function DetailPanelContent() {
   const pickerFlightId = searchParams.get("flightId")
   const isLogbook = pathname?.includes("/logbook")
   const isPickerPage = pathname?.includes("/aircraft") || pathname?.includes("/airports") || pathname?.includes("/crew")
-  const flightId = (isLogbook && selectedId) ? selectedId : (isPickerPage && pickerFlightId) ? pickerFlightId : null
+  // The logbook's duty cards open a duty (`duty:<id>`, `duty:new:<date>`).
+  const dutySelection = isLogbook && selectedId?.startsWith(DUTY_KEY_PREFIX) ? selectedId : null
+  const flightId = (isLogbook && selectedId && !dutySelection) ? selectedId : (isPickerPage && pickerFlightId) ? pickerFlightId : null
+
+  if (dutySelection) {
+    return (
+      <div className="h-full overflow-hidden bg-background">
+        <LogbookDutyPanel selection={dutySelection} />
+      </div>
+    )
+  }
 
   // Show FlightForm when we have a flight to edit (either on logbook or during picker navigation)
   if (flightId) {

@@ -64,7 +64,6 @@ const PAGE_IMPORTERS: Record<KeepAliveRouteKey, () => Promise<PageModule>> = {
   "/aircraft": () => import("@/app/(app)/aircraft/page"),
   "/airports": () => import("@/app/(app)/airports/page"),
   "/crew": () => import("@/app/(app)/crew/page"),
-  "/roster": () => import("@/app/(app)/roster/page"),
 }
 
 /**

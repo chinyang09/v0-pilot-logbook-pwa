@@ -33,7 +33,7 @@ import { SyncStatus } from "@/components/sync-status"
 import { haptic } from "@/lib/utils/haptics"
 import { isShortcut } from "@/lib/utils/shortcuts"
 import type { BottomNavTab } from "@/types/db/stores.types"
-import { normaliseNavTabs, useLogbookView, type LogbookView } from "@/hooks/use-logbook-view"
+import { normaliseNavTabs } from "@/lib/utils/nav-tabs"
 
 // ─── Tab config ──────────────────────────────────────────────
 
@@ -57,14 +57,13 @@ const TAB_CONFIG: Record<
     icon: Book,
     href: "/logbook",
     // The sidebar's Logbook group: Currencies and the Bin light this tab. The
-    // ROSTER is this tab's second view (List | Roster), so it and what used to
-    // light the Roster tab — FDP and Discrepancies — light it too.
+    // roster is this list with its duties on, so what used to light the Roster
+    // tab — FDP and Discrepancies — lights it too.
     isActive: (p) =>
       p === "/logbook" ||
       p?.startsWith("/flights/") ||
       p === "/currencies" ||
       p === "/recently-deleted" ||
-      p === "/roster" ||
       p === "/discrepancies" ||
       p === "/fdp",
   },
@@ -115,9 +114,8 @@ const TAB_CONFIG: Record<
   },
 }
 
-/** Where a tab goes: the Logbook tab goes back to the view last used. */
-function tabHref(key: BottomNavTab, logbookView: LogbookView): string | undefined {
-  if (key === "logbook") return logbookView
+/** Where a tab goes. (A stored "roster" tab is folded into Logbook — see normaliseNavTabs.) */
+function tabHref(key: BottomNavTab): string | undefined {
   return TAB_CONFIG[key]?.href
 }
 
@@ -627,7 +625,6 @@ const PillBarContent = memo(function PillBarContent({
 }) {
   const tabsRef = useRef<HTMLDivElement>(null)
   const activeIndex = activeTabIndex(tabs, pathname)
-  const logbookView = useLogbookView()
   const router = useRouter()
   const reduce = useReducedMotion()
 
@@ -993,7 +990,7 @@ const PillBarContent = memo(function PillBarContent({
     lens.style.setProperty("--lens-to-y", `${r.height / lensH}`)
     lens.classList.add("PillDragLens--settle")
     lens.style.translate = `${dx}px ${dy}px`
-    const href = tabHref(tabs[drag.nearest], logbookView)
+    const href = tabHref(tabs[drag.nearest])
     if (href) router.push(href, { scroll: false })
     // Outlast the splat's rebound before handing off to the real blob, or the
     // last of the squash gets cut.
@@ -1006,7 +1003,7 @@ const PillBarContent = memo(function PillBarContent({
       // now already in place and lit, and a wobble after everything has come
       // to rest reads as a second arrival.
     }, 620)
-  }, [tabs, router, squishX, squishY, nudgeX, logbookView])
+  }, [tabs, router, squishX, squishY, nudgeX])
 
   useEffect(() => () => {
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current)
@@ -1083,7 +1080,7 @@ const PillBarContent = memo(function PillBarContent({
           return (
             <Link
               key={tabKey}
-              href={tabHref(tabKey, logbookView) ?? tab.href}
+              href={tabHref(tabKey) ?? tab.href}
               scroll={false}
               data-nav-link
               draggable={false}
@@ -1243,8 +1240,6 @@ const SidebarNav = memo(function SidebarNav({
 
   const isItemActive = (href: string) => {
     if (href === "/") return pathname === "/"
-    // The roster is the Logbook's second view.
-    if (href === "/logbook" && pathname === "/roster") return true
     return pathname === href || pathname?.startsWith(href + "/")
   }
 
@@ -1450,12 +1445,11 @@ const EXPANDED_HEIGHT =
  */
 function useHardwareNav(tabs: readonly BottomNavTab[]) {
   const router = useRouter()
-  const logbookView = useLogbookView()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key < "1" || e.key > "9" || e.key.length !== 1 || !isShortcut(e)) return
       const key = tabs[Number(e.key) - 1]
-      const href = key ? tabHref(key, logbookView) : undefined
+      const href = key ? tabHref(key) : undefined
       if (!href) return
       e.preventDefault()
       router.push(href, { scroll: false })
@@ -1469,7 +1463,7 @@ function useHardwareNav(tabs: readonly BottomNavTab[]) {
       window.removeEventListener("keydown", onKey)
       window.removeEventListener("click", onClick, true)
     }
-  }, [tabs, router, logbookView])
+  }, [tabs, router])
 }
 
 function activeTabIndex(tabs: readonly BottomNavTab[], pathname: string): number {
