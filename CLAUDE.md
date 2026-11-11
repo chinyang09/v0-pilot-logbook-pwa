@@ -1780,6 +1780,50 @@ runs the FDP pipeline (~250ms of that 4× figure is `createDutyPeriodsFromFlight
 and the pilot-status model). Back-from-flight is a `popstate`, which React
 renders synchronously by design.
 
+### Ambient: the app is already where the pilot is (Nov 2026)
+
+Three places where the app knew the answer and still made the pilot find it:
+
+- **The logbook OPENS AT NOW** (`logbookNowIndex`, `lib/utils/logbook-now.ts`).
+  The list is newest first, so every rostered flight sits ABOVE the last one
+  flown: with a month ahead it opened on a flight three weeks away and the one
+  being logged today was thirty rows down. On its first rows of a mount it
+  scrolls so the NEXT flight to fly (the earliest unflown one dated today or
+  later; a leg with OUT and no IN counts) is at the top, what was just flown
+  beneath it, the rest of the roster a scroll up. Once per mount, never over
+  a selection (`revealFlight` owns that), index 0 — as before — when nothing
+  is ahead. It waits for the calibrated row height, so the offset is exact.
+- **The flight form points at the next time to stamp** (`nextStamp`). On a
+  flight dated within a day of today, the first of OUT / OFF / ON / IN still
+  blank carries the PRIMARY NOW; the others stay outline. Four identical NOW
+  buttons were four things to choose between at the moment the pilot has the
+  least attention to spare. Its accessible name says so ("Out now, next").
+- **The tablet's dashboard panel opens the cell that matters** (see
+  "CURRENCY and LIMITS").
+
+### Hardware: keys and a tick (`lib/utils/shortcuts.ts`, `lib/utils/haptics.ts`)
+
+| Key | Does | Where |
+|---|---|---|
+| `1`–`4` | the nav's tabs, in the pilot's own order (`useHardwareNav`) | everywhere |
+| `/` | opens search (focuses it when already open) | logbook |
+| `N` | new flight | logbook |
+| `↑` `↓` | the flight above / below the open one | logbook, split layout, focus on the list's side |
+
+- **ONE gate, `isShortcut`**: no modifier held, not in a field / wheel /
+  editable, no dialog or menu open, not already handled. A new shortcut goes
+  through it and into the table in `shortcuts.ts`.
+- A keep-alive page listens only while it is the ACTIVE route.
+- The arrows stand down when focus is inside the open flight — there they
+  scroll the panel and turn a wheel.
+- **`haptic(weight)`** is the one way to vibrate: `tick` (6ms — a nav tab, a
+  menu choice), `tap` (10 — NOW), `thud` (18 — a delete, from
+  `showUndoToast`, where every delete ends). Android has `navigator.vibrate`
+  and iOS does not; nothing looks or behaves differently without it, so it is
+  not a platform branch. Only ever inside the gesture that caused it. (The
+  older direct `navigator.vibrate` calls — the year rail, the countdown — are
+  as they were.)
+
 ### The Logbook's Virtualized List
 
 `components/flight-list.tsx` uses `@tanstack/react-virtual` with dynamic
@@ -5484,6 +5528,8 @@ When making changes, be aware of these high-impact files:
 - Do not let the annunciator's second line repeat its headline — when the headline is the governing requirement's own remedy, the line is `status.also` (the NEXT flagged requirement, "+N More"), never "Tightest <the same requirement> <its figure>". And do not paint a limit bar green: a limit with room is neutral, colour arrives with caution or fail
 - Do not stand every hour category in the flight form's TIME section — the ones the flight holds and the seat's role time lead (`leadsTimeSection`), the rest wait behind "More Categories". Never fold a category that holds a figure, and never hide a row conditionally elsewhere in the form to save space (the empty Scheduled rows stay): a row that is sometimes absent is a row to hunt for
 - Do not offer NOW on a flight that is not dated within a day of today (`isWithinADayOfToday`)
+- Do not add a keyboard shortcut that does not go through `isShortcut`, or a `navigator.vibrate` call outside `haptic()` — and never vibrate from a scroll, a render or a timer
+- Do not make the logbook's opening scroll run more than once per mount, or over a selection — after the first rows it is the pilot's list, and a programmatic scroll cancels a momentum scroll on touch
 - Do not print a bare rest countdown in the annunciator. The hero is `nextAction.headline`, which is the CONTEXTUAL form of the same fact ("Rest short by 3:00", "Rest until 04:36"); a raw countdown there, a copy inside the ring and an "N to go" line beside "Legal from" were three printings of one number
 - Do not let `pilot-status.ts` format its own clocks — it is pure, so the formatter is INJECTED (`buildPilotStatus({ formatClock })`, wired by `usePilotStatus(recency, now, display)`). Its own `Intl.DateTimeFormat` was device-local 24-hour with a colon, so a Zulu-configured pilot read one convention in the hero line and another two lines below it
 - Do not make the legal page's cells navigate on tap — they open their detail in the detail panel, with the dashboard still in place. The reader came to check a status, and a route change loses the screen they came for. The deep link belongs inside the panel

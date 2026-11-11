@@ -30,6 +30,8 @@ import { usePreferences } from "@/components/providers/preferences-provider"
 import { useBackDismiss } from "@/hooks/use-back-dismiss"
 import { navSections, dashboardNavItem } from "@/components/nav-sections"
 import { SyncStatus } from "@/components/sync-status"
+import { haptic } from "@/lib/utils/haptics"
+import { isShortcut } from "@/lib/utils/shortcuts"
 import type { BottomNavTab } from "@/types/db/stores.types"
 
 // ─── Tab config ──────────────────────────────────────────────
@@ -1422,6 +1424,36 @@ const EXPANDED_HEIGHT =
  * Currencies tab in the bar as well `/currencies` matched both — the blob went
  * to whichever came first and BOTH labels read as selected.
  */
+/**
+ * The nav, from the hardware: `1`–`4` are the tabs in the pilot's own order
+ * (a keyboard on a tablet, a desktop window), and a tap on any nav link ticks
+ * where the device can (`haptic`) — the tab bar is the one control touched on
+ * every visit, and a physical one would click. Both are window listeners, so
+ * neither re-renders the nav; the tick is read at the capture phase, before
+ * the route change, inside the tap itself.
+ */
+function useHardwareNav(tabs: readonly BottomNavTab[]) {
+  const router = useRouter()
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key < "1" || e.key > "9" || e.key.length !== 1 || !isShortcut(e)) return
+      const href = TAB_CONFIG[tabs[Number(e.key) - 1]]?.href
+      if (!href) return
+      e.preventDefault()
+      router.push(href, { scroll: false })
+    }
+    const onClick = (e: MouseEvent) => {
+      if ((e.target as Element | null)?.closest?.("[data-nav-link]")) haptic("tick")
+    }
+    window.addEventListener("keydown", onKey)
+    window.addEventListener("click", onClick, true)
+    return () => {
+      window.removeEventListener("keydown", onKey)
+      window.removeEventListener("click", onClick, true)
+    }
+  }, [tabs, router])
+}
+
 function activeTabIndex(tabs: readonly BottomNavTab[], pathname: string): number {
   const own = tabs.findIndex((k) => {
     const href = TAB_CONFIG[k]?.href
@@ -1479,6 +1511,7 @@ export const NavPill = memo(function NavPill() {
   const prefersReducedMotion = useReducedMotion()
 
   const tabs = preferences.navigation.bottomNavTabs
+  useHardwareNav(tabs)
 
   const desktopPill = (
     <DesktopPillMorph

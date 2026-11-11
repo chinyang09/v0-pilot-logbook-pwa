@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import { useLiveQuery } from "dexie-react-hooks";
 import { userDb } from "@/lib/db/user-db";
 import { formatDay, formatDayAt, isWithinADayOfToday } from "@/lib/utils/date";
+import { haptic } from "@/lib/utils/haptics";
 import { useDayKey } from "@/hooks/use-day-key";
 import { useCollapsingTitle } from "@/hooks/use-collapsing-title";
 import { DETAIL_TITLE_KEY } from "@/lib/layout/header-title";
@@ -466,6 +467,7 @@ function TimeRow({
   onTap,
   onNow,
   showNow = true,
+  nextUp = false,
   clockSeparator = "colon",
   derivedValue,
 }: {
@@ -475,6 +477,12 @@ function TimeRow({
   onTap: (frame: "utc" | "local") => void;
   onNow?: () => void;
   showNow?: boolean;
+  /**
+   * This is the NEXT time to stamp (OUT, then OFF, ON, IN): its NOW is the
+   * primary surface, so four identical buttons become one to press and three
+   * that wait.
+   */
+  nextUp?: boolean;
   clockSeparator?: DisplayPreferences["clockSeparator"];
   /**
    * What the row falls back to when nothing has been entered — shown muted, in
@@ -525,10 +533,10 @@ function TimeRow({
         <div className="flex flex-col items-end">
           {showNow && !hasValue && !hasDerived ? (
             <Button
-              variant="outline"
+              variant={nextUp ? "default" : "outline"}
               size="sm"
-              aria-label={`${label} now`}
-              className="h-9 min-w-11 px-2 text-xs text-primary control-surface-inset"
+              aria-label={nextUp ? `${label} now, next` : `${label} now`}
+              className={cn("h-9 min-w-11 px-2 text-xs control-surface-inset", !nextUp && "text-primary")}
               onClick={(e) => {
                 e.stopPropagation();
                 onNow?.();
@@ -1908,10 +1916,16 @@ function FlightFormImpl({
   const setNowTime = useCallback(
     (field: keyof FlightLog) => {
       const now = getCurrentTimeUTC();
+      haptic("tap");
       updateField(field, now);
     },
     [updateField]
   );
+  // The form knows where the flight is in its own sequence: the first of
+  // OUT / OFF / ON / IN still blank is the one that happens next.
+  const nextStamp = canStampNow
+    ? (["outTime", "offTime", "onTime", "inTime"] as const).find((k) => !formData[k]) ?? null
+    : null;
 
 
   // Additional crew management, by ROW (members are added through the crew
@@ -2362,6 +2376,7 @@ function FlightFormImpl({
               onTap={(frame) => openTimePicker("outTime", frame)}
               onNow={() => setNowTime("outTime")}
               showNow={canStampNow}
+              nextUp={nextStamp === "outTime"}
             clockSeparator={clockSeparator}
             />
           </SwipeableRow>
@@ -2374,6 +2389,7 @@ function FlightFormImpl({
               onTap={(frame) => openTimePicker("offTime", frame)}
               onNow={() => setNowTime("offTime")}
               showNow={canStampNow}
+              nextUp={nextStamp === "offTime"}
             clockSeparator={clockSeparator}
             />
           </SwipeableRow>
@@ -2386,6 +2402,7 @@ function FlightFormImpl({
               onTap={(frame) => openTimePicker("onTime", frame)}
               onNow={() => setNowTime("onTime")}
               showNow={canStampNow}
+              nextUp={nextStamp === "onTime"}
             clockSeparator={clockSeparator}
             />
           </SwipeableRow>
@@ -2398,6 +2415,7 @@ function FlightFormImpl({
               onTap={(frame) => openTimePicker("inTime", frame)}
               onNow={() => setNowTime("inTime")}
               showNow={canStampNow}
+              nextUp={nextStamp === "inTime"}
             clockSeparator={clockSeparator}
             />
           </SwipeableRow>

@@ -13,6 +13,7 @@
  * the app shell, and nothing in between should re-render to carry it.
  */
 
+import { haptic } from "./haptics"
 import { useSyncExternalStore } from "react"
 
 /** Long enough to read and reach; short enough not to sit over the list. */
@@ -36,6 +37,8 @@ function emit() {
 
 /** Show (or replace) the message. Only the latest delete is undoable here. */
 export function showUndoToast(message: string, undo: UndoToast["undo"]) {
+  // Every delete in the app ends here, so this is where it is felt.
+  haptic("thud")
   current = { key: nextKey++, message, undo }
   if (timer) clearTimeout(timer)
   timer = setTimeout(dismissUndoToast, UNDO_TOAST_MS)

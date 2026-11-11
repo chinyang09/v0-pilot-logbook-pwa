@@ -28,6 +28,7 @@ import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { useSearchParams } from "next/navigation"
 import { usePageActive } from "@/hooks/use-page-active"
+import { isShortcut } from "@/lib/utils/shortcuts"
 import { whenIdle } from "@/lib/utils/idle"
 import { prewarmAirportClocks } from "@/lib/db/stores/reference/airports.store"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
@@ -560,6 +561,38 @@ export default function LogbookPage() {
       ),
     [hasActiveFilters, flights.length, clearAllFilters, handleAddFlight]
   )
+
+  // The logbook from a keyboard (`isShortcut` says when a key is one): `/`
+  // opens search, `N` starts a flight, and with a flight open the arrows move
+  // to the one above or below — reading down a month without going back to
+  // the list for each. Only while this page is the one on screen: it is
+  // keep-alive, and a hidden logbook must not answer another page's keys.
+  useEffect(() => {
+    if (!isActive) return
+    const onKey = (e: KeyboardEvent) => {
+      if (!isShortcut(e)) return
+      if (e.key === "/") {
+        if (showSearch) searchInputRef.current?.focus({ preventScroll: true })
+        else toggleSearch()
+      } else if (e.key === "n" || e.key === "N") {
+        handleAddFlight()
+      } else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && selectedFlightId && isSplitLayout) {
+        // Only from the LIST's side. With focus in the open flight, the
+        // arrows are that panel's own (they scroll it, they turn a wheel).
+        const el = e.target as Element | null
+        if (el !== document.body && !el?.closest?.('[data-slot="card"]')) return
+        const at = filteredFlights.findIndex((f) => f.id === selectedFlightId)
+        const next = filteredFlights[at + (e.key === "ArrowDown" ? 1 : -1)]
+        if (at === -1 || !next) return
+        setSelectedFlightId(next.id)
+      } else {
+        return
+      }
+      e.preventDefault()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [isActive, showSearch, toggleSearch, handleAddFlight, selectedFlightId, filteredFlights, setSelectedFlightId, isSplitLayout])
 
   const logbookActions = useMemo(() => (
     <>

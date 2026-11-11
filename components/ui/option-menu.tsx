@@ -27,6 +27,7 @@
  * - It animates opacity and scale only, from the corner nearest its control.
  */
 
+import { haptic } from "@/lib/utils/haptics"
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { AnimatePresence, motion } from "framer-motion"
@@ -181,6 +182,7 @@ function OptionMenu<T extends string>({
 
   const choose = useCallback(
     (v: T) => {
+      haptic("tick")
       dismiss(() => {
         if (v !== value) onSelect(v)
       })

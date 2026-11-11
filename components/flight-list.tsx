@@ -48,6 +48,7 @@ import { useCalibratedRowHeight, useRemeasureOnCalibration } from "@/hooks/use-c
 import { useFlipPush } from "@/hooks/use-flip-push";
 import { PANEL_MS } from "@/components/calendar-panel";
 import { MORPH_EASE } from "@/lib/motion";
+import { logbookNowIndex } from "@/lib/utils/logbook-now";
 
 export interface FlightListRef {
   scrollToFlight: (flightId: string, instant?: boolean) => void;
@@ -408,6 +409,29 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     });
 
     useRemeasureOnCalibration(rowHeight, rowVirtualizer);
+
+    // The logbook OPENS AT NOW: the next flight to fly at the top, what was
+    // just flown beneath it, the rest of the roster a scroll up
+    // (`logbookNowIndex`). Once per mount — the first time there are rows and
+    // a calibrated height to place them by — and never over a selection, which
+    // `revealFlight` brings into view itself. A programmatic scroll before the
+    // pilot has touched the list, so there is no momentum to cancel.
+    const openedAtNowRef = useRef(false);
+    useEffect(() => {
+      if (openedAtNowRef.current || isLoading || flights.length === 0 || rowHeight <= 0) return;
+      openedAtNowRef.current = true;
+      if (selectedFlightId) return;
+      const index = logbookNowIndex(flights, new Date().toISOString().slice(0, 10));
+      if (index <= 0) return;
+      requestAnimationFrame(() => {
+        isExternalScrollRef.current = true;
+        rowVirtualizer.scrollToIndex(index, { align: "start", behavior: "auto" });
+        window.setTimeout(() => {
+          isExternalScrollRef.current = false;
+          scrollContainerRef.current?.dispatchEvent(new Event("scroll"));
+        }, 100);
+      });
+    }, [flights, isLoading, rowHeight, selectedFlightId, rowVirtualizer]);
 
     // Get virtual items
     const virtualItems = rowVirtualizer.getVirtualItems();
