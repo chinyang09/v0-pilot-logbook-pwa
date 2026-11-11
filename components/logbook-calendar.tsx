@@ -10,12 +10,16 @@ import {
   useState,
   useEffect,
 } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Layers } from "lucide-react";
 import { WheelPicker, WheelPickerWrapper } from "@ncdai/react-wheel-picker";
 import "@ncdai/react-wheel-picker/style.css";
 import { wheelClassNames } from "@/components/ui/wheel-styles";
 import type { FlightLog } from "@/lib/db";
 import { cn } from "@/lib/utils";
+import { formatDay } from "@/lib/utils/date";
+import { fitScale, labelWidth, onFontsReady } from "@/lib/utils/text-fit";
+import { layoutWeek, type BarTone, type WeekLayout } from "@/lib/utils/roster/calendar-bars";
+import { setCalendarDuties, useCalendarDuties, useCalendarSpans } from "@/hooks/use-calendar-spans";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -65,6 +69,8 @@ interface LogbookCalendarProps {
   onHeaderPress?: () => void;
   /** True while the picker is open, so the caption's chevron can flip. */
   headerActive?: boolean;
+  /** Offers a Today button in the header. */
+  onToday?: () => void;
 }
 
 export interface CalendarHandle {
@@ -98,6 +104,77 @@ function yearOptions(from: number, to: number) {
 }
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/**
+ * A week row: the day number's line, then THREE one-line lanes, then a
+ * hairline of air — the owner's reference (a desktop calendar app): three
+ * things a day, each one line ("TR560 RPMD", "LOFF"), what falls past them
+ * counted beside the date ("+1"). Fixed, so every row and every month is the
+ * same height and stepping months never moves anything under the calendar.
+ */
+const DAY_LINE_PX = 17;
+const LANE_PX = 14;
+const ROW_PAD_PX = 3;
+const LANES = 3;
+
+/**
+ * A DUTY is a solid bar, white type on its type's colour — the shape of the
+ * month (a run of leave, days off) reads before a word does. -700 on every hue
+ * keeps white 9px type at 4.5:1 and over.
+ */
+const DUTY_BAR: Record<string, string> = {
+  standby: "bg-amber-700 text-white",
+  training: "bg-purple-700 text-white",
+  leave: "bg-green-700 text-white",
+  off: "bg-slate-600 text-white",
+  ground: "bg-orange-700 text-white",
+  positioning: "bg-cyan-700 text-white",
+  other: "bg-slate-600 text-white",
+};
+
+/**
+ * A FLIGHT is coloured TEXT, no fill — the reference's own split, and it is
+ * what keeps a day with three sectors legible: three filled chips stacked in a
+ * 50px cell read as a block. Still to fly is the accent (planned, as on the
+ * logbook card), flown the plain record, a past sector with no times the amber
+ * of "not logged", a simulator teal.
+ */
+function barTone(tone: BarTone): string {
+  if (tone.kind === "duty") return DUTY_BAR[tone.dutyType] ?? DUTY_BAR.other;
+  switch (tone.state) {
+    case "flown":
+      return "text-foreground";
+    case "unlogged":
+      return "text-status-warning";
+    case "sim":
+      return "text-teal-700 dark:text-teal-300";
+    default:
+      return "text-primary";
+  }
+}
+
+type GridDay = { date: Date; dateStr: string; isCurrentMonth: boolean };
+
+/** Week rows a month spans, Sunday-first. */
+function weeksIn(year: number, month: number): number {
+  const first = new Date(year, month, 1).getDay();
+  const days = new Date(year, month + 1, 0).getDate();
+  return Math.ceil((first + days) / 7);
+}
+
+function nextMonthOf(m: { year: number; month: number }): [number, number] {
+  return m.month === 11 ? [m.year + 1, 0] : [m.year, m.month + 1];
+}
+
+/** The month's six week rows, each laid out against the spans. */
+function weeksOf(days: GridDay[], spans: Parameters<typeof layoutWeek>[1], maxLanes: number) {
+  const weeks: { days: GridDay[]; layout: WeekLayout }[] = [];
+  for (let i = 0; i < days.length; i += 7) {
+    const week = days.slice(i, i + 7);
+    weeks.push({ days: week, layout: layoutWeek(week.map((d) => d.dateStr), spans, maxLanes) });
+  }
+  return weeks;
+}
 
 /** Single ↔ dual month slide. Same 300ms as the panels it opens beside. */
 const PANE_SLIDE_MS = 300;
@@ -162,16 +239,37 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       view = "calendar",
       onMonthSelect,
       dualMonth = false,
-      paneMaxWidth = 360,
+      paneMaxWidth,
       rangeStart = null,
       rangeEnd = null,
       header,
       onHeaderPress,
       headerActive = false,
+      onToday,
     },
     ref
   ) {
     const containerRef = useRef<HTMLDivElement>(null);
+
+    // One day's width, so a label can be condensed to fit it (see text-fit).
+    // Read from a ResizeObserver — after layout, never in a commit — off the
+    // first week row; every pane is the same width.
+    const [cellPx, setCellPx] = useState(0);
+    const [, setFontsTick] = useState(0);
+    useEffect(() => {
+      const el = containerRef.current;
+      if (!el) return;
+      const ro = new ResizeObserver(() => {
+        const row = el.querySelector<HTMLElement>("[data-cal-week]");
+        if (row) setCellPx(row.clientWidth / 7);
+      });
+      ro.observe(el);
+      const stop = onFontsReady(() => setFontsTick((n) => n + 1));
+      return () => {
+        ro.disconnect();
+        stop();
+      };
+    }, []);
     /**
      * Swipe bookkeeping — REFS, not state.
      *
@@ -276,20 +374,30 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [dualMonth]);
 
-    const flightDates = useMemo(() => {
-      const dates = new Map<string, { count: number; hasNight: boolean; allFuture: boolean }>();
-      flights.forEach((flight) => {
-        const date = flight.date;
-        const isFuture = !flight.outTime || !flight.inTime;
-        const existing = dates.get(date) || { count: 0, hasNight: false, allFuture: true };
-        existing.count++;
-        if (flight.nightTime && flight.nightTime !== "00:00")
-          existing.hasNight = true;
-        if (!isFuture) existing.allFuture = false;
-        dates.set(date, existing);
-      });
-      return dates;
-    }, [flights]);
+    // Every flight and duty the month draws, filtered by the Duties toggle.
+    const spans = useCalendarSpans(flights);
+    const showDuties = useCalendarDuties();
+    // Only the weeks the month spans (4–6), the same for both panes of a
+    // pair, rather than a fixed six with a row of next month's days.
+    const weekRows = dualMonth
+      ? Math.max(weeksIn(selectedMonth.year, selectedMonth.month), weeksIn(...nextMonthOf(selectedMonth)))
+      : weeksIn(selectedMonth.year, selectedMonth.month);
+    // The month(s) on screen, laid out ONCE per change of data or month: the
+    // page re-renders the calendar as its list scrolls (the selected day
+    // follows the top flight), and each layout is a pass over every span.
+    const paneLayouts = useMemo(() => {
+      const map = new Map<string, ReturnType<typeof weeksOf>>();
+      const months = dualMonth
+        ? [selectedMonth, addMonths(selectedMonth.year, selectedMonth.month, 1)]
+        : [selectedMonth];
+      for (const m of months) {
+        const days = computeMonthDays(m.year, m.month);
+        map.set(`${days[0].dateStr}|${weekRows}`, weeksOf(days.slice(0, weekRows * 7), spans, LANES));
+      }
+      return map;
+    }, [spans, selectedMonth, dualMonth, weekRows]);
+    const layoutsFor = (days: GridDay[], rows: number) =>
+      paneLayouts.get(`${days[0].dateStr}|${rows}`) ?? weeksOf(days.slice(0, rows * 7), spans, LANES);
 
     // Days for the currently selected month (used in month/year picker + single month mode)
     const calendarDays = useMemo(
@@ -485,105 +593,154 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       </div>
     );
 
-    // ─── Reusable day grid renderer ────────────────────────────
+    // ─── The month as BARS ──────────────────────────────────────
+    //
+    // A grid of day cells with the day's flights and duties laid over it as
+    // bars (`lib/utils/roster/calendar-bars.ts`): a day says what it IS
+    // ("TR560 RPMD", "LOFF"), a flight across midnight runs from the middle of
+    // one day to the middle of the next, and a run of leave is one bar. Rows
+    // are one fixed height (three lanes); what does not fit a day is counted
+    // ("+1").
     const renderDayGrid = (
       days: { date: Date; dateStr: string; isCurrentMonth: boolean }[],
-      keyPrefix = ""
-    ) => (
-      // Capped and centred. The cap is what keeps a month the same size — and
-      // so the same HEIGHT, the cells being square — whether one or two are on
-      // screen; see MONTH_PANE_PX. Without any cap a single month stretched to
-      // fill the wide panel (7 columns of 84px, the grid going from 313px tall
-      // to 519px) for the frames between the panel resizing and the
-      // dual-month switch catching up, which flashed a giant calendar.
-      <div className="mx-auto w-full" style={{ maxWidth: paneMaxWidth }}>
-        <div className="grid grid-cols-7 gap-0 px-1 pt-0.5 pb-0">
-          {DAYS.map((day) => (
-            <div
-              key={day}
-              className="text-center text-[10px] font-medium text-[var(--on-glass-label)] uppercase tracking-wider"
-            >
-              {day}
-            </div>
-          ))}
-        </div>
-        <div className="grid grid-cols-7 gap-0 px-1">
-          {days.map((dayInfo, dayIndex) => {
-            const flightInfo = flightDates.get(dayInfo.dateStr);
-            const isCurrentMonth = dayInfo.isCurrentMonth;
-            const isToday = dayInfo.dateStr === today;
-            const isSelected = isCurrentMonth && dayInfo.dateStr === selectedDate;
-
-            // Range visualization. Endpoints highlight whenever they match,
-            // even with only one tap; the connecting tint draws only when
-            // both endpoints exist and span more than a single day.
-            const hasFullRange =
-              !!(rangeStart && rangeEnd) && rangeStart !== rangeEnd;
-            const isRangeStart =
-              isCurrentMonth && !!rangeStart && dayInfo.dateStr === rangeStart;
-            const isRangeEnd =
-              isCurrentMonth && !!rangeEnd && dayInfo.dateStr === rangeEnd;
-            const isInRange =
-              hasFullRange &&
-              isCurrentMonth &&
-              dayInfo.dateStr >= rangeStart! &&
-              dayInfo.dateStr <= rangeEnd!;
-            const isRangeMiddle = isInRange && !isRangeStart && !isRangeEnd;
-            // The range is drawn as one capsule PER WEEK ROW, the way a native
-            // calendar draws it: a middle cell that starts a row (Sunday, or
-            // the 1st) or ends one (Saturday, or the month's last day) is
-            // rounded on that side. Square there, a range wrapping weeks read
-            // as one blocky slab with a notch cut out of it.
-            const col = dayIndex % 7;
-            const nextDay = days[dayIndex + 1];
-            const startsRow = col === 0 || dayInfo.date.getDate() === 1;
-            const endsRow = col === 6 || !nextDay || !nextDay.isCurrentMonth;
-            // An endpoint at a row's edge closes that side too (a range
-            // starting on a Saturday, or ending on a Sunday).
-            const capLeft = (isRangeMiddle || (hasFullRange && isRangeEnd)) && startsRow;
-            const capRight = (isRangeMiddle || (hasFullRange && isRangeStart)) && endsRow;
-
-            return (
-              <button
-                key={`${keyPrefix}${dayIndex}`}
-                onClick={() => handleDateClick(dayInfo.dateStr, isCurrentMonth)}
-                className={cn(
-                  "relative flex items-center justify-center aspect-square p-px",
-                  // Continuous pill behind the row of in-range cells.
-                  isRangeMiddle && "bg-[var(--on-glass-accent-soft)]",
-                  capLeft && "rounded-l-full",
-                  capRight && "rounded-r-full",
-                  hasFullRange && isRangeStart && "bg-[var(--on-glass-accent-soft)] rounded-l-full",
-                  hasFullRange && isRangeEnd && "bg-[var(--on-glass-accent-soft)] rounded-r-full",
-                )}
+      keyPrefix = "",
+      rows = weekRows
+    ) => {
+      const weeks = layoutsFor(days, rows);
+      const rowHeight = DAY_LINE_PX + LANES * LANE_PX + ROW_PAD_PX;
+      const hasFullRange = !!(rangeStart && rangeEnd) && rangeStart !== rangeEnd;
+      return (
+        <div className="mx-auto w-full" style={{ maxWidth: paneMaxWidth }}>
+          <div className="grid grid-cols-7 gap-0 px-1 pt-0.5 pb-0.5">
+            {DAYS.map((day) => (
+              <div
+                key={day}
+                className="text-center text-[10px] font-medium text-[var(--on-glass-label)] uppercase tracking-wider"
               >
-                <div
-                  className={cn(
-                    "w-full aspect-square flex items-center justify-center text-lg rounded-full transition-[background-color,color,box-shadow]",
-                    isCurrentMonth
-                      ? "text-foreground"
-                      : "text-[var(--on-glass-faint)]",
-                    // Suppress flight-date highlighting when the calendar is
-                    // in range-pick mode; only the range pill should colour
-                    // cells, so the highlighted period reads as one shape.
-                    !rangeStart && !rangeEnd && flightInfo && isCurrentMonth && !isSelected && (
-                      flightInfo.allFuture
-                        ? "font-semibold text-primary ring-1 ring-inset ring-primary/50"
-                        : "font-semibold text-primary bg-[var(--on-glass-accent)]"
-                    ),
-                    isCurrentMonth && isToday && !isSelected && !isRangeStart && !isRangeEnd && "bg-[var(--on-glass-accent-strong)] ring-2 ring-inset ring-primary font-bold",
-                    isSelected && "bg-primary text-primary-foreground z-10",
-                    (isRangeStart || isRangeEnd) && "bg-primary text-primary-foreground z-10",
-                  )}
-                >
-                  {dayInfo.date.getDate()}
+                {day}
+              </div>
+            ))}
+          </div>
+          <div className="px-1">
+            {weeks.map((week, w) => (
+              // Each row is its own layout and paint island: the bars are
+              // absolute inside it, so nothing in a row reaches past it.
+              <div key={`${keyPrefix}w${w}`} data-cal-week className="relative" style={{ height: rowHeight, contain: "layout paint" }}>
+                <div className="grid h-full grid-cols-7">
+                  {week.days.map((dayInfo, col) => {
+                    const isCurrentMonth = dayInfo.isCurrentMonth;
+                    const isToday = dayInfo.dateStr === today;
+                    const isSelected = isCurrentMonth && dayInfo.dateStr === selectedDate;
+                    const isRangeEnd =
+                      isCurrentMonth &&
+                      ((!!rangeStart && dayInfo.dateStr === rangeStart) || (!!rangeEnd && dayInfo.dateStr === rangeEnd));
+                    const isInRange =
+                      hasFullRange && isCurrentMonth && dayInfo.dateStr >= rangeStart! && dayInfo.dateStr <= rangeEnd!;
+                    const hidden = week.layout.hidden[col];
+                    const labels = week.layout.bars
+                      .filter((b) => b.start < (col + 1) * 2 && b.end > col * 2)
+                      .map((b) => (b.span.detail ? `${b.span.label} ${b.span.detail}` : b.span.label));
+                    return (
+                      <button
+                        key={`${keyPrefix}${w}-${col}`}
+                        type="button"
+                        tabIndex={isCurrentMonth ? undefined : -1}
+                        aria-label={`${formatDay(dayInfo.dateStr)}${labels.length ? `, ${labels.join(", ")}` : ""}${hidden ? `, and ${hidden} more` : ""}`}
+                        aria-pressed={isSelected || undefined}
+                        aria-current={isToday ? "date" : undefined}
+                        onClick={() => handleDateClick(dayInfo.dateStr, isCurrentMonth)}
+                        className={cn(
+                          "relative flex h-full min-w-0 items-start justify-between border-t border-[var(--on-glass-fill)] px-1 pt-0.5 text-left transition-colors",
+                          col > 0 && "border-l",
+                          !isCurrentMonth && "bg-[var(--on-glass-fill-soft)]",
+                          // Today is the whole CELL, shaded, as in a desk
+                          // calendar — a circle on the number was a small
+                          // mark to find in a grid of busy days.
+                          isToday && "bg-[var(--on-glass-fill)]",
+                          isInRange && "bg-[var(--on-glass-accent-soft)]",
+                          isRangeEnd && "bg-[var(--on-glass-accent)]",
+                          isSelected && "bg-[var(--on-glass-accent-soft)] ring-2 ring-inset ring-primary",
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "flex h-[15px] min-w-[15px] items-center justify-center rounded-full px-[3px] text-[11px] leading-none tabular-nums",
+                            isCurrentMonth ? "text-foreground" : "text-[var(--on-glass-faint)]",
+                            isToday && "font-bold text-primary",
+                          )}
+                        >
+                          {dayInfo.date.getDate()}
+                        </span>
+                        {hidden > 0 && (
+                          <span className="text-[9px] font-semibold leading-[15px] text-[var(--on-glass-muted)]">
+                            +{hidden}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
-              </button>
-            );
-          })}
+                {/* The bars ride over the cells and take no taps: a tap is the
+                    DAY's, which is what the page scrolls to. */}
+                <div aria-hidden className="pointer-events-none absolute inset-x-0" style={{ top: DAY_LINE_PX }}>
+                  {week.layout.bars.map((bar) => {
+                    const startCol = Math.floor(bar.start / 2);
+                    const dim = !week.days[Math.min(startCol, 6)].isCurrentMonth && !week.days[Math.min(Math.ceil(bar.end / 2) - 1, 6)].isCurrentMonth;
+                    const isDuty = bar.span.tone.kind === "duty";
+                    const text = bar.span.detail && !dualMonth ? `${bar.span.label} ${bar.span.detail}` : bar.span.label;
+                    // Condensed by exactly what it needs to sit on one line:
+                    // the bar's width less its 1px insets and padding.
+                    const natural = labelWidth(text);
+                    const available =
+                      ((bar.end - bar.start) / 2) * cellPx -
+                      (bar.continuesLeft ? 0 : 1) -
+                      (bar.continuesRight ? 0 : 1) -
+                      (isDuty ? 8 : 4);
+                    const scale = cellPx > 0 ? fitScale(natural, available) : 1;
+                    return (
+                      <div
+                        key={`${keyPrefix}${bar.key}`}
+                        className={cn(
+                          "absolute flex items-center overflow-hidden whitespace-nowrap text-[9px] font-semibold leading-none tracking-[-0.02em]",
+                          barTone(bar.span.tone),
+                          // A duty is a bar; a flight is text on the day.
+                          isDuty ? "rounded-[3px] px-1" : "px-[2px]",
+                          bar.continuesLeft && "rounded-l-none",
+                          bar.continuesRight && "rounded-r-none",
+                          dim && "opacity-50",
+                        )}
+                        style={{
+                          top: bar.lane * LANE_PX,
+                          height: LANE_PX - 2,
+                          left: `calc(${(bar.start / 14) * 100}% + ${bar.continuesLeft ? 0 : 1}px)`,
+                          width: `calc(${((bar.end - bar.start) / 14) * 100}% - ${(bar.continuesLeft ? 0 : 1) + (bar.continuesRight ? 0 : 1)}px)`,
+                        }}
+                      >
+                        {/* ONE line: "TR560 RPMD". Clipped, never ellipsed —
+                            "TR56…" loses the digit that says which flight. In
+                            the two-month layout a day is ~40px, so a flight
+                            is its number alone there. */}
+                        <span
+                          className="inline-block shrink-0"
+                          style={
+                            scale < 1 && natural
+                              ? { width: natural, transform: `scaleX(${scale})`, transformOrigin: "left center" }
+                              : undefined
+                          }
+                        >
+                          {text}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
-    );
+      );
+    };
+
 
     /**
      * ONE month pane: its caption and its grid.
@@ -606,10 +763,11 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     const renderPane = (
       _m: { year: number; month: number },
       days: { date: Date; dateStr: string; isCurrentMonth: boolean }[],
-      keyPrefix = ""
+      keyPrefix = "",
+      rows = weekRows
     ) => (
       <>
-        {renderDayGrid(days, keyPrefix)}
+        {renderDayGrid(days, keyPrefix, rows)}
       </>
     );
 
@@ -619,14 +777,15 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
      */
     const renderStaticMonths = (anchor: { year: number; month: number }) => {
       if (!dualMonth) {
-        return renderPane(anchor, computeMonthDays(anchor.year, anchor.month), "out-");
+        return renderPane(anchor, computeMonthDays(anchor.year, anchor.month), "out-", weeksIn(anchor.year, anchor.month));
       }
       const next = addMonths(anchor.year, anchor.month, 1);
+      const rows = Math.max(weeksIn(anchor.year, anchor.month), weeksIn(next.year, next.month));
       return (
         <div className="flex">
           {[anchor, next].map((m, i) => (
             <div key={`out-${m.year}-${m.month}`} className="min-w-0 px-1" style={{ flex: "0 0 50%" }}>
-              {renderPane(m, computeMonthDays(m.year, m.month), `out${i}-`)}
+              {renderPane(m, computeMonthDays(m.year, m.month), `out${i}-`, rows)}
             </div>
           ))}
         </div>
@@ -650,7 +809,21 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     })();
 
     const dateSelector = (
-      <div className="flex items-center justify-center px-2 pt-1 pb-0.5">
+      // Three columns so the selector stays centred whatever the sides hold:
+      // Today on the left (when the page offers it), the Duties toggle on the
+      // right — one answer for every calendar and the roster's agenda.
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 px-1 pt-1 pb-0.5">
+        <div className="flex justify-start">
+          {onToday && (
+            <button
+              type="button"
+              onClick={onToday}
+              className="h-9 rounded-full px-3 text-xs font-semibold text-primary transition-colors hover:bg-[var(--on-glass-fill-soft)]"
+            >
+              Today
+            </button>
+          )}
+        </div>
         {onHeaderPress ? (
           <button
             type="button"
@@ -670,6 +843,22 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         ) : (
           <span className="px-3 py-1 text-[15px] font-semibold text-foreground">{rangeLabel}</span>
         )}
+        <div className="flex justify-end">
+          <button
+            type="button"
+            aria-pressed={showDuties}
+            onClick={() => setCalendarDuties(!showDuties)}
+            className={cn(
+              "flex h-9 items-center gap-1 rounded-full px-3 text-xs font-semibold transition-colors",
+              showDuties
+                ? "bg-[var(--on-glass-active)] text-[var(--on-glass-active-fg)]"
+                : "text-[var(--on-glass-muted)] hover:bg-[var(--on-glass-fill-soft)]"
+            )}
+          >
+            <Layers className="h-3.5 w-3.5" aria-hidden />
+            Duties
+          </button>
+        </div>
       </div>
     );
 

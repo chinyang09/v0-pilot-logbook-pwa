@@ -36,14 +36,12 @@ export const DETAIL_MIN_PX = 360
 export const SPLIT_MIN_PX = SINGLE_MONTH_PX + DETAIL_MIN_PX
 
 /**
- * How wide ONE month pane is inside the split layout.
+ * How wide each month pane is in the DUAL layout.
  *
- * A month's day cells are square, so its width sets its HEIGHT. If the single
- * month were wider than a dual pane the calendar would be taller with one
- * month than with two, and toggling the panel width would resize the panel
- * that the flight list has to absorb — the owner's word for it was
- * "disruptive". So in the split layout the calendar is ALWAYS one pane wide,
- * and the single month is centred in its 360px panel rather than filling it.
+ * (It was the single month's width too, while day cells were square and a
+ * month's width set its height — a wider single month made the width toggle
+ * resize the calendar under the flight list. The bar calendar's rows are a
+ * fixed height, so the single month has its own width, `SINGLE_PANE_PX`.)
  *
  * The number is the dual panel minus the page's `px-2` calendar gutter, halved,
  * minus the pane's own `px-1` — the grid box a dual pane actually gets:
@@ -54,6 +52,17 @@ export const SPLIT_MIN_PX = SINGLE_MONTH_PX + DETAIL_MIN_PX
  * calendar should use the width it has (see `paneMaxWidth` on LogbookCalendar).
  */
 export const MONTH_PANE_PX = (DUAL_MONTH_PX - 16) / 2 - 8
+
+/**
+ * ONE month in the split layout: the single panel less the same gutters,
+ * (360 − 16) − 8 = 336 → days of 48px, a phone's. The bar calendar's rows are
+ * a fixed height, so a single month no longer has to be held to a dual pane's
+ * width to keep the two modes the same height — and held there, a day was too
+ * narrow for "TR560 RPMD" and the tablet's calendar read unlike the phone's.
+ * Capped rather than free so the frames before the dual switch catches up do
+ * not stretch it across the wide panel.
+ */
+export const SINGLE_PANE_PX = SINGLE_MONTH_PX - 16 - 8
 
 /**
  * The desktop sidebar's outer width — what it PUSHES the content across by.

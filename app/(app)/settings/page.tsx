@@ -14,12 +14,13 @@ import { SettingsRow, ToggleRow, SelectRow } from "@/components/ui/settings-row"
 import { DateRow } from "@/components/ui/date-row"
 import { PageLoading } from "@/components/ui/page-loading"
 import { SortableNavList } from "@/components/sortable-nav-list"
+import { normaliseNavTabs } from "@/hooks/use-logbook-view"
 import { AppearanceSettings } from "@/components/appearance-settings"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import {
   Monitor, Clock, Plane, Sun,
-  LayoutDashboard, Book, Calendar, Users, MapPin, Award,
+  LayoutDashboard, Book, Users, MapPin, Award,
   Settings, UserCircle, Navigation, ChevronRight, NotebookPen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -47,7 +48,6 @@ const AUTO_FILL_HOW: Record<keyof AutoFillPreferences, string> = {
 const ALL_NAV_TABS: Array<{ value: BottomNavTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { value: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { value: "logbook", label: "Logbook", icon: Book },
-  { value: "roster", label: "Roster", icon: Calendar },
   { value: "aircraft", label: "Aircraft", icon: Plane },
   { value: "crew", label: "Crew", icon: Users },
   { value: "airports", label: "Airports", icon: MapPin },
@@ -207,7 +207,9 @@ function NavigationSection({ preferences, updateNavigation }: {
         <div className="p-3">
           <SortableNavList
             tabs={ALL_NAV_TABS}
-            selectedTabs={preferences.navigation.bottomNavTabs}
+            // Roster is the Logbook tab's second view: a stored Roster tab
+            // reads as Logbook here, as it does in the nav.
+            selectedTabs={normaliseNavTabs(preferences.navigation.bottomNavTabs)}
             onUpdate={updateNavigation}
           />
         </div>

@@ -21,7 +21,8 @@ import { Button } from "@/components/ui/button"
 import { useRouter } from "next/navigation"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { usePanelDualMonth, useFloatingPanelUnderHeader } from "@/lib/layout/panel-mode"
-import { parseYMDLocal as parseDateLocal } from "@/lib/utils/date"
+import { parseYMDLocal as parseDateLocal, formatLocalYMD } from "@/lib/utils/date"
+import { LogbookViewSwitch } from "@/components/logbook-view-switch"
 import { insertFlightSorted } from "@/lib/utils/flight-sort"
 import { UnifiedImportButton } from "@/components/import/unified-import-button"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
@@ -376,6 +377,17 @@ export default function LogbookPage() {
     })
   }, [flights])
 
+  // The calendar's Today: the month that holds it, and the list at it.
+  const handleToday = useCallback(() => {
+    const now = new Date()
+    // In dual mode the panes are a fixed odd|even pair: anchor on its start.
+    const month = dualMonthRef.current ? pairStart(now.getMonth()) : now.getMonth()
+    const next = { year: now.getFullYear(), month }
+    setSelectedMonth(next)
+    selectedMonthRef.current = next
+    handleDateSelect(formatLocalYMD(now))
+  }, [handleDateSelect])
+
   // A flight opened from ELSEWHERE — a note's "Open flight", Next Leg, a link
   // with ?selected= — was lit in the list but left wherever the list was, so
   // on a tablet the panel showed one flight and the list another month. Bring
@@ -596,6 +608,9 @@ export default function LogbookPage() {
 
   const logbookActions = useMemo(() => (
     <>
+      {/* The tab's page switch, first: the flights, or the roster. */}
+      <LogbookViewSwitch current="/logbook" active={isActive} />
+
       <GlassButtonGroup>
         <GlassGroupButton
           ariaLabel="Toggle search"
@@ -644,7 +659,7 @@ export default function LogbookPage() {
         <Plus className="h-5 w-5" />
       </GlassIconButton>
     </>
-  ), [showCalendar, toggleCalendar, handleAddFlight, showSearch, toggleSearch])
+  ), [showCalendar, toggleCalendar, handleAddFlight, showSearch, toggleSearch, isActive])
 
   // Register actions for the desktop floating bar
   useRegisterMainActions(logbookActions, isActive)
@@ -744,6 +759,7 @@ export default function LogbookPage() {
           selectedMonth={selectedMonth}
           onMonthChange={handleCalendarMonthChange}
           onDateSelect={handleDateSelect}
+          onToday={handleToday}
           selectedDate={selectedDate || topFlightDate}
           onScrollStart={handleCalendarScrollStart}
           dualMonth={dualMonth}

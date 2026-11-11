@@ -30,7 +30,7 @@
 import * as React from "react"
 
 import { LogbookCalendar, type CalendarHandle } from "@/components/logbook-calendar"
-import { MONTH_PANE_PX } from "@/lib/layout/panel-widths"
+import { MONTH_PANE_PX, SINGLE_PANE_PX } from "@/lib/layout/panel-widths"
 import { MORPH_EASE } from "@/lib/motion"
 
 /** ONE clock for the panel and anything reserving space for it. */
@@ -138,7 +138,11 @@ export const CalendarPanel = React.forwardRef<CalendarHandle, CalendarPanelProps
             className="bg-transparent shadow-none border-none"
             glass
             cornerRadius={20}
-            paneMaxWidth={splitLayout ? MONTH_PANE_PX : undefined}
+            // Two months: each one pane wide. ONE month: the width of a
+            // phone's, so a day holds "TR560 RPMD" on one line as it does on
+            // a phone (the rows are a fixed height, so the two modes are the
+            // same height whatever the width). A phone: the width it has.
+            paneMaxWidth={splitLayout ? (calendar.dualMonth ? MONTH_PANE_PX : SINGLE_PANE_PX) : undefined}
             view={monthYearView ? "monthYear" : "calendar"}
             headerActive={monthYearView}
             {...calendar}
