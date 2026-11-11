@@ -270,7 +270,7 @@ function deriveNextAction({
       tone: "current",
       headline: total > 0 ? `Sector ${Math.min(flown + 1, total)} of ${total}` : "On duty",
       detail: duty.active.route || undefined,
-      href: "/roster",
+      href: "/logbook?duties=1",
     }
   }
 
@@ -282,7 +282,7 @@ function deriveNextAction({
       tone: "current",
       headline: `On standby to ${clock(duty.standby.endMs)}`,
       detail: duty.standby.activated ? "Activated" : "Not called",
-      href: "/roster",
+      href: "/logbook?duties=1",
     }
   }
 
@@ -293,7 +293,7 @@ function deriveNextAction({
       tone: "current",
       headline: `Report ${clock(duty.next.reportMs)}`,
       detail: duty.next.route || `${duty.next.sectorCount} sectors`,
-      href: "/roster",
+      href: "/logbook?duties=1",
     }
   }
 

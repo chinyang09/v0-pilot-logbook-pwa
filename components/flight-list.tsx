@@ -49,9 +49,20 @@ import { useFlipPush } from "@/hooks/use-flip-push";
 import { PANEL_MS } from "@/components/calendar-panel";
 import { MORPH_EASE } from "@/lib/motion";
 import { logbookNowIndex } from "@/lib/utils/logbook-now";
+import type { ScheduleEntry } from "@/types/entities/roster.types";
+import { DutyCardBody } from "@/components/duty-card-body";
+import { buildLogbookRows, type LogbookRow } from "@/lib/utils/logbook-rows";
+
+type DutyRow = Extract<LogbookRow, { kind: "duty" }>;
 
 export interface FlightListRef {
   scrollToFlight: (flightId: string, instant?: boolean) => void;
+  /**
+   * Scroll to the first row (newest first) that `match` accepts — a flight or
+   * a duty. The calendar's date and month taps go through this, so they land
+   * on a day's duty as readily as on its flight. False when nothing matches.
+   */
+  scrollToFirst: (match: (row: { key: string; date: string; startDate: string }) => boolean) => boolean;
   /** Bring a flight into view only if it is not already on screen. False when
    *  the list does not hold it (yet). */
   revealFlight: (flightId: string) => boolean;
@@ -70,12 +81,28 @@ export interface FlightListRef {
   absorbSpacerDelta: (delta: number) => void;
 }
 
+/** What the list reports as the row at its top: a flight's id, or a duty's row key. */
+export interface TopRow {
+  id: string;
+  date: string;
+}
+
 interface FlightListProps {
   flights: FlightLog[];
+  /**
+   * The roster's duties, drawn as cards among the flights (the Duties toggle
+   * on). Empty or absent, the list is the logbook alone.
+   */
+  duties?: ScheduleEntry[];
+  /** When each called-out standby was called (para 6(6)), keyed by entry id. */
+  calledOut?: ReadonlyMap<string, string>;
+  onEditDuty?: (entry: ScheduleEntry) => void;
+  /** Every entry the card stands for — a run of leave is one card, deleted whole. */
+  onDeleteDuty?: (entries: ScheduleEntry[]) => void;
   isLoading?: boolean;
   onEdit?: (flight: FlightLog) => void;
   onDeleted?: () => void;
-  onTopFlightChange?: (flight: FlightLog | null) => void;
+  onTopFlightChange?: (top: TopRow | null) => void;
   onScrollStart?: () => void;
   /** CSS length: the header offset plus whatever floats above the list. */
   topSpacerHeight?: string;
@@ -83,7 +110,8 @@ interface FlightListProps {
    *  growing above it (the calendar) instead of on its own separate curve. */
   topSpacerTransition?: string;
   headerContent?: React.ReactNode; // Height of the top bar (48px)
-  selectedFlightId?: string | null; // Currently selected flight for visual highlighting
+  /** The open row — a flight's id, or a duty's row key (`duty:<id>`). */
+  selectedFlightId?: string | null;
   /** What an empty list says. The page knows WHY it is empty (nothing logged
    *  yet, or a search that matched nothing) and the list does not. */
   emptyState?: React.ReactNode;
@@ -302,8 +330,65 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
   );
 });
 
+interface SwipeableDutyCardProps {
+  row: DutyRow;
+  calledOutAt: string | null;
+  onEdit: (entry: ScheduleEntry) => void;
+  onDelete: (entries: ScheduleEntry[]) => void;
+  isSelected?: boolean;
+  displayPrefs?: DisplayPreferences;
+}
+
+/**
+ * A roster duty among the flights: the same card, the same height (the list
+ * positions every row at one calibrated height), told apart by its colour and
+ * icon. Tap opens it in the detail panel; swipe deletes it into the Bin. No
+ * press-and-hold preview and no `…` — those are a flight's.
+ */
+const SwipeableDutyCard = memo(function SwipeableDutyCard({
+  row,
+  calledOutAt,
+  onEdit,
+  onDelete,
+  isSelected = false,
+  displayPrefs,
+}: SwipeableDutyCardProps) {
+  const { entry, entries } = row;
+  return (
+    <SwipeableCard
+      id={`duty-card-${row.key}`}
+      onClick={() => onEdit(entry)}
+      actions={[
+        {
+          icon: <Trash2 className="h-5 w-5" />,
+          ariaLabel: entries.length > 1 ? `Delete ${entries.length} days` : "Delete duty",
+          variant: "destructive",
+          onClick: () => onDelete(entries),
+        },
+      ]}
+    >
+      <Card
+        className={cn(
+          "overflow-hidden bg-card border-border py-0 gap-0 cursor-pointer transition-colors",
+          isSelected && "border-primary/50 bg-primary/5"
+        )}
+      >
+        <CardContent className="px-3 py-1">
+          <DutyCardBody
+            entry={entry}
+            displayPrefs={displayPrefs}
+            calledOutAt={calledOutAt}
+            through={row.date}
+            days={entries.length}
+          />
+        </CardContent>
+      </Card>
+    </SwipeableCard>
+  );
+});
+
 // Generate FastScroll items from flight dates (year-based navigation)
-function generateFlightYearItems(flights: FlightLog[]): FastScrollItem[] {
+function generateFlightYearItems(flights: readonly { date: string }[]): FastScrollItem[] {
   if (flights.length === 0) return [];
 
   const years = new Map<string, number>();
@@ -329,7 +414,7 @@ function generateFlightYearItems(flights: FlightLog[]): FastScrollItem[] {
 }
 
 // Get first flight index for a given year
-function getFirstFlightIndexForYear(flights: FlightLog[], targetYear: string): number {
+function getFirstFlightIndexForYear(flights: readonly { date: string }[], targetYear: string): number {
   const year = parseInt(targetYear, 10);
 
   for (let i = 0; i < flights.length; i++) {
@@ -346,6 +431,10 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
   function FlightList(
     {
       flights,
+      duties,
+      calledOut,
+      onEditDuty,
+      onDeleteDuty,
       isLoading,
       onEdit,
       onDeleted,
@@ -376,7 +465,9 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     const [deletingInfo, setDeletingInfo] = useState<{ id: string; height: number } | null>(null);
 
     // Generate FastScroll items from flights (year-based)
-    const fastScrollItems = useMemo(() => generateFlightYearItems(flights), [flights]);
+    // Flights and (with the Duties toggle on) the roster's duties, one list.
+    const rows = useMemo<LogbookRow[]>(() => buildLogbookRows(flights, duties ?? []), [flights, duties]);
+    const fastScrollItems = useMemo(() => generateFlightYearItems(rows), [rows]);
     const hasYearRail = fastScrollItems.length > 1;
 
     // ONE row height, calibrated from the first card that lays out — every
@@ -389,9 +480,9 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     // STABLE: the virtualizer rebuilds every row's measurement whenever
     // `getItemKey` changes identity, and an inline arrow is a new one each
     // render — a full pass over the whole list per scroll-driven render.
-    const getFlightKey = useCallback((index: number) => flights[index]?.id ?? `row-${index}`, [flights]);
+    const getFlightKey = useCallback((index: number) => rows[index]?.key ?? `row-${index}`, [rows]);
     const rowVirtualizer = useVirtualizer({
-      count: flights.length,
+      count: rows.length,
       getScrollElement: () => scrollContainerRef.current,
       // Sized from a ResizeObserver, not a synchronous read mid-commit (see
       // `observeRectAfterLayout`).
@@ -418,10 +509,11 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     // pilot has touched the list, so there is no momentum to cancel.
     const openedAtNowRef = useRef(false);
     useEffect(() => {
-      if (openedAtNowRef.current || isLoading || flights.length === 0 || rowHeight <= 0) return;
+      if (openedAtNowRef.current || isLoading || rows.length === 0 || rowHeight <= 0) return;
       openedAtNowRef.current = true;
       if (selectedFlightId) return;
-      const index = logbookNowIndex(flights, new Date().toISOString().slice(0, 10));
+      const flightIndex = logbookNowIndex(flights, new Date().toISOString().slice(0, 10));
+      const index = flightIndex <= 0 ? flightIndex : rows.findIndex((r) => r.key === flights[flightIndex].id);
       if (index <= 0) return;
       requestAnimationFrame(() => {
         isExternalScrollRef.current = true;
@@ -431,16 +523,18 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           scrollContainerRef.current?.dispatchEvent(new Event("scroll"));
         }, 100);
       });
-    }, [flights, isLoading, rowHeight, selectedFlightId, rowVirtualizer]);
+    }, [flights, rows, isLoading, rowHeight, selectedFlightId, rowVirtualizer]);
 
     // Get virtual items
     const virtualItems = rowVirtualizer.getVirtualItems();
 
+    // The handle, for its own methods to call one another.
+    const handle = useRef<FlightListRef | null>(null);
     useImperativeHandle(
       ref,
-      () => ({
+      () => (handle.current = {
         revealFlight: (flightId: string) => {
-          const index = flights.findIndex((f) => f.id === flightId);
+          const index = rows.findIndex((r) => r.key === flightId);
           const container = scrollContainerRef.current;
           if (index === -1 || !container) return false;
           // Rows are one fixed height, so whether it is on screen is arithmetic
@@ -455,7 +549,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           return true;
         },
         scrollToFlight: (flightId: string, instant?: boolean) => {
-          const index = flights.findIndex((f) => f.id === flightId);
+          const index = rows.findIndex((r) => r.key === flightId);
           if (index !== -1) {
             isExternalScrollRef.current = true;
 
@@ -504,6 +598,12 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
             requestAnimationFrame(animate);
           }
         },
+        scrollToFirst: (match) => {
+          const row = rows.find((r) => match(r));
+          if (!row) return false;
+          handle.current?.scrollToFlight(row.key);
+          return true;
+        },
         absorbSpacerDelta: (delta: number) => {
           const container = scrollContainerRef.current;
           if (!container || !delta) return;
@@ -514,7 +614,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           container.scrollTop += delta;
         },
       }),
-      [flights, rowVirtualizer]
+      [rows, rowVirtualizer]
     );
 
     const handleScroll = useCallback(() => {
@@ -522,7 +622,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       // Note: onScrollStart is now triggered by touch events, not scroll events
       // This prevents programmatic/momentum scrolls from changing the sync source
 
-      if (flights.length === 0) return;
+      if (rows.length === 0) return;
 
       const visibleItems = rowVirtualizer.getVirtualItems();
       if (visibleItems.length === 0) return;
@@ -542,7 +642,8 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
         }
       }
 
-      const topFlight = flights[topVisibleItem.index];
+      const top = rows[topVisibleItem.index];
+      const topFlight = top ? { id: top.key, date: top.date } : null;
 
       if (topFlight) {
         // Update active year for FastScroll (use ref to avoid stale closure)
@@ -557,7 +658,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           onTopFlightChange?.(topFlight);
         }
       }
-    }, [flights, onTopFlightChange, rowVirtualizer]);
+    }, [rows, onTopFlightChange, rowVirtualizer]);
 
     // Handle user touch/interaction/wheel start on flight list
     const handleTouchStart = useCallback(() => {
@@ -600,6 +701,8 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       (flight: FlightLog) => onEdit?.(flight),
       [onEdit]
     );
+    const handleEditDuty = useCallback((entry: ScheduleEntry) => onEditDuty?.(entry), [onEditDuty]);
+    const handleDeleteDuty = useCallback((entries: ScheduleEntry[]) => onDeleteDuty?.(entries), [onDeleteDuty]);
 
     const performDelete = useCallback(async (flight: FlightLog) => {
       // Measure the card's current rendered height from the outer wrapper div.
@@ -733,7 +836,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
     // FastScroll selection handler (year-based) with instant scrolling
     const handleFastScrollSelect = useCallback(
       (year: string) => {
-        const index = getFirstFlightIndexForYear(flights, year);
+        const index = getFirstFlightIndexForYear(rows, year);
         if (index !== -1) {
           isExternalScrollRef.current = true;
           isFastScrollingRef.current = true;
@@ -745,14 +848,14 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
 
           // Notify parent for calendar sync
           onScrollStart?.();
-          onTopFlightChange?.(flights[index]);
+          onTopFlightChange?.({ id: rows[index].key, date: rows[index].date });
 
           setTimeout(() => {
             isExternalScrollRef.current = false;
           }, 100);
         }
       },
-      [flights, rowVirtualizer, onScrollStart, onTopFlightChange]
+      [rows, rowVirtualizer, onScrollStart, onTopFlightChange]
     );
 
     const handleFastScrollStart = useCallback(() => {
@@ -800,7 +903,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       );
     }
 
-    if (flights.length === 0) {
+    if (rows.length === 0) {
       return (
         <>
           <div
@@ -876,17 +979,17 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                 // Index of the card currently animating out. Computed once here
                 // (not inside the map) to avoid redundant findIndex calls per item.
                 const deletingIndex = deletingInfo
-                  ? flights.findIndex((f) => f.id === deletingInfo.id)
+                  ? rows.findIndex((r) => r.key === deletingInfo.id)
                   : -1;
                 return virtualItems.map((virtualRow) => {
-                  const flight = flights[virtualRow.index];
-                  const isDeleting = deletingInfo?.id === flight.id;
+                  const row = rows[virtualRow.index];
+                  const isDeleting = deletingInfo?.id === row.key;
                   // Cards strictly below the deleting card shift upward via CSS.
                   const isBelow = deletingIndex !== -1 && virtualRow.index > deletingIndex;
                   return (
                     <div
-                      key={flight.id}
-                      id={`flight-${flight.id}`}
+                      key={row.key}
+                      id={`flight-${row.key}`}
                       style={{
                         position: "absolute",
                         top: 0,
@@ -924,16 +1027,27 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                             }),
                           }}
                         >
-                          <SwipeableFlightCard
-                            flight={flight}
-                            onEdit={handleEdit}
-                            onDelete={performDelete}
-                            onMore={handleMore}
-                            onHold={handleHold}
-                            isSelected={selectedFlightId === flight.id}
-                            isPreviewing={preview?.flight.id === flight.id}
-                            displayPrefs={preferences.display}
-                          />
+                          {row.kind === "flight" ? (
+                            <SwipeableFlightCard
+                              flight={row.flight}
+                              onEdit={handleEdit}
+                              onDelete={performDelete}
+                              onMore={handleMore}
+                              onHold={handleHold}
+                              isSelected={selectedFlightId === row.key}
+                              isPreviewing={preview?.flight.id === row.key}
+                              displayPrefs={preferences.display}
+                            />
+                          ) : (
+                            <SwipeableDutyCard
+                              row={row}
+                              calledOutAt={calledOut?.get(row.entry.id) ?? null}
+                              onEdit={handleEditDuty}
+                              onDelete={handleDeleteDuty}
+                              isSelected={selectedFlightId === row.key}
+                              displayPrefs={preferences.display}
+                            />
+                          )}
                         </div>
                       </div>
                     </div>

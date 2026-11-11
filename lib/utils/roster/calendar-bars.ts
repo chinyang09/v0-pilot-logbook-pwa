@@ -8,7 +8,8 @@
  *
  * | | Drawn as |
  * |---|---|
- * | a flight inside one day | that day's cell, full width |
+ * | a flight inside one day | that day's cell, full width: "248 WMKP" |
+ * | a RETURN pair (out and straight back) | ONE bar: "248/9 WMKP" — the turnaround airport |
  * | a flight (or timed duty) across midnight | from the MIDDLE of its first day to the MIDDLE of its last — half of each cell, so the crossover is a picture |
  * | an all-day duty on consecutive days (leave, LOFF) | ONE bar across them, the days merged |
  *
@@ -84,11 +85,85 @@ export function nextDayKey(key: string): string {
   return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10)
 }
 
-/** The label a FLIGHT bar carries: "TR560 RPMD" — number, then where it goes. */
+/**
+ * A flight number without its airline: "TR0288" → "288". The calendar is the
+ * pilot's own month, so the designator is the same on nearly every bar and
+ * was a third of each label. An IATA designator (two characters, one of them
+ * possibly a digit) or an ICAO one (three letters) is dropped, and the leading
+ * zeros with it; anything that does not read as one is kept whole.
+ */
+export function shortFlightNumber(flightNumber: string | undefined): string {
+  const fn = (flightNumber ?? "").trim().toUpperCase().replace(/\s+/g, "")
+  const m = /^(?:[A-Z]{2,3}|[A-Z]\d|\d[A-Z])0*(\d{1,5}[A-Z]?)$/.exec(fn)
+  return m ? m[1] : fn
+}
+
+/**
+ * Two flight numbers as one: "248/9" — the second written as the digits it
+ * does not share with the first, the way a crew roster writes a return. When
+ * they share nothing ("199" and "200") or differ in length, both whole.
+ */
+export function pairedFlightNumber(a: string, b: string): string {
+  if (!a) return b
+  if (!b || a === b) return a
+  if (a.length === b.length) {
+    let common = 0
+    while (common < a.length - 1 && a[common] === b[common]) common++
+    if (common > 0) return `${a}/${b.slice(common)}`
+  }
+  return `${a}/${b}`
+}
+
+/** An airport as the calendar writes it: the ICAO code, else the IATA. */
+function airportCode(icao: string | undefined, iata: string | undefined): string {
+  return (icao || iata || "").trim().toUpperCase()
+}
+
+/** The label a FLIGHT bar carries: "248 WMKP" — number, then where it goes. */
 export function flightBarLabel(f: Partial<Pick<FlightLog, "flightNumber" | "arrivalIcao" | "arrivalIata">>): string {
-  const number = (f.flightNumber ?? "").trim().toUpperCase()
-  const to = (f.arrivalIcao || f.arrivalIata || "").trim().toUpperCase()
+  const number = shortFlightNumber(f.flightNumber)
+  const to = airportCode(f.arrivalIcao, f.arrivalIata)
   return [number, to].filter(Boolean).join(" ") || "Flight"
+}
+
+/** The longest turnaround a return pair may have on the ground (a duty's own break). */
+const RETURN_TURNAROUND_MS = 8 * 3_600_000
+
+/** An airline designator, when the number has one. */
+function designator(flightNumber: string | undefined): string {
+  return /^([A-Z]{2,3}|[A-Z]\d|\d[A-Z])\d/.exec((flightNumber ?? "").trim().toUpperCase())?.[1] ?? ""
+}
+
+interface TimedFlight {
+  flight: FlightLog
+  startMs: number | null
+  endMs: number | null
+  state: "flown" | "planned" | "unlogged"
+}
+
+/**
+ * Is `b` the way straight back from `a`? Out A→B, then B→A, `b` the very next
+ * flight, on the same airline, leaving within a turnaround of `a`'s arrival.
+ * A triangle (A→B→C→A) pairs nothing: its legs are not the next one's reverse.
+ */
+function isReturnOf(a: TimedFlight, b: TimedFlight): boolean {
+  const out = { from: airportCode(a.flight.departureIcao, a.flight.departureIata), to: airportCode(a.flight.arrivalIcao, a.flight.arrivalIata) }
+  const back = { from: airportCode(b.flight.departureIcao, b.flight.departureIata), to: airportCode(b.flight.arrivalIcao, b.flight.arrivalIata) }
+  if (!out.from || !out.to || out.from === out.to) return false
+  if (back.from !== out.to || back.to !== out.from) return false
+  const da = designator(a.flight.flightNumber)
+  const db = designator(b.flight.flightNumber)
+  if (da && db && da !== db) return false
+  if (a.startMs === null || b.startMs === null) return a.flight.date === b.flight.date
+  const ground = b.startMs - (a.endMs ?? a.startMs)
+  return ground >= 0 && ground <= RETURN_TURNAROUND_MS
+}
+
+/** One state for a pair: a gap in the record first, then what is still to fly. */
+function pairState(a: TimedFlight["state"], b: TimedFlight["state"]): TimedFlight["state"] {
+  if (a === "unlogged" || b === "unlogged") return "unlogged"
+  if (a === "planned" || b === "planned") return "planned"
+  return "flown"
 }
 
 /**
@@ -122,7 +197,7 @@ function timedSpan(
 }
 
 export interface CalendarSpanOptions {
-  /** Show standby, ground, leave, off and simulator sessions (the Duties toggle). */
+  /** Show the roster's duties — standby, ground, leave, off (the Duties toggle). */
   duties: boolean
   /** YYYY-MM-DD (UTC) — a past sector with no times is drawn as NOT LOGGED. */
   todayUtc: string
@@ -130,8 +205,8 @@ export interface CalendarSpanOptions {
 
 /**
  * Every span the month calendar draws, from the logbook's flights and the
- * roster's duties. With `duties` off only operated flights and positioning
- * remain — the logbook's own picture.
+ * roster's duties. With `duties` off only the logbook's own entries remain —
+ * flights, positioning and simulator sessions.
  */
 export function buildCalendarSpans(
   entries: readonly ScheduleEntry[],
@@ -141,32 +216,59 @@ export function buildCalendarSpans(
 ): CalendarSpan[] {
   const spans: CalendarSpan[] = []
 
+  // Flights in the order they fly, so a leg can find the way back.
+  const timed: TimedFlight[] = []
   for (const flight of flights) {
     const simulator = isSimulatorEntry(flight)
-    if (simulator && !options.duties) continue
     const startMs = utcInstant(flight.date, flight.outTime || flight.scheduledOut)
     let endMs = utcInstant(flight.date, flight.inTime || flight.scheduledIn)
     if (startMs !== null && endMs !== null && endMs <= startMs) endMs += DAY_MS
+    if (simulator) {
+      // A simulator session is the logbook's own entry — shown whatever the
+      // Duties toggle says, as the logbook list shows it.
+      spans.push({
+        id: flight.id,
+        label: `SIM${flight.simSessionCode ? ` ${flight.simSessionCode}` : ""}`,
+        tone: { kind: "flight", state: "sim" },
+        ...(startMs === null
+          ? { startDay: flight.date, endDay: flight.date, startHalf: 0 as const, endHalf: 2 as const }
+          : timedSpan(startMs, endMs, display)),
+        order: startMs ?? 0,
+      })
+      continue
+    }
+    const state = isFlownFlight(flight) ? "flown" : isUnloggedPast(flight, options.todayUtc) ? "unlogged" : "planned"
+    timed.push({ flight, startMs, endMs, state })
+  }
+  timed.sort(
+    (x, y) =>
+      (x.startMs ?? Date.parse(`${x.flight.date}T00:00:00Z`)) - (y.startMs ?? Date.parse(`${y.flight.date}T00:00:00Z`)) ||
+      x.flight.id.localeCompare(y.flight.id)
+  )
+
+  for (let i = 0; i < timed.length; i++) {
+    const a = timed[i]
+    const b = timed[i + 1]
+    // "248/9 WMKP": out and straight back is ONE bar, named for the
+    // turnaround — a four-sector day of two returns is two bars, not four.
+    const pair = b && isReturnOf(a, b) ? b : null
+    if (pair) i++
+    const last = pair ?? a
+    const startMs = a.startMs
+    const endMs = last.endMs ?? last.startMs
     const where =
       startMs === null
-        ? { startDay: flight.date, endDay: flight.date, startHalf: 0 as const, endHalf: 2 as const }
+        ? { startDay: a.flight.date, endDay: last.flight.date, startHalf: 0 as const, endHalf: 2 as const }
         : timedSpan(startMs, endMs, display)
-    const state = simulator
-      ? "sim"
-      : isFlownFlight(flight)
-        ? "flown"
-        : isUnloggedPast(flight, options.todayUtc)
-          ? "unlogged"
-          : "planned"
-    const number = (flight.flightNumber ?? "").trim().toUpperCase()
-    const to = (flight.arrivalIcao || flight.arrivalIata || "").trim().toUpperCase()
+    const number = pair
+      ? pairedFlightNumber(shortFlightNumber(a.flight.flightNumber), shortFlightNumber(pair.flight.flightNumber))
+      : shortFlightNumber(a.flight.flightNumber)
+    const to = airportCode(a.flight.arrivalIcao, a.flight.arrivalIata)
     spans.push({
-      id: flight.id,
-      label: simulator
-        ? `SIM${flight.simSessionCode ? ` ${flight.simSessionCode}` : ""}`
-        : number || flightBarLabel(flight),
-      detail: !simulator && number && to ? to : undefined,
-      tone: { kind: "flight", state },
+      id: a.flight.id,
+      label: number || flightBarLabel(a.flight),
+      detail: number && to ? to : undefined,
+      tone: { kind: "flight", state: pair ? pairState(a.state, pair.state) : a.state },
       ...where,
       order: startMs ?? 0,
     })

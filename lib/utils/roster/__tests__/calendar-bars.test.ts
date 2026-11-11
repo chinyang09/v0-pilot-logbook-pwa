@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { FlightLog } from "@/types/entities/flight.types"
 import type { ScheduleEntry } from "@/types/entities/roster.types"
-import { buildCalendarSpans, flightBarLabel, layoutWeek, nextDayKey } from "../calendar-bars"
+import { buildCalendarSpans, flightBarLabel, layoutWeek, nextDayKey, pairedFlightNumber, shortFlightNumber } from "../calendar-bars"
 
 const UTC = { zulu: true }
 const flight = (over: Partial<FlightLog>): FlightLog =>
@@ -13,8 +13,24 @@ const opts = { duties: true, todayUtc: "2026-11-11" }
 
 describe("calendar spans", () => {
   it("labels a flight by its number and where it goes", () => {
-    expect(flightBarLabel({ flightNumber: "tr560", arrivalIcao: "RPMD" })).toBe("TR560 RPMD")
-    expect(flightBarLabel({ flightNumber: "TR560", arrivalIata: "DVO" })).toBe("TR560 DVO")
+    expect(flightBarLabel({ flightNumber: "tr560", arrivalIcao: "RPMD" })).toBe("560 RPMD")
+    expect(flightBarLabel({ flightNumber: "TR560", arrivalIata: "DVO" })).toBe("560 DVO")
+  })
+
+  it("drops the airline designator and leading zeros, and keeps anything else whole", () => {
+    expect(shortFlightNumber("TR0288")).toBe("288")
+    expect(shortFlightNumber("TGW288")).toBe("288")
+    expect(shortFlightNumber("3K123")).toBe("123")
+    expect(shortFlightNumber("TR288A")).toBe("288A")
+    expect(shortFlightNumber("288")).toBe("288")
+    expect(shortFlightNumber("POSN")).toBe("POSN")
+  })
+
+  it("writes a return pair the way a roster does", () => {
+    expect(pairedFlightNumber("248", "249")).toBe("248/9")
+    expect(pairedFlightNumber("288", "291")).toBe("288/91")
+    expect(pairedFlightNumber("199", "200")).toBe("199/200")
+    expect(pairedFlightNumber("98", "101")).toBe("98/101")
   })
 
   it("keeps a same-day flight in one whole cell", () => {
@@ -44,14 +60,89 @@ describe("calendar spans", () => {
     expect(spans[1]).toMatchObject({ startDay: "2026-11-13", endDay: "2026-11-13" })
   })
 
-  it("leaves duties and simulators out when the Duties toggle is off", () => {
+  it("leaves the roster's duties out when the Duties toggle is off, and keeps the logbook's simulator", () => {
     const spans = buildCalendarSpans(
       [duty({})],
       [flight({ id: "a" }), flight({ id: "s", entryType: "simulator", isSimulator: true })],
       UTC,
       { ...opts, duties: false }
     )
-    expect(spans.map((s) => s.id)).toEqual(["a"])
+    expect(spans.map((s) => s.id).sort()).toEqual(["a", "s"])
+  })
+
+  const leg = (id: string, number: string, from: string, to: string, out: string, inn: string, date = "2026-11-16") =>
+    flight({ id, date, flightNumber: number, departureIcao: from, arrivalIcao: to, scheduledOut: out, scheduledIn: inn })
+
+  it("draws out-and-back as ONE bar named for the turnaround", () => {
+    const spans = buildCalendarSpans(
+      [],
+      [
+        leg("b", "TR249", "WMKP", "WSSS", "04:00", "05:10"),
+        leg("a", "TR248", "WSSS", "WMKP", "01:30", "02:40"),
+      ],
+      UTC,
+      opts
+    )
+    expect(spans).toHaveLength(1)
+    expect(spans[0]).toMatchObject({ id: "a", label: "248/9", detail: "WMKP", startDay: "2026-11-16", endDay: "2026-11-16" })
+  })
+
+  it("makes a four-sector day of two returns two bars", () => {
+    const spans = buildCalendarSpans(
+      [],
+      [
+        leg("1", "TR248", "WSSS", "WMKP", "00:30", "01:40"),
+        leg("2", "TR249", "WMKP", "WSSS", "02:30", "03:40"),
+        leg("3", "TR250", "WSSS", "WMKP", "05:00", "06:10"),
+        leg("4", "TR251", "WMKP", "WSSS", "07:00", "08:10"),
+      ],
+      UTC,
+      opts
+    )
+    expect(spans.map((s) => `${s.label} ${s.detail}`)).toEqual(["248/9 WMKP", "250/1 WMKP"])
+  })
+
+  it("pairs an overnight return across midnight, half of each day", () => {
+    const spans = buildCalendarSpans(
+      [],
+      [
+        leg("a", "TR566", "WSSS", "VTBS", "14:50", "17:15"),
+        leg("b", "TR567", "VTBS", "WSSS", "18:20", "20:45"),
+      ],
+      { zulu: false, zone: "Asia/Singapore" },
+      opts
+    )
+    expect(spans).toHaveLength(1)
+    expect(spans[0]).toMatchObject({ label: "566/7", startDay: "2026-11-16", endDay: "2026-11-17", startHalf: 1, endHalf: 1 })
+  })
+
+  it("leaves a one-way leg, a triangle and a long layover as single legs", () => {
+    const spans = buildCalendarSpans(
+      [],
+      [
+        leg("a", "TR100", "WSSS", "WMKK", "00:00", "01:00"),
+        leg("b", "TR101", "WMKK", "WMKP", "02:00", "03:00"),
+        leg("c", "TR102", "WMKP", "WSSS", "04:00", "05:00"),
+        leg("d", "TR300", "WSSS", "RJAA", "06:00", "13:00", "2026-11-17"),
+        leg("e", "TR301", "RJAA", "WSSS", "06:00", "13:00", "2026-11-19"),
+      ],
+      UTC,
+      opts
+    )
+    expect(spans.map((s) => s.label)).toEqual(["100", "101", "102", "300", "301"])
+  })
+
+  it("keeps a pair still to fly in the accent until both legs are flown", () => {
+    const [s] = buildCalendarSpans(
+      [],
+      [
+        { ...leg("a", "TR248", "WSSS", "WMKP", "01:30", "02:40", "2026-11-11"), outTime: "01:31", inTime: "02:39" },
+        leg("b", "TR249", "WMKP", "WSSS", "04:00", "05:10", "2026-11-11"),
+      ],
+      UTC,
+      opts
+    )
+    expect(s.tone).toEqual({ kind: "flight", state: "planned" })
   })
 
   it("marks a past sector with no times as not logged", () => {

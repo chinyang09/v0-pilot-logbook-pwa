@@ -2,7 +2,7 @@
 
 import { SEARCH_INPUT_PROPS } from "@/lib/utils/input-props"
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react"
-import { FlightList, type FlightListRef } from "@/components/flight-list"
+import { FlightList, type FlightListRef, type TopRow } from "@/components/flight-list"
 import { useDebounce } from "@/hooks/use-debounce"
 import { type CalendarHandle } from "@/components/logbook-calendar"
 import { CalendarPanel, PANEL_MS, PANEL_MOTION, useStowedWhenClosed } from "@/components/calendar-panel"
@@ -10,19 +10,26 @@ import { type FlightLog } from "@/lib/db"
 import { useCreateFlight } from "@/hooks/use-create-flight"
 import {
   useFlights,
+  useScheduleEntries,
   refreshAllData,
   useDBReady,
   CACHE_KEYS,
 } from "@/hooks/data"
 import { mutate } from "swr"
-import { Calendar, Plane, Plus, Search, SearchX, X } from "lucide-react"
+import { Briefcase, Calendar, Plane, Plus, Search, SearchX, X } from "lucide-react"
 import { EmptyState } from "@/components/ui/empty-state"
 import { Button } from "@/components/ui/button"
 import { useRouter } from "next/navigation"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { usePanelDualMonth, useFloatingPanelUnderHeader } from "@/lib/layout/panel-mode"
 import { parseYMDLocal as parseDateLocal, formatLocalYMD } from "@/lib/utils/date"
-import { LogbookViewSwitch } from "@/components/logbook-view-switch"
+import { ChoicePicker } from "@/components/ui/option-menu"
+import { setCalendarDuties, useCalendarDuties } from "@/hooks/use-calendar-spans"
+import { deleteScheduleEntry, restoreScheduleEntry } from "@/lib/db"
+import { showUndoToast } from "@/lib/utils/undo-toast"
+import { standbyActivation } from "@/lib/utils/roster/standby-activation"
+import { buildLogbookRows, dutyRowKey, dutySearchFields, isRosterDuty, newDutyKey, rowCoversDate } from "@/lib/utils/logbook-rows"
+import type { ScheduleEntry } from "@/types/entities/roster.types"
 import { insertFlightSorted } from "@/lib/utils/flight-sort"
 import { UnifiedImportButton } from "@/components/import/unified-import-button"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
@@ -34,6 +41,13 @@ import { whenIdle } from "@/lib/utils/idle"
 import { prewarmAirportClocks } from "@/lib/db/stores/reference/airports.store"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { GlassButtonGroup, GlassGroupButton, GlassIconButton } from "@/components/ui/glass-icon-button"
+
+/** What the header's + offers once the roster's duties are in the list. */
+type AddKind = "" | "flight" | "duty"
+const ADD_OPTIONS: { value: AddKind; label: string }[] = [
+  { value: "flight", label: "Flight" },
+  { value: "duty", label: "Duty" },
+]
 
 /** ONE clock for the floating panels and the list spacer they push. Both use
  *  this exact string, so the calendar's collapse and the list's reserved
@@ -67,6 +81,39 @@ export default function LogbookPage() {
 
   const { flights, isLoading: flightsLoading, refresh: refreshFlights } = useFlights()
   const createFlight = useCreateFlight()
+
+  // THE ROSTER IS THIS LIST WITH ITS DUTIES ON. One switch (the header's
+  // Duties button, shared with every calendar): off, the logbook alone —
+  // flights, positioning, simulator sessions; on, the roster's standby,
+  // ground, leave and days off as cards among them.
+  const showDuties = useCalendarDuties()
+  const { scheduleEntries, refresh: refreshEntries } = useScheduleEntries()
+  const rosterDuties = useMemo(
+    () => (showDuties ? scheduleEntries.filter(isRosterDuty) : []),
+    [showDuties, scheduleEntries]
+  )
+  // `?duties=1` — a link that means the roster (the dashboard's duty line, an
+  // old /roster bookmark) turns the duties on as it arrives, then drops the
+  // parameter so a later reload keeps whatever the pilot chooses.
+  const wantsDuties = searchParams.get("duties") === "1"
+  useEffect(() => {
+    if (!wantsDuties) return
+    setCalendarDuties(true)
+    const url = new URL(window.location.href)
+    url.searchParams.delete("duties")
+    window.history.replaceState(window.history.state, "", url.toString())
+  }, [wantsDuties])
+
+  /** When each called-out standby was called (para 6(6)) — one walk, not one per card. */
+  const calledOut = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const entry of rosterDuties) {
+      if (entry.dutyType !== "standby") continue
+      const activation = standbyActivation(entry, flights)
+      if (activation) map.set(entry.id, activation.at)
+    }
+    return map
+  }, [rosterDuties, flights])
 
   // Initialize calendar state from URL (preserves state when switching layouts)
   const [showCalendar, setShowCalendar] = useState(() => {
@@ -278,14 +325,13 @@ export default function LogbookPage() {
       // step of a swipe or a wheel spin — and by OUT alone, so it could pick a
       // different leg from the one the list shows first.
       const prefix = `${year}-${String(month + 1).padStart(2, "0")}-`
-      const newest = flights.find((f) => f.date.startsWith(prefix))
-      if (newest) flightListRef.current?.scrollToFlight(newest.id)
+      flightListRef.current?.scrollToFirst((row) => row.date.startsWith(prefix))
     },
-    [flights],
+    [],
   )
 
   const handleFlightScroll = useCallback(
-    (topFlight: FlightLog | null) => {
+    (topFlight: TopRow | null) => {
       if (!topFlight) return
       topFlightIdRef.current = topFlight.id
       topFlightDateRef.current = topFlight.date
@@ -336,9 +382,9 @@ export default function LogbookPage() {
     if (calendarSyncedRef.current || flights.length === 0 || flightsLoading) return
     calendarSyncedRef.current = true
 
-    const targetFlight = topFlightIdRef.current
-      ? flights.find(f => f.id === topFlightIdRef.current)
-      : flights[0]
+    // The row at the top may be a duty: its DATE is what the calendar needs.
+    const topDate = topFlightDateRef.current ?? flights[0]?.date
+    const targetFlight = topDate ? { date: topDate } : null
     if (targetFlight) {
       const date = parseDateLocal(targetFlight.date)
       const year = date.getFullYear()
@@ -369,13 +415,12 @@ export default function LogbookPage() {
 
     // Defer scroll to next frame so state updates settle first
     requestAnimationFrame(() => {
-      const targetFlight = flights.find(f => f.date === date)
-        ?? flights.find(f => f.date < date)
-      if (targetFlight) {
-        flightListRef.current?.scrollToFlight(targetFlight.id)
-      }
+      const list = flightListRef.current
+      if (!list) return
+      // That day's first row — a flight or a duty — else the next day before it.
+      if (!list.scrollToFirst((row) => rowCoversDate(row, date))) list.scrollToFirst((row) => row.date < date)
     })
-  }, [flights])
+  }, [])
 
   // The calendar's Today: the month that holds it, and the list at it.
   const handleToday = useCallback(() => {
@@ -511,6 +556,17 @@ export default function LogbookPage() {
     setSearchTerms((prev) => prev.filter((t) => t !== term))
   }, [])
 
+  // The same terms narrow the duties: a code, a description, the kind ("standby").
+  const filteredDuties = useMemo(() => {
+    const pending = debouncedSearchQuery.trim().toLowerCase()
+    const terms = [...searchTerms.map((t) => t.toLowerCase()), ...(pending ? [pending] : [])]
+    if (terms.length === 0) return rosterDuties
+    return rosterDuties.filter((entry) => {
+      const fields = dutySearchFields(entry)
+      return terms.every((term) => fields.some((v) => v.includes(term)))
+    })
+  }, [rosterDuties, searchTerms, debouncedSearchQuery])
+
   const hasActiveFilters = searchTerms.length > 0 || searchQuery.trim().length > 0
   const isLoading = dbLoading || !dbReady
 
@@ -520,6 +576,10 @@ export default function LogbookPage() {
   // changes only re-render the text node — the glass DOM stays untouched.
   const selectedDateRef = useRef(selectedDate)
   selectedDateRef.current = selectedDate
+  const selectedFlightIdRef = useRef(selectedFlightId)
+  useEffect(() => {
+    selectedFlightIdRef.current = selectedFlightId
+  }, [selectedFlightId])
   // Re-entrancy guard: a second tap on [+] before the first create finishes
   // must not create a second blank flight.
   const creatingFlightRef = useRef(false)
@@ -542,6 +602,44 @@ export default function LogbookPage() {
       creatingFlightRef.current = false
     }
   }, [createFlight, setSelectedFlightId])
+
+  // A new duty opens in the detail panel on the day in view (the calendar's
+  // tapped day), else today; nothing is written until it is saved.
+  const handleAddDuty = useCallback(() => {
+    setSelectedFlightId(newDutyKey(selectedDateRef.current || new Date().toISOString().slice(0, 10)))
+  }, [setSelectedFlightId])
+
+  const handleEditDuty = useCallback(
+    (entry: ScheduleEntry) => setSelectedFlightId(dutyRowKey(entry.id)),
+    [setSelectedFlightId]
+  )
+
+  // A card may be a run of whole days (a week of leave): it is binned whole,
+  // and Undo brings the whole run back.
+  const handleDeleteDuty = useCallback(
+    async (entries: ScheduleEntry[]) => {
+      if (entries.length === 0) return
+      for (const entry of entries) await deleteScheduleEntry(entry.id)
+      if (entries.some((e) => selectedFlightIdRef.current === dutyRowKey(e.id))) setSelectedFlightId(null)
+      await refreshEntries()
+      refreshAllData()
+      const name = entries[0].dutyCode || "Duty"
+      showUndoToast(entries.length > 1 ? `${name} × ${entries.length} deleted` : `${name} deleted`, async () => {
+        for (const entry of entries) await restoreScheduleEntry(entry.id)
+        await refreshEntries()
+        refreshAllData()
+      })
+    },
+    [refreshEntries, setSelectedFlightId]
+  )
+
+  const handleAdd = useCallback(
+    (kind: AddKind) => {
+      if (kind === "duty") handleAddDuty()
+      else if (kind === "flight") void handleAddFlight()
+    },
+    [handleAddDuty, handleAddFlight]
+  )
 
   // Why the list is empty decides what it should offer. A search that matched
   // nothing used to read "No flights logged — add your first flight" to a
@@ -593,10 +691,12 @@ export default function LogbookPage() {
         // arrows are that panel's own (they scroll it, they turn a wheel).
         const el = e.target as Element | null
         if (el !== document.body && !el?.closest?.('[data-slot="card"]')) return
-        const at = filteredFlights.findIndex((f) => f.id === selectedFlightId)
-        const next = filteredFlights[at + (e.key === "ArrowDown" ? 1 : -1)]
+        // Through the list as it stands — flights and duties alike.
+        const rows = buildLogbookRows(filteredFlights, filteredDuties)
+        const at = rows.findIndex((r) => r.key === selectedFlightId)
+        const next = rows[at + (e.key === "ArrowDown" ? 1 : -1)]
         if (at === -1 || !next) return
-        setSelectedFlightId(next.id)
+        setSelectedFlightId(next.key)
       } else {
         return
       }
@@ -604,13 +704,10 @@ export default function LogbookPage() {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [isActive, showSearch, toggleSearch, handleAddFlight, selectedFlightId, filteredFlights, setSelectedFlightId, isSplitLayout])
+  }, [isActive, showSearch, toggleSearch, handleAddFlight, selectedFlightId, filteredFlights, filteredDuties, setSelectedFlightId, isSplitLayout])
 
   const logbookActions = useMemo(() => (
     <>
-      {/* The tab's page switch, first: the flights, or the roster. */}
-      <LogbookViewSwitch current="/logbook" active={isActive} />
-
       <GlassButtonGroup>
         <GlassGroupButton
           ariaLabel="Toggle search"
@@ -634,6 +731,18 @@ export default function LogbookPage() {
           <Calendar className="h-5 w-5" />
         </GlassGroupButton>
 
+        {/* Duties: the logbook alone, or the roster — its standby, ground,
+            leave and days off as cards among the flights. ONE switch, shared
+            with every calendar; it replaced a List | Roster page switch. */}
+        <GlassGroupButton
+          ariaLabel="Show duties"
+          ariaPressed={showDuties}
+          active={showDuties}
+          onClick={() => setCalendarDuties(!showDuties)}
+        >
+          <Briefcase className="h-5 w-5" />
+        </GlassGroupButton>
+
         {/* No month label here. The calendar's own caption names the month and
             is now what opens the picker, so a second expanding label in the
             action bar was saying the same thing twice — and it was the thing
@@ -652,14 +761,30 @@ export default function LogbookPage() {
         />
       </GlassButtonGroup>
 
-      <GlassIconButton
-        ariaLabel="Add flight"
-        onClick={handleAddFlight}
-      >
-        <Plus className="h-5 w-5" />
-      </GlassIconButton>
+      {/* CREATE. The logbook alone adds a flight in one tap; with the roster's
+          duties shown it asks which — a flight or a duty, from one place. */}
+      {showDuties ? (
+        <GlassContainer cornerRadius={22} overBlur>
+          <ChoicePicker<AddKind>
+            label="Add"
+            value=""
+            options={ADD_OPTIONS}
+            onValueChange={handleAdd}
+            className="flex h-11 w-11 items-center justify-center rounded-full text-foreground transition-colors hover:bg-[var(--on-glass-fill-soft)]"
+          >
+            <Plus className="h-5 w-5" />
+          </ChoicePicker>
+        </GlassContainer>
+      ) : (
+        <GlassIconButton
+          ariaLabel="Add flight"
+          onClick={handleAddFlight}
+        >
+          <Plus className="h-5 w-5" />
+        </GlassIconButton>
+      )}
     </>
-  ), [showCalendar, toggleCalendar, handleAddFlight, showSearch, toggleSearch, isActive])
+  ), [showCalendar, toggleCalendar, handleAddFlight, showSearch, toggleSearch, showDuties, handleAdd])
 
   // Register actions for the desktop floating bar
   useRegisterMainActions(logbookActions, isActive)
@@ -782,6 +907,10 @@ export default function LogbookPage() {
         <FlightList
           ref={flightListRef}
           flights={filteredFlights}
+          duties={filteredDuties}
+          calledOut={calledOut}
+          onEditDuty={handleEditDuty}
+          onDeleteDuty={handleDeleteDuty}
           isLoading={flightsLoading || isLoading}
           onEdit={handleEditFlight}
           onDeleted={handleFlightDeleted}

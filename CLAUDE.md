@@ -1805,7 +1805,7 @@ Three places where the app knew the answer and still made the pilot find it:
   day has ended (an overnight sector keeps until its own arrival day is over)
   with no OUT/IN is not "scheduled" any more: the logbook card drops the
   accent and reads "not logged" in amber where the block time sits, the
-  roster agenda captions it "Not Logged", and the legal page carries a
+  calendar draws it amber, and the legal page carries a
   `Not Logged` CAUTION requirement (`LegalityInput.unlogged`, the last 90
   days, oldest first) whose remedy is "Log TR491 (7 Nov)" and whose panel
   opens the flight. An unflown sector counts toward nothing, so a missing one
@@ -1908,7 +1908,8 @@ zone).
 
 | | Drawn as |
 |---|---|
-| a flight inside one day | that day's cell, full width, ONE line: "TR560 RPMD" ("TR560" alone in the dual layout) |
+| a flight inside one day | that day's cell, full width, ONE line: "248 WMKP" — no airline designator (`shortFlightNumber`) |
+| out and straight back | ONE bar, "248/9 WMKP", named for the turnaround (`isReturnOf`: the very next flight, the reverse route, the same airline, within 8h) — a four-sector day of two returns is two bars, not four and a "+1" |
 | a flight or timed duty across midnight | from the MIDDLE of its first day to the MIDDLE of its last — half of each cell |
 | all-day duties on consecutive days with one code | ONE bar ("Paternal Leave", "LOFF"); leave reads its description, other duties their code |
 | a bar leaving a week row | continues on the next row, its cut ends square |
@@ -1920,38 +1921,54 @@ zone).
   horizontally by exactly what it needs (`lib/utils/text-fit.ts`: canvas
   `measureText`, cached per label, `scaleX` with a floor of 0.7, re-measured
   once the web font loads) rather than set in a second typeface. Measured: no
-  label clipped at 390 (≥0.77) or 360 (≥0.70). What a day has past three
+  label clipped at 390 (≥0.76) or 360 (≥0.72, with 2px bar padding). What a day has past three
   lanes is counted beside its number ("+1"). Clipped at the floor, never
   ellipsed — "TR56…" loses the digit that says which flight. Every row is one
   fixed height, so stepping weeks moves nothing and one month and two are the
   same height; a pair takes the larger month's row count.
-- **The DUAL layout shows the flight number alone** — a pane is 284px, ~40px a
-  day, and condensing "TR560 RPMD" into that is past legible.
-- **A flight is TEXT, a duty is a BAR**, as in the reference: a flight's label
-  in its state's colour on the glass — the accent still to fly, the plain
-  record flown, amber not logged, teal a simulator — and a duty a solid fill
-  in its type's -700 hue with white text (`DUTY_BAR`; at 20% a run of leave
-  read as a stain). Today is the whole CELL shaded (`--on-glass-fill`) with a
-  bold accent number, not a circle round the number.
+- **Airports on every flight or on none** — decided once per layout by
+  whether "888/9 WMKP" fits a day at the 0.7 floor. A two-month pane (~40px a
+  day) shows numbers alone ("248/9"); decided per bar, one day read "100",
+  "101", "102 WSSS".
+- **Every item is a tinted BAR** (`barTone`, `DUTY_BAR`): a flight in its
+  state's tone (the accent still to fly, `--on-glass-fill` flown, amber not
+  logged, teal a simulator), a duty its type's hue at 20%; today is the
+  number in an accent circle. A round of bare coloured text and solid -700
+  duty bars was tried and rejected by the owner: neighbours in one lane ran
+  together and read as overlapping labels. Bars leave a 3px gap
+  (`BAR_INSET_PX`) between neighbours.
 - **The day's width is read in a ResizeObserver** (`data-cal-week` /7), never
   in a commit, and each week row is `contain: layout paint`.
 - **Bars take no taps.** A tap is the DAY's, which the page scrolls to.
-- **The header is three columns**: Today (where the page offers it), the
-  month selector (the month/year wheels), and the **Duties** toggle
-  (`useCalendarDuties`, a per-device module store). Off, standby, ground,
-  leave, off and simulator sessions leave every calendar AND the roster's
-  agenda — the logbook's own picture.
+- **The header is Today and the month selector** (the month/year wheels). The
+  **Duties** toggle is the LOGBOOK HEADER's (below), and every calendar follows
+  it (`useCalendarDuties`, a per-device module store): off, standby, ground,
+  leave and days off leave the calendars; simulator sessions are logbook
+  entries and stay.
 
-### The roster is the LOGBOOK tab's second view (Nov 2026)
+### The roster IS the logbook, with its duties on (Nov 2026)
 
-The roster showed the logbook's flights anyway, so two tabs read as
-duplicates. They stay two routes (`/logbook`, `/roster`), each keep-alive with
-its own detail panel, but the nav has ONE Logbook tab: a **List | Roster**
-switch (`LogbookViewSwitch`, icons — with words the left header group reached
-the centred pill at 1180) leads both headers, and the tab goes back to the view
-last used (`useLogbookView`). Roster left the sidebar and the tab picker; a
-stored "roster" tab is folded into Logbook and its slot given to the next tab
-(`normaliseNavTabs`). FDP and Discrepancies light the Logbook tab now.
+The roster drew the logbook's flights anyway, and a flight could be added on
+one page and a duty only on the other — so there is ONE page, `/logbook`. Its
+list (`FlightList`) takes the roster's duties as cards among the flights
+(`buildLogbookRows`, `lib/utils/logbook-rows.ts`), and one **Duties** button
+in the header's VIEW group (a briefcase, `aria-pressed`) switches between the
+logbook alone and the roster. It replaced a List | Roster page switch, so the
+header has one button fewer.
+
+| | Rule |
+|---|---|
+| order | one newest-first list: a duty sorts as a flight would — UTC date, then report time against the flight's out time, a whole-day duty last in its day; on a tie the flight first. A flight's place never depends on whether duties are shown |
+| the card | `DutyCardBody`: the flight card's four lines and its HEIGHT (the list positions every row at one calibrated height — measured 102px both): date column, report — length — release (UTC, as the flight cards), the code with its icon, the description, "Called out HH:MMZ" for an activated standby. Told apart by the duty type's colour on the date and code and a stripe down its leading edge |
+| runs | consecutive whole-day duties with the same kind, code and description are ONE card ("3 days … to 14 NOV"), at its last day; a swipe bins the whole run and Undo brings it back |
+| selection | a duty is `duty:<id>` (`dutyRowKey`), a new one `duty:new:<date>`; the shell renders `LogbookDutyPanel` for either, as it renders `FlightForm` for a flight id |
+| + | with duties off, a new flight in one tap; with them on, a menu — Flight or Duty (on the calendar's chosen day, else today; nothing is written until saved) |
+| search, ↑↓, calendar | search terms match a duty's code, description and kind; the arrows step through rows of both kinds; a calendar day lands on the first row COVERING it (`scrollToFirst`, `rowCoversDate`) |
+| `/roster` | a redirect to `/logbook?duties=1` that carries a selection across; `?duties=1` (the dashboard's duty links) turns the duties on and drops itself |
+
+Roster is in no nav, tab picker or keep-alive list; a stored "roster" tab is
+folded into Logbook (`normaliseNavTabs`, `lib/utils/nav-tabs.ts`). FDP and
+Discrepancies light the Logbook tab.
 
 ### ONE Calendar Panel (`components/calendar-panel.tsx`)
 
@@ -3441,7 +3458,7 @@ open flight, both themes (Nov 2026: zero violations). What it took:
 Four heavy pages are kept mounted across navigations for instant tab-switching and scroll preservation:
 
 **Persistent pages** (`components/keep-alive-pages.tsx`):
-- `/` (dashboard), `/logbook`, `/aircraft`, `/airports`, `/crew`, `/roster` — the primary tabs, lazy-imported via `React.lazy()`, mounted on first visit, never unmounted. The one list lives in `components/keep-alive-routes.ts`; `PERSISTENT_PAGES` is typed against it
+- `/` (dashboard), `/logbook`, `/aircraft`, `/airports`, `/crew` — the primary tabs (the roster is the logbook with its duties on), lazy-imported via `React.lazy()`, mounted on first visit, never unmounted. The one list lives in `components/keep-alive-routes.ts`; `PERSISTENT_PAGES` is typed against it
 - All other pages (currencies, discrepancies, settings, account, …) unmount normally via Next.js `children`
 
 **How it works:**
@@ -3561,7 +3578,7 @@ Next.js wraps pages in internal `LayoutRouter` components that unmount contents 
 ```
 AppLayout → PreferencesProvider → SidebarProvider → DetailPanelProvider
   → PageActionsProvider → DashboardPeriodProvider → AppShell → KeepAlivePages
-    ├── /, /logbook, /aircraft, /airports, /crew, /roster (lazy, persistent)
+    ├── /, /logbook, /aircraft, /airports, /crew (lazy, persistent)
     └── children (other routes, normal unmount)
 ```
 
@@ -4126,60 +4143,13 @@ Rest before a standby needs no special code: once the standby is a
 `DutyPeriod` in the merged timeline, `calculateAllRestPeriods` checks it like
 any other. That was the whole reason for tracking it.
 
-#### The roster page is CALENDAR FIRST
+#### The roster page is gone — its duties are logbook cards
 
-`app/(app)/roster/page.tsx` is a month (`RosterMonth`) STUCK under the header
-over an agenda (`RosterAgenda`) of EVERY rostered day in date order
-(`rosterAgenda` — plus today and a day the pilot tapped, even when empty). It
-is the logbook's calendar and list: a tapped day scrolls to just under the
-month (`scrollToDay`), and scrolling moves the month's selection to the day at
-the top (`onTopDayChange`). It used to rebuild the agenda FROM the tapped day,
-so every day before it vanished; before that it was every imported date
-newest-first with the calendar behind a toggle.
-
-- **Stuck, and covered above.** The month is `position: sticky` at
-  `--chrome-top`, and once stuck its `::before` paints the header band above
-  it (`.roster-month-sticky[data-stuck]`) — rows pass UNDER the month and would
-  otherwise reappear above it. The page holds `useFloatingPanelUnderHeader`
-  while active, so the tap band and the fade's tail leave the month's controls
-  alone.
-- **A scroll the page started is not the pilot's.** `scrollToDay` marks the
-  scroll programmatic until no scroll event has come for `SETTLE_MS`, or the
-  selection would walk through every day on the way. And the effect that
-  scrolls to a TARGET is not keyed on the selection: the selection follows the
-  scroll, and re-running on it snapped the list back to the last tapped day.
-- **Rows arriving above the top day do not move it** (a sync, a tapped empty
-  day): the offsets are exact (fixed heights), so the shift is one
-  `scrollTop` write. A tail spacer lets the LAST day reach the top.
-- No Currencies / Discrepancies / FDP links under the month — they are in the
-  nav.
-
-- The month is the app's one bar calendar (see "The month calendar is BARS"),
-  on glass, with Today and the Duties toggle in its header. A dot only said
-  "busy" and had to be tapped to be read.
-- It shows the logbook's FLIGHTS beside the roster's own duties, and tapping
-  one opens the flight (`FlightForm`) in the ROSTER's detail panel, as
-  `flight:<id>` (the duties use their own ids). It used to be a link into the
-  logbook, so Back from the flight left the roster for the logbook. That is a READ join in
-  `lib/utils/roster/roster-days.ts`, not a second copy — `scheduleEntries`
-  still holds non-flight duties only (below).
-- A day off or a day of leave shows NO times ("All day"): the report rosters
-  it as a window (00:00–23:59 at base), which read "16:00Z / 15:59Z +1"
-  beside a row that had already said everything.
-- An item sits on the day its START falls on in the DISPLAY clock (Zulu → the
-  UTC date; local → the device zone). Both tables key on the UTC date, so a
-  06:00 SGT standby is stored on the previous day; with no start time (leave,
-  off) the stored date is the only fact there is.
-- The header's Add duty pre-fills the selected day, and an empty day's own
-  "Add duty" pre-fills THAT day (`onAddDuty(dayKey)` — it used to add to the
-  selected day whichever empty day was tapped).
-- The agenda runs the whole roster and is
-  VIRTUALIZED (`RosterAgenda`, `@tanstack/react-virtual`) on the page's own
-  scroller, with the logbook's rules: every row kind has a FIXED height
-  (`HEADER_H` 36, `ITEM_H` 64 — a 58px card and its gap), nothing is measured,
-  rows are keyed by id, and `scrollMargin` (the month and the nav above the
-  list) is taken in a ResizeObserver callback. Measured: 240 rows, ~20 in the
-  DOM.
+See "The roster IS the logbook, with its duties on". The sticky month over a
+day-by-day agenda (`RosterAgenda`) is retired; what it said survives on the
+cards: a day off or leave reads "all day" (the report's 00:00–23:59 window was
+two clocks for nothing), an activated standby says when it was called out, a
+past sector with no times reads "not logged".
 
 #### The roster holds NON-FLIGHT duties only
 
@@ -5777,9 +5747,8 @@ When making changes, be aware of these high-impact files:
 - Do not write to ANOTHER record from a form control before Save — the crew card's "This is Me" switch un-flagged the current self card in the database the moment it moved, untouched by Cancel, so a stray flip left the logbook with no self card. The form changes; `handleSave` clears the other flags when it commits
 - Do not let a select show blank for a stored value it has no option for — the currency Type row read empty for any company code an import brought in. Offer the record's own value as an option (`typeOptions`); mapping it to "Custom" would rewrite the stored code on the next save
 - Do not use a native `<select>` (laid over a row or bare) or a Radix Select for a choice — it is `ChoicePicker`/`OptionMenu`, the app's own menu on the glass face. The platform's control is a different thing on every device and like nothing else in the app. And give the trigger the whole row, never a corner of it
-- Do not link a roster flight into the logbook — it opens in the ROSTER's detail panel (`flight:<id>`), so Back returns to the roster. And do not let the roster agenda's rows vary in height or be measured: it is virtualized like the logbook (`HEADER_H` / `ITEM_H`), for the same momentum-scroll reason
-- Do not draw a calendar day as a bare number with a dot, or give a page a calendar of its own — every calendar is `LogbookCalendar`'s bar grid, fed by `useCalendarSpans` and governed by one Duties toggle. Keep a flight ONE line ("TR560 RPMD", condensed by `text-fit.ts`, never a second typeface; the number alone in the dual layout), three lanes a day, a flight as text and a duty as a solid bar, a midnight crossover on HALF of each day, a run of all-day duties ONE bar, and the rows a fixed height
-- Do not put Roster back in the nav as its own tab — it is the Logbook tab's second view (`LogbookViewSwitch`); a stored "roster" tab goes through `normaliseNavTabs`
+- Do not draw a calendar day as a bare number with a dot, or give a page a calendar of its own — every calendar is `LogbookCalendar`'s bar grid, fed by `useCalendarSpans` and governed by one Duties toggle. Keep a flight ONE line without its designator ("248 WMKP", condensed by `text-fit.ts`, never a second typeface), a return pair ONE bar ("248/9 WMKP"), airports on every flight or none, three lanes a day, every item a tinted bar (bare text ran together), a midnight crossover on HALF of each day, a run of all-day duties ONE bar, and the rows a fixed height
+- Do not bring back a separate roster page or a List | Roster switch — the roster is the logbook list with its Duties on (`buildLogbookRows`), one + adds either kind, and a stored "roster" tab goes through `normaliseNavTabs`. A duty card must stay the flight card's exact height (`DutyCardBody` mirrors `FlightCardBody`'s fixed line boxes), or the virtualised list starts correcting its scroll
 - Do not bring back the month-capsule grid or a year stepper in the calendar's month/year picker — it is two wheels, live, closed by the date selector; and in the dual layout it takes the RIGHT pane with the month being chosen still drawn on the left. Keep `WHEEL_ITEM_PX` small enough that the wheel fits a dual pane's grid, or the panel grows (or clips) when it opens
 - Do not cap a date wheel's past at a few years — a pilot back-filling a paper logbook enters flights from decades ago; the default is 70
 - Do not make "Add Crew" open the crew picker directly, and do not lay an additional crew member out differently from the PIC/SIC rows — role on the LEFT (the menu), name on the RIGHT (the picker, for THAT row), a swipe to clear. The pick carries the row's role and index (`additionalCrewField`); address rows by index, never by crew-card id
