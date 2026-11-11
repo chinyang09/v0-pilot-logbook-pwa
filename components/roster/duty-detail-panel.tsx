@@ -18,16 +18,20 @@
  */
 
 import { useMemo, useState } from "react";
+import { ChevronRight, Trash2 } from "lucide-react";
 
 import { DateRow } from "@/components/ui/date-row";
 import { DetailFormPanel } from "@/components/ui/detail-form-panel";
 import { FormSection } from "@/components/ui/form-section";
 import { TimeRow } from "@/components/ui/time-row";
 import { SettingsRow, SelectRow } from "@/components/ui/settings-row";
+import { SwipeableCard } from "@/components/swipeable-card";
 import { useDraft } from "@/hooks/use-draft";
-import { addScheduleEntry, updateScheduleEntry } from "@/lib/db";
+import { addScheduleEntry, deleteScheduleEntry, updateScheduleEntry } from "@/lib/db";
 import type { DutyType, ScheduleEntry } from "@/types/entities/roster.types";
 import { isValidHHMM } from "@/lib/utils/time";
+import { formatDay, formatDayRange } from "@/lib/utils/date";
+import { MAX_PERIOD_DAYS, daysBetween, planDutyPeriod } from "@/lib/utils/duty-period";
 
 /**
  * The kinds a pilot can enter by hand.
@@ -56,7 +60,8 @@ const HAS_WINDOW = new Set<DutyType>([
 const todayUTC = () => new Date().toISOString().slice(0, 10);
 
 interface DutyFields {
-  date: string;
+  from: string;
+  to: string;
   dutyType: DutyType;
   dutyCode: string;
   description: string;
@@ -64,49 +69,74 @@ interface DutyFields {
   end: string;
 }
 
-function fieldsOf(entry: ScheduleEntry | null, defaultDate?: string): DutyFields {
+function fieldsOf(entries: readonly ScheduleEntry[], defaultDate?: string): DutyFields {
+  const first = entries[0];
+  const day = first?.date ?? defaultDate ?? todayUTC();
   return {
-    date: entry?.date ?? defaultDate ?? todayUTC(),
-    dutyType: entry?.dutyType ?? "standby",
-    dutyCode: entry?.dutyCode ?? "",
-    description: entry?.dutyDescription ?? "",
-    start: entry?.reportTime ?? "",
-    end: entry?.debriefTime ?? "",
+    from: day,
+    to: entries[entries.length - 1]?.date ?? day,
+    dutyType: first?.dutyType ?? "standby",
+    dutyCode: first?.dutyCode ?? "",
+    description: first?.dutyDescription ?? "",
+    start: first?.reportTime ?? "",
+    end: first?.debriefTime ?? "",
   };
 }
 
 /**
- * `entry` null is a NEW duty on `defaultDate`. Key the panel on the entry's id
- * (or the day, for a new one), so a different duty starts a fresh draft.
+ * A duty, or a PERIOD of one — "LOFF 12–15 Nov" — from the first day to the
+ * last. The roster stores a day per entry (see `lib/utils/duty-period.ts` for
+ * why), and a run of the same whole-day duty is one card; this edits it as
+ * the card shows it: From and To move its ends, the fields change every day
+ * of it, and its DAYS are listed under it — tap one to change only that day,
+ * swipe one to remove only that day.
+ *
+ * `entries` empty is a NEW duty from `defaultDate` (To may run it over
+ * several days at once — a week of leave entered in one go). Key the panel on
+ * the period's first id (or the day, for a new one), so a different duty
+ * starts a fresh draft.
  */
 export function DutyDetailPanel({
-  entry,
+  entries,
+  all,
   defaultDate,
   onSaved,
   onCancelNew,
+  onOpenDay,
+  onRemoveDay,
 }: {
-  entry: ScheduleEntry | null;
+  /** The period being edited, in date order: its days, one, or none (new). */
+  entries: readonly ScheduleEntry[];
+  /** Every live roster duty, so a period grown into its neighbour adopts it. */
+  all: readonly ScheduleEntry[];
   /** A new duty's date (YYYY-MM-DD) — the day it was added from. */
   defaultDate?: string;
-  /** After a save; resolves once the page has the stored row back. */
-  onSaved: (saved: ScheduleEntry) => Promise<unknown> | void;
+  /** After a save, with the id of the entry on the period's first day. */
+  onSaved: (firstId: string) => Promise<unknown> | void;
   /** New only: close the empty form. */
   onCancelNew?: () => void;
+  /** Open ONE day of the period on its own. */
+  onOpenDay?: (entry: ScheduleEntry) => void;
+  /** Remove ONE day of the period (soft, with an Undo). */
+  onRemoveDay?: (entry: ScheduleEntry) => void;
 }) {
-  const isNew = !entry;
-  const base = useMemo(() => fieldsOf(entry, defaultDate), [entry, defaultDate]);
+  const isNew = entries.length === 0;
+  const base = useMemo(() => fieldsOf(entries, defaultDate), [entries, defaultDate]);
   const { values, set, reset, dirty } = useDraft(base);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { date, dutyType, dutyCode, description, start, end } = values;
+  const { from, to, dutyType, dutyCode, description, start, end } = values;
   const wantsWindow = HAS_WINDOW.has(dutyType);
+  const dayCount = daysBetween(from, to).length;
 
   // Why Save is unavailable, said out loud. The rows' placeholders ("BKUP",
   // "06:00", "18:00") read as filled-in values, so an unavailable Save with
   // no reason looked like the form was broken.
   const missing: string[] = [];
-  if (!date) missing.push("a date");
+  if (!from) missing.push("a first day");
+  if (!to || (from && to < from)) missing.push("a last day on or after the first");
+  else if (dayCount > MAX_PERIOD_DAYS) missing.push(`a period of at most ${MAX_PERIOD_DAYS} days`);
   if (!dutyCode.trim()) missing.push("a code");
   if (wantsWindow) {
     if (!isValidHHMM(start)) missing.push("a start time");
@@ -124,20 +154,32 @@ export function DutyDetailPanel({
     try {
       // Times are UTC, the same frame the parser writes and everything
       // downstream reads.
-      const payload = {
-        date,
-        timeReference: "UTC" as const,
+      const fields = {
         dutyType,
         dutyCode: dutyCode.trim().toUpperCase(),
         dutyDescription: description.trim() || undefined,
         reportTime: wantsWindow ? start : undefined,
         debriefTime: wantsWindow ? end : undefined,
       };
-      const saved = entry
-        ? await updateScheduleEntry(entry.id, payload)
-        : await addScheduleEntry({ ...payload, sectors: [], crew: [], importedAt: Date.now() });
-      if (!saved) throw new Error("Duty not found");
-      await onSaved(saved);
+      const plan = planDutyPeriod({ editing: entries, all, from, to, fields });
+      let firstId = plan.firstId;
+      for (const u of plan.updates) {
+        if (!(await updateScheduleEntry(u.id, u.patch))) throw new Error("Duty not found");
+      }
+      for (const day of plan.creates) {
+        const created = await addScheduleEntry({
+          ...fields,
+          date: day,
+          timeReference: "UTC",
+          sectors: [],
+          crew: [],
+          importedAt: Date.now(),
+        });
+        if (day === from) firstId = created.id;
+      }
+      for (const id of plan.deletes) await deleteScheduleEntry(id);
+      if (!firstId) throw new Error("Nothing saved");
+      await onSaved(firstId);
       reset();
     } catch (err) {
       console.error("[Roster] Saving duty failed:", err);
@@ -147,9 +189,12 @@ export function DutyDetailPanel({
     }
   };
 
+  const first = entries[0];
+  const isPeriod = entries.length > 1;
   return (
     <DetailFormPanel
-      title={isNew ? "New Duty" : entry.dutyCode || "Duty"}
+      title={isNew ? "New Duty" : first.dutyCode || "Duty"}
+      description={isPeriod ? `${formatDayRange(base.from, base.to)} · ${entries.length} days` : undefined}
       dirty={isNew || dirty}
       canSave={!blockedReason}
       saving={saving}
@@ -163,7 +208,23 @@ export function DutyDetailPanel({
       }}
     >
       <FormSection title="Duty">
-        <DateRow label="Date" value={date} onChange={(v) => set("date", v)} required />
+        <DateRow
+          label="From"
+          value={from}
+          onChange={(v) => {
+            set("from", v);
+            // A period cannot end before it starts: moving From past To takes To along.
+            if (to < v) set("to", v);
+          }}
+          required
+        />
+        <DateRow
+          label="To"
+          value={to}
+          onChange={(v) => set("to", v)}
+          description={dayCount > 1 ? `${dayCount} days` : undefined}
+          required
+        />
         <SelectRow
           label="Type"
           value={dutyType}
@@ -187,7 +248,7 @@ export function DutyDetailPanel({
       </FormSection>
 
       {wantsWindow && (
-        <FormSection title="Window (UTC)">
+        <FormSection title={dayCount > 1 ? "Window Each Day (UTC)" : "Window (UTC)"}>
           <TimeRow label="Start" value={start} onChange={(v) => set("start", v)} required />
           <TimeRow
             label="End"
@@ -196,6 +257,44 @@ export function DutyDetailPanel({
             description="Before the start means the next day."
             required
           />
+        </FormSection>
+      )}
+
+      {isPeriod && (
+        // Each day of the period, as the roster stores it: tap one to change
+        // that day alone (13 Nov's LOFF turned into a standby), swipe one to
+        // remove it. Either leaves the rest of the period as it is.
+        <FormSection title="Days">
+          {entries.map((entry) => (
+            <SwipeableCard
+              key={entry.id}
+              id={`duty-day-${entry.id}`}
+              variant="row"
+              separated
+              actions={
+                onRemoveDay
+                  ? [
+                      {
+                        ariaLabel: `Remove ${formatDay(entry.date)}`,
+                        icon: <Trash2 className="h-4 w-4" />,
+                        variant: "destructive",
+                        onClick: () => onRemoveDay(entry),
+                      },
+                    ]
+                  : []
+              }
+            >
+              <button
+                type="button"
+                onClick={() => onOpenDay?.(entry)}
+                className="flex w-full items-center gap-3 px-4 py-3.5 text-left"
+              >
+                <span className="min-w-0 flex-1 text-foreground">{formatDay(entry.date)}</span>
+                <span className="text-muted-foreground">{entry.dutyCode}</span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+              </button>
+            </SwipeableCard>
+          ))}
         </FormSection>
       )}
     </DetailFormPanel>

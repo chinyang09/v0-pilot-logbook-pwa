@@ -64,6 +64,12 @@ export interface CalendarBar {
   start: number
   end: number
   lane: number
+  /**
+   * Lanes the bar fills: 1, or 2 when its label wanted a second line
+   * ("456/7" over "WMKP") and the lane under it was free across its whole
+   * range — never at the cost of another item.
+   */
+  height: 1 | 2
   continuesLeft: boolean
   continuesRight: boolean
 }
@@ -329,12 +335,18 @@ export function buildCalendarSpans(
  * order; `maxLanes` caps what is drawn, and what falls past it is counted per
  * day in `hidden` ("+2").
  */
-export function layoutWeek(days: readonly string[], spans: readonly CalendarSpan[], maxLanes: number): WeekLayout {
+export function layoutWeek(
+  days: readonly string[],
+  spans: readonly CalendarSpan[],
+  maxLanes: number,
+  /** Whether a bar would rather take two lines than condense onto one. */
+  wantsTwoLines?: (bar: Pick<CalendarBar, "span" | "start" | "end" | "continuesLeft" | "continuesRight">) => boolean
+): WeekLayout {
   const first = days[0]
   const last = days[days.length - 1]
   const index = new Map(days.map((d, i) => [d, i]))
 
-  const placed: Omit<CalendarBar, "lane">[] = []
+  const placed: Omit<CalendarBar, "lane" | "height">[] = []
   for (const span of spans) {
     if (span.endDay < first || span.startDay > last) continue
     const continuesLeft = span.startDay < first
@@ -365,9 +377,26 @@ export function layoutWeek(days: readonly string[], spans: readonly CalendarSpan
       laneEnds[lane] = p.end
     }
     if (lane < maxLanes) {
-      bars.push({ ...p, lane })
+      bars.push({ ...p, lane, height: 1 })
     } else {
       for (let d = Math.floor(p.start / 2); d < Math.ceil(p.end / 2); d++) hidden[d]++
+    }
+  }
+
+  // A second line only where the lane under a bar is EMPTY across its range:
+  // the lanes are first packed one line each, so taking a line can never push
+  // another item out of sight. Half-day occupancy, lane by lane.
+  if (wantsTwoLines) {
+    const taken = Array.from({ length: maxLanes }, () => new Array<boolean>(days.length * 2).fill(false))
+    for (const b of bars) for (let c = b.start; c < b.end; c++) taken[b.lane][c] = true
+    for (const b of bars) {
+      const below = b.lane + 1
+      if (below >= maxLanes || !wantsTwoLines(b)) continue
+      let free = true
+      for (let c = b.start; c < b.end && free; c++) free = !taken[below][c]
+      if (!free) continue
+      for (let c = b.start; c < b.end; c++) taken[below][c] = true
+      b.height = 2
     }
   }
   return { bars, lanes: laneEnds.length, hidden }

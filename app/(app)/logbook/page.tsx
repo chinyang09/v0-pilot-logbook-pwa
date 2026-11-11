@@ -24,11 +24,11 @@ import { GlassContainer } from "@/components/ui/glass-container"
 import { usePanelDualMonth, useFloatingPanelUnderHeader } from "@/lib/layout/panel-mode"
 import { parseYMDLocal as parseDateLocal, formatLocalYMD } from "@/lib/utils/date"
 import { ChoicePicker } from "@/components/ui/option-menu"
-import { setCalendarDuties, useCalendarDuties } from "@/hooks/use-calendar-spans"
+import { setCalendarDuties, setListDuties, useCalendarDuties, useListDuties } from "@/hooks/use-calendar-spans"
 import { deleteScheduleEntry, restoreScheduleEntry } from "@/lib/db"
 import { showUndoToast } from "@/lib/utils/undo-toast"
 import { standbyActivation } from "@/lib/utils/roster/standby-activation"
-import { buildLogbookRows, dutyRowKey, dutySearchFields, isRosterDuty, newDutyKey, rowCoversDate } from "@/lib/utils/logbook-rows"
+import { buildLogbookRows, dutyDayKey, dutyRowKey, dutySearchFields, isRosterDuty, newDutyKey, rowCoversDate } from "@/lib/utils/logbook-rows"
 import type { ScheduleEntry } from "@/types/entities/roster.types"
 import { insertFlightSorted } from "@/lib/utils/flight-sort"
 import { UnifiedImportButton } from "@/components/import/unified-import-button"
@@ -82,11 +82,15 @@ export default function LogbookPage() {
   const { flights, isLoading: flightsLoading, refresh: refreshFlights } = useFlights()
   const createFlight = useCreateFlight()
 
-  // THE ROSTER IS THIS LIST WITH ITS DUTIES ON. One switch (the header's
-  // Duties button, shared with every calendar): off, the logbook alone —
-  // flights, positioning, simulator sessions; on, the roster's standby,
-  // ground, leave and days off as cards among them.
-  const showDuties = useCalendarDuties()
+  // THE ROSTER IS THIS LIST WITH ITS DUTIES ON. The header's Duties button:
+  // off, the logbook alone — flights, positioning, simulator sessions; on,
+  // the roster's standby, ground, leave and days off as cards among them.
+  // The calendar has a switch of its own, so the month can keep the roster
+  // while the list shows flights alone.
+  const showDuties = useListDuties()
+  const calendarDuties = useCalendarDuties()
+  /** Duties are being looked at somewhere — so + offers to add one. */
+  const dutiesInView = showDuties || calendarDuties
   const { scheduleEntries, refresh: refreshEntries } = useScheduleEntries()
   const rosterDuties = useMemo(
     () => (showDuties ? scheduleEntries.filter(isRosterDuty) : []),
@@ -98,6 +102,7 @@ export default function LogbookPage() {
   const wantsDuties = searchParams.get("duties") === "1"
   useEffect(() => {
     if (!wantsDuties) return
+    setListDuties(true)
     setCalendarDuties(true)
     const url = new URL(window.location.href)
     url.searchParams.delete("duties")
@@ -620,7 +625,8 @@ export default function LogbookPage() {
     async (entries: ScheduleEntry[]) => {
       if (entries.length === 0) return
       for (const entry of entries) await deleteScheduleEntry(entry.id)
-      if (entries.some((e) => selectedFlightIdRef.current === dutyRowKey(e.id))) setSelectedFlightId(null)
+      if (entries.some((e) => selectedFlightIdRef.current === dutyRowKey(e.id) || selectedFlightIdRef.current === dutyDayKey(e.id)))
+        setSelectedFlightId(null)
       await refreshEntries()
       refreshAllData()
       const name = entries[0].dutyCode || "Duty"
@@ -732,13 +738,13 @@ export default function LogbookPage() {
         </GlassGroupButton>
 
         {/* Duties: the logbook alone, or the roster — its standby, ground,
-            leave and days off as cards among the flights. ONE switch, shared
-            with every calendar; it replaced a List | Roster page switch. */}
+            leave and days off as cards among the flights. It replaced a
+            List | Roster page switch; the calendar keeps its own. */}
         <GlassGroupButton
-          ariaLabel="Show duties"
+          ariaLabel="Duty cards in the list"
           ariaPressed={showDuties}
           active={showDuties}
-          onClick={() => setCalendarDuties(!showDuties)}
+          onClick={() => setListDuties(!showDuties)}
         >
           <Briefcase className="h-5 w-5" />
         </GlassGroupButton>
@@ -762,8 +768,9 @@ export default function LogbookPage() {
       </GlassButtonGroup>
 
       {/* CREATE. The logbook alone adds a flight in one tap; with the roster's
-          duties shown it asks which — a flight or a duty, from one place. */}
-      {showDuties ? (
+          duties shown (in the list or on the calendar) it asks which — a
+          flight or a duty, from one place. */}
+      {dutiesInView ? (
         <GlassContainer cornerRadius={22} overBlur>
           <ChoicePicker<AddKind>
             label="Add"
@@ -784,7 +791,7 @@ export default function LogbookPage() {
         </GlassIconButton>
       )}
     </>
-  ), [showCalendar, toggleCalendar, handleAddFlight, showSearch, toggleSearch, showDuties, handleAdd])
+  ), [showCalendar, toggleCalendar, handleAddFlight, showSearch, toggleSearch, showDuties, dutiesInView, handleAdd])
 
   // Register actions for the desktop floating bar
   useRegisterMainActions(logbookActions, isActive)

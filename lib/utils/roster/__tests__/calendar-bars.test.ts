@@ -189,6 +189,40 @@ describe("week layout", () => {
     expect(bars).toHaveLength(3)
     expect(hidden[1]).toBe(1)
   })
+
+  it("gives a label a second line only where the lane under it is free", () => {
+    const always = () => true
+    const legs = (n: number) =>
+      Array.from({ length: n }, (_, i) =>
+        flight({ id: `f${i}`, flightNumber: `TR${100 + i}`, scheduledOut: `0${i * 2}:00`, scheduledIn: `0${i * 2 + 1}:00` })
+      )
+    // One flight alone: number over airport.
+    expect(layoutWeek(WEEK, buildCalendarSpans([], legs(1), UTC, opts), 3, always).bars.map((b) => b.height)).toEqual([2])
+    // Two: the first's lane below is taken, the second's is free.
+    expect(layoutWeek(WEEK, buildCalendarSpans([], legs(2), UTC, opts), 3, always).bars.map((b) => [b.lane, b.height])).toEqual([
+      [0, 1],
+      [1, 2],
+    ])
+    // Three: every lane is needed, so nothing takes a second line.
+    expect(layoutWeek(WEEK, buildCalendarSpans([], legs(3), UTC, opts), 3, always).bars.map((b) => b.height)).toEqual([1, 1, 1])
+    // Only bars that ask for it.
+    expect(layoutWeek(WEEK, buildCalendarSpans([], legs(1), UTC, opts), 3, () => false).bars[0].height).toBe(1)
+  })
+
+  it("never takes a second line over another item's day, even half of it", () => {
+    const spans = buildCalendarSpans(
+      [duty({ id: "sb", date: "2026-11-17", dutyType: "standby", dutyCode: "SBY", reportTime: "00:00", debriefTime: "08:00" })],
+      [flight({ id: "o", outTime: "21:55", inTime: "01:30" })],
+      UTC,
+      opts
+    )
+    // The overnight flight (16th, half to 17th) sits over the standby's lane on the 17th.
+    const bars = layoutWeek(WEEK, spans, 3, () => true).bars
+    const over = bars.find((b) => b.span.id === "o")!
+    const sb = bars.find((b) => b.span.id === "sb")!
+    expect([over.lane, over.height]).toEqual([0, 1])
+    expect([sb.lane, sb.height]).toEqual([1, 2])
+  })
 })
 
 describe("duty labels", () => {

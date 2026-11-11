@@ -170,7 +170,6 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
   displayPrefs,
 }: SwipeableFlightCardProps) {
   const isLocked = flight.isLocked || false;
-  const isScheduled = !flight.outTime || !flight.inTime;
 
   // Press-and-hold opens the context preview. Cancelled by any movement past a
   // few px, so it never fires on a scroll or on the start of a swipe — those
@@ -311,7 +310,6 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
           // colours ever wanted a transition here.
           "bg-card border-border cursor-pointer relative py-0 transition-colors",
           isLocked && "opacity-75",
-          isScheduled && "border-l-2 border-l-primary/70",
           isSelected && "bg-primary/20 border-primary",
           !isSelected && "hover:bg-muted/50",
           // The preview opens as an exact copy of this card, ON this card, so

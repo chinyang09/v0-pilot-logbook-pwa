@@ -1914,57 +1914,89 @@ zone).
 | all-day duties on consecutive days with one code | ONE bar ("Paternal Leave", "LOFF"); leave reads its description, other duties their code |
 | a bar leaving a week row | continues on the next row, its cut ends square |
 
-- **One line per lane, THREE lanes per day, rows only for the weeks the
-  month spans** — the owner's reference fits three items a day and ten
-  characters ("TRxxx WARR") on a line. Inter is wide: those ten characters are
-  ~53–58px of 9px type and a phone's day is ~46–51px, so a label is CONDENSED
-  horizontally by exactly what it needs (`lib/utils/text-fit.ts`: canvas
-  `measureText`, cached per label, `scaleX` with a floor of 0.7, re-measured
-  once the web font loads) rather than set in a second typeface. Measured: no
-  label clipped at 390 (≥0.76) or 360 (≥0.72, with 2px bar padding). What a day has past three
-  lanes is counted beside its number ("+1"). Clipped at the floor, never
-  ellipsed — "TR56…" loses the digit that says which flight. Every row is one
-  fixed height, so stepping weeks moves nothing and one month and two are the
-  same height; a pair takes the larger month's row count.
-- **Airports on every flight or on none** — decided once per layout by
-  whether "888/9 WMKP" fits a day at the 0.7 floor. A two-month pane (~40px a
-  day) shows numbers alone ("248/9"); decided per bar, one day read "100",
-  "101", "102 WSSS".
-- **Every item is a tinted BAR** (`barTone`, `DUTY_BAR`): a flight in its
-  state's tone (the accent still to fly, `--on-glass-fill` flown, amber not
-  logged, teal a simulator), a duty its type's hue at 20%; today is the
-  number in an accent circle. A round of bare coloured text and solid -700
-  duty bars was tried and rejected by the owner: neighbours in one lane ran
-  together and read as overlapping labels. Bars leave a 3px gap
-  (`BAR_INSET_PX`) between neighbours.
+- **SIX week rows, always, and compact** (`WEEK_ROWS`; a row is a 12px day
+  line + three 12px lanes + 1px — 49px). A calendar that grew and shrank a row
+  as the months turned moved the list under it, which the owner called
+  disruptive; at 62px a row a phone showed two and a half flight cards under
+  it. Measured at 390×844 with no status-bar inset: the panel is 342px and 4.1
+  cards show under it (3.5 at 360×780). The header row's controls are 28px
+  tall, their hit areas grown to 36px by a pseudo-element.
+- **THREE lanes per day, one line each — or TWO lines where there is room**
+  — the owner's reference fits three items a day and ten characters ("TRxxx
+  WARR") on a line. Inter is wide: those ten characters are ~53–58px of 9px
+  type and a phone's day is ~46–51px, so a label is CONDENSED horizontally by
+  exactly what it needs (`lib/utils/text-fit.ts`: canvas `measureText`, cached
+  per label, `scaleX` with a floor of 0.7, re-measured once the web font
+  loads) rather than set in a second typeface. A flight whose label would be
+  condensed past 0.85 takes a SECOND line instead ("456/7" over "WMKP") —
+  but only where the lane under it is EMPTY across its whole range
+  (`layoutWeek`'s `wantsTwoLines`; the lanes are packed one line each first,
+  so taking a line can never push another item out of sight). Where neither
+  fits, the number alone. Measured: no label clipped at 390, 360 or a 1180
+  two-month layout. What a day has past three lanes is counted beside its
+  number ("+1"). Clipped at the floor, never ellipsed — "TR56…" loses the
+  digit that says which flight.
+- **A day keeps or drops its one-line airports TOGETHER.** Decided per bar, a
+  triangle read "100", "101 WMKP", "102 WSSS" — one label a hair wider than the
+  next. A two-line bar is not part of that decision.
+- **Every item is a tinted BAR** (`barTone`, `DUTY_BAR`): a flight in the
+  accent — FILLED (`bg-primary/25`, foreground text) once flown, light with
+  accent text still to fly — amber not logged, teal a simulator; a duty its
+  type's hue at 20%. Flown was `--on-glass-fill` grey, which could not be told
+  from a grey day off. A round of bare coloured text and solid -700 duty bars
+  was rejected by the owner: neighbours in one lane ran together and read as
+  overlapping labels. Bars leave a 3px gap (`BAR_INSET_PX`) between neighbours.
+- **Today is the whole DAY lit** (`--on-glass-accent-soft`, its number bold in
+  the accent), not a number in a circle; the selected day is a ring.
+- **The grid's corners follow the glass**: the week block is clipped to a
+  radius concentric with the panel (its radius less the ~8px inset), and the
+  corner cells carry it too, so a lit corner cell — today, a range end, next
+  month's soft days — is not a square against a rounded material.
 - **The day's width is read in a ResizeObserver** (`data-cal-week` /7), never
   in a commit, and each week row is `contain: layout paint`.
 - **Bars take no taps.** A tap is the DAY's, which the page scrolls to.
-- **The header is Today and the month selector** (the month/year wheels). The
-  **Duties** toggle is the LOGBOOK HEADER's (below), and every calendar follows
-  it (`useCalendarDuties`, a per-device module store): off, standby, ground,
-  leave and days off leave the calendars; simulator sessions are logbook
-  entries and stay.
+- **The header is Today, the month selector (the month/year wheels) and the
+  calendar's own Duties switch** (`useCalendarDuties`, a per-device module
+  store): off, standby, ground, leave and days off leave every calendar;
+  simulator sessions are logbook entries and stay. It is a SEPARATE switch
+  from the logbook list's (`useListDuties`), so the month can keep the roster
+  while the list shows flights alone — the owner's ask.
 
 ### The roster IS the logbook, with its duties on (Nov 2026)
 
 The roster drew the logbook's flights anyway, and a flight could be added on
 one page and a duty only on the other — so there is ONE page, `/logbook`. Its
 list (`FlightList`) takes the roster's duties as cards among the flights
-(`buildLogbookRows`, `lib/utils/logbook-rows.ts`), and one **Duties** button
-in the header's VIEW group (a briefcase, `aria-pressed`) switches between the
-logbook alone and the roster. It replaced a List | Roster page switch, so the
-header has one button fewer.
+(`buildLogbookRows`, `lib/utils/logbook-rows.ts`), and a **Duties** button
+in the header's VIEW group (a briefcase, `aria-pressed`, `useListDuties`)
+switches the list between the logbook alone and the roster. It replaced a
+List | Roster page switch, so the header has one button fewer. The calendar
+has its own switch (above); the list's starts from the calendar's stored
+answer, because before they were split one switch did both.
 
 | | Rule |
 |---|---|
 | order | one newest-first list: a duty sorts as a flight would — UTC date, then report time against the flight's out time, a whole-day duty last in its day; on a tie the flight first. A flight's place never depends on whether duties are shown |
 | the card | `DutyCardBody`: the flight card's four lines and its HEIGHT (the list positions every row at one calibrated height — measured 102px both): date column, report — length — release (UTC, as the flight cards), the code with its icon, the description, "Called out HH:MMZ" for an activated standby. Told apart by the duty type's colour on the date and code and a stripe down its leading edge |
 | runs | consecutive whole-day duties with the same kind, code and description are ONE card ("3 days … to 14 NOV"), at its last day; a swipe bins the whole run and Undo brings it back |
-| selection | a duty is `duty:<id>` (`dutyRowKey`), a new one `duty:new:<date>`; the shell renders `LogbookDutyPanel` for either, as it renders `FlightForm` for a flight id |
-| + | with duties off, a new flight in one tap; with them on, a menu — Flight or Duty (on the calendar's chosen day, else today; nothing is written until saved) |
+| a run is a PERIOD | it opens as one (`dutyRunOf`): From / To move its ends, its fields change every day of it, and its DAYS are listed under it — tap a day to change only that day (`duty:day:<id>`, `dutyDayKey`), swipe one to remove only that day. A new duty can be entered over several days at once |
+| selection | a duty is `duty:<id>` (`dutyRowKey`) — its period —, one day of it `duty:day:<id>`, a new one `duty:new:<date>`; the shell renders `LogbookDutyPanel` for any of them, as it renders `FlightForm` for a flight id |
+| + | with duties shown nowhere, a new flight in one tap; with them in the list or on the calendar, a menu — Flight or Duty (on the calendar's chosen day, else today; nothing is written until saved) |
 | search, ↑↓, calendar | search terms match a duty's code, description and kind; the arrows step through rows of both kinds; a calendar day lands on the first row COVERING it (`scrollToFirst`, `rowCoversDate`) |
 | `/roster` | a redirect to `/logbook?duties=1` that carries a selection across; `?duties=1` (the dashboard's duty links) turns the duties on and drops itself |
+
+**The roster still stores ONE ENTRY PER DAY** (`lib/utils/duty-period.ts`),
+and a period is how the pilot sees and edits those days, not a different
+record. The company report lists each day on its own row; a re-import matches
+each day by date + code (`bulkUpsertScheduleEntries`); each imported day has a
+derived id (`duty:<date>:<code>`) so two devices importing one report land on
+one record; and paragraph 5 counts days off one at a time. A period save is a
+PLAN over its days (`planDutyPeriod`): a day it keeps is patched only where it
+differs, a day it lost is binned (soft), a day it gained is created — or, when
+the same duty (type + code) already sits on that day, adopted rather than
+doubled. One consequence to know: a re-import still re-creates a day the
+report carries that the pilot changed to another code, because the report is
+the authority on whether its duty exists.
 
 Roster is in no nav, tab picker or keep-alive list; a stored "roster" tab is
 folded into Logbook (`normaliseNavTabs`, `lib/utils/nav-tabs.ts`). FDP and
@@ -3744,7 +3776,9 @@ device.
   the row and the next launch flipped a light-mode pilot to dark.
 
 Scheduled (unflown) flights are drawn in the accent (`text-primary` on the
-logbook card and the roster chip): planned is the accent, whatever it is. Their SECONDARY text
+logbook card and the calendar bar): planned is the accent, whatever it is. The
+text says it; the card carries no accent BORDER as well (the owner: a flight
+still to fly does not need one). Their SECONDARY text
 (month, aircraft, flight number) is `.text-primary-muted`, the accent mixed
 toward `--muted-foreground` — never the accent at a fraction of its opacity,
 which let the card through at 3.6:1.
@@ -5747,8 +5781,9 @@ When making changes, be aware of these high-impact files:
 - Do not write to ANOTHER record from a form control before Save — the crew card's "This is Me" switch un-flagged the current self card in the database the moment it moved, untouched by Cancel, so a stray flip left the logbook with no self card. The form changes; `handleSave` clears the other flags when it commits
 - Do not let a select show blank for a stored value it has no option for — the currency Type row read empty for any company code an import brought in. Offer the record's own value as an option (`typeOptions`); mapping it to "Custom" would rewrite the stored code on the next save
 - Do not use a native `<select>` (laid over a row or bare) or a Radix Select for a choice — it is `ChoicePicker`/`OptionMenu`, the app's own menu on the glass face. The platform's control is a different thing on every device and like nothing else in the app. And give the trigger the whole row, never a corner of it
-- Do not draw a calendar day as a bare number with a dot, or give a page a calendar of its own — every calendar is `LogbookCalendar`'s bar grid, fed by `useCalendarSpans` and governed by one Duties toggle. Keep a flight ONE line without its designator ("248 WMKP", condensed by `text-fit.ts`, never a second typeface), a return pair ONE bar ("248/9 WMKP"), airports on every flight or none, three lanes a day, every item a tinted bar (bare text ran together), a midnight crossover on HALF of each day, a run of all-day duties ONE bar, and the rows a fixed height
-- Do not bring back a separate roster page or a List | Roster switch — the roster is the logbook list with its Duties on (`buildLogbookRows`), one + adds either kind, and a stored "roster" tab goes through `normaliseNavTabs`. A duty card must stay the flight card's exact height (`DutyCardBody` mirrors `FlightCardBody`'s fixed line boxes), or the virtualised list starts correcting its scroll
+- Do not draw a calendar day as a bare number with a dot, or give a page a calendar of its own — every calendar is `LogbookCalendar`'s bar grid, fed by `useCalendarSpans` and governed by its own Duties switch. Keep a flight without its designator ("248 WMKP", condensed by `text-fit.ts`, never a second typeface), a return pair ONE bar ("248/9 WMKP"), a second line ("248/9" over "WMKP") only where the lane under it is empty, a day's one-line airports kept or dropped together, three lanes a day, every item a tinted bar (bare text ran together) with a flown flight FILLED in the accent (never grey — a day off is grey), a midnight crossover on HALF of each day, a run of all-day duties ONE bar, and SIX rows of one fixed height in every month
+- Do not store a duty period as one record or edit a run day by day — the roster keeps one entry per day (imports, re-import matching, derived ids and para 5 all depend on it), and a run is edited as a PERIOD through `planDutyPeriod`, with its days listed for a one-day change
+- Do not bring back a separate roster page or a List | Roster switch — the roster is the logbook list with its Duties on (`buildLogbookRows`, `useListDuties` — the calendar's switch is its own), one + adds either kind, and a stored "roster" tab goes through `normaliseNavTabs`. A duty card must stay the flight card's exact height (`DutyCardBody` mirrors `FlightCardBody`'s fixed line boxes), or the virtualised list starts correcting its scroll
 - Do not bring back the month-capsule grid or a year stepper in the calendar's month/year picker — it is two wheels, live, closed by the date selector; and in the dual layout it takes the RIGHT pane with the month being chosen still drawn on the left. Keep `WHEEL_ITEM_PX` small enough that the wheel fits a dual pane's grid, or the panel grows (or clips) when it opens
 - Do not cap a date wheel's past at a few years — a pilot back-filling a paper logbook enters flights from decades ago; the default is 70
 - Do not make "Add Crew" open the crew picker directly, and do not lay an additional crew member out differently from the PIC/SIC rows — role on the LEFT (the menu), name on the RIGHT (the picker, for THAT row), a swipe to clear. The pick carries the row's role and index (`additionalCrewField`); address rows by index, never by crew-card id

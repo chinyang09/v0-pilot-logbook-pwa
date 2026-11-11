@@ -10,7 +10,7 @@ import {
   useState,
   useEffect,
 } from "react";
-import { ChevronDown } from "lucide-react";
+import { Briefcase, ChevronDown } from "lucide-react";
 import { WheelPicker, WheelPickerWrapper } from "@ncdai/react-wheel-picker";
 import "@ncdai/react-wheel-picker/style.css";
 import { wheelClassNames } from "@/components/ui/wheel-styles";
@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 import { formatDay } from "@/lib/utils/date";
 import { fitScale, labelWidth, onFontsReady } from "@/lib/utils/text-fit";
 import { layoutWeek, type BarTone, type WeekLayout } from "@/lib/utils/roster/calendar-bars";
-import { useCalendarSpans } from "@/hooks/use-calendar-spans";
+import { setCalendarDuties, useCalendarDuties, useCalendarSpans } from "@/hooks/use-calendar-spans";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -106,16 +106,20 @@ function yearOptions(from: number, to: number) {
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /**
- * A week row: the day number's line, then THREE one-line lanes, then a
- * hairline of air — the owner's reference (a desktop calendar app): three
- * things a day, each one line ("TR560 RPMD", "LOFF"), what falls past them
- * counted beside the date ("+1"). Fixed, so every row and every month is the
- * same height and stepping months never moves anything under the calendar.
+ * A week row: the day number's line, then THREE one-line lanes, then a pixel
+ * of air — the owner's reference (a desktop calendar app): three things a
+ * day, each one line ("248/9 WMKP", "LOFF"), what falls past them counted
+ * beside the date ("+1"). Every month is SIX rows of this height, whatever
+ * weeks it spans: a calendar that grew and shrank a row as the months turned
+ * moved the list under it (the owner: "disruptive"). Compact, because on a
+ * phone every pixel here is a pixel of the logbook — at 62px a row the list
+ * showed two and a half cards under it.
  */
-const DAY_LINE_PX = 17;
-const LANE_PX = 14;
-const ROW_PAD_PX = 3;
+const DAY_LINE_PX = 12;
+const LANE_PX = 12;
+const ROW_PAD_PX = 1;
 const LANES = 3;
+const WEEK_ROWS = 6;
 
 /**
  * Every item is a tinted BAR — a flight in its state's tone, a duty in its
@@ -137,8 +141,11 @@ const DUTY_BAR: Record<string, string> = {
 function barTone(tone: BarTone): string {
   if (tone.kind === "duty") return DUTY_BAR[tone.dutyType] ?? DUTY_BAR.other;
   switch (tone.state) {
+    // Flown: the accent, filled — a flight reads as a flight beside a grey
+    // day off. The grey it was told a flown sector from a duty by nothing.
+    // Still to fly: the same hue, light, in the accent's own text.
     case "flown":
-      return "bg-[var(--on-glass-fill)] text-foreground";
+      return "bg-primary/25 text-foreground";
     case "unlogged":
       return "bg-status-warning/15 text-status-warning";
     case "sim":
@@ -154,28 +161,43 @@ const BAR_INSET_PX = 1.5;
 const BAR_PAD_PX = 2;
 /** The narrowest a label is condensed to before its airport is dropped. */
 const MIN_LABEL_SCALE = 0.7;
+/**
+ * Condensed past this, a label would rather take a SECOND line — "456/7" over
+ * "WMKP" — where the lane under it is free. A label squeezed to 70% of its
+ * width is legible; one at full width on two lines is easier.
+ */
+const TWO_LINE_BELOW = 0.85;
 
 type GridDay = { date: Date; dateStr: string; isCurrentMonth: boolean };
 
-/** Week rows a month spans, Sunday-first. */
-function weeksIn(year: number, month: number): number {
-  const first = new Date(year, month, 1).getDay();
-  const days = new Date(year, month + 1, 0).getDate();
-  return Math.ceil((first + days) / 7);
-}
-
-function nextMonthOf(m: { year: number; month: number }): [number, number] {
-  return m.month === 11 ? [m.year + 1, 0] : [m.year, m.month + 1];
-}
+type WantsTwoLines = Parameters<typeof layoutWeek>[3];
 
 /** The month's six week rows, each laid out against the spans. */
-function weeksOf(days: GridDay[], spans: Parameters<typeof layoutWeek>[1], maxLanes: number) {
+function weeksOf(
+  days: GridDay[],
+  spans: Parameters<typeof layoutWeek>[1],
+  maxLanes: number,
+  wantsTwoLines?: WantsTwoLines
+) {
   const weeks: { days: GridDay[]; layout: WeekLayout }[] = [];
   for (let i = 0; i < days.length; i += 7) {
     const week = days.slice(i, i + 7);
-    weeks.push({ days: week, layout: layoutWeek(week.map((d) => d.dateStr), spans, maxLanes) });
+    weeks.push({ days: week, layout: layoutWeek(week.map((d) => d.dateStr), spans, maxLanes, wantsTwoLines) });
   }
   return weeks;
+}
+
+/** The width a bar gives its text: its half-day columns, less its insets and padding. */
+function barTextWidth(
+  bar: { start: number; end: number; continuesLeft: boolean; continuesRight: boolean },
+  cellPx: number
+): number {
+  return (
+    ((bar.end - bar.start) / 2) * cellPx -
+    (bar.continuesLeft ? 0 : BAR_INSET_PX) -
+    (bar.continuesRight ? 0 : BAR_INSET_PX) -
+    2 * BAR_PAD_PX
+  );
 }
 
 /** Single ↔ dual month slide. Same 300ms as the panels it opens beside. */
@@ -210,7 +232,7 @@ function computeMonthDays(year: number, month: number) {
     days.push({ date, dateStr: formatDateLocal(date), isCurrentMonth: true });
   }
 
-  const remainingDays = 42 - days.length;
+  const remainingDays = WEEK_ROWS * 7 - days.length;
   for (let i = 1; i <= remainingDays; i++) {
     const nextDate = new Date(year, month + 1, i);
     days.push({ date: nextDate, dateStr: formatDateLocal(nextDate), isCurrentMonth: false });
@@ -378,14 +400,24 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
 
     // Every flight and duty the month draws, filtered by the Duties toggle.
     const spans = useCalendarSpans(flights);
-    // Only the weeks the month spans (4–6), the same for both panes of a
-    // pair, rather than a fixed six with a row of next month's days.
-    const weekRows = dualMonth
-      ? Math.max(weeksIn(selectedMonth.year, selectedMonth.month), weeksIn(...nextMonthOf(selectedMonth)))
-      : weeksIn(selectedMonth.year, selectedMonth.month);
-    // The month(s) on screen, laid out ONCE per change of data or month: the
-    // page re-renders the calendar as its list scrolls (the selected day
-    // follows the top flight), and each layout is a pass over every span.
+    const showDuties = useCalendarDuties();
+    // Which bars would rather be two lines: a flight whose "248/9 WMKP" would
+    // be condensed past TWO_LINE_BELOW to fit on one. Read against the day's
+    // measured width, so it is only asked once that is known.
+    const wantsTwoLines = useMemo<WantsTwoLines>(() => {
+      if (cellPx <= 0) return undefined;
+      return (bar) => {
+        if (!bar.span.detail) return false;
+        const width = labelWidth(`${bar.span.label} ${bar.span.detail}`);
+        return width != null && width > 0 && width * TWO_LINE_BELOW > barTextWidth(bar, cellPx);
+      };
+      // fontsTick: the widths change once the web font has loaded.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [cellPx, fontsTick]);
+    // The month(s) on screen, laid out ONCE per change of data, month or day
+    // width: the page re-renders the calendar as its list scrolls (the
+    // selected day follows the top flight), and each layout is a pass over
+    // every span.
     const paneLayouts = useMemo(() => {
       const map = new Map<string, ReturnType<typeof weeksOf>>();
       const months = dualMonth
@@ -393,37 +425,12 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         : [selectedMonth];
       for (const m of months) {
         const days = computeMonthDays(m.year, m.month);
-        map.set(`${days[0].dateStr}|${weekRows}`, weeksOf(days.slice(0, weekRows * 7), spans, LANES));
+        map.set(days[0].dateStr, weeksOf(days, spans, LANES, wantsTwoLines));
       }
       return map;
-    }, [spans, selectedMonth, dualMonth, weekRows]);
-    // Airports are shown on EVERY flight or on none: whether each flight bar in
-    // view holds its full label ("248/9 WMKP") at the narrowest condensing.
-    // Decided per bar, a day read "100", "101", "102 WSSS" — the short one
-    // kept its airport and the others did not. A two-month pane (~40px a day)
-    // comes out numbers alone.
-    const detailsFit = useMemo(() => {
-      if (cellPx <= 0) return true;
-      for (const weeks of paneLayouts.values()) {
-        for (const week of weeks) {
-          for (const bar of week.layout.bars) {
-            if (!bar.span.detail) continue;
-            const width = labelWidth(`${bar.span.label} ${bar.span.detail}`);
-            const available =
-              ((bar.end - bar.start) / 2) * cellPx -
-              (bar.continuesLeft ? 0 : BAR_INSET_PX) -
-              (bar.continuesRight ? 0 : BAR_INSET_PX) -
-              2 * BAR_PAD_PX;
-            if (width && width * MIN_LABEL_SCALE > available) return false;
-          }
-        }
-      }
-      return true;
-      // fontsTick: the widths change once the web font has loaded.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [paneLayouts, cellPx, fontsTick]);
-    const layoutsFor = (days: GridDay[], rows: number) =>
-      paneLayouts.get(`${days[0].dateStr}|${rows}`) ?? weeksOf(days.slice(0, rows * 7), spans, LANES);
+    }, [spans, selectedMonth, dualMonth, wantsTwoLines]);
+    const layoutsFor = (days: GridDay[]) =>
+      paneLayouts.get(days[0].dateStr) ?? weeksOf(days, spans, LANES, wantsTwoLines);
 
     // Days for the currently selected month (used in month/year picker + single month mode)
     const calendarDays = useMemo(
@@ -629,25 +636,35 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     // ("+1").
     const renderDayGrid = (
       days: { date: Date; dateStr: string; isCurrentMonth: boolean }[],
-      keyPrefix = "",
-      rows = weekRows
+      keyPrefix = ""
     ) => {
-      const weeks = layoutsFor(days, rows);
+      const weeks = layoutsFor(days);
       const rowHeight = DAY_LINE_PX + LANES * LANE_PX + ROW_PAD_PX;
+      // Concentric with the glass: its radius less the ~8px the grid sits in.
+      const gridRadius = Math.max(cornerRadius - 8, 6);
+      const last = weeks.length - 1;
+      const cornerRadiusOf = (w: number, col: number) => {
+        const r = (top: boolean, left: boolean) =>
+          (top ? w === 0 : w === last) && (left ? col === 0 : col === 6) ? gridRadius : 0;
+        return `${r(true, true)}px ${r(true, false)}px ${r(false, false)}px ${r(false, true)}px`;
+      };
       const hasFullRange = !!(rangeStart && rangeEnd) && rangeStart !== rangeEnd;
       return (
         <div className="mx-auto w-full" style={{ maxWidth: paneMaxWidth }}>
-          <div className="grid grid-cols-7 gap-0 px-1 pt-0.5 pb-0.5">
+          <div className="grid grid-cols-7 gap-0 px-1 pb-0.5">
             {DAYS.map((day) => (
               <div
                 key={day}
-                className="text-center text-[10px] font-medium text-[var(--on-glass-label)] uppercase tracking-wider"
+                className="text-center text-[9px] font-medium leading-3 text-[var(--on-glass-label)] uppercase tracking-wider"
               >
                 {day}
               </div>
             ))}
           </div>
-          <div className="px-1">
+          {/* The grid's corners follow the glass it sits in: a lit cell at a
+              corner (today, a range end, next month's soft days) was a square
+              against the material's rounded corner. */}
+          <div className="mx-1 overflow-hidden" style={{ borderRadius: gridRadius }}>
             {weeks.map((week, w) => (
               // Each row is its own layout and paint island: the bars are
               // absolute inside it, so nothing in a row reaches past it.
@@ -655,7 +672,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                 <div className="grid h-full grid-cols-7">
                   {week.days.map((dayInfo, col) => {
                     const isCurrentMonth = dayInfo.isCurrentMonth;
-                    const isToday = dayInfo.dateStr === today;
+                    const isToday = isCurrentMonth && dayInfo.dateStr === today;
                     const isSelected = isCurrentMonth && dayInfo.dateStr === selectedDate;
                     const isRangeEnd =
                       isCurrentMonth &&
@@ -676,25 +693,30 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                         aria-current={isToday ? "date" : undefined}
                         onClick={() => handleDateClick(dayInfo.dateStr, isCurrentMonth)}
                         className={cn(
-                          "relative flex h-full min-w-0 items-start justify-between border-t border-[var(--on-glass-fill)] px-1 pt-0.5 text-left transition-colors",
-                          col > 0 && "border-l",
+                          "relative flex h-full min-w-0 items-start justify-between px-1 text-left transition-colors",
+                          w > 0 && "border-t border-[var(--on-glass-fill)]",
+                          col > 0 && "border-l border-[var(--on-glass-fill)]",
                           !isCurrentMonth && "bg-[var(--on-glass-fill-soft)]",
                           isInRange && "bg-[var(--on-glass-accent-soft)]",
                           isRangeEnd && "bg-[var(--on-glass-accent)]",
-                          isSelected && "bg-[var(--on-glass-accent-soft)] ring-2 ring-inset ring-primary",
+                          // Today is the whole DAY, lit — the number alone in
+                          // a circle was a mark to find, not a day to see.
+                          isToday && !isRangeEnd && "bg-[var(--on-glass-accent-soft)]",
+                          isSelected && "ring-2 ring-inset ring-primary",
                         )}
+                        style={{ borderRadius: cornerRadiusOf(w, col) }}
                       >
                         <span
                           className={cn(
-                            "flex h-[15px] min-w-[15px] items-center justify-center rounded-full px-[3px] text-[11px] leading-none tabular-nums",
+                            "text-[10px] leading-3 tabular-nums",
                             isCurrentMonth ? "text-foreground" : "text-[var(--on-glass-faint)]",
-                            isToday && "bg-primary font-bold text-primary-foreground",
+                            isToday && "font-bold text-primary",
                           )}
                         >
                           {dayInfo.date.getDate()}
                         </span>
                         {hidden > 0 && (
-                          <span className="text-[9px] font-semibold leading-[15px] text-[var(--on-glass-muted)]">
+                          <span className="text-[9px] font-semibold leading-3 text-[var(--on-glass-muted)]">
                             +{hidden}
                           </span>
                         )}
@@ -705,35 +727,46 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                 {/* The bars ride over the cells and take no taps: a tap is the
                     DAY's, which is what the page scrolls to. */}
                 <div aria-hidden className="pointer-events-none absolute inset-x-0" style={{ top: DAY_LINE_PX }}>
-                  {week.layout.bars.map((bar) => {
+                  {(() => {
+                    // A DAY keeps or drops its one-line airports together: a
+                    // triangle read "100", "101 WMKP", "102 WSSS" when the
+                    // airport was dropped per bar, because one label is a
+                    // hair wider than the next.
+                    const dropDay = new Array<boolean>(7).fill(false);
+                    if (cellPx > 0) {
+                      for (const b of week.layout.bars) {
+                        if (b.height === 2 || !b.span.detail) continue;
+                        if ((labelWidth(`${b.span.label} ${b.span.detail}`) ?? 0) * MIN_LABEL_SCALE <= barTextWidth(b, cellPx)) continue;
+                        for (let d = Math.floor(b.start / 2); d < Math.ceil(b.end / 2); d++) dropDay[d] = true;
+                      }
+                    }
+                    const dropsAirport = (b: { start: number; end: number }) => {
+                      for (let d = Math.floor(b.start / 2); d < Math.ceil(b.end / 2); d++) if (dropDay[d]) return true;
+                      return false;
+                    };
+                    return week.layout.bars.map((bar) => {
                     const startCol = Math.floor(bar.start / 2);
                     const dim = !week.days[Math.min(startCol, 6)].isCurrentMonth && !week.days[Math.min(Math.ceil(bar.end / 2) - 1, 6)].isCurrentMonth;
-                    // One line, condensed by exactly what it needs to fit the
-                    // bar (its insets and padding off). "248/9 WMKP" first; when
-                    // even condensed to MIN_LABEL_SCALE it would not fit (a
-                    // two-month pane's ~40px day), the number alone — "TR56…"
-                    // style clipping loses the one thing that says which
-                    // flight, and an airport can wait for the day's own list.
-                    const available =
-                      ((bar.end - bar.start) / 2) * cellPx -
-                      (bar.continuesLeft ? 0 : BAR_INSET_PX) -
-                      (bar.continuesRight ? 0 : BAR_INSET_PX) -
-                      2 * BAR_PAD_PX;
+                    const available = barTextWidth(bar, cellPx);
+                    const tall = bar.height === 2 && !!bar.span.detail;
+                    // ONE line where "248/9 WMKP" fits condensed no further
+                    // than MIN_LABEL_SCALE; TWO ("248/9" over "WMKP") where it
+                    // would not and the lane under the bar is free; else the
+                    // number alone. Clipping ("TR56…") loses the one thing
+                    // that says which flight.
                     const full = bar.span.detail ? `${bar.span.label} ${bar.span.detail}` : bar.span.label;
-                    const fullWidth = labelWidth(full);
-                    const text =
-                      bar.span.detail &&
-                      cellPx > 0 &&
-                      !detailsFit
-                        ? bar.span.label
-                        : full;
-                    const natural = text === full ? fullWidth : labelWidth(text);
-                    const scale = cellPx > 0 ? fitScale(natural, available, MIN_LABEL_SCALE) : 1;
+                    const lines = tall
+                      ? [bar.span.label, bar.span.detail!]
+                      : [
+                          bar.span.detail && dropsAirport(bar)
+                            ? bar.span.label
+                            : full,
+                        ];
                     return (
                       <div
                         key={`${keyPrefix}${bar.key}`}
                         className={cn(
-                          "absolute flex items-center overflow-hidden whitespace-nowrap text-[9px] font-semibold leading-none tracking-[-0.02em]",
+                          "absolute flex flex-col justify-center overflow-hidden whitespace-nowrap text-[9px] font-semibold leading-[11px] tracking-[-0.02em]",
                           barTone(bar.span.tone),
                           "rounded-[3px]",
                           bar.continuesLeft && "rounded-l-none",
@@ -742,26 +775,33 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                         )}
                         style={{
                           top: bar.lane * LANE_PX,
-                          height: LANE_PX - 2,
+                          height: bar.height * LANE_PX - 1,
                           paddingInline: BAR_PAD_PX,
                           left: `calc(${(bar.start / 14) * 100}% + ${bar.continuesLeft ? 0 : BAR_INSET_PX}px)`,
                           width: `calc(${((bar.end - bar.start) / 14) * 100}% - ${(bar.continuesLeft ? 0 : BAR_INSET_PX) + (bar.continuesRight ? 0 : BAR_INSET_PX)}px)`,
                         }}
                       >
-                        {/* ONE line: "248/9 WMKP", never ellipsed. */}
-                        <span
-                          className="inline-block shrink-0"
-                          style={
-                            scale < 1 && natural
-                              ? { width: natural, transform: `scaleX(${scale})`, transformOrigin: "left center" }
-                              : undefined
-                          }
-                        >
-                          {text}
-                        </span>
+                        {lines.map((text, i) => {
+                          const natural = labelWidth(text);
+                          const scale = cellPx > 0 ? fitScale(natural, available, MIN_LABEL_SCALE) : 1;
+                          return (
+                            <span
+                              key={i}
+                              className={cn("block shrink-0", i > 0 && "font-medium")}
+                              style={
+                                scale < 1 && natural
+                                  ? { width: natural, transform: `scaleX(${scale})`, transformOrigin: "left center" }
+                                  : undefined
+                              }
+                            >
+                              {text}
+                            </span>
+                          );
+                        })}
                       </div>
                     );
-                  })}
+                  });
+                  })()}
                 </div>
               </div>
             ))}
@@ -792,11 +832,10 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     const renderPane = (
       _m: { year: number; month: number },
       days: { date: Date; dateStr: string; isCurrentMonth: boolean }[],
-      keyPrefix = "",
-      rows = weekRows
+      keyPrefix = ""
     ) => (
       <>
-        {renderDayGrid(days, keyPrefix, rows)}
+        {renderDayGrid(days, keyPrefix)}
       </>
     );
 
@@ -806,15 +845,14 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
      */
     const renderStaticMonths = (anchor: { year: number; month: number }) => {
       if (!dualMonth) {
-        return renderPane(anchor, computeMonthDays(anchor.year, anchor.month), "out-", weeksIn(anchor.year, anchor.month));
+        return renderPane(anchor, computeMonthDays(anchor.year, anchor.month), "out-");
       }
       const next = addMonths(anchor.year, anchor.month, 1);
-      const rows = Math.max(weeksIn(anchor.year, anchor.month), weeksIn(next.year, next.month));
       return (
         <div className="flex">
           {[anchor, next].map((m, i) => (
             <div key={`out-${m.year}-${m.month}`} className="min-w-0 px-1" style={{ flex: "0 0 50%" }}>
-              {renderPane(m, computeMonthDays(m.year, m.month), `out${i}-`, rows)}
+              {renderPane(m, computeMonthDays(m.year, m.month), `out${i}-`)}
             </div>
           ))}
         </div>
@@ -837,17 +875,25 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
         : `${MONTHS[selectedMonth.month]} ${yy(selectedMonth.year)} – ${MONTHS[next.month]} ${yy(next.year)}`;
     })();
 
+    // A control here is 28px tall to keep the row short; its HIT area is
+    // grown to 36px by a pseudo-element (the rule for a fixed-height row).
+    const hit = "relative after:absolute after:-inset-y-1 after:inset-x-0 after:content-['']";
     const dateSelector = (
       // Three columns so the selector stays centred: Today on the left (when
-      // the page offers it). The Duties toggle is the logbook header's — one
-      // switch between the logbook and the roster, not one per calendar.
+      // the page offers it), the calendar's own Duties switch on the right.
+      // That switch is the CALENDAR's: the logbook header's governs the duty
+      // cards in the list, so a pilot can keep the month's leave and standby
+      // in view without them interleaving the flights.
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 px-1 pt-1 pb-0.5">
         <div className="flex justify-start">
           {onToday && (
             <button
               type="button"
               onClick={onToday}
-              className="h-9 rounded-full px-3 text-xs font-semibold text-primary transition-colors hover:bg-[var(--on-glass-fill-soft)]"
+              className={cn(
+                "h-7 rounded-full px-2.5 text-xs font-semibold text-primary transition-colors hover:bg-[var(--on-glass-fill-soft)]",
+                hit
+              )}
             >
               Today
             </button>
@@ -859,7 +905,10 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
             onClick={onHeaderPress}
             aria-label="Select month"
             aria-expanded={headerActive}
-            className="flex items-center gap-1.5 rounded-full px-3 py-1 text-[15px] font-semibold text-foreground transition-colors hover:bg-[var(--on-glass-fill-soft)]"
+            className={cn(
+              "flex h-7 items-center gap-1 rounded-full px-3 text-[15px] font-semibold text-foreground transition-colors hover:bg-[var(--on-glass-fill-soft)]",
+              hit
+            )}
           >
             {rangeLabel}
             <ChevronDown
@@ -870,10 +919,26 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
             />
           </button>
         ) : (
-          <span className="px-3 py-1 text-[15px] font-semibold text-foreground">{rangeLabel}</span>
+          <span className="flex h-7 items-center px-3 text-[15px] font-semibold text-foreground">{rangeLabel}</span>
         )}
-        {/* Kept empty so the selector stays centred. */}
-        <div />
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => setCalendarDuties(!showDuties)}
+            aria-pressed={showDuties}
+            aria-label="Duties on the calendar"
+            className={cn(
+              "flex h-7 items-center gap-1 rounded-full px-2.5 text-xs font-semibold transition-colors",
+              hit,
+              showDuties
+                ? "bg-[var(--on-glass-active)] text-[var(--on-glass-active-fg)]"
+                : "text-[var(--on-glass-muted)] hover:bg-[var(--on-glass-fill-soft)]"
+            )}
+          >
+            <Briefcase className="size-3.5" aria-hidden />
+            Duties
+          </button>
+        </div>
       </div>
     );
 

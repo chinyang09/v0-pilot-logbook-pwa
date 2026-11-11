@@ -39,6 +39,13 @@ export function dutyIdOf(key: string | null | undefined): string | null {
 /** A NEW duty's selection: `duty:new:<YYYY-MM-DD>` — the day it starts on. */
 export const NEW_DUTY_PREFIX = `${DUTY_KEY_PREFIX}new:`
 export const newDutyKey = (date: string) => `${NEW_DUTY_PREFIX}${date}`
+/**
+ * ONE day of a period, opened on its own: `duty:day:<id>`. A card for "LOFF
+ * 12–15 Nov" opens the period; a day picked from its list opens just that day,
+ * so 13 Nov can be changed without the other three.
+ */
+export const DUTY_DAY_PREFIX = `${DUTY_KEY_PREFIX}day:`
+export const dutyDayKey = (entryId: string) => `${DUTY_DAY_PREFIX}${entryId}`
 
 export type LogbookRow =
   | { kind: "flight"; key: string; date: string; startDate: string; flight: FlightLog }
@@ -125,6 +132,16 @@ export function buildLogbookRows(flights: readonly FlightLog[], duties: readonly
   }
   for (; d < sorted.length; d++) rows.push(sorted[d])
   return rows
+}
+
+/**
+ * The entries of the period (the run) an entry belongs to — the whole run for
+ * a day off in "LOFF 12–15 Nov", the entry alone for a timed duty. Null when
+ * the entry is not a live roster duty.
+ */
+export function dutyRunOf(entryId: string, duties: readonly ScheduleEntry[]): ScheduleEntry[] | null {
+  for (const row of dutyRows(duties)) if (row.entries.some((e) => e.id === entryId)) return row.entries
+  return null
 }
 
 /** The words a search term is matched against, lowercased, one per field. */

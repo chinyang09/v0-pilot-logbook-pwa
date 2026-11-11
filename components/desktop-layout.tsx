@@ -82,7 +82,8 @@ function DetailPanelContent() {
   const pickerFlightId = searchParams.get("flightId")
   const isLogbook = pathname?.includes("/logbook")
   const isPickerPage = pathname?.includes("/aircraft") || pathname?.includes("/airports") || pathname?.includes("/crew")
-  // The logbook's duty cards open a duty (`duty:<id>`, `duty:new:<date>`).
+  // The logbook's duty cards open a duty (`duty:<id>` — its period —,
+  // `duty:day:<id>` — one day of it — or `duty:new:<date>`).
   const dutySelection = isLogbook && selectedId?.startsWith(DUTY_KEY_PREFIX) ? selectedId : null
   const flightId = (isLogbook && selectedId && !dutySelection) ? selectedId : (isPickerPage && pickerFlightId) ? pickerFlightId : null
 
