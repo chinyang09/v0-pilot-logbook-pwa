@@ -19,7 +19,8 @@ import { cn } from "@/lib/utils";
 import { formatDay } from "@/lib/utils/date";
 import { fitScale, labelWidth, onFontsReady } from "@/lib/utils/text-fit";
 import { layoutWeek, type BarTone, type WeekLayout } from "@/lib/utils/roster/calendar-bars";
-import { setCalendarDuties, useCalendarDuties, useCalendarSpans } from "@/hooks/use-calendar-spans";
+import { setDutiesView, useDutiesView, useCalendarSpans, type DutiesView } from "@/hooks/use-calendar-spans";
+import { ChoicePicker, type MenuOption } from "@/components/ui/option-menu";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -71,6 +72,11 @@ interface LogbookCalendarProps {
   headerActive?: boolean;
   /** Offers a Today button in the header. */
   onToday?: () => void;
+  /**
+   * The page lists duties beside its flights (the logbook), so the Duties
+   * menu offers "Calendar and List" as well as the calendar alone.
+   */
+  dutiesInList?: boolean;
 }
 
 export interface CalendarHandle {
@@ -122,36 +128,63 @@ const LANES = 3;
 const WEEK_ROWS = 6;
 
 /**
- * Every item is a tinted BAR — a flight in its state's tone, a duty in its
- * type's hue at 20% (at the roster chips' 10% a run of leave all but vanished
- * on the glass). Two neighbours in one lane are two shapes with a gap between
- * them; as bare text they ran into each other and read as one overlapping
- * label.
+ * Every item is a BAR, and a bar is SOLID: its hue mixed into the colour the
+ * glass face reads as (`--on-glass`), so it looks like the tint it always
+ * did but nothing behind the calendar shows through it — the calendar is
+ * glass, what is written on it is not (the owner's rule). Two neighbours in a
+ * lane are two shapes with a gap between them; as bare text they ran into
+ * each other and read as one overlapping label.
+ *
+ * REST days — a day off, every kind of leave (annual, sick, parental) — are
+ * ONE hue: the colour answers "am I working that day", and LOFF in grey
+ * beside leave in green read as two different kinds of day.
  */
-const DUTY_BAR: Record<string, string> = {
-  standby: "bg-amber-500/20 text-amber-800 dark:text-amber-200",
-  training: "bg-purple-500/20 text-purple-800 dark:text-purple-200",
-  leave: "bg-green-500/20 text-green-800 dark:text-green-200",
-  off: "bg-slate-500/20 text-slate-700 dark:text-slate-200",
-  ground: "bg-orange-500/20 text-orange-800 dark:text-orange-200",
-  positioning: "bg-cyan-500/20 text-cyan-800 dark:text-cyan-200",
-  other: "bg-slate-500/20 text-slate-700 dark:text-slate-200",
+const HUE = {
+  rest: "oklch(0.723 0.219 149.6)", // green-500
+  standby: "oklch(0.769 0.188 70.1)", // amber-500
+  training: "oklch(0.627 0.265 303.9)", // purple-500
+  ground: "oklch(0.705 0.213 47.6)", // orange-500
+  positioning: "oklch(0.715 0.143 215.2)", // cyan-500
+  other: "oklch(0.554 0.046 257.4)", // slate-500
+  sim: "oklch(0.704 0.14 182.5)", // teal-500
+} as const;
+
+const solid = (hue: string, pct: number) => `color-mix(in oklab, ${hue} ${pct}%, var(--on-glass))`;
+
+const DUTY_BAR: Record<string, { text: string; hue: string }> = {
+  standby: { text: "text-amber-800 dark:text-amber-200", hue: HUE.standby },
+  training: { text: "text-purple-800 dark:text-purple-200", hue: HUE.training },
+  leave: { text: "text-green-800 dark:text-green-200", hue: HUE.rest },
+  off: { text: "text-green-800 dark:text-green-200", hue: HUE.rest },
+  ground: { text: "text-orange-800 dark:text-orange-200", hue: HUE.ground },
+  positioning: { text: "text-cyan-800 dark:text-cyan-200", hue: HUE.positioning },
+  other: { text: "text-slate-700 dark:text-slate-200", hue: HUE.other },
 };
 
-function barTone(tone: BarTone): string {
-  if (tone.kind === "duty") return DUTY_BAR[tone.dutyType] ?? DUTY_BAR.other;
+function barTone(tone: BarTone, quiet = false): { className: string; background: string } {
+  const t = barToneFull(tone);
+  // Outside the month: the same hue, half as strong, its words muted — never
+  // translucent, which let the glass through the bar.
+  if (!quiet) return t;
+  return { className: "text-[var(--on-glass-muted)]", background: t.background.replace(/(\d+)%/, (_, n) => `${Math.round(Number(n) / 2)}%`) };
+}
+
+function barToneFull(tone: BarTone): { className: string; background: string } {
+  if (tone.kind === "duty") {
+    const d = DUTY_BAR[tone.dutyType] ?? DUTY_BAR.other;
+    return { className: d.text, background: solid(d.hue, 30) };
+  }
   switch (tone.state) {
-    // Flown: the accent, filled — a flight reads as a flight beside a grey
-    // day off. The grey it was told a flown sector from a duty by nothing.
-    // Still to fly: the same hue, light, in the accent's own text.
+    // Flown: the accent, filled — a flight reads as a flight beside a day
+    // off. Still to fly: the same hue, light, in the accent's own text.
     case "flown":
-      return "bg-primary/25 text-foreground";
+      return { className: "text-foreground", background: solid("var(--primary)", 30) };
     case "unlogged":
-      return "bg-status-warning/15 text-status-warning";
+      return { className: "text-status-warning", background: solid("var(--status-warning)", 16) };
     case "sim":
-      return "bg-teal-500/10 text-teal-700 dark:text-teal-300";
+      return { className: "text-teal-800 dark:text-teal-200", background: solid(HUE.sim, 18) };
     default:
-      return "bg-primary/10 text-primary";
+      return { className: "text-primary", background: solid("var(--primary)", 12) };
   }
 }
 
@@ -270,6 +303,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       onHeaderPress,
       headerActive = false,
       onToday,
+      dutiesInList = false,
     },
     ref
   ) {
@@ -400,7 +434,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
 
     // Every flight and duty the month draws, filtered by the Duties toggle.
     const spans = useCalendarSpans(flights);
-    const showDuties = useCalendarDuties();
+    const dutiesView = useDutiesView();
     // Which bars would rather be two lines: a flight whose "248/9 WMKP" would
     // be condensed past TWO_LINE_BELOW to fit on one. Read against the day's
     // measured width, so it is only asked once that is known.
@@ -562,10 +596,23 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       stepMonths(e.deltaY > 0);
     };
 
+    /**
+     * A day of ANOTHER month is a way to that month: the calendar moves to it
+     * (a pair moves two, as a step does, unless the month is already the other
+     * pane) and the day is chosen.
+     */
     const handleDateClick = (dateStr: string, isCurrentMonth: boolean) => {
-      if (isCurrentMonth) {
-        onDateSelect?.(dateStr);
+      if (!isCurrentMonth) {
+        const [y, m] = dateStr.split("-").map(Number);
+        const delta = y * 12 + (m - 1) - (selectedMonth.year * 12 + selectedMonth.month);
+        const visible = delta === 0 || (dualMonth && delta === 1);
+        if (!visible) {
+          const step = dualMonth ? (delta > 0 ? 2 : -2) : delta;
+          const target = addMonths(selectedMonth.year, selectedMonth.month, step);
+          onMonthChange(target.year, target.month);
+        }
       }
+      onDateSelect?.(dateStr);
     };
 
     const today = getTodayLocal();
@@ -636,22 +683,23 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     // ("+1").
     const renderDayGrid = (
       days: { date: Date; dateStr: string; isCurrentMonth: boolean }[],
-      keyPrefix = ""
+      keyPrefix = "",
+      /** Which of the glass's bottom corners this grid reaches (a dual pane reaches one). */
+      edges: { left: boolean; right: boolean } = { left: true, right: true }
     ) => {
       const weeks = layoutsFor(days);
       const rowHeight = DAY_LINE_PX + LANES * LANE_PX + ROW_PAD_PX;
-      // Concentric with the glass: its radius less the ~8px the grid sits in.
-      const gridRadius = Math.max(cornerRadius - 8, 6);
+      // The grid runs to the glass's edges, so its bottom corners ARE the
+      // glass's: a lit corner cell is clipped to the material's own curve.
       const last = weeks.length - 1;
-      const cornerRadiusOf = (w: number, col: number) => {
-        const r = (top: boolean, left: boolean) =>
-          (top ? w === 0 : w === last) && (left ? col === 0 : col === 6) ? gridRadius : 0;
-        return `${r(true, true)}px ${r(true, false)}px ${r(false, false)}px ${r(false, true)}px`;
-      };
+      const bottomLeft = edges.left ? cornerRadius : 0;
+      const bottomRight = edges.right ? cornerRadius : 0;
+      const cornerRadiusOf = (w: number, col: number) =>
+        w === last ? `0 0 ${col === 6 ? bottomRight : 0}px ${col === 0 ? bottomLeft : 0}px` : undefined;
       const hasFullRange = !!(rangeStart && rangeEnd) && rangeStart !== rangeEnd;
       return (
         <div className="mx-auto w-full" style={{ maxWidth: paneMaxWidth }}>
-          <div className="grid grid-cols-7 gap-0 px-1 pb-0.5">
+          <div className="grid grid-cols-7 gap-0 pb-0.5">
             {DAYS.map((day) => (
               <div
                 key={day}
@@ -661,10 +709,13 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
               </div>
             ))}
           </div>
-          {/* The grid's corners follow the glass it sits in: a lit cell at a
-              corner (today, a range end, next month's soft days) was a square
-              against the material's rounded corner. */}
-          <div className="mx-1 overflow-hidden" style={{ borderRadius: gridRadius }}>
+          {/* Edge to edge: a GLASS calendar, not a calendar laid on glass. The
+              bottom corners are the material's own, so a lit corner cell
+              (today, a range end, next month's days) follows its curve. */}
+          <div
+            className="overflow-hidden"
+            style={{ borderRadius: `0 0 ${bottomRight}px ${bottomLeft}px` }}
+          >
             {weeks.map((week, w) => (
               // Each row is its own layout and paint island: the bars are
               // absolute inside it, so nothing in a row reaches past it.
@@ -672,7 +723,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                 <div className="grid h-full grid-cols-7">
                   {week.days.map((dayInfo, col) => {
                     const isCurrentMonth = dayInfo.isCurrentMonth;
-                    const isToday = isCurrentMonth && dayInfo.dateStr === today;
+                    const isToday = dayInfo.dateStr === today;
                     const isSelected = isCurrentMonth && dayInfo.dateStr === selectedDate;
                     const isRangeEnd =
                       isCurrentMonth &&
@@ -687,30 +738,36 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                       <button
                         key={`${keyPrefix}${w}-${col}`}
                         type="button"
-                        tabIndex={isCurrentMonth ? undefined : -1}
                         aria-label={`${formatDay(dayInfo.dateStr)}${labels.length ? `, ${labels.join(", ")}` : ""}${hidden ? `, and ${hidden} more` : ""}`}
                         aria-pressed={isSelected || undefined}
                         aria-current={isToday ? "date" : undefined}
                         onClick={() => handleDateClick(dayInfo.dateStr, isCurrentMonth)}
                         className={cn(
-                          "relative flex h-full min-w-0 items-start justify-between px-1 text-left transition-colors",
-                          w > 0 && "border-t border-[var(--on-glass-fill)]",
-                          col > 0 && "border-l border-[var(--on-glass-fill)]",
-                          !isCurrentMonth && "bg-[var(--on-glass-fill-soft)]",
+                          "relative flex h-full min-w-0 items-start justify-between border-t border-[var(--on-glass-fill)] px-1 text-left transition-colors",
+                          col > 0 && "border-l",
+                          // Another month's days are SHADED, not painted: a
+                          // translucent darkening the glass still shows
+                          // through. A solid fill there blocked the material
+                          // and read as a grey slab under the calendar.
+                          !isCurrentMonth && "bg-black/[0.07] dark:bg-black/30",
                           isInRange && "bg-[var(--on-glass-accent-soft)]",
                           isRangeEnd && "bg-[var(--on-glass-accent)]",
-                          // Today is the whole DAY, lit — the number alone in
-                          // a circle was a mark to find, not a day to see.
-                          isToday && !isRangeEnd && "bg-[var(--on-glass-accent-soft)]",
+                          // Today is the whole DAY, lit.
+                          isToday && !isRangeEnd && "bg-[var(--on-glass-fill)]",
                           isSelected && "ring-2 ring-inset ring-primary",
                         )}
                         style={{ borderRadius: cornerRadiusOf(w, col) }}
                       >
                         <span
                           className={cn(
+                            // Day numbers are grey; TODAY is the one in full
+                            // ink, bold — white on dark, black on light.
                             "text-[10px] leading-3 tabular-nums",
-                            isCurrentMonth ? "text-foreground" : "text-[var(--on-glass-faint)]",
-                            isToday && "font-bold text-primary",
+                            isToday
+                              ? "font-bold text-foreground"
+                              : isCurrentMonth
+                                ? "text-[var(--on-glass-muted)]"
+                                : "text-[var(--on-glass-faint)]",
                           )}
                         >
                           {dayInfo.date.getDate()}
@@ -762,18 +819,21 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                             ? bar.span.label
                             : full,
                         ];
+                    // Outside the month: the same bar, quieter — never
+                    // translucent, which let the glass through it.
+                    const tone = barTone(bar.span.tone, dim);
                     return (
                       <div
                         key={`${keyPrefix}${bar.key}`}
                         className={cn(
                           "absolute flex flex-col justify-center overflow-hidden whitespace-nowrap text-[9px] font-semibold leading-[11px] tracking-[-0.02em]",
-                          barTone(bar.span.tone),
+                          tone.className,
                           "rounded-[3px]",
                           bar.continuesLeft && "rounded-l-none",
                           bar.continuesRight && "rounded-r-none",
-                          dim && "opacity-50",
                         )}
                         style={{
+                          background: tone.background,
                           top: bar.lane * LANE_PX,
                           height: bar.height * LANE_PX - 1,
                           paddingInline: BAR_PAD_PX,
@@ -832,12 +892,17 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     const renderPane = (
       _m: { year: number; month: number },
       days: { date: Date; dateStr: string; isCurrentMonth: boolean }[],
-      keyPrefix = ""
+      keyPrefix = "",
+      pane?: 0 | 1
     ) => (
       <>
-        {renderDayGrid(days, keyPrefix)}
+        {renderDayGrid(days, keyPrefix, pane === undefined ? undefined : { left: pane === 0, right: pane === 1 })}
       </>
     );
+
+    /** A dual pane: half the glass, the right one ruled off from the left. */
+    const paneClass = (i: number) =>
+      cn("relative min-w-0", i === 1 && "border-l border-[var(--on-glass-fill)]");
 
     /**
      * The month(s) for an arbitrary anchor, with no animation state on them —
@@ -851,8 +916,8 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       return (
         <div className="flex">
           {[anchor, next].map((m, i) => (
-            <div key={`out-${m.year}-${m.month}`} className="min-w-0 px-1" style={{ flex: "0 0 50%" }}>
-              {renderPane(m, computeMonthDays(m.year, m.month), `out${i}-`)}
+            <div key={`out-${m.year}-${m.month}`} className={paneClass(i)} style={{ flex: "0 0 50%" }}>
+              {renderPane(m, computeMonthDays(m.year, m.month), `out${i}-`, i as 0 | 1)}
             </div>
           ))}
         </div>
@@ -866,26 +931,76 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
      * when they straddle a boundary, because "Dec – Jan 27" would put December
      * in the wrong year. Tapping it opens the month/year picker.
      */
-    const rangeLabel = (() => {
-      const yy = (y: number) => String(y % 100).padStart(2, "0");
-      if (!dualMonth) return `${MONTHS[selectedMonth.month]} ${yy(selectedMonth.year)}`;
+    // The month on the LEFT, full name bold and the year light — "November
+    // 2026" — the way a calendar app titles its month; the tools on the right.
+    // Two months name both: "Nov – Dec 2026", or each with its year across
+    // one ("Dec 2026 – Jan 2027", which "Dec – Jan 27" would put in the
+    // wrong year).
+    const monthTitle = (() => {
+      const year = (y: number) => <span className="font-normal text-[var(--on-glass-muted)]">{y}</span>;
+      if (!dualMonth) {
+        return (
+          <>
+            <span className="font-bold">{MONTHS_FULL[selectedMonth.month]}</span> {year(selectedMonth.year)}
+          </>
+        );
+      }
       const next = addMonths(selectedMonth.year, selectedMonth.month, 1);
-      return next.year === selectedMonth.year
-        ? `${MONTHS[selectedMonth.month]} – ${MONTHS[next.month]} ${yy(selectedMonth.year)}`
-        : `${MONTHS[selectedMonth.month]} ${yy(selectedMonth.year)} – ${MONTHS[next.month]} ${yy(next.year)}`;
+      return next.year === selectedMonth.year ? (
+        <>
+          <span className="font-bold">{`${MONTHS[selectedMonth.month]} – ${MONTHS[next.month]}`}</span>{" "}
+          {year(selectedMonth.year)}
+        </>
+      ) : (
+        <>
+          <span className="font-bold">{MONTHS[selectedMonth.month]}</span> {year(selectedMonth.year)}
+          <span className="font-bold">{` – ${MONTHS[next.month]}`}</span> {year(next.year)}
+        </>
+      );
     })();
+
+    // Where duties show — ONE control (see `useDutiesView`). A page with no
+    // list beside the calendar (the dashboard) offers on or off.
+    const dutyOptions: MenuOption<DutiesView>[] = dutiesInList
+      ? [
+          { value: "off", label: "Hidden" },
+          { value: "calendar", label: "On Calendar" },
+          { value: "all", label: "Calendar and List" },
+        ]
+      : [
+          { value: "off", label: "Hidden" },
+          { value: "calendar", label: "On Calendar" },
+        ];
+    const dutyValue: DutiesView = !dutiesInList && dutiesView === "all" ? "calendar" : dutiesView;
 
     // A control here is 28px tall to keep the row short; its HIT area is
     // grown to 36px by a pseudo-element (the rule for a fixed-height row).
     const hit = "relative after:absolute after:-inset-y-1 after:inset-x-0 after:content-['']";
     const dateSelector = (
-      // Three columns so the selector stays centred: Today on the left (when
-      // the page offers it), the calendar's own Duties switch on the right.
-      // That switch is the CALENDAR's: the logbook header's governs the duty
-      // cards in the list, so a pilot can keep the month's leave and standby
-      // in view without them interleaving the flights.
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 px-1 pt-1 pb-0.5">
-        <div className="flex justify-start">
+      <div className="flex items-center justify-between gap-2 pt-1.5 pb-1 pl-3 pr-1.5">
+        {onHeaderPress ? (
+          <button
+            type="button"
+            onClick={onHeaderPress}
+            aria-label="Select month"
+            aria-expanded={headerActive}
+            className={cn(
+              "-ml-1.5 flex h-7 min-w-0 items-center gap-1 rounded-full px-1.5 text-[17px] leading-none text-foreground transition-colors hover:bg-[var(--on-glass-fill-soft)]",
+              hit
+            )}
+          >
+            <span className="truncate">{monthTitle}</span>
+            <ChevronDown
+              className={cn(
+                "h-4 w-4 shrink-0 text-[var(--on-glass-muted)] transition-transform",
+                headerActive && "rotate-180"
+              )}
+            />
+          </button>
+        ) : (
+          <span className="flex h-7 min-w-0 items-center truncate text-[17px] leading-none text-foreground">{monthTitle}</span>
+        )}
+        <div className="flex shrink-0 items-center gap-1">
           {onToday && (
             <button
               type="button"
@@ -898,46 +1013,22 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
               Today
             </button>
           )}
-        </div>
-        {onHeaderPress ? (
-          <button
-            type="button"
-            onClick={onHeaderPress}
-            aria-label="Select month"
-            aria-expanded={headerActive}
-            className={cn(
-              "flex h-7 items-center gap-1 rounded-full px-3 text-[15px] font-semibold text-foreground transition-colors hover:bg-[var(--on-glass-fill-soft)]",
-              hit
-            )}
-          >
-            {rangeLabel}
-            <ChevronDown
-              className={cn(
-                "h-4 w-4 text-[var(--on-glass-muted)] transition-transform",
-                headerActive && "rotate-180"
-              )}
-            />
-          </button>
-        ) : (
-          <span className="flex h-7 items-center px-3 text-[15px] font-semibold text-foreground">{rangeLabel}</span>
-        )}
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={() => setCalendarDuties(!showDuties)}
-            aria-pressed={showDuties}
-            aria-label="Duties on the calendar"
+          <ChoicePicker<DutiesView>
+            label="Duties"
+            value={dutyValue}
+            options={dutyOptions}
+            onValueChange={setDutiesView}
             className={cn(
               "flex h-7 items-center gap-1 rounded-full px-2.5 text-xs font-semibold transition-colors",
               hit,
-              showDuties
+              dutiesView !== "off"
                 ? "bg-[var(--on-glass-active)] text-[var(--on-glass-active-fg)]"
                 : "text-[var(--on-glass-muted)] hover:bg-[var(--on-glass-fill-soft)]"
             )}
           >
             <Briefcase className="size-3.5" aria-hidden />
             Duties
-          </button>
+          </ChoicePicker>
         </div>
       </div>
     );
@@ -987,7 +1078,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                 return (
                   <div
                     key={`carousel-${m.year}-${m.month}`}
-                    className="relative min-w-0 px-1 transition-opacity duration-150"
+                    className={cn(paneClass(i), "transition-opacity duration-150")}
                     style={
                       {
                         flex: "0 0 50%",
@@ -1007,7 +1098,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                       } as React.CSSProperties
                     }
                   >
-                    {renderPane(m, m.days, `m${i}-`)}
+                    {renderPane(m, m.days, `m${i}-`, i as 0 | 1)}
                   </div>
                 );
               })}

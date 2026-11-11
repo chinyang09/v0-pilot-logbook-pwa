@@ -16,7 +16,7 @@ import {
   CACHE_KEYS,
 } from "@/hooks/data"
 import { mutate } from "swr"
-import { Briefcase, Calendar, Plane, Plus, Search, SearchX, X } from "lucide-react"
+import { Calendar, Plane, Plus, Search, SearchX, X } from "lucide-react"
 import { EmptyState } from "@/components/ui/empty-state"
 import { Button } from "@/components/ui/button"
 import { useRouter } from "next/navigation"
@@ -24,7 +24,7 @@ import { GlassContainer } from "@/components/ui/glass-container"
 import { usePanelDualMonth, useFloatingPanelUnderHeader } from "@/lib/layout/panel-mode"
 import { parseYMDLocal as parseDateLocal, formatLocalYMD } from "@/lib/utils/date"
 import { ChoicePicker } from "@/components/ui/option-menu"
-import { setCalendarDuties, setListDuties, useCalendarDuties, useListDuties } from "@/hooks/use-calendar-spans"
+import { setDutiesView, useCalendarDuties, useListDuties } from "@/hooks/use-calendar-spans"
 import { deleteScheduleEntry, restoreScheduleEntry } from "@/lib/db"
 import { showUndoToast } from "@/lib/utils/undo-toast"
 import { standbyActivation } from "@/lib/utils/roster/standby-activation"
@@ -82,11 +82,11 @@ export default function LogbookPage() {
   const { flights, isLoading: flightsLoading, refresh: refreshFlights } = useFlights()
   const createFlight = useCreateFlight()
 
-  // THE ROSTER IS THIS LIST WITH ITS DUTIES ON. The header's Duties button:
-  // off, the logbook alone — flights, positioning, simulator sessions; on,
-  // the roster's standby, ground, leave and days off as cards among them.
-  // The calendar has a switch of its own, so the month can keep the roster
-  // while the list shows flights alone.
+  // THE ROSTER IS THIS LIST WITH ITS DUTIES ON. One control, in the
+  // calendar's header (`useDutiesView`): duties hidden, on the calendar, or on
+  // the calendar AND as cards among the flights. The list's own share is the
+  // last: the month with its roster while the list shows flights alone is the
+  // common case, so it is the default.
   const showDuties = useListDuties()
   const calendarDuties = useCalendarDuties()
   /** Duties are being looked at somewhere — so + offers to add one. */
@@ -102,8 +102,7 @@ export default function LogbookPage() {
   const wantsDuties = searchParams.get("duties") === "1"
   useEffect(() => {
     if (!wantsDuties) return
-    setListDuties(true)
-    setCalendarDuties(true)
+    setDutiesView("all")
     const url = new URL(window.location.href)
     url.searchParams.delete("duties")
     window.history.replaceState(window.history.state, "", url.toString())
@@ -737,17 +736,8 @@ export default function LogbookPage() {
           <Calendar className="h-5 w-5" />
         </GlassGroupButton>
 
-        {/* Duties: the logbook alone, or the roster — its standby, ground,
-            leave and days off as cards among the flights. It replaced a
-            List | Roster page switch; the calendar keeps its own. */}
-        <GlassGroupButton
-          ariaLabel="Duty cards in the list"
-          ariaPressed={showDuties}
-          active={showDuties}
-          onClick={() => setListDuties(!showDuties)}
-        >
-          <Briefcase className="h-5 w-5" />
-        </GlassGroupButton>
+        {/* Where duties show is the CALENDAR's control (its header's
+            Duties menu) — the list's duty cards are its third choice. */}
 
         {/* No month label here. The calendar's own caption names the month and
             is now what opens the picker, so a second expanding label in the
@@ -791,7 +781,7 @@ export default function LogbookPage() {
         </GlassIconButton>
       )}
     </>
-  ), [showCalendar, toggleCalendar, handleAddFlight, showSearch, toggleSearch, showDuties, dutiesInView, handleAdd])
+  ), [showCalendar, toggleCalendar, handleAddFlight, showSearch, toggleSearch, dutiesInView, handleAdd])
 
   // Register actions for the desktop floating bar
   useRegisterMainActions(logbookActions, isActive)
@@ -892,6 +882,7 @@ export default function LogbookPage() {
           onMonthChange={handleCalendarMonthChange}
           onDateSelect={handleDateSelect}
           onToday={handleToday}
+          dutiesInList
           selectedDate={selectedDate || topFlightDate}
           onScrollStart={handleCalendarScrollStart}
           dualMonth={dualMonth}

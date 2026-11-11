@@ -891,15 +891,22 @@ function tryExtractGroundDuty(
 
   // The window ("06:15 - 18:15") lands in the report / actual columns
   // depending on the export, so scan the row for the first HH:MM range — the
-  // same approach `tryExtractSimDuty` takes. A day off carries none, which is
-  // fine: it is a date, not a duty window.
-  const range = cols.join(" ").match(/(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})/);
+  // same approach `tryExtractSimDuty` takes. A day off or leave is a DATE,
+  // never a window: were one printed ("00:00 - 23:59" at base), converting it
+  // to UTC would move the day — a Local Base LOFF on the 12th becomes 16:00Z
+  // on the 11th — and the calendar would draw it across two half days.
+  const range =
+    dutyType === "off" || dutyType === "leave"
+      ? null
+      : cols.join(" ").match(/(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})/);
 
   return {
     date,
     dutyType,
     dutyCode,
-    description: detailCell,
+    // A PDF cell wraps its text ("Temporary Shared Parental\nLeave"); the
+    // break is the page's, not the duty's.
+    description: detailCell.replace(/\s+/g, " ").trim(),
     startLocal: range?.[1],
     endLocal: range?.[2],
     sourceLine: lineNumber,

@@ -24,6 +24,7 @@
  * `dayKeyAt` in the display zone, the same rule the roster's agenda uses.
  */
 
+import { groupDutyRuns, isWholeDayDuty } from "@/lib/utils/roster/duty-runs"
 import type { FlightLog } from "@/types/entities/flight.types"
 import type { DutyType, ScheduleEntry } from "@/types/entities/roster.types"
 import { isFlownFlight } from "@/lib/utils/flight-calculations"
@@ -178,11 +179,11 @@ function pairState(a: TimedFlight["state"], b: TimedFlight["state"]): TimedFligh
  * of days is where "PL" does not, and a leave bar is long enough to hold it.
  */
 export function dutyBarLabel(entry: Pick<ScheduleEntry, "dutyCode" | "dutyDescription" | "dutyType">): string {
-  if (entry.dutyType === "leave" && entry.dutyDescription?.trim()) return entry.dutyDescription.trim()
+  const said = (entry.dutyDescription ?? "").replace(/\s+/g, " ").trim()
+  if (entry.dutyType === "leave" && said) return said
   const code = (entry.dutyCode ?? "").trim()
   if (code) return code.toUpperCase()
-  const description = (entry.dutyDescription ?? "").trim()
-  if (description) return description
+  if (said) return said
   return entry.dutyType.charAt(0).toUpperCase() + entry.dutyType.slice(1)
 }
 
@@ -282,14 +283,16 @@ export function buildCalendarSpans(
 
   if (!options.duties) return spans
 
-  // Timed duties are their own spans; all-day duties (no report time) on
-  // consecutive days with the same code merge into one bar.
-  const allDay: ScheduleEntry[] = []
+  // Timed duties are their own spans; whole-day duties — a day off or leave
+  // whatever window it carries, or anything with no report time — are grouped
+  // into runs by the rule the logbook's cards use (`groupDutyRuns`), so a
+  // run is one bar here exactly when it is one card there.
+  const wholeDay: ScheduleEntry[] = []
   for (const entry of entries) {
-    if (entry.dutyType === "flight") continue
-    const startMs = utcInstant(entry.date, entry.reportTime)
+    if (entry.dutyType === "flight" || entry.deletedAt != null) continue
+    const startMs = isWholeDayDuty(entry) ? null : utcInstant(entry.date, entry.reportTime)
     if (startMs === null) {
-      allDay.push(entry)
+      wholeDay.push(entry)
       continue
     }
     let endMs = utcInstant(entry.date, entry.debriefTime)
@@ -303,28 +306,18 @@ export function buildCalendarSpans(
     })
   }
 
-  allDay.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.id.localeCompare(b.id)))
-  const open = new Map<string, CalendarSpan>()
-  for (const entry of allDay) {
-    const label = dutyBarLabel(entry)
-    const key = `${entry.dutyType}|${label}`
-    const run = open.get(key)
-    if (run && nextDayKey(run.endDay) === entry.date) {
-      run.endDay = entry.date
-      continue
-    }
-    const span: CalendarSpan = {
+  for (const run of groupDutyRuns(wholeDay)) {
+    const entry = run.entries[0]
+    spans.push({
       id: entry.id,
-      label,
+      label: dutyBarLabel(entry),
       tone: { kind: "duty", dutyType: entry.dutyType },
-      startDay: entry.date,
-      endDay: entry.date,
+      startDay: run.startDate,
+      endDay: run.endDate,
       startHalf: 0,
       endHalf: 2,
       order: -1,
-    }
-    open.set(key, span)
-    spans.push(span)
+    })
   }
 
   return spans

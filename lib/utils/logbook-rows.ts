@@ -24,6 +24,9 @@
 import type { FlightLog } from "@/types/entities/flight.types"
 import type { ScheduleEntry } from "@/types/entities/roster.types"
 import { effectiveOutTime } from "@/lib/utils/flight-sort"
+import { groupDutyRuns, isWholeDayDuty } from "@/lib/utils/roster/duty-runs"
+
+export { isWholeDayDuty }
 
 /**
  * A duty's selection id and row key. Namespaced, because the detail panel's
@@ -74,44 +77,25 @@ export function isRosterDuty(entry: ScheduleEntry): boolean {
 
 type DutyRow = Extract<LogbookRow, { kind: "duty" }>
 
-/** A day off or leave is the whole day, whatever window the report put round it. */
-export function isWholeDayDuty(entry: Pick<ScheduleEntry, "dutyType" | "reportTime">): boolean {
-  return entry.dutyType === "off" || entry.dutyType === "leave" || !entry.reportTime
-}
-
-/** The day after a YYYY-MM-DD, on the calendar. */
-function nextDay(date: string): string {
-  const [y, m, d] = date.split("-").map(Number)
-  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10)
-}
-
-/** Whole-day duties on consecutive days with the same kind, code and description, as runs. */
+/** Whole-day duties on consecutive days with the same kind, code and description, as runs (`groupDutyRuns`). */
 function dutyRows(duties: readonly ScheduleEntry[]): DutyRow[] {
-  const live = duties.filter(isRosterDuty).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id))
+  const live = duties.filter(isRosterDuty)
   const rows: DutyRow[] = []
-  const open = new Map<string, DutyRow>()
   for (const entry of live) {
     if (!isWholeDayDuty(entry)) {
       rows.push({ kind: "duty", key: dutyRowKey(entry.id), date: entry.date, startDate: entry.date, entry, entries: [entry] })
-      continue
     }
-    const runKey = `${entry.dutyType}|${(entry.dutyCode ?? "").trim().toUpperCase()}|${(entry.dutyDescription ?? "").trim()}`
-    const run = open.get(runKey)
-    if (run && (nextDay(run.date) === entry.date || run.date === entry.date)) {
-      run.date = entry.date
-      run.entries.push(entry)
-      continue
-    }
-    const row: DutyRow = { kind: "duty", key: dutyRowKey(entry.id), date: entry.date, startDate: entry.date, entry, entries: [entry] }
-    open.set(runKey, row)
-    rows.push(row)
+  }
+  for (const run of groupDutyRuns(live.filter(isWholeDayDuty))) {
+    const entry = run.entries[0]
+    rows.push({ kind: "duty", key: dutyRowKey(entry.id), date: run.endDate, startDate: run.startDate, entry, entries: run.entries })
   }
   // Newest first, as `compareFlights`: the (last) day, the report time ("" —
   // a whole day — last), then id.
   return rows.sort(
     (a, b) =>
       b.date.localeCompare(a.date) ||
-      (b.entry.reportTime || "").localeCompare(a.entry.reportTime || "") ||
+      (isWholeDayDuty(b.entry) ? "" : b.entry.reportTime || "").localeCompare(isWholeDayDuty(a.entry) ? "" : a.entry.reportTime || "") ||
       a.entry.id.localeCompare(b.entry.id)
   )
 }
@@ -119,7 +103,7 @@ function dutyRows(duties: readonly ScheduleEntry[]): DutyRow[] {
 /** Does the duty row come BEFORE the flight in the newest-first list? */
 function dutyFirst(row: DutyRow, flight: FlightLog): boolean {
   if (row.date !== flight.date) return row.date > flight.date
-  return (row.entry.reportTime || "") > effectiveOutTime(flight)
+  return (isWholeDayDuty(row.entry) ? "" : row.entry.reportTime || "") > effectiveOutTime(flight)
 }
 
 export function buildLogbookRows(flights: readonly FlightLog[], duties: readonly ScheduleEntry[]): LogbookRow[] {

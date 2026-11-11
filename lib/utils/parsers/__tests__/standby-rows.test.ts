@@ -64,7 +64,7 @@ function row(y: number, cells: (string | undefined)[]): NormalizedRow {
 }
 
 /** A one-page report holding a single standby day. */
-function buildStandbyDoc(frameLabel: string, window: string): NormalizedDocument {
+function buildStandbyDoc(frameLabel: string, window: string, offWindow = ""): NormalizedDocument {
   const rows: NormalizedRow[] = [
     row(559, ["Scoot Pte Ltd"]),
     row(531, ["", "", "", `01/06/2026 - 30/06/2026 (All times in ${frameLabel})`]),
@@ -81,7 +81,8 @@ function buildStandbyDoc(frameLabel: string, window: string): NormalizedDocument
       "Crew",
     ]),
     row(394, ["02/06/2026 Tue", "BKUP", "Backup Standby SIN", window, "", "", "", ""]),
-    row(340, ["03/06/2026 Wed", "LOFF", "Local Day Off for Tech Crew", "", "", "", "", ""]),
+    row(340, ["03/06/2026 Wed", "LOFF", "Local Day Off for Tech Crew", offWindow, "", "", "", ""]),
+    row(320, ["04/06/2026 Thu", "TSPL", "Temporary Shared Parental\nLeave", "", "", "", "", ""]),
   ].map((r, i) => ({ ...r, index: i }));
 
   return {
@@ -93,6 +94,20 @@ function buildStandbyDoc(frameLabel: string, window: string): NormalizedDocument
 }
 
 describe("standby rows survive the parser", () => {
+  it("keeps a day off on its own date even when the report prints a window round it", async () => {
+    // At base 00:00 - 23:59 is 16:00Z the day before: read as a window, the
+    // 3rd's day off landed on the 2nd, across two half days.
+    const plan = await parseScheduleCSV(buildStandbyDoc("Local Base", "06:00 - 18:00", "00:00 - 23:59"));
+    const off = plan.groundDuties.find((d) => d.dutyType === "off")!;
+    expect(off.date).toBe("2026-06-03");
+    expect(off.startTime).toBeUndefined();
+  });
+
+  it("joins a description the PDF wrapped onto two lines", async () => {
+    const plan = await parseScheduleCSV(buildStandbyDoc("UTC", "06:00 - 18:00"));
+    expect(plan.groundDuties.find((d) => d.dutyCode === "TSPL")?.description).toBe("Temporary Shared Parental Leave");
+  });
+
   it("extracts a standby and a day off that used to be dropped", async () => {
     const plan = await parseScheduleCSV(buildStandbyDoc("UTC", "06:00 - 18:00"));
 
