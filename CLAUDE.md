@@ -1800,6 +1800,24 @@ Three places where the app knew the answer and still made the pilot find it:
   least attention to spare. Its accessible name says so ("Out now, next").
 - **The tablet's dashboard panel opens the cell that matters** (see
   "CURRENCY and LIMITS").
+- **A past sector with no times is a GAP, and every page says so**
+  (`isUnloggedPast`, `lib/utils/logbook-now.ts`). A flight whose UTC ARRIVAL
+  day has ended (an overnight sector keeps until its own arrival day is over)
+  with no OUT/IN is not "scheduled" any more: the logbook card drops the
+  accent and reads "not logged" in amber where the block time sits, the
+  roster agenda captions it "Not Logged", and the legal page carries a
+  `Not Logged` CAUTION requirement (`LegalityInput.unlogged`, the last 90
+  days, oldest first) whose remedy is "Log TR491 (7 Nov)" and whose panel
+  opens the flight. An unflown sector counts toward nothing, so a missing one
+  quietly understates recency and the limits — it drew in the accent, as if
+  still ahead. Simulators are never flagged (a session may record no times).
+
+**Decluttered in the same pass:** a comparison card no longer explains itself
+in a sentence under every row ("Your entry is on record…") — the held side is
+lit; only an accepted card's days-left line stays. The Summary's "Sim" figure
+shows only for a period that had a session. The light theme's
+`--status-warning` is L 0.5 (from 0.56) so amber TEXT clears 4.5:1 on a
+caution cell's tint, and a caution cell's figure reads `text-status-warning`.
 
 ### Hardware: keys and a tick (`lib/utils/shortcuts.ts`, `lib/utils/haptics.ts`)
 
@@ -5528,6 +5546,7 @@ When making changes, be aware of these high-impact files:
 - Do not let the annunciator's second line repeat its headline — when the headline is the governing requirement's own remedy, the line is `status.also` (the NEXT flagged requirement, "+N More"), never "Tightest <the same requirement> <its figure>". And do not paint a limit bar green: a limit with room is neutral, colour arrives with caution or fail
 - Do not stand every hour category in the flight form's TIME section — the ones the flight holds and the seat's role time lead (`leadsTimeSection`), the rest wait behind "More Categories". Never fold a category that holds a figure, and never hide a row conditionally elsewhere in the form to save space (the empty Scheduled rows stay): a row that is sometimes absent is a row to hunt for
 - Do not offer NOW on a flight that is not dated within a day of today (`isWithinADayOfToday`)
+- Do not draw a past sector with no OUT/IN as scheduled — `isUnloggedPast` makes it a gap (amber "not logged", a `Not Logged` caution on the legal page). And do not flag a simulator that way, or a sector before its UTC arrival day has ended
 - Do not add a keyboard shortcut that does not go through `isShortcut`, or a `navigator.vibrate` call outside `haptic()` — and never vibrate from a scroll, a render or a timer
 - Do not make the logbook's opening scroll run more than once per mount, or over a selection — after the first rows it is the pilot's list, and a programmatic scroll cancels a momentum scroll on touch
 - Do not print a bare rest countdown in the annunciator. The hero is `nextAction.headline`, which is the CONTEXTUAL form of the same fact ("Rest short by 3:00", "Rest until 04:36"); a raw countdown there, a copy inside the ring and an "N to go" line beside "Legal from" were three printings of one number

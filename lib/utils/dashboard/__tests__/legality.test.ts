@@ -304,3 +304,45 @@ describe("buildLegalityModel — binding constraint", () => {
     expect(model.binding?.id).toBe("doc-A")
   })
 })
+
+describe("buildLegalityModel — sectors the logbook is missing", () => {
+  const base = {
+    recency: { takeoffs: 6, landings: 6, current: true, lapseIso: "2027-01-01" },
+    capacity: {
+      duty14Days: { used: 20, limit: 90, remaining: 70 },
+      duty28Days: { used: 40, limit: 180, remaining: 140 },
+      flight28Days: { used: 30, limit: 100, remaining: 70 },
+      flight365Days: { used: 300, limit: 1000, remaining: 700 },
+    },
+    currencies: [],
+    now: new Date("2026-11-10T08:00:00Z"),
+  }
+
+  it("is a caution naming the sector, opening it, when one is unlogged", () => {
+    const m = buildLegalityModel({ ...base, unlogged: [{ id: "f1", date: "2026-11-07", label: "TR491" }] })
+    const r = m.requirements.find((x) => x.id === "unlogged")!
+    expect(r.state).toBe("caution")
+    expect(r.value).toBe("TR491")
+    expect(r.action).toBe("Log TR491 (7 Nov)")
+    expect(r.href).toBe("/logbook?selected=f1")
+    expect(m.verdict).toBe("caution")
+  })
+
+  it("counts several, and outranks a document that is only expiring", () => {
+    const m = buildLegalityModel({
+      ...base,
+      unlogged: [
+        { id: "a", date: "2026-11-01", label: "TR1" },
+        { id: "b", date: "2026-11-07", label: "TR2" },
+      ],
+    })
+    expect(m.requirements.find((x) => x.id === "unlogged")!.value).toBe("2 sectors")
+    expect(m.binding?.id).toBe("unlogged")
+  })
+
+  it("adds nothing when every past sector is logged", () => {
+    const m = buildLegalityModel({ ...base })
+    expect(m.requirements.some((x) => x.id === "unlogged")).toBe(false)
+    expect(m.verdict).toBe("ok")
+  })
+})

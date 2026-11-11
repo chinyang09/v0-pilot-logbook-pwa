@@ -6,6 +6,7 @@ import { useFDPData } from "./use-fdp-data"
 import { useCurrencies } from "./use-currencies"
 import { useFlights } from "./use-flights"
 import { hhmmToMinutes } from "@/lib/utils/time"
+import { isUnloggedPast } from "@/lib/utils/logbook-now"
 import { buildLegalityModel } from "@/lib/utils/dashboard/legality"
 import { deriveDutyStatus } from "@/lib/utils/dashboard/duty-status"
 import { buildPilotStatus, type PilotStatus } from "@/lib/utils/dashboard/pilot-status"
@@ -87,6 +88,25 @@ export function usePilotStatus(
     [scheduleDutyPeriods, plannedDutyPeriods],
   )
 
+  // Past sectors in the recency window still without times, oldest first —
+  // keyed on the UTC DAY, so it is recomputed once a day, not every minute.
+  const todayUtc = new Date(Math.floor(now / 86_400_000) * 86_400_000).toISOString().slice(0, 10)
+  const unlogged = useMemo(() => {
+    const [y, m, d] = todayUtc.split("-").map(Number)
+    const from = new Date(Date.UTC(y, m - 1, d - 90)).toISOString().slice(0, 10)
+    return flights
+      .filter((f) => f.date >= from && isUnloggedPast(f, todayUtc))
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+      .map((f) => ({
+        id: f.id,
+        date: f.date,
+        label:
+          f.flightNumber?.trim() ||
+          [f.departureIcao, f.arrivalIcao].filter(Boolean).join("–") ||
+          "Flight",
+      }))
+  }, [flights, todayUtc])
+
   const forecastBreaches = useMemo(
     () => forecast.exceedances.map((e) => e.limitName),
     [forecast],
@@ -137,9 +157,10 @@ export function usePilotStatus(
         currencies,
         logbookEmpty,
         unavailable,
+        unlogged,
         now: new Date(nowMinute * 60_000),
       }),
-    [nowMinute, recency, capacity, forecastBreaches, currencies, logbookEmpty, unavailable],
+    [nowMinute, recency, capacity, forecastBreaches, currencies, logbookEmpty, unavailable, unlogged],
   )
 
   const status = useMemo(

@@ -171,25 +171,21 @@ export const FlightMismatchCard = memo(function FlightMismatchCard({
         })}
       </div>
 
-      <div className="mt-1.5 flex items-baseline justify-between gap-2 text-[11px]">
-        <p className={holdsOwn ? "text-muted-foreground" : "text-muted-foreground/70"}>
-          {holdsOwn
-            ? "Your entry is on record; the company's figure is kept alongside it."
-            : "The company's figure is on record. Tap yours to put it back."}
+      {/* Which side is on record is the LIT side of each pair, and the tab's
+          own line says what a tap does — a sentence repeating both under
+          every card was the same words once per flight. What is left is the
+          one fact a card holds alone: how long an accepted change can still
+          be put back. */}
+      {!holdsOwn && acceptedAt != null && (
+        <p
+          className={cn(
+            "mt-1.5 text-right text-[11px] tabular-nums",
+            retentionDaysLeft(acceptedAt) <= 7 ? "text-status-warning" : "text-muted-foreground"
+          )}
+        >
+          {retentionLabel(acceptedAt)}
         </p>
-        {!holdsOwn && acceptedAt != null && (
-          <span
-            className={cn(
-              "shrink-0 tabular-nums",
-              retentionDaysLeft(acceptedAt) <= 7
-                ? "text-status-warning"
-                : "text-muted-foreground/70"
-            )}
-          >
-            {retentionLabel(acceptedAt)}
-          </span>
-        )}
-      </div>
+      )}
     </div>
   );
 })
