@@ -1908,22 +1908,33 @@ zone).
 
 | | Drawn as |
 |---|---|
-| a flight inside one day | that day's cell, full width: "TR560" over "RPMD" |
+| a flight inside one day | that day's cell, full width, ONE line: "TR560 RPMD" ("TR560" alone in the dual layout) |
 | a flight or timed duty across midnight | from the MIDDLE of its first day to the MIDDLE of its last — half of each cell |
 | all-day duties on consecutive days with one code | ONE bar ("Paternal Leave", "LOFF"); leave reads its description, other duties their code |
 | a bar leaving a week row | continues on the next row, its cut ends square |
 
-- **Two lines per lane, two lanes per row, rows only for the weeks the month
-  spans.** "TR560 RPMD" on one line is ~56px of 9px type and a phone's day
-  cell is ~51px, so a flight is its number over its destination; what a day
-  has past two lanes is counted beside its number ("+1"). Clipped, never
+- **One line per lane, THREE lanes per day, rows only for the weeks the
+  month spans** — the owner's reference fits three items a day and ten
+  characters ("TRxxx WARR") on a line. Inter is wide: those ten characters are
+  ~53–58px of 9px type and a phone's day is ~46–51px, so a label is CONDENSED
+  horizontally by exactly what it needs (`lib/utils/text-fit.ts`: canvas
+  `measureText`, cached per label, `scaleX` with a floor of 0.7, re-measured
+  once the web font loads) rather than set in a second typeface. Measured: no
+  label clipped at 390 (≥0.77) or 360 (≥0.70). What a day has past three
+  lanes is counted beside its number ("+1"). Clipped at the floor, never
   ellipsed — "TR56…" loses the digit that says which flight. Every row is one
-  fixed height, so stepping weeks moves nothing; a pair of months takes the
-  larger month's row count.
-- **The colours are the roster's vocabulary**: a flight still to fly the
-  accent, flown the plain record, a past sector with no times amber (not
-  logged), a simulator teal, a duty its type's hue at 20% (`DUTY_BAR`) — at the
-  roster chips' 10% a run of leave all but vanished on the glass.
+  fixed height, so stepping weeks moves nothing and one month and two are the
+  same height; a pair takes the larger month's row count.
+- **The DUAL layout shows the flight number alone** — a pane is 284px, ~40px a
+  day, and condensing "TR560 RPMD" into that is past legible.
+- **A flight is TEXT, a duty is a BAR**, as in the reference: a flight's label
+  in its state's colour on the glass — the accent still to fly, the plain
+  record flown, amber not logged, teal a simulator — and a duty a solid fill
+  in its type's -700 hue with white text (`DUTY_BAR`; at 20% a run of leave
+  read as a stain). Today is the whole CELL shaded (`--on-glass-fill`) with a
+  bold accent number, not a circle round the number.
+- **The day's width is read in a ResizeObserver** (`data-cal-week` /7), never
+  in a commit, and each week row is `contain: layout paint`.
 - **Bars take no taps.** A tap is the DAY's, which the page scrolls to.
 - **The header is three columns**: Today (where the page offers it), the
   month selector (the month/year wheels), and the **Duties** toggle
@@ -2063,14 +2074,15 @@ move the pill onto a button. Measured at 1180: main actions 16→240, pill
 367→814. What *can* collide is a page whose action bar EXPANDS — the dashboard's
 period pills — and that is a per-page question, not a sizing one.
 
-**A month is ALWAYS ONE PANE WIDE in the split layout** — `MONTH_PANE_PX`, 284,
-which is the dual panel minus the page's calendar gutter, halved, minus the
-pane's own padding. Day cells are square, so a month's width IS its height: a
-single month wider than a dual pane made the calendar taller with one month
-than with two, and the width toggle then resized the panel under the flight
-list every time. Capped, both modes measure **272px** and the list does not
-move at all (measured: `scrollTop` 900 before, during and after a round trip).
-The single month is therefore centred in its 360px panel rather than filling it.
+**A dual pane is `MONTH_PANE_PX` (284), a single month `SINGLE_PANE_PX`
+(336)** in the split layout — the dual panel minus the gutter, halved, minus a
+pane's padding; and the single panel minus the same. They used to be one
+width because the cells were SQUARE, so a month's width was its height and a
+wider single month made the width toggle resize the calendar under the flight
+list. The bar grid's rows are a fixed height, so that reason is gone: the two
+modes are the same height at any width, and a single month on a tablet now
+has the phone's ~48px days instead of the pane's ~40 (the owner's "desktop
+differs from mobile"). On a phone the calendar is uncapped.
 
 The pane width is only half of it: the calendar also carries exactly ONE header
 row (the date selector) in both modes. When the caption lived on each pane
@@ -5755,7 +5767,7 @@ When making changes, be aware of these high-impact files:
 - Do not give a full-surface overlay `inset-0` on desktop — the sidebar and the nav pill draw above it, so it ends up BEHIND them with its top unreachable (that was the signature pad on iPad). Take the content region: `--chrome-top`/`--chrome-bottom`, plus `SIDEBAR_WIDTH_PX` on the left only while the sidebar is PUSHING (below 1120 it overlays full-width panels and the region has not moved). Mobile keeps `inset-0` — there the dialog is above the bottom nav and the viewport IS the region
 - Do not redeclare the sidebar's width — it is `SIDEBAR_WIDTH_PX` in `lib/layout/panel-widths.ts`, part of the same budget as the panel widths (1180 − 199 − 1 = 980 on iPad Air 5 landscape). It had drifted into three separate copies
 - Do not hardcode the panel widths — they live in `lib/layout/panel-widths.ts` and are a single budget. `DUAL_MONTH_PX` is 600 rather than 620 because 620 + 360 detail is EXACTLY the space iPad Air 5 landscape has with the sidebar open, so it fit with zero slack and any rounding took the dual-month toggle away on the owner's device
-- Do not let a single calendar month be wider than a DUAL pane in the split layout — (written when the cells were square; the bar grid's rows are a fixed height now, but the cap still keeps one month and a pair the same width) the cells were square, so its width was its height, and a taller single month means the width toggle resizes the calendar under the flight list on every switch. Cap it at `MONTH_PANE_PX` and give it the same month caption a dual pane has (the caption alone was 12px of the difference). Uncapped entirely it grew from 313px to 519px tall for the frames before the dual-month switch caught up
+- Do not let the calendar's HEIGHT depend on its width — the rows are a fixed height, which is what lets a single month (`SINGLE_PANE_PX`) be wider than a dual pane (`MONTH_PANE_PX`) without the width toggle resizing the calendar under the flight list. Give both modes the one header row (a per-pane caption was 12px of difference), and keep a cap in the split layout: uncapped, a single month stretched across the wide panel for the frames before the dual-month switch caught up
 - Do not thin the rim by dropping the conic's FLANKS — iOS's controls have a hairline you can see ALL THE WAY ROUND, and at flanks of ~0.05 three-quarters of the perimeter had none. Keep the lobes concentrated (that is what reads as light on a curve) and the flanks around 0.22; the ring's WIDTH (`--softness`, and `.Highlight`'s padding with it) is the separate knob, and it is only free to be fine BECAUSE the flanks hold the continuity
 - Do not go back to ONE image input for the camera button — Android 14+ answers `accept="image/*"` with its Photo Picker, which has no camera. Two inputs (one `capture="environment"`), chosen from `PhotoSourceMenu`, whose rows are `<label>`s so the picker opens inside the tap (iOS refuses a file input opened outside the gesture)
 - Do not open the flight card's `…` cascade behind a blocking scrim — the page must stay scrollable underneath (a scroll dismisses it) while taps are swallowed at the capture phase so nothing activates. And arm that swallow on a short timer, or the click from the tap that OPENED it closes it on the same gesture
@@ -5766,7 +5778,7 @@ When making changes, be aware of these high-impact files:
 - Do not let a select show blank for a stored value it has no option for — the currency Type row read empty for any company code an import brought in. Offer the record's own value as an option (`typeOptions`); mapping it to "Custom" would rewrite the stored code on the next save
 - Do not use a native `<select>` (laid over a row or bare) or a Radix Select for a choice — it is `ChoicePicker`/`OptionMenu`, the app's own menu on the glass face. The platform's control is a different thing on every device and like nothing else in the app. And give the trigger the whole row, never a corner of it
 - Do not link a roster flight into the logbook — it opens in the ROSTER's detail panel (`flight:<id>`), so Back returns to the roster. And do not let the roster agenda's rows vary in height or be measured: it is virtualized like the logbook (`HEADER_H` / `ITEM_H`), for the same momentum-scroll reason
-- Do not draw a calendar day as a bare number with a dot, or give a page a calendar of its own — every calendar is `LogbookCalendar`'s bar grid, fed by `useCalendarSpans` and governed by one Duties toggle. Keep a flight two lines ("TR560" over "RPMD"), a midnight crossover on HALF of each day, a run of all-day duties ONE bar, and the rows a fixed height
+- Do not draw a calendar day as a bare number with a dot, or give a page a calendar of its own — every calendar is `LogbookCalendar`'s bar grid, fed by `useCalendarSpans` and governed by one Duties toggle. Keep a flight ONE line ("TR560 RPMD", condensed by `text-fit.ts`, never a second typeface; the number alone in the dual layout), three lanes a day, a flight as text and a duty as a solid bar, a midnight crossover on HALF of each day, a run of all-day duties ONE bar, and the rows a fixed height
 - Do not put Roster back in the nav as its own tab — it is the Logbook tab's second view (`LogbookViewSwitch`); a stored "roster" tab goes through `normaliseNavTabs`
 - Do not bring back the month-capsule grid or a year stepper in the calendar's month/year picker — it is two wheels, live, closed by the date selector; and in the dual layout it takes the RIGHT pane with the month being chosen still drawn on the left. Keep `WHEEL_ITEM_PX` small enough that the wheel fits a dual pane's grid, or the panel grows (or clips) when it opens
 - Do not cap a date wheel's past at a few years — a pilot back-filling a paper logbook enters flights from decades ago; the default is 70

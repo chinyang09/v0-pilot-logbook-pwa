@@ -17,6 +17,7 @@ import { wheelClassNames } from "@/components/ui/wheel-styles";
 import type { FlightLog } from "@/lib/db";
 import { cn } from "@/lib/utils";
 import { formatDay } from "@/lib/utils/date";
+import { fitScale, labelWidth, onFontsReady } from "@/lib/utils/text-fit";
 import { layoutWeek, type BarTone, type WeekLayout } from "@/lib/utils/roster/calendar-bars";
 import { setCalendarDuties, useCalendarDuties, useCalendarSpans } from "@/hooks/use-calendar-spans";
 
@@ -105,50 +106,50 @@ function yearOptions(from: number, to: number) {
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /**
- * A week row: the day number's line, then two bar lanes, then a hairline of
- * air. A lane is two lines tall because a flight is "TR560" over "RPMD" — on
- * one line the pair is ~56px of 9px type, and a phone's day cell is ~51px.
- * Two lanes hold a turnaround; what a day has past them is counted ("+1").
- * Fixed, so every row and every month is the same height and stepping months
- * never moves anything under the calendar.
+ * A week row: the day number's line, then THREE one-line lanes, then a
+ * hairline of air — the owner's reference (a desktop calendar app): three
+ * things a day, each one line ("TR560 RPMD", "LOFF"), what falls past them
+ * counted beside the date ("+1"). Fixed, so every row and every month is the
+ * same height and stepping months never moves anything under the calendar.
  */
 const DAY_LINE_PX = 17;
-const LANE_PX = 23;
-const ROW_PAD_PX = 2;
-const LANES = 2;
+const LANE_PX = 14;
+const ROW_PAD_PX = 3;
+const LANES = 3;
 
 /**
- * A bar's colour says what KIND of thing it is, the roster's own vocabulary:
- * a flight still to fly is the accent (planned, as on the logbook card), a
- * flown one the plain record, one in the past with no times the amber of
- * "not logged", a simulator teal, and a duty its duty type's colour.
- */
-/**
- * A duty's bar: its type's hue, a step stronger than the roster's 10% chips.
- * On the glass a 10% tint all but vanished, and a run of leave or days off is
- * the shape of the month — it should read before the flights do.
+ * A DUTY is a solid bar, white type on its type's colour — the shape of the
+ * month (a run of leave, days off) reads before a word does. -700 on every hue
+ * keeps white 9px type at 4.5:1 and over.
  */
 const DUTY_BAR: Record<string, string> = {
-  standby: "bg-amber-500/20 text-amber-800 dark:text-amber-200",
-  training: "bg-purple-500/20 text-purple-800 dark:text-purple-200",
-  leave: "bg-green-500/20 text-green-800 dark:text-green-200",
-  off: "bg-slate-500/20 text-slate-700 dark:text-slate-200",
-  ground: "bg-orange-500/20 text-orange-800 dark:text-orange-200",
-  positioning: "bg-cyan-500/20 text-cyan-800 dark:text-cyan-200",
-  other: "bg-slate-500/20 text-slate-700 dark:text-slate-200",
+  standby: "bg-amber-700 text-white",
+  training: "bg-purple-700 text-white",
+  leave: "bg-green-700 text-white",
+  off: "bg-slate-600 text-white",
+  ground: "bg-orange-700 text-white",
+  positioning: "bg-cyan-700 text-white",
+  other: "bg-slate-600 text-white",
 };
 
+/**
+ * A FLIGHT is coloured TEXT, no fill — the reference's own split, and it is
+ * what keeps a day with three sectors legible: three filled chips stacked in a
+ * 50px cell read as a block. Still to fly is the accent (planned, as on the
+ * logbook card), flown the plain record, a past sector with no times the amber
+ * of "not logged", a simulator teal.
+ */
 function barTone(tone: BarTone): string {
   if (tone.kind === "duty") return DUTY_BAR[tone.dutyType] ?? DUTY_BAR.other;
   switch (tone.state) {
     case "flown":
-      return "bg-[var(--on-glass-fill)] text-foreground";
+      return "text-foreground";
     case "unlogged":
-      return "bg-status-warning/15 text-status-warning";
+      return "text-status-warning";
     case "sim":
-      return "bg-teal-500/10 text-teal-700 dark:text-teal-300";
+      return "text-teal-700 dark:text-teal-300";
     default:
-      return "bg-primary/10 text-primary";
+      return "text-primary";
   }
 }
 
@@ -238,7 +239,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       view = "calendar",
       onMonthSelect,
       dualMonth = false,
-      paneMaxWidth = 360,
+      paneMaxWidth,
       rangeStart = null,
       rangeEnd = null,
       header,
@@ -249,6 +250,26 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     ref
   ) {
     const containerRef = useRef<HTMLDivElement>(null);
+
+    // One day's width, so a label can be condensed to fit it (see text-fit).
+    // Read from a ResizeObserver — after layout, never in a commit — off the
+    // first week row; every pane is the same width.
+    const [cellPx, setCellPx] = useState(0);
+    const [, setFontsTick] = useState(0);
+    useEffect(() => {
+      const el = containerRef.current;
+      if (!el) return;
+      const ro = new ResizeObserver(() => {
+        const row = el.querySelector<HTMLElement>("[data-cal-week]");
+        if (row) setCellPx(row.clientWidth / 7);
+      });
+      ro.observe(el);
+      const stop = onFontsReady(() => setFontsTick((n) => n + 1));
+      return () => {
+        ro.disconnect();
+        stop();
+      };
+    }, []);
     /**
      * Swipe bookkeeping — REFS, not state.
      *
@@ -578,7 +599,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     // bars (`lib/utils/roster/calendar-bars.ts`): a day says what it IS
     // ("TR560 RPMD", "LOFF"), a flight across midnight runs from the middle of
     // one day to the middle of the next, and a run of leave is one bar. Rows
-    // are one fixed height (two lanes); what does not fit a day is counted
+    // are one fixed height (three lanes); what does not fit a day is counted
     // ("+1").
     const renderDayGrid = (
       days: { date: Date; dateStr: string; isCurrentMonth: boolean }[],
@@ -604,7 +625,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
             {weeks.map((week, w) => (
               // Each row is its own layout and paint island: the bars are
               // absolute inside it, so nothing in a row reaches past it.
-              <div key={`${keyPrefix}w${w}`} className="relative" style={{ height: rowHeight, contain: "layout paint" }}>
+              <div key={`${keyPrefix}w${w}`} data-cal-week className="relative" style={{ height: rowHeight, contain: "layout paint" }}>
                 <div className="grid h-full grid-cols-7">
                   {week.days.map((dayInfo, col) => {
                     const isCurrentMonth = dayInfo.isCurrentMonth;
@@ -632,6 +653,10 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                           "relative flex h-full min-w-0 items-start justify-between border-t border-[var(--on-glass-fill)] px-1 pt-0.5 text-left transition-colors",
                           col > 0 && "border-l",
                           !isCurrentMonth && "bg-[var(--on-glass-fill-soft)]",
+                          // Today is the whole CELL, shaded, as in a desk
+                          // calendar — a circle on the number was a small
+                          // mark to find in a grid of busy days.
+                          isToday && "bg-[var(--on-glass-fill)]",
                           isInRange && "bg-[var(--on-glass-accent-soft)]",
                           isRangeEnd && "bg-[var(--on-glass-accent)]",
                           isSelected && "bg-[var(--on-glass-accent-soft)] ring-2 ring-inset ring-primary",
@@ -641,7 +666,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                           className={cn(
                             "flex h-[15px] min-w-[15px] items-center justify-center rounded-full px-[3px] text-[11px] leading-none tabular-nums",
                             isCurrentMonth ? "text-foreground" : "text-[var(--on-glass-faint)]",
-                            isToday && "bg-primary font-bold text-primary-foreground",
+                            isToday && "font-bold text-primary",
                           )}
                         >
                           {dayInfo.date.getDate()}
@@ -661,12 +686,25 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                   {week.layout.bars.map((bar) => {
                     const startCol = Math.floor(bar.start / 2);
                     const dim = !week.days[Math.min(startCol, 6)].isCurrentMonth && !week.days[Math.min(Math.ceil(bar.end / 2) - 1, 6)].isCurrentMonth;
+                    const isDuty = bar.span.tone.kind === "duty";
+                    const text = bar.span.detail && !dualMonth ? `${bar.span.label} ${bar.span.detail}` : bar.span.label;
+                    // Condensed by exactly what it needs to sit on one line:
+                    // the bar's width less its 1px insets and padding.
+                    const natural = labelWidth(text);
+                    const available =
+                      ((bar.end - bar.start) / 2) * cellPx -
+                      (bar.continuesLeft ? 0 : 1) -
+                      (bar.continuesRight ? 0 : 1) -
+                      (isDuty ? 8 : 4);
+                    const scale = cellPx > 0 ? fitScale(natural, available) : 1;
                     return (
                       <div
                         key={`${keyPrefix}${bar.key}`}
                         className={cn(
-                          "absolute flex flex-col justify-center overflow-hidden whitespace-nowrap rounded-[3px] px-1 text-[9px] font-semibold leading-[10px] tracking-tight",
+                          "absolute flex items-center overflow-hidden whitespace-nowrap text-[9px] font-semibold leading-none tracking-[-0.02em]",
                           barTone(bar.span.tone),
+                          // A duty is a bar; a flight is text on the day.
+                          isDuty ? "rounded-[3px] px-1" : "px-[2px]",
                           bar.continuesLeft && "rounded-l-none",
                           bar.continuesRight && "rounded-r-none",
                           dim && "opacity-50",
@@ -678,13 +716,20 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                           width: `calc(${((bar.end - bar.start) / 14) * 100}% - ${(bar.continuesLeft ? 0 : 1) + (bar.continuesRight ? 0 : 1)}px)`,
                         }}
                       >
-                        {/* A flight is its number over where it goes; a duty
-                            is one line. Clipped, never ellipsed — "TR56…"
-                            loses the one digit that says which flight. */}
-                        <span className="overflow-hidden">{bar.span.label}</span>
-                        {bar.span.detail && (
-                          <span className="overflow-hidden font-medium">{bar.span.detail}</span>
-                        )}
+                        {/* ONE line: "TR560 RPMD". Clipped, never ellipsed —
+                            "TR56…" loses the digit that says which flight. In
+                            the two-month layout a day is ~40px, so a flight
+                            is its number alone there. */}
+                        <span
+                          className="inline-block shrink-0"
+                          style={
+                            scale < 1 && natural
+                              ? { width: natural, transform: `scaleX(${scale})`, transformOrigin: "left center" }
+                              : undefined
+                          }
+                        >
+                          {text}
+                        </span>
                       </div>
                     );
                   })}
