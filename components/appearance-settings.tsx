@@ -166,20 +166,25 @@ function PaletteCard({
       aria-pressed={selected}
       onClick={onSelect}
       className={cn(
-        "flex flex-col gap-2 rounded-lg border-2 p-2 text-left transition-colors",
+        "relative flex flex-col gap-2 rounded-lg border-2 p-2 text-left transition-colors",
         selected ? "border-primary bg-primary/10" : "border-border hover:border-primary/50"
       )}
     >
       <PaletteSwatch seed={seed} mode={mode} />
-      <div className="flex items-start gap-1.5 px-0.5">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1 text-sm font-medium">
-            {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
-            <span className="truncate">{name}</span>
-          </div>
-          <div className="text-xs text-muted-foreground leading-snug">{description}</div>
+      {/* The tick rides on the SWATCH's corner, so choosing a palette moves
+          nothing: in the text column it took the words' width and wrapped
+          the description onto another line, shifting the whole grid. */}
+      {selected && (
+        <span className="absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm" aria-hidden>
+          <Check className="h-3.5 w-3.5" strokeWidth={3} />
+        </span>
+      )}
+      <div className="min-w-0 px-0.5">
+        <div className="flex items-center gap-1 text-sm font-medium">
+          {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
+          <span className="truncate">{name}</span>
         </div>
-        {selected && <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />}
+        <div className="text-xs text-muted-foreground leading-snug">{description}</div>
       </div>
     </button>
   )

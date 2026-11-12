@@ -1941,31 +1941,42 @@ zone).
   next. A two-line bar is not part of that decision.
 - **A GLASS calendar, not a calendar on glass — and what is written on it is
   SOLID.** Every item is a bar (`barTone`, `DUTY_BAR`, `HUE`) whose hue is
-  MIXED into `--on-glass` (`color-mix`), so it looks like the tint it was but
-  nothing behind the glass shows through it: a flight in the accent — FILLED
-  once flown, light with accent text still to fly — amber not logged, teal a
-  simulator, a duty its type's hue. Another month's bars are the same hue at
-  half strength, never `opacity` (that let the glass through). A round of
-  bare coloured text and solid -700 duty bars was rejected by the owner:
-  neighbours in one lane ran together. Bars leave a 3px gap (`BAR_INSET_PX`).
+  MIXED into `--on-glass` (`color-mix`), so nothing behind the glass shows
+  through it. Another month's bars fall to a faint tint with muted ink, never
+  `opacity` (that let the glass through). A round of bare coloured text was
+  rejected by the owner: neighbours in one lane ran together. Bars leave a
+  3px gap (`BAR_INSET_PX`).
+- **Two WEIGHTS, by what the logbook is FOR** (the owner, Nov 2026: it is a
+  flight log; duties explain the roster and help recall the flying). LOUD —
+  filled in their hue with dark or accent ink: a FLOWN flight (the accent),
+  a SIMULATOR (teal) and a STANDBY (amber, a commitment that can become a
+  flight). Outlined — a 1px inset ring over a light tint: a flight still TO
+  FLY (the accent: outlined = not yet) and a past sector NOT LOGGED (amber,
+  a gap). QUIET — a 12% tint with `text-muted-foreground`: ground, training,
+  positioning, other, and every rest day. It was the other way round: every
+  duty sat at a 30% tint with saturated text while a flown flight was a pale
+  wash, so a month of days off out-shouted the flying. Quiet is FILL and
+  weight, never contrast — every label measures ≥ 4.5:1 in both themes.
 - **REST days are ONE hue** (green): a day off and every leave — annual,
   sick, parental — on the calendar and on the list's duty cards alike
   (`isRestDay`, `lib/utils/roster/duty-runs.ts`). LOFF grey beside leave green
   read as two kinds of day.
 - **Another month's days are SHADED, not painted** — a translucent darkening
-  (`bg-black/[0.07]`, `/30` dark) the glass shows through; a solid fill read
-  as a slab under the calendar. They are TAPPABLE: the calendar moves to that
-  month (a pair two months, unless it is the other pane) and the day is
-  chosen.
-- **Day numbers are grey; TODAY's is a solid ACCENT BADGE** — the calendar's
-  ONE solid accent mark, as on the platform's own calendars (Nov 2026: a lit
-  cell and a bold number were the range's tint and easy to miss). **The
-  chosen day is a NEUTRAL fill** (`--on-glass-fill`) **with an inverted
-  badge** (ink on the face): it was an accent ring, the colour every flight
-  still to fly is drawn in, so the day tapped read as one more of them. Only
-  today is badged in the accent — a range's ends are bold accent numbers, or
-  today inside a range read as a third end. "Today" follows the clock
-  (`useDayKey`), so a calendar left open overnight moves it.
+  (`bg-black/[0.14]`, `/[0.45]` dark) the glass shows through; a solid fill
+  read as a slab under the calendar (and `/[0.07]` was too faint to tell the
+  month apart). They are TAPPABLE: the calendar moves to that month (a pair
+  two months, unless it is the other pane) and the day is chosen.
+- **No circles.** In-month day numbers are the label ink (`--on-glass-label`),
+  another month's faint. **TODAY** is a 2px accent RULE across the top of
+  its day — the calendar's one solid accent mark — over a soft accent wash,
+  with its number bold in the accent ink. **The chosen day** is an INK
+  outline (2px `--foreground`) drawn in a layer ABOVE the bars, so a bar
+  through the day cannot hide it, over a light lift, number bold ink. Ink,
+  not the accent, because an accent outline is a flight still to fly; and a
+  grey fill on grey glass (the round before, with a badge) was "as good as
+  nothing". A range's ends are bold numbers on the selected-thing fill.
+  "Today" follows the clock (`useDayKey`), so a calendar left open overnight
+  moves it.
 - **The grid is ONE tab stop per month** (the chosen day, else today, else the
   1st) and the ARROWS move between days, a week up or down
   (`onGridKeyDown`); past the month's edge the calendar moves with the focus.
@@ -2079,8 +2090,8 @@ the calendar over it.** The dashboard's used to float, and the period's hero
 figure read through the calendar's glass between the day numbers.
 
 **A range fills its DAYS** — square cells in the accent (`--on-glass-accent`),
-the ends the selected-thing fill (`--on-glass-active`) with bold accent
-numbers. It was the soft tint (today's too), and the dashboard's chosen period
+the ends the selected-thing fill (`--on-glass-active`) with bold
+`--on-glass-active-fg` numbers. It was the soft tint (today's too), and the dashboard's chosen period
 read no stronger than one lit day. The
 per-week-row capsules it used to be drawn as went with the edge-to-edge grid:
 every other lit day (today, the selected one, another month's) is a whole cell
@@ -3466,6 +3477,9 @@ device.
 - **The provider applies the palette only once preferences have LOADED.**
   Before that the boot script has already painted the last palette; applying
   the in-memory default over it flashed Graphite on every launch.
+- **Choosing a palette moves nothing.** The chosen card's tick rides on its
+  swatch's corner; in the text column it took the words' width, wrapped the
+  description and shifted the grid.
 - **The custom editor previews LIVE on the whole app** — rAF-batched
   `applyPalette` while a slider moves — and commits to the preference 400ms
   after it settles. Committing per step re-rendered every consumer of the
@@ -5496,7 +5510,7 @@ When making changes, be aware of these high-impact files:
 - Do not write to ANOTHER record from a form control before Save — the crew card's "This is Me" switch un-flagged the current self card in the database the moment it moved, untouched by Cancel, so a stray flip left the logbook with no self card. The form changes; `handleSave` clears the other flags when it commits
 - Do not let a select show blank for a stored value it has no option for — the currency Type row read empty for any company code an import brought in. Offer the record's own value as an option (`typeOptions`); mapping it to "Custom" would rewrite the stored code on the next save
 - Do not use a native `<select>` (laid over a row or bare) or a Radix Select for a choice — it is `ChoicePicker`/`OptionMenu`, the app's own menu on the glass face. The platform's control is a different thing on every device and like nothing else in the app. And give the trigger the whole row, never a corner of it
-- Do not draw a calendar day as a bare number with a dot, or give a page a calendar of its own — every calendar is `LogbookCalendar`'s bar grid, fed by `useCalendarSpans` and governed by its own Duties switch. Keep a flight without its designator ("248 WMKP", condensed by `text-fit.ts`, never a second typeface), a return pair ONE bar ("248/9 WMKP"), a second line ("248/9" over "WMKP") only where the lane under it is empty, a day's one-line airports kept or dropped together, three lanes a day, every item a tinted bar (bare text ran together) with a flown flight FILLED in the accent (never grey — a day off is grey), a midnight crossover on HALF of each day, a run of all-day duties ONE bar, and SIX rows of one fixed height in every month
+- Do not draw a calendar day as a bare number with a dot, or give a page a calendar of its own — every calendar is `LogbookCalendar`'s bar grid, fed by `useCalendarSpans` and governed by its own Duties switch. Keep a flight without its designator ("248 WMKP", condensed by `text-fit.ts`, never a second typeface), a return pair ONE bar ("248/9 WMKP"), a second line ("248/9" over "WMKP") only where the lane under it is empty, a day's one-line airports kept or dropped together, three lanes a day, every item a tinted bar (bare text ran together) with a flown flight, a simulator and a standby FILLED and every other duty a quiet tint (the flying is what the calendar is for), today a top rule and the chosen day an ink outline above the bars (never a circle), a midnight crossover on HALF of each day, a run of all-day duties ONE bar, and SIX rows of one fixed height in every month
 - Do not group a run of duty days anywhere but `groupDutyRuns` — the calendar and the list each had their own rule, so a day off with a window was "all day" on its card and a half-day bar on the calendar, and two codes sharing a description were one bar but two cards. And do not let the schedule parser give a day off or leave a window: converted to UTC, a Local Base 00:00–23:59 LOFF moved to the previous day
 - Do not split the duties control back into two switches, and do not put a duties button back in the logbook header — it is ONE three-state menu in the calendar's header (`useDutiesView`), default On Calendar
 - Do not paint a calendar bar translucent (`bg-x/20`, `opacity`) or fill another month's days solid — what is ON the glass is solid (`color-mix` into `--on-glass`), and another month's days are a translucent shade the glass shows through. And do not inset the grid from the glass: it runs edge to edge and takes the glass's bottom corners
