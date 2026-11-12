@@ -21,7 +21,7 @@ import { EmptyState } from "@/components/ui/empty-state"
 import { Button } from "@/components/ui/button"
 import { useRouter } from "next/navigation"
 import { GlassContainer } from "@/components/ui/glass-container"
-import { pairStart, usePanelDualMonth, useFloatingPanelUnderHeader } from "@/lib/layout/panel-mode"
+import { pairStart, usePanelDualMonth } from "@/lib/layout/panel-mode"
 import { parseYMDLocal as parseDateLocal, formatLocalYMD } from "@/lib/utils/date"
 import { ChoicePicker } from "@/components/ui/option-menu"
 import { setDutiesView, useCalendarDuties, useListDuties } from "@/hooks/use-calendar-spans"
@@ -164,10 +164,6 @@ export default function LogbookPage() {
     }, 4000)
   }, [flights])
   const isActive = usePageActive("/logbook", refreshFlightsWhenIdle)
-  // The open panel hangs from the bar: the header's tap band and fade tail
-  // step aside for it (released once its collapse has run).
-  useFloatingPanelUnderHeader(isActive && (showSearch || showCalendar), PANEL_MS)
-
   const calendarRef = useRef<CalendarHandle>(null)
   const flightListRef = useRef<FlightListRef>(null)
   const calendarContainerRef = useRef<HTMLDivElement>(null)
@@ -877,7 +873,21 @@ export default function LogbookPage() {
           dualMonth={dualMonth}
           splitLayout={isSplitLayout}
           monthYearView={showMonthPicker}
-          onHeaderPress={() => setShowMonthPicker((v) => !v)}
+          onHeaderPress={() => {
+            // While the wheels are up the month being chosen is the LEFT pane,
+            // whatever its parity; closing them snaps a pair back to its
+            // odd|even phase (as the dashboard does), or the next step moves
+            // Feb–Mar to Apr–May and every pair after it is out of phase.
+            if (showMonthPicker && dualMonth) {
+              const current = selectedMonthRef.current
+              const next = { year: current.year, month: pairStart(current.month) }
+              if (next.month !== current.month) {
+                selectedMonthRef.current = next
+                setSelectedMonth(next)
+              }
+            }
+            setShowMonthPicker((v) => !v)
+          }}
           onMonthSelect={(year, month) => {
             // Live: the wheels move the calendar and the list as they settle,
             // and the date selector closes the picker.

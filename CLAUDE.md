@@ -1974,7 +1974,16 @@ zone).
   `lib/layout/panel-mode.ts`). The dashboard anchored on the period's end as it
   was, so a December end showed Dec|Jan and a step moved it out of phase; it
   snaps now, except while the wheels are up (the month being chosen is the
-  left pane) — closing them snaps it.
+  left pane) — closing them snaps it, on the logbook as on the dashboard (the
+  logbook left a wheel's February as Feb|Mar, and every step after it out of
+  phase).
+- **The wheels take a touch WebKit sends as non-cancelable.** The library
+  started a drag only on a cancelable `touchstart` (and settled only on a
+  cancelable `touchend`), and on the owner's iPhone the calendar's wheels did
+  not move at all — iOS delivers a touch as non-cancelable when it has not
+  routed that region's listeners synchronously. The patch drags whatever the
+  flag says and `[data-rwp]` carries `touch-action: none`, so the page cannot
+  pan under the drag either way.
 - **The grid runs to the glass's edges** — no inner padding, a dual pane's
   right half ruled off from its left — and its bottom corners ARE the
   glass's (`cornerRadius`), so a lit corner cell follows the material's curve.
@@ -2219,370 +2228,42 @@ rejected twice: a year away was a tap per year, and it read as a web form.
 - The years run 70 back and 5 ahead of today and the viewed year.
 - It mounts only while open: a wheel is ninety rows of 3D-transformed text.
 
-**The header steps aside for a floating panel hanging from it**
-(`useFloatingPanelUnderHeader`, `lib/layout/panel-mode.ts`). The calendar and
-the search field sit at `--chrome-top`, i.e. inside both the tap-to-top band
-(`--chrome-tap`) and the fade's 16px tail, so while one is open, over the MAIN
-panel:
-
-- the tap band is removed — with it in place the month selector could not be
-  tapped at all on a desktop; the tap scrolled the list to the top;
-- the fade's TAIL is cleared (`ChromeFade`'s `clearBelowBar`) — the panel's top
-  came out dimmed and blurred as if it were content scrolling away, the
-  selector reading as disabled. It cannot be RAISED above the header instead:
-  the page lives in its keep-alive stacking context, below the shell's.
-  The cut is a mask on each of the fade's LAYERS, never on its wrapper — a
-  mask on an ancestor makes it a backdrop root and the blur samples nothing.
-
-The logbook and the dashboard hold it only while their panel is open AND their
-page is the active route, and the release waits `PANEL_MS` so the fade does not
-land on the panel while it is still collapsing.
-
-**The header names BOTH months in dual mode** — `Jul – Aug 26`, and both years
-when the pair straddles a new year (`Dec 26 – Jan 27`), since "Dec – Jan 27"
-would put December in the wrong year. The year is two digits because at four
-the dual form pushed the left action group into the centred nav pill. The month/year picker
-marks both too. Naming only the anchor left the right-hand pane unaccounted for
-in a view that is plainly showing two months.
-
-Going **dual → single** keeps whichever pane the top flight is actually in — if
-that is the right-hand month, the LEFT one stows. Going single → dual snaps the
-anchor to its pair boundary.
-
-**Single ↔ dual is a horizontal slide, and the pair is treated as two months
-stacked on top of each other.** The one that belongs on the right slides out
-from under the other; closing, it slides back under. Which pane travels never
-changes — it is always the right-hand month — what changes is which one you were
-already looking at, and that one holds full opacity while the other arrives:
-
-| Looking at | Opening to dual |
-|---|---|
-| Jul (the left month) | Jul stays put, Aug emerges from under it and moves right |
-| Aug (the right month) | Aug moves right, revealing Jul underneath on the left |
-
-Both directions are the same pair of keyframes (`cal-pane-settle` /
-`cal-pane-leave`) parameterised by `--cal-pane-x` and `--cal-pane-o`. The month
-you were looking at CANNOT be read off `selectedMonth` when the slide starts —
-the page re-anchors the selection to the pair's first month in the same commit
-that flips `dualMonth` — hence `lastSingleMonthRef`.
-
-The three-panel month **carousel is gone**, and it was broken as well as being
-the wrong motion. It rendered the stepped-to month as an extra absolutely
-positioned panel inside a container whose height came from a ref measured "at
-rest"; on the FIRST entry into dual mode that measurement had never happened, so
-the container fell to `height: undefined` over absolutely positioned children
-and the whole calendar collapsed to its padding (**measured: 8px, where two
-months are 280**). It never recovered either — the handler that ended the
-animation tested `dataset.animAnchor`, and `data-anim-anchor=""` reads back as
-the empty string, which is falsy, so it returned on every event. A dual step
-moves the pair by TWO months, so there was never a single month sliding across
-another to animate in the first place.
-
-What replaced it is simpler and covers **both** modes: stepping slides the whole
-view VERTICALLY, because the gesture that steps it is a vertical swipe (and a
-wheel) — the months should travel the way the finger does. The single ↔ dual
-width slide stays horizontal; that one is the pair opening sideways. The arriving month(s) come in from the side you are heading
-toward (`cal-step-in`) while a copy of the outgoing one leaves the other way
-(`cal-step-out`). The arriving content is in FLOW and only the outgoing copy is
-absolute, so the container keeps its height for the whole slide — which is
-exactly what the carousel got wrong. Measured on a single-month step: the
-arriving grid starts at `translateX(344px)`, one grid width, and eases to 0.
-The width slide sets `suppressStepRef` for its duration, because widening the
-panel also re-anchors `selectedMonth` and that would otherwise fire a step slide
-on top of the width slide.
-
-**A resize is not a push** (`FlightListRef.absorbSpacerDelta`). The list has
-`overflow-anchor: none` because growing the spacer is how the panels push it —
-but the spacer also changes when the calendar switches between one month and
-two while already open, and with anchoring off that slid the whole logbook under
-the reader's eye. So the push stays uncompensated and the RESIZE is absorbed by
-a single `scrollTop` write, with the spacer's transition dropped to `none` for
-that one commit (an eased spacer would drift against a one-shot correction for
-300ms). Measured: toggling the width with the list at scrollTop 900 now lands at
-867, exactly the calendar's 313→280 height change, and returns to 900 on the way
-back.
-
-### The Flight Card (`components/flight-card-body.tsx`)
-
-One visual definition of "a flight card", shared by the logbook list, the
-import review and the discrepancies page. Layout:
-
-```
-28   02:30 ──────── 4:00 hrs ──────── 06:30
-JUL  WSSS                             WICA        ← "SIMULATOR" for a sim
-26   ⧉ 9V-NCE, A21N                  TR318        ← icon only on sims
-     Lim Chin Yang                    ☀ 1D ✎
-```
-
-- An optional `diffs` map turns any covered slot into `old struck through in
-  grey` + `new in the accent colour` — that is how the import review renders.
-  A SCHEDULED-time change is drawn in the OUT/IN slot only while the slot
-  shows the scheduled time; on a flown flight it is listed under the card
-  ("Scheduled In 02:59 → 03:10"). Drawn in the slot it read as the import
-  moving the time the aeroplane actually arrived.
-- Clock times honour `displayPrefs.clockSeparator`; the duration always keeps
-  its colon.
-- The out—block—in connector is `bg-current` (the same colour as the times it
-  joins) and is **hidden entirely** when there are no times — two bare rules
-  across a just-created row read as damage.
-- `showLandingChips` / `showStatusIcons` / `showPilotRole` let a consumer drop
-  parts; the signed (✎) and locked (🔒) icons are how the card says "this entry
-  is yours" — do not reintroduce a separate "replaces yours" banner.
-
-### Main / Detail on every page (the owner's rule, Oct 2026)
-
-"All pages should operate in [one] model: more details are shown on the detail
-panel, while the main page occupies the main panel." A page's LIST or overview
-is the main panel; what is behind a row opens in the detail panel — beside the
-list on a tablet, the full-screen overlay (with its back entry) on a phone —
-through `useDetailPanel`'s `setSelectedId` + `setDetailContent`, never a sheet
-or a dialog over the list.
-
-| Page | Main panel | Detail panel |
-|---|---|---|
-| logbook, aircraft, airports, crew | the list | the record |
-| roster, currencies | month + agenda / the list | the duty / currency form (`DetailFormPanel`); a roster FLIGHT (`FlightForm`) |
-| discrepancies | comparisons, notes | a comparison's FLIGHT (`FlightForm`); a note and its Resolve (`DiscrepancyDetailPanel`) |
-| recently deleted | the bin | what the item was, how long it is kept, Restore / Delete forever |
-| FDP | the timeline (rolling limits + duties, one pointer), at FULL width | the Quick Check, only while it is open (a duty block expands IN PLACE — see "The FDP page") |
-| account, settings | the sections | the section |
-| dashboard | legal / summary | a requirement cell (`RequirementDetailPanel`); a period flight (`FlightForm`) |
-
-- **Every main panel names itself** — `PageContainer`'s `title`, a large
-  heading at the top of the list, as each detail panel names what it shows.
-  The pages reachable only from the sidebar named themselves nowhere: on
-  Account, Settings or Recently Deleted no nav tab lights up either, so
-  nothing on screen said where you were. The logbook and the dashboard go
-  without — their first row is already their own.
-- **A page with nothing behind its rows takes the whole width**
-  (`useMainPanelFullWidth`, `lib/layout/panel-mode.ts`) — the FDP chart. The
-  detail panel and the divider step aside (`[data-main-full]`) with their
-  sizes kept, and come back when the page lets go: the Quick Check is the one
-  thing that needs the panel, so opening it gives the panel back. A tapped
-  chart DAY used to open in the detail panel, which on a phone covered the
-  chart on every tap of a gesture meant to scrub it, to say what the tooltip
-  and the chart's own series (select several) already say. The sidebar
-  toggle's main-width LOCK (inline `min-width`/`max-width` for the 300ms of
-  the push) is skipped for such a page — it has no main width to hold, and the
-  lock capped the chart at the split's main width, so it shrank and sprang
-  back on every toggle.
-- **An empty detail panel says what a row opens** (`DETAIL_PLACEHOLDER` in
-  `desktop-layout.tsx`: "Select a crew member", "Select a deleted item"),
-  not "Select an item".
-- **Every record is edited IN PLACE** — always editable, Cancel / Save in the
-  header only once something differs. Crew and aircraft were the records
-  behind a read-only view and an Edit button; both are `DetailFormPanel`s now,
-  titled with the person's name / the registration, with `isDirty` derived
-  from the form against the stored record (the aircraft form follows the
-  stored record for every field not touched). The AIRPORT panel reads only,
-  and is the same pieces: `ReadingPanel`, `FormSection` +
-  `ReadOnlyRow`, its favourite an `ActionRow` ("Add to Favorites"), not cards
-  of its own. `/aircraft/<reg>`, `/airports/<icao>` and `/crew/<id>` are REDIRECTS to the
-  list with `?selected=` on every width, as `/flights/<id>` is on a tablet —
-  on a phone they drew a second copy of each panel, which drifted (an Edit
-  button, "Mark as Favourite"). `/crew/new` keeps a page only for the crew
-  PICKER (`?field=`), which returns to the flight with the card seated; any
-  other `/crew/new` opens the create form in the panel (`?new=1`).
-- **The title follows you up into the bar** (`useCollapsingTitle`,
-  `lib/layout/header-title.ts`, `HeaderTitle`). Once the large title has
-  scrolled under the header, a small copy (15px semibold) fades in IN the
-  header row — the main panel's over the main panel, a detail form's over
-  the detail panel (or between Back and the commits in the phone overlay).
-  Scrolled away it was gone, which left the reader exactly as lost as having
-  no title. Each region is a `.header-bar-grid`: the title is centred when it
-  fits and the BUTTONS get their full width first when it does not, so it
-  slides aside and truncates rather than going under one; on the desktop it
-  also keeps clear of the nav pill when the pill sits in the row
-  (`--header-main-w`, `--detail-pill-clear`), and an open search takes the
-  whole region. The panel writes to a module store only when the title
-  crosses the bar — a comparison per scroll event, no render.
-- **A flight names itself in the bar too.** The flight form has no large
-  title — its identity is its first rows — so once the route rows scroll
-  under the header, the bar reads "TR269 · WIII–WSSS" ("Simulator · <date>"
-  for a session): `useCollapsingTitle`'s `titleRef` on the "To" row, a
-  zero-height spacer where the chrome spacer would be, and the form's own
-  scroller passed in. Deep in a 50-row form there was nothing saying which
-  flight it was.
-- **Account ends with signing out**: "Sign out" (this device, a NEUTRAL
-  capsule — it loses nothing, unsynced edits are pushed or asked about
-  first) and "Sign out of all devices" (red, on its countdown) UNDER the
-  sections. There was no plain sign-out at all — only a swipe on your own row
-  in Active sessions — and the all-devices one sat above the sections as the
-  first thing on the page. The app says "sign out" everywhere, never "log
-  out".
-- **A panel that only READS is still a `DetailFormPanel`** — through
-  `ReadingPanel` (same file): one title, an optional one-line `description`,
-  one scroller, the chrome spacers — and no header buttons. Settings' sections
-  (which save each change as it is made) are ReadingPanels too; they had a
-  wrapper and a smaller heading of their own, and their title never followed
-  the reader up into the header.
-- **A record that is not there SAYS so** (`PanelMessage`,
-  `components/ui/page-loading.tsx`): a title, the reason, a way on if there
-  is one. A selection with nothing behind it (a link to a card deleted or not
-  synced here) still opens the panel — flight, crew, aircraft, airport alike
-  — rather than an empty pane, or on a phone an overlay with nothing in it.
-- **Actions inside a panel are `ActionRow`s** (`components/ui/action-row.tsx`):
-  a row in a grouped section with the label in the accent or red, never a
-  full-width filled button.
-- **One selection id per page, namespaced where tables can collide**
-  (recently deleted keys `kind:id`; the dashboard's requirement cells are
-  `req:<id>` beside its flights).
-- **The row that is open is lit only where the panel BESIDE it shows it**
-  (`isDesktop && …`) — a phone has no such panel.
-- **Account sections own their state.** The detail panel is rendered by the
-  shell, OUTSIDE the page's tree, so a section cannot read the page's state or
-  context; the profile and the sessions are one SWR cache each
-  (`components/account/account-data.ts`), shared by the list and the panel.
-
-### Discrepancies as the Comparison Record
-
-`app/(app)/discrepancies/page.tsx` leads with **Comparisons**: one
-`FlightMismatchCard` per flight showing each tracked field with your value and
-the company's side by side (`OptionPair`), the held side lit. Tapping the other
-side writes it to the flight and updates the row, so this — not the review
-modal — is the single home for undoing an import decision, reachable whether
-the change was accepted or rejected at import time. One-off notes (duplicates,
-stale reports, missing sectors) sit in a second tab.
-
-**Three tabs, not four.** The page holds two kinds of thing, each with an open
-and a settled state, so the settled state is never its own tab:
-
-| | Open | Settled |
-|---|---|---|
-| tracked field difference | **Comparisons** | **Accepted** |
-| one-off import note | **Notes** | "Handled", below the open notes in the same tab |
-
-**The page opens on the first tab with something OPEN in it** until the pilot
-picks one (the stored choice is `null` until then): it always opened on
-Comparisons, so a pilot whose only items were import notes arrived at "Nothing
-to Compare" over a page with things waiting one tab along.
-
-A fourth "Resolved" tab put two synonyms side by side in the tab bar and made
-the split look arbitrary — it was only ever the notes' settled half. Both note
-lists are scoped to non-mismatch types so a comparison can never fall through
-and render as a prose `DiscrepancyCard`, which is the presentation the
-comparison cards exist to replace.
-
-`Discrepancy.holding: "logbook" | "schedule"` records which side the flight
-currently holds, independently of `resolved`. The comparison tabs split on it:
-
-| Tab | Rows | Retained |
-|---|---|---|
-| **Comparisons** | `holding: "logbook"` — a standing difference | forever; it IS the licence record |
-| **Accepted** | `holding: "schedule"` — the pilot conceded | 90 days, then purged |
-
-Taking the company's value stamps `acceptedAt` and starts the undo window;
-taking your own back clears it. Accepting at IMPORT time stamps it too — same
-act, same clock — and a re-import keeps the original stamp rather than
-restarting it. The card shows the days left, because when
-`purgeExpiredAcceptedDiscrepancies()` takes the row the pilot's original value
-goes with it. `tracked-mismatch.test.ts` pins the stamp both ways round: on the
-wrong row, the sweep eventually deletes a difference the pilot never conceded.
-
-### The Undo Windows (`lib/utils/retention.ts`)
-
-Two clocks, both defined here, and the helpers take the window as an argument
-so a caller states which one it is on:
-
-| | Window | What |
-|---|---|---|
-| `RETENTION_MS` | **90 days** | import decisions, accepted comparisons — roughly three company report cycles, so a quarterly review can still put one back |
-| `DELETED_RETENTION_MS` | **30 days** | anything the user DELETED, held in Recently Deleted |
-
-They were one number. A deletion is an ACT, not a difference between two
-records: you know within days whether you meant it, and holding every deleted
-flight, aircraft and crew member for a quarter turns a safety net into an
-archive.
-
-**Clearing a retention stamp writes `null`, never `undefined`.**
-`/api/sync/bulk` applies an update as a `$set` of the payload's keys and
-`JSON.stringify` drops undefined ones, so `undefined` leaves the server's stamp
-in place and the next pull undoes the undo — a restored flight drops straight
-back in the bin. `isWithinRetention` and `isLiveFlight` therefore test `== null`.
-
-### Recently Deleted (everything you delete)
-
-The pilot sees it as **"Bin"** — the nav item, the page title, the flight
-form's "This flight is in the Bin". "Recently deleted" broke onto two lines in
-the sidebar once its row went bold, and the row grew under the gravity blob.
-Sidebar labels are single-line (`truncate`) whatever their length.
-
-**Every delete in the app is a SOFT delete**, not just flights. `deleteEntity`
-in `crud-helpers.ts` sets `deletedAt` and pushes an **update** — that is what
-makes Recently Deleted work across devices, since binning and restoring both
-ride the ordinary sync path. Only `purgeEntity` (and the 30-day sweep) writes a
-tombstone.
-
-There is no confirmation on the way out. Deleting is one tap, and the holding
-area is the undo — see "Destructive Actions" below for why the countdown went.
-
-| Kind | Store | Synced? |
-|---|---|---|
-| flights | `flights.store` | yes |
-| crew | `crew.store` | yes |
-| currencies | `currencies.store` | yes |
-| aircraft | **`reference/aircraft.store`** — the aircraft PAGE lists the reference database, not `userDb.aircraft` | no (referenceDb has no sync queue, which is what deleting a custom aircraft has always meant) |
-| roster duties | `schedule.store` | yes |
-
-**Discrepancies stay a HARD delete.** A comparison is import bookkeeping rather
-than a record the pilot authored — it is regenerated from the next report.
-
-**Schedule entries used to be, and no longer are.** That reasoning held while
-the roster was import-only; it stopped the moment duties became hand-editable,
-because a standby you typed in yourself is a record you authored and a mis-tap
-on it should be as recoverable as a mis-tap on a flight.
-
-`app/(app)/recently-deleted/page.tsx` sweeps every kind on load, then lists
-what's left GROUPED BY KIND with the days remaining. The per-kind
-restore/destroy/sweep triple lives in one `OPS` lookup, not a switch at each of
-the three call sites.
-
-The cost is that `userDb.flights` now holds rows nothing should show. Read lists
-through `getAllFlights()`, or filter with **`isLiveFlight`** when reading the
-table directly — the totals (`stats.store`), both reconciliations, the schedule
-parser and the import button all do. A binned flight reaching an import match
-would silently update, and so resurrect, a flight the user deleted.
-
-`normalizeFlightFromServer` **spreads the server record first** and applies
-defaults over it. Building it from an explicit field list quietly dropped every
-field added since it was written (`entryType`/`isSimulator` — a simulator came
-back from a second device as an ordinary flight — the import decisions, the
-report watermarks). Do not go back to an allowlist.
+**Nothing in the header reaches a floating panel hanging from it.** The
+calendar and the search field sit at `--chrome-top`, which is where the
+header's band and its tap target END (see `ChromeFade`). They used to reach
+past it — a 16px fade tail and a tap strip under the buttons — so the header
+had to step aside for an open panel (a hook, `useFloatingPanelUnderHeader`, a
+mask cut to the panel's shape); with the band ending at the bar there is
+nothing to step aside, and the hook and the mask are gone.
 
 ### Chrome Overlays (`components/ui/chrome-overlays.tsx`)
 
 - **`ChromeFade`** — THE floating-header treatment, rendered directly by the
   main shell header and the mobile detail overlay header in
   `desktop-layout.tsx` (no more inline copies): a native-style bar of
-  progressive **blur + darken**. Three masked backdrop-blur layers (smallest
-  radius first, widest coverage, so the stack only ever adds blur toward the
-  edge) under a background gradient. It extends `FADE_TAIL` (**16px**) BEYOND
-  the bar it sits on, because native bars start softening a little before
-  their own edge. It was 41 (45px below the buttons) until the owner's read on
-  device (Nov 2026): every list then had to START that far down to be
-  readable, a strip of every screen spent on a fade. 16 sits just inside the
-  first card's 20px gap (`LIST_TOP_GAP`, a page title's `pt-4`), so a list at
-  its top — or tapped back to it — is just clear of the band.
+  progressive **blur + darken** (one masked blur layer under a veil).
 
-  **`--chrome-tap` is a THIRD number**: how far below the action buttons a tap
-  still counts as "the header" and scrolls that panel to the top. The header
-  row ends level with the buttons, which put the fast-scroll target's lower
-  edge exactly where the darkening begins — aim a little low and you hit a
-  flight card and open it. 1.5rem claims the strip under the buttons, the same
-  idea as iOS's status-bar tap: genuine chrome that the list does not own. It
-  is a REAL element, so a drag STARTING in it does not scroll — which is why it
-  stays thin rather than covering the whole fade tail. And it is REMOVED while
-  a floating panel (the logbook's search or calendar) sits under the buttons
-  (`useFloatingPanelUnderHeader`): that panel's own first control lives in
-  this band. The fade's tail is cleared then too — but only under the panel's
-  own SHAPE (`tailCutMask`): its 8px gutters and the slivers outside its
-  rounded top corners keep the treatment. Clearing the whole width let content
-  scrolling past the calendar's corners come through sharp and undimmed.
+  **ONE band: the blur, the tap-to-top target and the bar end at the same
+  line, `--chrome-top`** — 4px below the 44px controls as they are 4px below
+  the top of the bar, so the action buttons sit in the middle of it (the
+  owner's ask, Nov 2026). It used to run past the bar: a fade tail (41px,
+  then 16) and a separate tap strip under the buttons (`--chrome-tap`, 20px,
+  4px further than the blur), so neither edge said where the header ended and
+  the tap area read as too large. Tapping any bare part of the bar — or the
+  strip over the status bar — scrolls that panel to the top; the phone
+  overlay's bar does the same for the record.
 
-  **`--chrome-clear` is a DIFFERENT number, a few px larger** (1.25rem → 20px
-  below the bar, 4px clear of the band). It is where the quick-scroll rail
-  parks a row — the same place a list's first card sits at its top — and a
-  row landing exactly on the band's lower edge would be sitting against it.
+  **`--chrome-clear`** (the bar + 1.25rem) is where the quick-scroll rail
+  parks a row — the same place a list's first card sits at its top
+  (`LIST_TOP_GAP`, 20px).
+
+  **The header is `inert` while the phone's sidebar is up**
+  (`setOverlaySidebarOpen` / `useIsOverlaySidebarOpen`,
+  `lib/layout/panel-mode.ts`). The bottom bar's morph keeps its own open state,
+  so the shell could not see it, and the header sits above the sidebar's
+  backdrop in z-order: a tap on the header behind an open sidebar scrolled the
+  list to the top or pressed an action button. Inert, the tap reaches the
+  backdrop and closes the sidebar.
   The gradient is anchored to a fixed 52px ramp so taller chrome
   keeps the same boundary instead of stretching until content shows through the
   title. Because the veil is `--background` it darkens on the dark theme and
@@ -5684,7 +5365,7 @@ When making changes, be aware of these high-impact files:
 - Do not give the bottom pill, the sidebar's lower end, or a scroller's bottom clearance their own safe-area math — they all derive from `--nav-bottom-offset` (`max(4px, env(safe-area-inset-bottom) - 10px)`: hugs the iOS home indicator, plain 4px on Android/desktop). One number keeps the pill↔sidebar morph endpoints aligned and the scrolled-to-rest last row on the same line; `components/bottom-edge-blur.tsx` adds the progressive blur under that line on iOS standalone only (below the nav in z-order so the sidebar and pill stay sharp)
 - Do not leave the cloned pill's `backdrop-filter`s (or `mix-blend-mode` anywhere in the lens subtree) in place during a drag or landing — they re-sample every frame and block layerisation, which is what made the release jank
 - Do not give the drag lens its own copy of the highlight to land on — it is portalled to `<body>`, so an opaque fill there covers the tab's icon and label and the landing flashes a solid pill with nothing in it. The REAL blob is revealed instead (it lives behind the row) and the glass dissolves off it; the lens stays translucent the whole way, so the content is never covered
-- Do not lengthen `FADE_TAIL` past the first card's gap again — at 41px every list had to start 45px below the buttons to be readable. It is 16, `--chrome-clear` and `LIST_TOP_GAP` are 20, so a list's top row, a quick-scrolled row and a tap-to-top all land just clear of the band. And do not clear the tail across the whole width under a floating panel — only the panel's own shape (`tailCutMask`), or content past its rounded corners shows sharp
+- Do not extend the header's band (`ChromeFade`) or its tap-to-top target past `--chrome-top`, and do not let them end at different lines — the bar, the blur and the tap target are ONE band with the action buttons in its middle. A tail below the bar (41px, then 16) and a tap strip 4px beyond the blur made the header's edge unreadable and the tap area too large, and every floating panel under the bar then needed the header to step aside for it
 - Do not put the drag-lens (`.PillDragLens`) release settle back on JS (framer `animate()`) or on layout properties — it must stay CSS `translate` + `scale`, which run on the compositor, because the release also fires `router.push` and a main-thread landing stalls against the route mount. Keep the two easings split (position no overshoot, scale overshoot = the splat), keep `--settle` dropping the glass's `backdrop-filter`, and keep the refract clone effect gated on `lensPhase === "drag"` so a deep clone of the pill never runs on the landing's first frame. Keep it clamped to the tab strip (edge overshoot → the liquid bounce) and keep the handoff timer longer than the rebound (or the last wobble is cut)
 - Do not re-gate the dashboard's meters / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so they can animate freely
 - Do not turn Recharts' series animation back on (`isAnimationActive` defaults to TRUE on every `Area`/`Bar`/`Line`) — it is a JS rAF loop that commits the whole chart through React every frame: ~120 commits of 430–520 components in the FDP page's first 3s at 4×, and the same again on every zoom and pan step, i.e. through a pinch. A new series takes `isAnimationActive={false}`; the chart's arrival is a compositor fade
@@ -5775,7 +5456,7 @@ When making changes, be aware of these high-impact files:
 - Do not hand-roll a form dialog — `RegionSheet` (`components/ui/region-sheet.tsx`) is the shell: content-region bounds, header with a close, grouped `FormSection` rows, Cancel/Save in the footer with the reason Save is disabled said beside it. The discrepancy-resolution form uses it (a choice among a few answers is a checked LIST, not a dropdown), and the signature pad takes its bounds from `useContentRegionStyle`. A form for a record chosen from a LIST is not a sheet at all — it opens in the detail panel (`DetailFormPanel`). The currency form was a centred modal of boxed inputs with a full-width button and read as a different app. Mount the form only while open and key it on the record, so `useState` initialisers seed it — never a reset effect
 - Do not clear the header's action buttons unconditionally on cleanup — `useRegisterActions` clears only what THIS page put there (`current === own ? null : current`). A keep-alive page learns it is inactive from the route store AFTER the commit that mounted the next page, whose layout effect has already registered its own buttons, so an unconditional `set(null)` wiped them: currencies, discrepancies and FDP came up with an empty header when arrived at from the logbook (once their code was prefetched), and with a full one from any ordinary page
 - Do not show "Something went wrong" for a chunk that will not load — that is the previous deploy's HTML asking for code the new deploy no longer serves (navigations are cache-first). `ErrorScreen` (every error boundary) recognises it (`isChunkLoadError`), drops the route's stale page from the worker's cache and reloads ONCE, guarded by `sessionStorage` so a genuinely missing chunk cannot loop
-- Do not let the wheel picker emit a value before its settle lands, and do not let a zero-length settle stop between rows — the library (`@ncdai/react-wheel-picker`, `patches/`) truncated the index on both paths, so releasing between 09 and 10 always took 09 and a controlled picker's own value change cancelled the settle on every release. A release held still (>100ms since the last move) has no fling and settles to the NEAREST row. The patch is part of webpack's cache key (`PATCHES_FINGERPRINT` in `next.config.mjs`): webpack re-reads `node_modules` only on a version change and a patch keeps the version, so a restored `.next/cache` shipped the unpatched module. A new patch goes through `pnpm patch`, with `patchedDependencies` in `package.json` (not `pnpm-workspace.yaml`) and only the patch lines changed in the lockfile
+- Do not let the wheel picker emit a value before its settle lands, and do not let a zero-length settle stop between rows — the library (`@ncdai/react-wheel-picker`, `patches/`) truncated the index on both paths, so releasing between 09 and 10 always took 09 and a controlled picker's own value change cancelled the settle on every release. A release held still (>100ms since the last move) has no fling and settles to the NEAREST row. And do not let it refuse a touch that is not `cancelable` — WebKit sends one where it has not routed the region's listeners synchronously, and the calendar's wheels then did not move at all on an iPhone; the patch drags regardless and the wheel is `touch-action: none`. The patch is part of webpack's cache key (`PATCHES_FINGERPRINT` in `next.config.mjs`): webpack re-reads `node_modules` only on a version change and a patch keeps the version, so a restored `.next/cache` shipped the unpatched module. A new patch goes through `pnpm patch`, with `patchedDependencies` in `package.json` (not `pnpm-workspace.yaml`) and only the patch lines changed in the lockfile
 - Do not make the wheel's highlight row translucent — the wheel draws the selected value twice (small and rotated, then bold in the highlight), and a translucent strip showed both. `.wheel-fill` (globals.css) is opaque, on the bar AND each wheel's row (`wheelClassNames`). It is a CSS class rather than an arbitrary `bg-[color-mix(…)]`: Tailwind generated nothing for that one
 - Do not give a full-surface overlay `inset-0` on desktop — the sidebar and the nav pill draw above it, so it ends up BEHIND them with its top unreachable (that was the signature pad on iPad). Take the content region: `--chrome-top`/`--chrome-bottom`, plus `SIDEBAR_WIDTH_PX` on the left only while the sidebar is PUSHING (below 1120 it overlays full-width panels and the region has not moved). Mobile keeps `inset-0` — there the dialog is above the bottom nav and the viewport IS the region
 - Do not redeclare the sidebar's width — it is `SIDEBAR_WIDTH_PX` in `lib/layout/panel-widths.ts`, part of the same budget as the panel widths (1180 − 199 − 1 = 980 on iPad Air 5 landscape). It had drifted into three separate copies
@@ -5799,7 +5480,7 @@ When making changes, be aware of these high-impact files:
 - Do not bring back the month-capsule grid or a year stepper in the calendar's month/year picker — it is two wheels, live, closed by the date selector; and in the dual layout it takes the RIGHT pane with the month being chosen still drawn on the left. Keep `WHEEL_ITEM_PX` small enough that the wheel fits a dual pane's grid, or the panel grows (or clips) when it opens
 - Do not cap a date wheel's past at a few years — a pilot back-filling a paper logbook enters flights from decades ago; the default is 70
 - Do not make "Add Crew" open the crew picker directly, and do not lay an additional crew member out differently from the PIC/SIC rows — role on the LEFT (the menu), name on the RIGHT (the picker, for THAT row), a swipe to clear. The pick carries the row's role and index (`additionalCrewField`); address rows by index, never by crew-card id
-- Do not size the phone's bottom bar to its tabs, or let it run the full width of a tablet — it is `MOBILE_PILL_WIDTH`, the screen less the panel gutter and 12px more each side (the same proportion of every phone), capped at 25rem so an iPad in portrait keeps a bar rather than a slab. The tab padding gives way below ~362px (`clamp(5px, (100vw − 262px)/10, 10px)`) so five tabs fit an iPad Split View window of 320. The bar's HEIGHT is not scaled: an iPad window at "iPhone size" draws CSS px at ~132 px/inch against a phone's ~150–160, so everything there is physically ~20% larger — that is the device, and sizing per platform would break the one-look rule
+- Do not size the phone's bottom bar to its tabs, or let it run the full width of a tablet — it is `MOBILE_PILL_WIDTH`, the screen less the panel gutter and 12px more each side (the same proportion of every phone), capped at 25rem so an iPad in portrait keeps a bar rather than a slab. The tabs are EQUAL columns (`grid-flow-col`: `minmax(0, 1fr)` in the fixed-width bar, `1fr` — the widest label — in the desktop pill, whose width is its content), so every tab and the highlight that slides between them is one width and the labels are evenly spaced; sized to their labels, "Dashboard" carried a wider highlight than "Crew". A label too long for its column truncates (an iPad Split View window of 320). The bar's HEIGHT is not scaled: an iPad window at "iPhone size" draws CSS px at ~132 px/inch against a phone's ~150–160, so everything there is physically ~20% larger — that is the device, and sizing per platform would break the one-look rule
 - Do not put per-row `measureElement` on ANY virtualised list of same-height rows (airports, aircraft, crew, logbook) — calibrate once with `useCalibratedRowHeight`, and keep the card one height by construction (truncate, reserve empty lines). And never pass `useVirtualizer` an inline `getItemKey`: its measurements are memoised on that function's identity, so a new arrow per render rebuilds every row's position on every scroll-driven render (29k rows on the airports list)
 - Do not hand-roll a suggestion list under a field — `SuggestionList` (`components/ui/suggestion-list.tsx`) is the one (an inset well, 44px rows, inset dividers), and `AircraftTypeSuggestions` and the add-aircraft / add-airport candidate lists all render through it; the aircraft form, panel and page each carried a bordered `hover:bg-accent` web dropdown
 - Do not ask an online lookup per keystroke or by itself on a form — a flight is looked up on the Lookup button (or Enter), a fleet on opening By fleet or on Find. And do not put Gates or Inbound back in the flight form: the form is for logging; they live on the dashboard's duty band and its panel (`useDutyLookups`, one cache). A lookup over an earlier one replaces what the EARLIER LOOKUP wrote (`lookupPatch`'s `previous`), never what the pilot entered — that is "Replace"
@@ -5837,7 +5518,7 @@ When making changes, be aware of these high-impact files:
 - Do not let the flight card's hold arm from a press on the row's own CONTROLS — the pointer hooks sit on `SwipeableCard`'s outer container, so the swipe buttons are inside them, and a thumb tap on `…` outlasts `HOLD_MS` on a phone. That opened the context preview instead of the cascade. Bail when the press starts on a `button`/`a`/`input`/`textarea` or inside `[data-swipe-actions]`
 - Do not put the flight card's ACTIONS back behind a press-and-hold — they live in the swipe panel behind `…`. A hold is an invisible gesture that nothing advertises, and as the actions menu it competed with the swipe and the scroll for the same pointer. The hold now drives the CONTEXT PREVIEW instead, which is a different job (a look, not a menu) and the one thing a hold has always meant; it still needs the movement cancel and the synthetic `pointercancel`
 - Do not let a dismissing tap on the `…` reopen the cascade — the swallow closes it on `pointerup` and the follow-up `click` then arrives with the listeners already gone. Keep `CASCADE_REOPEN_GUARD_MS`: an open request within 350ms of a close is the same tap, whichever order an engine delivers it in
-- Do not confine the header's blur to the bar's own height, and do not scroll a row to `--chrome-top` — content has to clear `--chrome-clear` (the bar PLUS the fade's tail). A row parked at the bar's edge sits in the blur and looks sharp enough to tap when it isn't
+- Do not scroll a row to `--chrome-top` — the quick-scroll rail parks it at `--chrome-clear`, where a list's first card sits, not against the bar's edge
 - Do not let the bottom nav hide on scroll — it is the app's primary navigation on a phone, and it disappeared exactly when a long read made you want it, with a scroll UP as the only way back. The machinery for it is GONE, not merely switched off, and that is the point: `ScrollNavbarProvider` sat at the very top of the app tree and flipped a `hideNavbar` state on every scroll direction change past a 10px threshold, so a single flick re-rendered the whole tree — six mounted keep-alive pages, the shell, the virtualised logbook — to compute a value the nav had already stopped reading. Do not reintroduce a scroll handler that writes state anywhere above a page
 - Do not revalidate the whole flight list after the flight form saves ONE flight — auto-save runs every half-second of typing, and `mutate(CACHE_KEYS.flights)` read every flight back out of IndexedDB, re-sorted them and had SWR deep-compare the result for each save (~150ms at 4× on 1,200 flights, while typing). `refreshSavedFlight` writes the stored row into the cache with `insertFlightSorted` (`revalidate: false`), which keeps every other row's reference — so SWR's compare short-circuits on them — and still moves a flight whose date or time changed. It falls back to a full revalidation only when it has no stored row to hand
 - Do not `refresh` a data hook with `mutate(undefined, { revalidate: true })` — clearing the cache first flips `isLoading` true and flashes the list's skeleton on every background refresh, and it hands out a NEW array even when nothing changed, which defeats SWR's default deep `compare` (`dequal`) and makes every downstream memo recompute (the FDP pipeline, the dashboard aggregates, the calendar's flight-date map). Bare `mutate()` revalidates in place. For the same reason `isLoading` must NOT be `isLoading || isValidating`: SWR's `isLoading` already means "no data yet", and folding in `isValidating` turns every revalidation into a skeleton
@@ -5903,7 +5584,7 @@ When making changes, be aware of these high-impact files:
 - Do not let an overlay rely on Escape alone — on Android the back gesture is the other half of the same intent, and without `useBackDismiss` the router navigates and the overlay (portalled to `document.body`) is left over whatever page arrives. Every dismissal must go through the hook's `dismiss()`, and an action that navigates has to run as its FOLLOW-UP: closing first and popping the marker entry on the way out issues the `router.push` while our own `back()` is still queued, and the back then undoes it
 - Do not give a scroll handler ANY work that isn't per-frame cheap, and never let one write React state above the component that needs it. The logbook's list runs one rAF-throttled listener whose only job is the calendar sync; `topFlightDate` is pushed into state only while the calendar is actually OPEN, because the calendar is collapsed to `height: 0` rather than unmounted and updating it while stowed re-rendered a whole month grid per card scrolled past, for something nobody can see
 - Do not let a full-width page (`useMainPanelFullWidth`) take the sidebar toggle's main-width lock — it has no main width to hold, and the inline `max-width` capped the FDP chart at the split's main width for the length of the push
-- Do not hang a floating panel under the action buttons without holding `useFloatingPanelUnderHeader` while it is open (and its page active) — or the tap-to-top strip takes its first control's tap and the fade's tail dims and blurs its top as if it were content scrolling away. And do not try to fix that with a z-index: the page is in its keep-alive stacking context, below the shell's header. Clear the tail with a mask on the fade's LAYERS, never on the `ChromeFade` wrapper (an ancestor mask is a backdrop root, so the blur would sample nothing). And do not hide the calendar's date selector when the month/year picker opens: the picker REPLACES the grid in the same box, under the same selector, so the panel's height does not move
+- Do not leave a control above an overlay's backdrop taking taps while the overlay is up — the shell's header sits above the phone sidebar's backdrop and is `inert` while the sidebar is open (`useIsOverlaySidebarOpen`). And do not hide the calendar's date selector when the month/year picker opens: the picker REPLACES the grid in the same box, under the same selector, so the panel's height does not move
 - Do not leave a sign-out (or any action that awaits a network round trip before its first visible change) silent until the round trip returns — change its label on the TAP, and bound the wait (`flushBeforeSignOut(maxWaitMs)`)
 - Do not hand-roll a spinner — waiting is one thing and should look like one thing. `PageLoading` is the route-level state (every `loading.tsx`, the keep-alive Suspense fallback) and `PanelLoading` is the detail-panel one, both in `components/ui/page-loading.tsx`. The aircraft, airports and crew pages each carried an identical copy of a `border-2 border-primary border-t-transparent` ring, so waiting for a pane looked like a different kind of waiting depending on which tab you were on
 - Do not size the mobile bottom pill from `PILL_HEIGHT` — it is `MOBILE_PILL_HEIGHT` (60 against the desktop 44; `--chrome-bottom` clears it with 20px to spare). They are not the same control: one is a row of text tabs in a dense header, the other is the phone's only navigation, aimed at with a thumb

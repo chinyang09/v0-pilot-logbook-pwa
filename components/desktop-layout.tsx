@@ -7,7 +7,7 @@ import { useIsDesktop, useDesktopPill, useHydrated } from "@/hooks/use-is-deskto
 import { useSidebar } from "@/hooks/use-sidebar-context"
 import type { ImperativePanelHandle } from "react-resizable-panels"
 import { SINGLE_MONTH_PX, DUAL_MONTH_PX, DETAIL_MIN_PX } from "@/lib/layout/panel-widths"
-import { setPanelDualMonth, useIsMainPanelFullWidth, useIsFloatingPanelUnderHeader } from "@/lib/layout/panel-mode"
+import { setPanelDualMonth, useIsMainPanelFullWidth, useIsOverlaySidebarOpen } from "@/lib/layout/panel-mode"
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -153,10 +153,10 @@ function AppShellContent({ children }: AppShellProps) {
   // the push spacer and the width-lock must gate on the same breakpoint.
   const canPushSidebar = useDesktopPill()
   const { isOpen: sidebarOpen } = useSidebar()
+  const overlaySidebarOpen = useIsOverlaySidebarOpen()
   const searchParams = useSearchParams()
   const { mainActions, detailActions } = usePageActions()
   const mainFullWidth = useIsMainPanelFullWidth()
-  const floatingPanelOpen = useIsFloatingPanelUnderHeader()
 
   // The main panel has exactly TWO widths — one calendar month or two. The
   // divider is a toggle rather than a drag handle: dragging it only ever
@@ -352,38 +352,21 @@ function AppShellContent({ children }: AppShellProps) {
             "absolute top-0 left-0 right-0 z-[99] flex pt-chrome-bar",
             showMobileOverlay && "hidden md:flex"
           )}
+          // While the sidebar is up as an OVERLAY (below 1120px), the header is
+          // under its backdrop as far as the pilot is concerned: a tap there
+          // closes the sidebar. It sits above the backdrop in z-order, so it
+          // took the tap instead — scrolling the list to the top, or pressing
+          // an action button, behind an open sidebar.
+          inert={overlaySidebarOpen}
+          // ONE band: the tap-to-top target and the blur end at the same line,
+          // `--chrome-top`, 4px under the action buttons as they are 4px under
+          // the top of the bar — the buttons sit in the middle of it. The bare
+          // strip over the status bar is part of it too.
+          onClick={(e) => { if (e.target === e.currentTarget) scrollMainToTop() }}
         >
-          {/* The one floating-header treatment: progressive blur + fade */}
-          {/* …with its tail cleared over the main panel while a floating
-              panel hangs there (see `useFloatingPanelUnderHeader`). */}
-          <ChromeFade
-            side="top"
-            clearBelowBar={floatingPanelOpen ? (isDesktop ? "var(--main-panel-w)" : "100%") : undefined}
-          />
-
-          {/* FAST-SCROLL BAND — the strip just BELOW the action buttons.
-              iOS's own "tap the status bar to go to the top" target is the
-              status bar, which is genuinely not part of the scroll view; ours
-              was only the `h-13` row, so aiming a little low landed on a
-              flight card and opened it instead. This claims the band under
-              the buttons, where the treatment is already darkening and the
-              content is already chrome-ward.
-
-              It is a REAL element, so a drag started inside it does not
-              scroll the list — that is the trade, and why it stays thin
-              (`--chrome-tap`, 24px) rather than covering the whole fade tail.
-              Below the buttons only: the buttons themselves sit above it. */}
-          {/* Steps aside while a floating panel sits in this band (the
-              logbook's search or calendar), or it swallows that panel's own
-              first control — see `useFloatingPanelUnderHeader`. */}
-          {!floatingPanelOpen && (
-            <div
-              aria-hidden
-              className="absolute inset-x-0 z-0 cursor-pointer"
-              style={{ top: "var(--chrome-top)", height: "var(--chrome-tap)" }}
-              onClick={scrollMainToTop}
-            />
-          )}
+          {/* The one floating-header treatment: progressive blur + fade, the
+              height of the bar — no tail below it. */}
+          <ChromeFade side="top" />
           <div className="relative z-[1] flex items-center px-4 w-full h-13">
             {/* MAIN region — over the main panel (see `--header-main-w`): its
                 actions, then the page's title once it has scrolled under the
@@ -495,7 +478,12 @@ function AppShellContent({ children }: AppShellProps) {
           <div className="absolute top-0 left-0 right-0 z-[99] flex pointer-events-none pt-chrome-bar">
             {/* Same header treatment as the main shell */}
             <ChromeFade side="top" />
-            <div className="header-bar-grid header-bar-grid-balanced relative z-[1] px-4 w-full pointer-events-auto h-13">
+            <div
+              className="header-bar-grid header-bar-grid-balanced relative z-[1] px-4 w-full pointer-events-auto h-13"
+              // The bare bar scrolls the record to its top, as the main
+              // panel's does — it was the title alone here.
+              onClick={(e) => { if (e.target === e.currentTarget) scrollMobileDetailToTop() }}
+            >
               {/* Back button — flush left */}
               <GlassIconButton
                 ariaLabel="Back"

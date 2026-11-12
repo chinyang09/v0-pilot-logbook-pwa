@@ -81,124 +81,20 @@ const FACE_BLUR = 1.8;
 /** Where the single layer's own ramp reaches full strength. */
 const BLUR_RAMP = "58%";
 
-/**
- * How far the treatment extends BEYOND the bar it sits on.
- *
- * The band used to be exactly the bar's height, so the blur only really
- * arrived in the last few pixels above the buttons and a card sitting just
- * under them looked sharp, reachable and tappable — it was neither. Native
- * bars start softening well before their own edge, which is the cue that
- * says "this is behind the chrome": the band should be well clear of the
- * buttons before it starts climbing toward the top of the screen, so the
- * darkening reads as one continuous field rather than as something that
- * begins at the buttons' edge.
- *
- * This is the VISUAL band only. `--chrome-clear` — where the quick-scroll rail
- * parks a row — is a few px LARGER: a row landing exactly on the band's lower
- * edge sits against it.
- *
- * 16px (Nov 2026, the owner's read on device): at 41 the band reached 45px
- * below the action buttons, and every list had to START that far down to be
- * readable — a strip of every screen spent on a fade. 16 is the first card's
- * gap (`LIST_TOP_GAP`, a page's `pt-4` title) less a hair, so a list at its
- * top — or tapped back to it — sits just clear of the band, and
- * `--chrome-clear` parks a scrolled-to row at the same place.
- */
-const FADE_TAIL = 16;
-
-/**
- * Where a floating panel hangs under the bar (`useFloatingPanelUnderHeader`):
- * the logbook's search and calendar, the dashboard's calendar. Both sit at
- * `--chrome-top`, 8px (`px-2`) in from the panel's edges, with 20px corners.
- */
-const PANEL_INSET = 8;
-const PANEL_RADIUS = 20;
-
-/**
- * The mask that clears the tail UNDER a floating panel — and only under it.
- * KEEP (five solid layers, added): the bar's own band across the full width,
- * the gutter left of the panel, everything right of it (`width` from the left
- * edge, less the gutter), and the two slivers OUTSIDE its rounded top corners.
- *
- * It used to clear the whole width below the bar, so content scrolling past
- * the calendar's corners and down its 8px gutters came through sharp and
- * undimmed — a corner of crisp flight card beside a frosted header.
- */
-function tailCutMask(width: string) {
-  const g = `${PANEL_INSET}px`;
-  const r = `${PANEL_RADIUS}px`;
-  const solid = "linear-gradient(#000, #000)";
-  const corner = (at: string) => `radial-gradient(circle ${r} at ${at}, transparent ${PANEL_RADIUS - 0.5}px, #000 ${PANEL_RADIUS}px)`;
-  return {
-    image: [solid, solid, solid, corner("100% 100%"), corner("0 100%")].join(", "),
-    size: [`100% var(--chrome-top)`, `${g} 100%`, `calc(100% - ${width} + ${g}) 100%`, `${r} ${r}`, `${r} ${r}`].join(", "),
-    position: [
-      "0 0",
-      "0 0",
-      "100% 0",
-      `${g} var(--chrome-top)`,
-      `calc(${width} - ${g} - ${r}) var(--chrome-top)`,
-    ].join(", "),
-    layers: 5,
-  };
-}
-
-export function ChromeFade({
-  side,
-  className,
-  clearBelowBar,
-}: {
-  side: Side;
-  className?: string;
-  /**
-   * Clear the fade's TAIL (everything below `--chrome-top`) over this width
-   * from the left edge — a floating panel hangs there and is chrome, not
-   * content scrolling away (`useFloatingPanelUnderHeader`). The bar's own band
-   * keeps its treatment. Applied as a mask on each LAYER, never on this
-   * wrapper: a mask on an ancestor makes it a backdrop root, and the blur
-   * layer would then sample nothing.
-   */
-  clearBelowBar?: string;
-}) {
+export function ChromeFade({ side, className }: { side: Side; className?: string }) {
   const anchor = side === "top" ? { top: 0 } : { bottom: 0 };
   const ramp = `linear-gradient(to ${side}, transparent 0, black ${BLUR_RAMP})`;
-  const cut = side === "top" && clearBelowBar ? tailCutMask(clearBelowBar) : null;
-  // The blur: its ramp INTERSECTED with (bar band ∪ right of the cut). Mask
-  // layers composite bottom-up, so the bottom two are added first.
-  const blurMask = cut
-    ? {
-        maskImage: `${ramp}, ${cut.image}`,
-        WebkitMaskImage: `${ramp}, ${cut.image}`,
-        maskSize: `100% 100%, ${cut.size}`,
-        WebkitMaskSize: `100% 100%, ${cut.size}`,
-        maskPosition: `0 0, ${cut.position}`,
-        WebkitMaskPosition: `0 0, ${cut.position}`,
-        maskRepeat: "no-repeat",
-        WebkitMaskRepeat: "no-repeat",
-        maskComposite: ["intersect", ...Array(cut.layers).fill("add")].join(", "),
-        WebkitMaskComposite: ["source-in", ...Array(cut.layers).fill("source-over")].join(", "),
-      }
-    : { maskImage: ramp, WebkitMaskImage: ramp };
-  const veilMask = cut
-    ? {
-        maskImage: cut.image,
-        WebkitMaskImage: cut.image,
-        maskSize: cut.size,
-        WebkitMaskSize: cut.size,
-        maskPosition: cut.position,
-        WebkitMaskPosition: cut.position,
-        maskRepeat: "no-repeat",
-        WebkitMaskRepeat: "no-repeat",
-        maskComposite: Array(cut.layers).fill("add").join(", "),
-        WebkitMaskComposite: Array(cut.layers).fill("source-over").join(", "),
-      }
-    : undefined;
   return (
     <div
       aria-hidden
-      className={cn("pointer-events-none absolute inset-x-0 z-0", className)}
-      // Taller than the bar by FADE_TAIL — see the note there.
-      style={{ ...anchor, height: `calc(100% + ${FADE_TAIL}px)` }}
+      // EXACTLY the bar's height, no tail below it: the band, the tap-to-top
+      // target and the bar are one line (`--chrome-top`), with the action
+      // buttons in the middle of it. A 16px tail (41 before that) put the
+      // blur's edge below the buttons and the tap target's edge further still,
+      // so neither said where the header ended — and the owner read the tap
+      // area as too large. It also took every floating panel's top into the
+      // treatment, which needed its own mask to clear.
+      className={cn("pointer-events-none absolute inset-0 z-0", className)}
     >
       <div
         className="absolute inset-x-0"
@@ -207,10 +103,11 @@ export function ChromeFade({
           height: "100%",
           backdropFilter: `blur(${FACE_BLUR}px)`,
           WebkitBackdropFilter: `blur(${FACE_BLUR}px)`,
-          ...blurMask,
+          maskImage: ramp,
+          WebkitMaskImage: ramp,
         }}
       />
-      <div className="absolute inset-0" style={{ background: fadeFor(side), ...veilMask }} />
+      <div className="absolute inset-0" style={{ background: fadeFor(side) }} />
     </div>
   );
 }

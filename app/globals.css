@@ -317,29 +317,11 @@
      `--top-inset`, never the raw env(), for anything under the banner. */
   --top-inset: env(safe-area-inset-top, 0px);
   --install-banner-height: 0px;
-  /* How far BELOW the action buttons a tap still means "scroll to the top".
-     The header row itself is only `--chrome-top` tall, so aiming a little low
-     used to land on a flight card and open it. A real element, so a drag that
-     starts here does not scroll the list — hence thin: 24px is enough to
-     forgive a low tap without taking a meaningful strip of the list away. */
-  --chrome-tap: 1.25rem;
   /* Where the QUICK-SCROLL rail parks a row — the same 20px below the bar a
-     list's first card starts at (`LIST_TOP_GAP`), 4px clear of the header
-     treatment's band (`FADE_TAIL`, 16px in chrome-overlays). A scrolled-to
-     row lands where the list's top row sits, just below the fade. It was
-     3.5rem under a 41px band, which spent a strip of every screen. */
+     list's first card starts at (`LIST_TOP_GAP`, a page title's spacing). The
+     header's band ends AT the bar (`ChromeFade` has no tail), so a
+     scrolled-to row lands where the list's top row sits, clear of it. */
   --chrome-clear: calc(var(--chrome-top) + 1.25rem);
-  /* How far BELOW the action buttons a tap still counts as "the header", and
-     so scrolls that panel to the top. The header row itself ends level with
-     the buttons, which put the target's lower edge exactly where the
-     darkening begins — aim a little low and you hit a flight card and open it
-     instead. This band is the same idea as iOS's status-bar tap: a strip of
-     genuine chrome that the list does not own.
-
-     Kept modest on purpose. It is a real element, so a drag STARTING inside
-     it does not scroll the list — 24px is enough to catch an aimed tap and
-     small enough that it is not where a flick begins. */
-  --chrome-tap: 1.25rem;
   --chrome-top-sm: calc(2.75rem + var(--top-inset));
   /* How far above the physical bottom edge the floating nav rests — the ONE
      number the bottom pill, the sidebar's lower end, and the content
