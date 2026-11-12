@@ -7,7 +7,7 @@ import { useFlipPush } from "@/hooks/use-flip-push"
 import { MORPH_EASE } from "@/lib/motion"
 import { useFlights } from "@/hooks/data/use-flights"
 import { useDashboardPeriod } from "@/hooks/use-dashboard-period"
-import { usePanelDualMonth, useFloatingPanelUnderHeader } from "@/lib/layout/panel-mode"
+import { pairStart, usePanelDualMonth, useFloatingPanelUnderHeader } from "@/lib/layout/panel-mode"
 import { usePageActive } from "@/hooks/use-page-active"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 
@@ -71,13 +71,29 @@ export function DashboardCalendarPanel({
     setMidPickStart(null)
   }, [period])
 
+  // Two months are a FIXED odd|even pair, as on the logbook: every month the
+  // calendar is sent to is anchored on its pair, or the pair shuffled by one
+  // (Dec|Jan) and a step moved it out of phase.
+  const showMonth = React.useCallback(
+    (year: number, month: number) => setSelectedMonth({ year, month: dualMonth ? pairStart(month) : month }),
+    [dualMonth, setSelectedMonth],
+  )
+
   // Anchor the visible month on the active period's end whenever the picker
-  // opens or the period changes externally.
+  // opens, the period changes externally, or the layout gains or loses its
+  // second month.
   React.useEffect(() => {
     if (!showCalendar) return
     const anchor = new Date(`${resolved.toIso}T00:00:00`)
-    setSelectedMonth({ year: anchor.getFullYear(), month: anchor.getMonth() })
-  }, [showCalendar, resolved.toIso, setSelectedMonth])
+    showMonth(anchor.getFullYear(), anchor.getMonth())
+  }, [showCalendar, resolved.toIso, showMonth])
+
+  // Today moves the calendar to the month that holds it; it does not choose a
+  // day — a tap here is one end of a range.
+  const showToday = React.useCallback(() => {
+    const now = new Date()
+    showMonth(now.getFullYear(), now.getMonth())
+  }, [showMonth])
 
   const handleDateSelect = React.useCallback(
     (dateStr: string) => {
@@ -108,15 +124,21 @@ export function DashboardCalendarPanel({
         onNaturalHeight={onNaturalHeight}
         flights={flights}
         selectedMonth={selectedMonth}
-        onMonthChange={(year, month) => setSelectedMonth({ year, month })}
+        onMonthChange={showMonth}
         onDateSelect={handleDateSelect}
         rangeStart={displayStart}
         rangeEnd={displayEnd}
         dualMonth={dualMonth}
         splitLayout={isSplitLayout}
         monthYearView={monthYearView}
-        onHeaderPress={() => setMonthYearView(!monthYearView)}
+        onHeaderPress={() => {
+          // Closing the wheels puts the pair back in phase; while they are up
+          // the month being chosen is the LEFT pane, beside them.
+          if (monthYearView) showMonth(selectedMonth.year, selectedMonth.month)
+          setMonthYearView(!monthYearView)
+        }}
         onMonthSelect={(year, month) => setSelectedMonth({ year, month })}
+        onToday={showToday}
       />
     </div>
   )

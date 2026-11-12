@@ -21,7 +21,7 @@ import { EmptyState } from "@/components/ui/empty-state"
 import { Button } from "@/components/ui/button"
 import { useRouter } from "next/navigation"
 import { GlassContainer } from "@/components/ui/glass-container"
-import { usePanelDualMonth, useFloatingPanelUnderHeader } from "@/lib/layout/panel-mode"
+import { pairStart, usePanelDualMonth, useFloatingPanelUnderHeader } from "@/lib/layout/panel-mode"
 import { parseYMDLocal as parseDateLocal, formatLocalYMD } from "@/lib/utils/date"
 import { ChoicePicker } from "@/components/ui/option-menu"
 import { setDutiesView, useCalendarDuties, useListDuties } from "@/hooks/use-calendar-spans"
@@ -52,17 +52,6 @@ const ADD_OPTIONS: { value: AddKind; label: string }[] = [
 /** ONE clock for the floating panels and the list spacer they push. Both use
  *  this exact string, so the calendar's collapse and the list's reserved
  *  space are the same movement instead of two curves running side by side. */
-/**
- * In dual-month mode the two panes are a FIXED pair — odd month on the left,
- * even month on the right (Jan|Feb, Mar|Apr, …). Anchoring the pair to the
- * calendar rather than to whatever month you happened to scroll past is what
- * stops it shuffling by one month at a time: the pair only changes when the
- * top flight leaves it altogether.
- */
-function pairStart(month: number): number {
-  return month - (month % 2)
-}
-
 /** Is `month` one of the two panes currently shown for `anchor`? */
 function inSamePair(anchorMonth: number, anchorYear: number, month: number, year: number): boolean {
   const start = pairStart(anchorMonth)

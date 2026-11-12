@@ -15,6 +15,7 @@ import { WheelPicker, WheelPickerWrapper } from "@ncdai/react-wheel-picker";
 import "@ncdai/react-wheel-picker/style.css";
 import { wheelClassNames } from "@/components/ui/wheel-styles";
 import type { FlightLog } from "@/lib/db";
+import { useDayKey } from "@/hooks/use-day-key";
 import { cn } from "@/lib/utils";
 import { formatDay } from "@/lib/utils/date";
 import { fitScale, labelWidth, onFontsReady } from "@/lib/utils/text-fit";
@@ -601,20 +602,58 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
      * (a pair moves two, as a step does, unless the month is already the other
      * pane) and the day is chosen.
      */
+    const showMonthOf = (dateStr: string) => {
+      const [y, m] = dateStr.split("-").map(Number);
+      const delta = y * 12 + (m - 1) - (selectedMonth.year * 12 + selectedMonth.month);
+      const visible = delta === 0 || (dualMonth && delta === 1);
+      if (visible) return;
+      // A pair moves by whole pairs, as a swipe does, so the month lands in
+      // its own (odd|even) pane.
+      const step = dualMonth ? (delta > 0 ? 2 * Math.ceil((delta - 1) / 2) : -2 * Math.ceil(-delta / 2)) : delta;
+      const target = addMonths(selectedMonth.year, selectedMonth.month, step);
+      onMonthChange(target.year, target.month);
+    };
     const handleDateClick = (dateStr: string, isCurrentMonth: boolean) => {
-      if (!isCurrentMonth) {
-        const [y, m] = dateStr.split("-").map(Number);
-        const delta = y * 12 + (m - 1) - (selectedMonth.year * 12 + selectedMonth.month);
-        const visible = delta === 0 || (dualMonth && delta === 1);
-        if (!visible) {
-          const step = dualMonth ? (delta > 0 ? 2 : -2) : delta;
-          const target = addMonths(selectedMonth.year, selectedMonth.month, step);
-          onMonthChange(target.year, target.month);
-        }
-      }
+      if (!isCurrentMonth) showMonthOf(dateStr);
       onDateSelect?.(dateStr);
     };
 
+    /**
+     * The grid is ONE tab stop per month, and the arrows move between days
+     * (a week up or down) — the platform's date-grid keys. Every day being a
+     * tab stop put 42 presses (84 with two months) between the header and the
+     * list. Past the month's edge the calendar moves with the focus.
+     */
+    const pendingFocusRef = useRef<string | null>(null);
+    const onGridKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const by = ({ ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 } as Record<string, number>)[e.key];
+      if (!by || e.altKey || e.ctrlKey || e.metaKey) return;
+      const from = (e.target as HTMLElement).closest<HTMLElement>("[data-date]")?.dataset.date;
+      if (!from) return;
+      e.preventDefault();
+      const [y, m, d] = from.split("-").map(Number);
+      const to = new Date(Date.UTC(y, m - 1, d + by)).toISOString().slice(0, 10);
+      const cell = containerRef.current?.querySelector<HTMLElement>(`[data-date="${to}"][data-in-month]`);
+      if (cell) {
+        cell.focus();
+        return;
+      }
+      pendingFocusRef.current = to;
+      showMonthOf(to);
+    };
+    useEffect(() => {
+      const to = pendingFocusRef.current;
+      if (!to) return;
+      const cell = containerRef.current?.querySelector<HTMLElement>(`[data-date="${to}"][data-in-month]`);
+      if (cell) {
+        pendingFocusRef.current = null;
+        cell.focus();
+      }
+    });
+
+    // Re-rendered at midnight (and on return to the foreground), so a
+    // calendar left open overnight does not keep yesterday lit as today.
+    useDayKey();
     const today = getTodayLocal();
     const nowYear = new Date().getFullYear();
 
@@ -697,6 +736,9 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       const cornerRadiusOf = (w: number, col: number) =>
         w === last ? `0 0 ${col === 6 ? bottomRight : 0}px ${col === 0 ? bottomLeft : 0}px` : undefined;
       const hasFullRange = !!(rangeStart && rangeEnd) && rangeStart !== rangeEnd;
+      // The one day Tab lands on: the chosen day, else today, else the 1st.
+      const inMonth = days.filter((d) => d.isCurrentMonth).map((d) => d.dateStr);
+      const tabStop = [selectedDate, today].find((d) => !!d && inMonth.includes(d)) ?? inMonth[0];
       return (
         <div className="mx-auto w-full" style={{ maxWidth: paneMaxWidth }}>
           <div className="grid grid-cols-7 gap-0 pb-0.5">
@@ -715,6 +757,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
           <div
             className="overflow-hidden"
             style={{ borderRadius: `0 0 ${bottomRight}px ${bottomLeft}px` }}
+            onKeyDown={onGridKeyDown}
           >
             {weeks.map((week, w) => (
               // Each row is its own layout and paint island: the bars are
@@ -741,9 +784,16 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                         aria-label={`${formatDay(dayInfo.dateStr)}${labels.length ? `, ${labels.join(", ")}` : ""}${hidden ? `, and ${hidden} more` : ""}`}
                         aria-pressed={isSelected || undefined}
                         aria-current={isToday ? "date" : undefined}
+                        data-date={dayInfo.dateStr}
+                        data-in-month={isCurrentMonth ? "" : undefined}
+                        tabIndex={dayInfo.dateStr === tabStop && isCurrentMonth ? 0 : -1}
                         onClick={() => handleDateClick(dayInfo.dateStr, isCurrentMonth)}
                         className={cn(
                           "relative flex h-full min-w-0 items-start justify-between border-t border-[var(--on-glass-fill)] px-1 text-left transition-colors",
+                          // The focus outline INSIDE the day: the app's
+                          // default sits 2px outside, which the row's paint
+                          // containment and the next day cut off.
+                          "focus-visible:outline-offset-[-3px]",
                           col > 0 && "border-l",
                           // Another month's days are SHADED, not painted: a
                           // translucent darkening the glass still shows
@@ -752,8 +802,11 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                           !isCurrentMonth && "bg-black/[0.07] dark:bg-black/30",
                           isInRange && "bg-[var(--on-glass-accent-soft)]",
                           isRangeEnd && "bg-[var(--on-glass-accent)]",
-                          // Today is the whole DAY, lit.
-                          isToday && !isRangeEnd && "bg-[var(--on-glass-fill)]",
+                          // Today is the whole DAY, lit — in the ACCENT: a
+                          // grey fill read as one more day of another month
+                          // in the light theme. Inside a range the range's
+                          // own tint wins and the bold number still says it.
+                          isToday && !isRangeEnd && !isInRange && "bg-[var(--on-glass-accent-soft)]",
                           isSelected && "ring-2 ring-inset ring-primary",
                         )}
                         style={{ borderRadius: cornerRadiusOf(w, col) }}
@@ -871,15 +924,6 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     };
 
 
-    /**
-     * ONE month pane: its caption and its grid.
-     *
-     * The caption is rendered in SINGLE mode too, even though the header names
-     * the month as well. Without it a single month was 12px shorter than a
-     * dual pair, so toggling the panel width still resized the calendar and
-     * the flight list still had to absorb it — the whole point of capping the
-     * pane width was to make those two heights equal.
-     */
     /**
      * ONE month pane: just its grid.
      *
@@ -1110,6 +1154,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
             {paneAnim === "toSingle" && leavingMonth && (
               <div
                 aria-hidden
+                inert
                 className="absolute inset-x-0 top-0 z-0"
                 style={
                   {
@@ -1137,6 +1182,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       {step && (
         <div
           aria-hidden
+          inert
           className="absolute inset-x-0 top-0"
           style={
             {
