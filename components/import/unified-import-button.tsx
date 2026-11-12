@@ -659,7 +659,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         size="icon"
         disabled={busy}
         aria-label="Import files"
-        className="h-9 w-9 rounded-full"
+        className="h-10 w-10 rounded-full"
         onClick={() => fileInputRef.current?.click()}
       >
         {busy ? (

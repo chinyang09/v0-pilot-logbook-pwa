@@ -105,14 +105,12 @@ export default function Dashboard() {
     // Laid out to the height rather than scrolled into: the chrome offsets are
     // padding on a full-height flex column, and the panel takes what is left.
     //
-    // The top is the chrome PLUS the 20px every list leaves under it
-    // (`LIST_TOP_GAP`). A list scrolls its first row out of the header's fade;
-    // this page cannot scroll, so at the bare chrome offset its first line —
-    // the annunciator, the one word the page exists to say — sat under the
-    // veil for good (~50% of the background over it, measured unreadable red
-    // on the dark theme). Twenty pixels down the veil is ~10%.
+    // The top is the chrome PLUS the gap every page leaves under it
+    // (`--content-top-gap`, 16px — a page title's, the logbook's first
+    // card's). At the bare chrome offset its first line — the annunciator,
+    // the one word the page exists to say — sat under the header's veil.
     return (
-      <div className="flex h-full min-h-0 flex-col px-panel pt-[calc(var(--chrome-top)+20px)] pb-chrome">
+      <div className="flex h-full min-h-0 flex-col px-panel pt-[calc(var(--chrome-top)+var(--content-top-gap))] pb-chrome">
         <LegalDashboard className="min-h-0" />
       </div>
     )

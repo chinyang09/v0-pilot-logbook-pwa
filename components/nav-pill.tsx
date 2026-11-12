@@ -948,7 +948,11 @@ const PillBarContent = memo(function PillBarContent({
     <div
       data-pill-row
       className={cn(
-        "flex items-center px-1.5",
+        // px-0.5: a highlight sits 2px inside the bar's edge, the inset every
+        // capsule with a highlight in it uses (`HIGHLIGHT_INSET` in
+        // glass-icon-button.tsx). It was 6px, and the highlight read as a
+        // smaller thing floating inside the bar rather than filling its slot.
+        "flex items-center px-0.5",
         // The bottom bar is the taller of the two — see MOBILE_PILL_HEIGHT.
         mode === "desktop" ? "h-11" : "h-15"
       )}
@@ -1035,7 +1039,7 @@ const PillBarContent = memo(function PillBarContent({
                 <span
                   data-grav-item
                   className={cn(
-                    "flex w-full items-center justify-center h-8 px-3.5 rounded-full text-sm font-medium transition-colors",
+                    "flex w-full items-center justify-center h-10 px-3.5 rounded-full text-sm font-medium transition-colors",
                     highlighted
                       ? "text-[var(--on-glass-active-fg)]"
                       : "text-foreground"
@@ -1051,7 +1055,7 @@ const PillBarContent = memo(function PillBarContent({
                     // its highlight. A label too long for its share (an iPad
                     // window in Split View is 320) truncates rather than
                     // widening its column.
-                    "flex w-full min-w-0 flex-col items-center justify-center gap-1 h-12 px-0.5 rounded-full transition-colors",
+                    "flex w-full min-w-0 flex-col items-center justify-center gap-1 h-14 px-0.5 rounded-full transition-colors",
                     highlighted
                       ? "text-[var(--on-glass-active-fg)]"
                       : "text-foreground"

@@ -61,7 +61,7 @@ function inSamePair(anchorMonth: number, anchorYear: number, month: number, year
 /** Gap between the CHROME and the first flight card, matching what crew /
  *  aircraft / airports get from their content wrapper. Not applied under an
  *  open panel — that panel's own edge is the separation there. */
-const LIST_TOP_GAP = 20
+const LIST_TOP_GAP = 16
 
 export default function LogbookPage() {
   const router = useRouter()
@@ -921,6 +921,7 @@ export default function LogbookPage() {
           // block carry their own bottom edge, so the gap would read as slack
           // hanging off the panel rather than as breathing room under the
           // chrome. Only one of the two is ever the thing above the list.
+          topGapPx={showSearch || showCalendar ? 0 : LIST_TOP_GAP}
           topSpacerHeight={`calc(var(--chrome-top) + ${(showSearch || showCalendar ? 0 : LIST_TOP_GAP) + (showSearch ? searchBlockHeight : 0) + (showCalendar ? calendarNaturalHeight : 0)}px)`}
           topSpacerTransition={spacerAnimated ? PANEL_MOTION : "none"}
           selectedFlightId={selectedFlightId}

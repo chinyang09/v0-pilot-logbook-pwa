@@ -113,10 +113,20 @@ export function GlassTextButton({
   )
 }
 
+/**
+ * How far a highlight sits inside the capsule that holds it: 2px, the same in
+ * every capsule — a header group, the nav's bars, a segmented control. A
+ * group is h-11 with `px-0.5`, so what goes in it is `h-10` (`GROUP_ITEM`) and
+ * its highlight fills the capsule but for a hairline of glass. It was 4px in
+ * the groups and 6px in the nav, and the highlight read as a smaller thing
+ * floating inside the control rather than the part of it you are on.
+ */
+export const GROUP_ITEM = "h-10 min-w-10"
+
 export function GlassButtonGroup({ children }: { children: React.ReactNode }) {
   return (
     <GlassContainer cornerRadius={CONTROL_RADIUS} overBlur>
-      <div className="flex items-center gap-0.5 px-1 h-11">{children}</div>
+      <div className="flex items-center gap-0.5 px-0.5 h-11">{children}</div>
     </GlassContainer>
   )
 }
@@ -148,7 +158,8 @@ export function GlassGroupButton({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "h-9 w-9 rounded-full [&_svg]:!size-[19px]",
+        GROUP_ITEM,
+        "w-10 rounded-full [&_svg]:!size-[19px]",
         // `--on-glass-active` is THE selected-thing fill, shared with the nav's
         // gravity blob — see the token. Its foreground is a separate token
         // because `--primary` on a 32% tint of itself is the same hue at a

@@ -87,14 +87,14 @@ export function SegmentedTabs<T extends string>({
         ref={listRef}
         role="tablist"
         className={cn(
-          "relative flex items-center gap-0.5 overflow-x-auto scrollbar-hide p-1",
+          "relative flex items-center gap-0.5 overflow-x-auto scrollbar-hide p-0.5",
           className
         )}
       >
         {indicator && (
           <span
             aria-hidden
-            className="absolute inset-y-1 left-0 rounded-full bg-[var(--on-glass-accent)] transition-transform duration-300 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-reduce:transition-none"
+            className="absolute inset-y-0.5 left-0 rounded-full bg-[var(--on-glass-accent)] transition-transform duration-300 ease-[cubic-bezier(0.34,1.4,0.64,1)] motion-reduce:transition-none"
             style={{
               width: indicator.w,
               transform: `translateX(${indicator.x}px)`,
@@ -117,7 +117,7 @@ export function SegmentedTabs<T extends string>({
                 // flex-1: the segments share the control's width, as a native
                 // segmented control's do — content-sized, a full-width control
                 // ended in an empty strip after the last one.
-                "relative z-10 flex h-9 flex-1 shrink-0 items-center justify-center rounded-full px-3.5 text-xs font-medium whitespace-nowrap",
+                "relative z-10 flex h-10 flex-1 shrink-0 items-center justify-center rounded-full px-3.5 text-xs font-medium whitespace-nowrap",
                 "transition-colors active:scale-[0.97]",
                 active ? "text-primary" : "text-muted-foreground hover:text-foreground"
               )}

@@ -16,6 +16,9 @@ import { lookupAirportOnline } from "@/lib/airports/online-lookup"
 import { SuggestionList } from "@/components/ui/suggestion-list"
 import { lookup } from "@/lib/lookup/client"
 import type { AirportCandidate } from "@/lib/lookup/types"
+import { ScrollIndicator } from "@/components/ui/scroll-indicator"
+import { useCollapsingTitle } from "@/hooks/use-collapsing-title"
+import { DETAIL_TITLE_KEY } from "@/lib/layout/header-title"
 
 /** The airports a code being typed could be. Never throws; empty on any failure. */
 async function fetchAirportCandidates(code: string): Promise<AirportCandidate[]> {
@@ -546,20 +549,38 @@ export function AirportNewForm({
     // Detail panel mode: actions live in the floating right-side glass bar,
     // registered above via useRegisterDetailActions. Content scrolls behind
     // the global header (matches AirportDetailPanel layout).
-    return (
-      <div className="h-full relative flex flex-col">
-        <div className="flex-1 overflow-y-auto">
-          <div className="h-chrome-top" />
-          {formContent}
-          <div className="h-chrome-bottom" />
-        </div>
-      </div>
-    )
+    return <NewAirportPanel>{formContent}</NewAirportPanel>
   }
 
   return (
     <PageContainer>
       {formContent}
     </PageContainer>
+  )
+}
+
+/**
+ * The add-airport form in the DETAIL panel, named like every other new record
+ * ("New Aircraft", "New Duty", "New Currency" — `DetailFormPanel`'s title, the
+ * one that follows the reader up into the header). It was a bare scroller with
+ * no title, so the panel did not say what it was for. Its actions are its own
+ * (registered by the form), which is why it is not a `DetailFormPanel`.
+ */
+function NewAirportPanel({ children }: { children: React.ReactNode }) {
+  const { titleRef, spacerRef, onScroll } = useCollapsingTitle(DETAIL_TITLE_KEY, "New Airport")
+  return (
+    <div className="relative flex h-full flex-col">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain scrollbar-hide" onScroll={onScroll}>
+        <ScrollIndicator />
+        <div ref={spacerRef} className="h-chrome-top" />
+        <div className="px-panel pt-4">
+          <h2 ref={titleRef} className="px-1 text-xl font-semibold">
+            New Airport
+          </h2>
+        </div>
+        {children}
+        <div className="h-chrome-bottom" />
+      </div>
+    </div>
   )
 }

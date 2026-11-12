@@ -106,6 +106,10 @@ interface FlightListProps {
   onScrollStart?: () => void;
   /** CSS length: the header offset plus whatever floats above the list. */
   topSpacerHeight?: string;
+  /** The part of `topSpacerHeight` that is open space above the first card,
+   *  not chrome — the "top row" is judged against the line the rows pass
+   *  under, which is this much lower in the list than the scroll offset. */
+  topGapPx?: number;
   /** CSS transition for the spacer, so it moves in lock-step with whatever is
    *  growing above it (the calendar) instead of on its own separate curve. */
   topSpacerTransition?: string;
@@ -439,6 +443,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       onTopFlightChange,
       onScrollStart,
       topSpacerHeight = "0px",
+      topGapPx = 0,
       topSpacerTransition,
       headerContent,
       selectedFlightId,
@@ -625,16 +630,22 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       const visibleItems = rowVirtualizer.getVirtualItems();
       if (visibleItems.length === 0) return;
 
-      // Get the scroll offset from the virtualizer
-      const scrollOffset = rowVirtualizer.scrollOffset ?? 0;
+      // The line the rows pass under — the chrome and any open panel — in the
+      // rows' own coordinates: the scroll offset, less the gap the spacer
+      // leaves above the first card (`topGapPx`), which is not covered.
+      const line = (rowVirtualizer.scrollOffset ?? 0) - topGapPx;
 
-      // Find the first item that is actually visible at the top of the viewport.
-      // getVirtualItems() includes overscan items rendered above/below the viewport.
-      // Overscan items above have item.end <= scrollOffset.
-      // The first visible item is the first one where item.end > scrollOffset.
-      let topVisibleItem = visibleItems[0];
+      // The TOP row is the first one at least HALF on screen: its card's
+      // midpoint at or below the line. It was the first row with any pixel
+      // left showing, so a card all but gone under the calendar still named
+      // the day — the calendar lit a date the reader could no longer see, and
+      // switched only when the last sliver went. Half is where a reader stops
+      // reading a card as "the one at the top"; in both directions the date
+      // changes as the next card takes over that half.
+      let topVisibleItem = visibleItems[visibleItems.length - 1];
       for (const item of visibleItems) {
-        if (item.end > scrollOffset) {
+        const cardMid = item.start + (item.size - ROW_GAP_PX) / 2;
+        if (cardMid >= line) {
           topVisibleItem = item;
           break;
         }
@@ -656,7 +667,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
           onTopFlightChange?.(topFlight);
         }
       }
-    }, [rows, onTopFlightChange, rowVirtualizer]);
+    }, [rows, onTopFlightChange, rowVirtualizer, topGapPx]);
 
     // Handle user touch/interaction/wheel start on flight list
     const handleTouchStart = useCallback(() => {

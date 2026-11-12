@@ -74,7 +74,7 @@ export function DashboardActions() {
                 aria-selected={isActive}
                 onClick={() => setDashboardView(v.value)}
                 className={cn(
-                  "h-9 rounded-full px-3 text-xs font-semibold transition-colors",
+                  "h-10 rounded-full px-3 text-xs font-semibold transition-colors",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   isActive
                     ? "bg-[var(--on-glass-active)] text-[var(--on-glass-active-fg)]"
@@ -115,7 +115,7 @@ export function DashboardActions() {
               // h-9, like every other control in a GlassButtonGroup: the group
               // is h-11 with px-1, so a 48px child overflows a 44px box and the
               // glass — which clips — cut the icon off top and bottom.
-              "flex h-9 min-w-9 flex-col items-center justify-center rounded-full px-2 transition-colors",
+              "flex h-10 min-w-10 flex-col items-center justify-center rounded-full px-2 transition-colors",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               showFilter
                 ? "bg-[var(--on-glass-active)] text-[var(--on-glass-active-fg)]"
@@ -150,10 +150,14 @@ export function DashboardActions() {
                       aria-selected={isActive}
                       onClick={() => setPeriod({ kind: "preset", preset: p.value })}
                       className={cn(
-                        "px-2.5 py-1 rounded-full text-xs font-medium transition-colors",
+                        // One height and one selected fill with every other
+                        // control in a header group: they were 24px solid
+                        // accent pills, a different thing from the Legal /
+                        // Summary capsule beside them.
+                        "h-10 px-3 rounded-full text-xs font-semibold transition-colors",
                         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                         isActive
-                          ? "bg-primary text-primary-foreground shadow-sm"
+                          ? "bg-[var(--on-glass-active)] text-[var(--on-glass-active-fg)]"
                           : "text-muted-foreground hover:text-foreground hover:bg-[var(--on-glass-fill-soft)]",
                       )}
                     >
