@@ -32,17 +32,23 @@ import { isWholeDayDuty } from "@/lib/utils/logbook-rows";
 
 const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
-/** Each duty type's colour — the calendar's hues, as text and as the stripe. Rest days (off, leave) share one. */
+/**
+ * Each duty type's colour — the calendar's hues and the calendar's WEIGHTS.
+ * The logbook is a flight log: a standby (and a schedule flight duty) keeps
+ * its full colour; ground, training, positioning and rest days take a softer
+ * stripe and the muted ink, so a month of days off does not out-shout the
+ * flight cards around them. Rest days (off, leave) share one hue.
+ */
+const quiet = (stripe: string) => ({ text: "text-muted-foreground", stripe });
 export const DUTY_CARD_TONE: Record<DutyType, { text: string; stripe: string }> = {
   flight: { text: "text-blue-700 dark:text-blue-300", stripe: "bg-blue-500" },
   standby: { text: "text-amber-700 dark:text-amber-300", stripe: "bg-amber-500" },
-  training: { text: "text-purple-700 dark:text-purple-300", stripe: "bg-purple-500" },
-  leave: { text: "text-green-700 dark:text-green-300", stripe: "bg-green-500" },
-  // A rest day is ONE hue, leave or day off alike — the calendar's rule.
-  off: { text: "text-green-700 dark:text-green-300", stripe: "bg-green-500" },
-  ground: { text: "text-orange-700 dark:text-orange-300", stripe: "bg-orange-500" },
-  positioning: { text: "text-cyan-700 dark:text-cyan-300", stripe: "bg-cyan-500" },
-  other: { text: "text-slate-600 dark:text-slate-300", stripe: "bg-slate-400" },
+  training: quiet("bg-purple-500/45"),
+  leave: quiet("bg-green-500/45"),
+  off: quiet("bg-green-500/45"),
+  ground: quiet("bg-orange-500/45"),
+  positioning: quiet("bg-cyan-500/45"),
+  other: quiet("bg-slate-400/45"),
 };
 
 const TYPE_LABEL: Record<DutyType, string> = {

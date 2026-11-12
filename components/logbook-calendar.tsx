@@ -130,15 +130,29 @@ const WEEK_ROWS = 6;
 
 /**
  * Every item is a BAR, and a bar is SOLID: its hue mixed into the colour the
- * glass face reads as (`--on-glass`), so it looks like the tint it always
- * did but nothing behind the calendar shows through it — the calendar is
- * glass, what is written on it is not (the owner's rule). Two neighbours in a
- * lane are two shapes with a gap between them; as bare text they ran into
- * each other and read as one overlapping label.
+ * glass face reads as (`--on-glass`), so nothing behind the calendar shows
+ * through it — the calendar is glass, what is written on it is not (the
+ * owner's rule).
  *
- * REST days — a day off, every kind of leave (annual, sick, parental) — are
- * ONE hue: the colour answers "am I working that day", and LOFF in grey
- * beside leave in green read as two different kinds of day.
+ * TWO WEIGHTS, by what the logbook is FOR. It is a flight log; the duties are
+ * there to explain the roster and help recall the flying. So what the pilot
+ * DOES in an aeroplane or for one — a flight, a simulator session, a standby
+ * that can become a flight — is LOUD: a filled bar in its hue with dark (or
+ * the accent's own) ink. Everything else — ground school, office days,
+ * positioning, a day off, leave — is QUIET: a faint tint of its hue with
+ * muted ink. It used to be the other way round: every duty sat at a 30% tint
+ * with saturated text while a flown flight was a pale wash, so a month of
+ * days off out-shouted the flying.
+ *
+ *   flown        accent, filled          — the record
+ *   to fly       accent outline + tint   — the plan (outlined = not yet)
+ *   not logged   amber outline + tint    — a gap to fill
+ *   simulator    teal, filled
+ *   standby      amber, filled
+ *   rest/ground  a faint tint, muted ink — context, not content
+ *
+ * REST days — a day off, every kind of leave — are ONE hue (green): the
+ * colour answers "am I working that day".
  */
 const HUE = {
   rest: "oklch(0.723 0.219 149.6)", // green-500
@@ -152,40 +166,71 @@ const HUE = {
 
 const solid = (hue: string, pct: number) => `color-mix(in oklab, ${hue} ${pct}%, var(--on-glass))`;
 
-const DUTY_BAR: Record<string, { text: string; hue: string }> = {
-  standby: { text: "text-amber-800 dark:text-amber-200", hue: HUE.standby },
-  training: { text: "text-purple-800 dark:text-purple-200", hue: HUE.training },
-  leave: { text: "text-green-800 dark:text-green-200", hue: HUE.rest },
-  off: { text: "text-green-800 dark:text-green-200", hue: HUE.rest },
-  ground: { text: "text-orange-800 dark:text-orange-200", hue: HUE.ground },
-  positioning: { text: "text-cyan-800 dark:text-cyan-200", hue: HUE.positioning },
-  other: { text: "text-slate-700 dark:text-slate-200", hue: HUE.other },
-};
-
-function barTone(tone: BarTone, quiet = false): { className: string; background: string } {
-  const t = barToneFull(tone);
-  // Outside the month: the same hue, half as strong, its words muted — never
-  // translucent, which let the glass through the bar.
-  if (!quiet) return t;
-  return { className: "text-[var(--on-glass-muted)]", background: t.background.replace(/(\d+)%/, (_, n) => `${Math.round(Number(n) / 2)}%`) };
+interface Tone {
+  /** Ink: a utility class, or (`color`) a value. */
+  className: string;
+  color?: string;
+  background: string;
+  /** A 1px inset outline — the "not yet" of a planned flight or a gap. */
+  ring?: string;
+  /** Filled bars are the loud ones; outside the month they fall to a tint. */
+  loud: boolean;
 }
 
-function barToneFull(tone: BarTone): { className: string; background: string } {
-  if (tone.kind === "duty") {
-    const d = DUTY_BAR[tone.dutyType] ?? DUTY_BAR.other;
-    return { className: d.text, background: solid(d.hue, 30) };
-  }
+/**
+ * Quiet duties: a faint tint and the muted ink — quiet by FILL and weight,
+ * never by contrast: the label still reads at 4.5:1.
+ */
+const quietDuty = (hue: string): Tone => ({
+  className: "text-muted-foreground font-medium",
+  background: solid(hue, 12),
+  loud: false,
+});
+
+const DUTY_BAR: Record<string, Tone> = {
+  // Standby is LOUD: it is a commitment that can turn into a flight.
+  standby: { className: "text-amber-950", background: solid(HUE.standby, 88), loud: true },
+  training: quietDuty(HUE.training),
+  leave: quietDuty(HUE.rest),
+  off: quietDuty(HUE.rest),
+  ground: quietDuty(HUE.ground),
+  positioning: quietDuty(HUE.positioning),
+  other: quietDuty(HUE.other),
+};
+
+function barTone(tone: BarTone, quiet = false): Tone {
+  const t = barToneFull(tone);
+  if (!quiet) return t;
+  // Outside the month: the same hue, as a tint, its words muted — never
+  // translucent, which let the glass through the bar.
+  return {
+    className: "text-[var(--on-glass-muted)] font-medium",
+    background: t.loud || t.ring ? t.background.replace(/(\d+)%/, () => "10%") : t.background.replace(/(\d+)%/, () => "7%"),
+    loud: false,
+  };
+}
+
+function barToneFull(tone: BarTone): Tone {
+  if (tone.kind === "duty") return DUTY_BAR[tone.dutyType] ?? DUTY_BAR.other;
   switch (tone.state) {
-    // Flown: the accent, filled — a flight reads as a flight beside a day
-    // off. Still to fly: the same hue, light, in the accent's own text.
     case "flown":
-      return { className: "text-foreground", background: solid("var(--primary)", 30) };
+      return { className: "text-primary-foreground", background: solid("var(--primary)", 92), loud: true };
     case "unlogged":
-      return { className: "text-status-warning", background: solid("var(--status-warning)", 16) };
+      return {
+        className: "text-status-warning",
+        background: solid("var(--status-warning)", 14),
+        ring: "var(--status-warning)",
+        loud: false,
+      };
     case "sim":
-      return { className: "text-teal-800 dark:text-teal-200", background: solid(HUE.sim, 18) };
+      return { className: "text-teal-950", background: solid(HUE.sim, 88), loud: true };
     default:
-      return { className: "text-primary", background: solid("var(--primary)", 12) };
+      return {
+        className: "text-[var(--on-glass-active-fg)]",
+        background: solid("var(--primary)", 14),
+        ring: "var(--primary)",
+        loud: false,
+      };
   }
 }
 
@@ -812,44 +857,42 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                           col > 0 && "border-l",
                           // Another month's days are SHADED, not painted: a
                           // translucent darkening the glass still shows
-                          // through. A solid fill there blocked the material
-                          // and read as a grey slab under the calendar.
-                          !isCurrentMonth && "bg-black/[0.07] dark:bg-black/30",
-                          // A chosen PERIOD (the dashboard) is the accent, a
-                          // step up from the soft tint it was — that tint was
-                          // also today's, and a week's range read as faintly
-                          // as one lit day. Its ends are the selected-thing
-                          // fill, with their numbers badged (below).
+                          // through. Dark enough to read as "not this month"
+                          // at a glance, not a slab.
+                          !isCurrentMonth && "bg-black/[0.14] dark:bg-black/[0.45]",
+                          // A chosen PERIOD (the dashboard) is the accent; its
+                          // ends the selected-thing fill.
                           isInRange && "bg-[var(--on-glass-accent)]",
                           isRangeEnd && "bg-[var(--on-glass-active)]",
-                          // The chosen DAY is a NEUTRAL fill with an inverted
-                          // number. It was an accent ring — the colour every
-                          // flight still to fly is drawn in, so the day you
-                          // tapped read as one more of them; and at the edge
-                          // the ring sat over the glass's rim.
-                          isSelected && !isRangeEnd && "bg-[var(--on-glass-fill)]",
+                          // TODAY: a soft accent wash under an accent rule
+                          // across the top of the day (below) — no badge.
+                          isToday && !isInRange && !isRangeEnd && !isSelected && "bg-[var(--on-glass-accent-soft)]",
+                          // The chosen DAY: a light lift here, and an INK
+                          // outline drawn OVER its bars (below the bars layer).
+                          isSelected && !isRangeEnd && "bg-[var(--on-glass-fill-soft)]",
                         )}
                         style={{ borderRadius: cornerRadiusOf(w, col) }}
                       >
+                        {isToday && (
+                          // Today's rule: the calendar's one solid accent mark,
+                          // a bar across the top of the day like a page tab.
+                          <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-primary" />
+                        )}
                         <span
                           className={cn(
-                            // Day numbers are grey. TODAY's is a solid accent
-                            // badge — the calendar's ONE solid accent mark, as
-                            // on the platform's own calendars; a lit cell and a
-                            // bold number were the same tint as a range and
-                            // easy to miss. The chosen day inverts (ink on the
-                            // face); a range's ends are bold accent numbers on
-                            // their stronger fill — badged like today, today
-                            // inside a range read as a third end.
+                            // In-month numbers are the label ink, another
+                            // month's faint. Today is the accent, bold; the
+                            // chosen day full ink, bold; a range's ends bold
+                            // in the selected-thing ink.
                             "text-[10px] leading-3 tabular-nums",
                             isToday
-                              ? "-ml-0.5 inline-flex h-3 min-w-3.5 items-center justify-center rounded-full bg-primary px-[3px] font-bold text-primary-foreground"
+                              ? "font-bold text-[var(--on-glass-active-fg)]"
                               : isSelected && !isRangeEnd
-                                ? "-ml-0.5 inline-flex h-3 min-w-3.5 items-center justify-center rounded-full bg-foreground px-[3px] font-bold text-background"
+                                ? "font-bold text-foreground"
                                 : isRangeEnd
                                   ? "font-bold text-[var(--on-glass-active-fg)]"
                                   : isCurrentMonth
-                                    ? "text-[var(--on-glass-muted)]"
+                                    ? "font-medium text-[var(--on-glass-label)]"
                                     : "text-[var(--on-glass-faint)]",
                           )}
                         >
@@ -917,6 +960,8 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                         )}
                         style={{
                           background: tone.background,
+                          color: tone.color,
+                          boxShadow: tone.ring ? `inset 0 0 0 1px ${tone.ring}` : undefined,
                           top: bar.lane * LANE_PX,
                           height: bar.height * LANE_PX - 1,
                           paddingInline: BAR_PAD_PX,
@@ -946,6 +991,22 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                   });
                   })()}
                 </div>
+                {(() => {
+                  // The chosen day's outline, ABOVE the bars so a bar running
+                  // through the day cannot hide it. INK, not the accent — an
+                  // accent outline is a flight still to fly — and at full
+                  // contrast, where a grey fill on grey glass was as good as
+                  // nothing.
+                  const col = week.days.findIndex((d) => d.isCurrentMonth && d.dateStr === selectedDate);
+                  if (col < 0 || (!!rangeStart && (selectedDate === rangeStart || selectedDate === rangeEnd))) return null;
+                  return (
+                    <div
+                      aria-hidden
+                      className="pointer-events-none absolute inset-y-0 shadow-[inset_0_0_0_2px_var(--foreground)]"
+                      style={{ left: `${(col / 7) * 100}%`, width: `${100 / 7}%`, borderRadius: cornerRadiusOf(w, col) || 3 }}
+                    />
+                  );
+                })()}
               </div>
             ))}
           </div>
