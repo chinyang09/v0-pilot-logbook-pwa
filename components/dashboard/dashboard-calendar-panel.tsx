@@ -7,8 +7,7 @@ import { useFlipPush } from "@/hooks/use-flip-push"
 import { MORPH_EASE } from "@/lib/motion"
 import { useFlights } from "@/hooks/data/use-flights"
 import { useDashboardPeriod } from "@/hooks/use-dashboard-period"
-import { pairStart, usePanelDualMonth, useFloatingPanelUnderHeader } from "@/lib/layout/panel-mode"
-import { usePageActive } from "@/hooks/use-page-active"
+import { pairStart, usePanelDualMonth } from "@/lib/layout/panel-mode"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 
 /**
@@ -51,10 +50,6 @@ export function DashboardCalendarPanel({
   const { flights } = useFlights()
   const dualMonth = usePanelDualMonth()
   const isSplitLayout = useIsDesktop()
-  // The calendar hangs from the bar: the header's tap band and fade tail
-  // step aside for it (released once its collapse has run).
-  const isActive = usePageActive("/")
-  useFloatingPanelUnderHeader(isActive && showCalendar, PANEL_MS)
 
   const [midPickStart, setMidPickStart] = React.useState<string | null>(null)
 

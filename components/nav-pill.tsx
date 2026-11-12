@@ -25,6 +25,7 @@ import { OVERSHOOT_BEZIER, SETTLE_BEZIER, MORPH_EASE } from "@/lib/motion"
 import { GlassContainer, glassSpotlight } from "@/components/ui/glass-container"
 import { useDesktopPill, useHydrated } from "@/hooks/use-is-desktop"
 import { useSidebar } from "@/hooks/use-sidebar-context"
+import { setOverlaySidebarOpen } from "@/lib/layout/panel-mode"
 import { SIDEBAR_WIDTH_PX } from "@/lib/layout/panel-widths"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { useBackDismiss } from "@/hooks/use-back-dismiss"
@@ -970,7 +971,18 @@ const PillBarContent = memo(function PillBarContent({
           link menu on top of the lens (see suppressLinkMenu). */}
       <div
         ref={tabsRef}
-        className="relative flex items-center flex-1 min-w-0 justify-evenly touch-none"
+        className={cn(
+          // EQUAL columns, so every tab — and the highlight that slides
+          // between them — is the same width, and the spaces between labels
+          // are equal too. `justify-evenly` sized each tab to its label, so
+          // "Dashboard" carried a wider highlight than "Crew" and the gaps
+          // between labels varied with them. On the desktop the pill takes
+          // its width from its content, and `1fr` there is the widest label;
+          // on a phone the bar's width is fixed and `minmax(0, 1fr)` shares
+          // it out evenly whatever the labels.
+          "relative grid grid-flow-col items-center flex-1 min-w-0 touch-none",
+          mode === "desktop" ? "auto-cols-fr" : "auto-cols-[minmax(0,1fr)]"
+        )}
         onPointerDown={handleLensDown}
         onPointerMove={handleLensMove}
         onPointerUp={handleLensEnd}
@@ -1017,13 +1029,13 @@ const PillBarContent = memo(function PillBarContent({
               data-nav-link
               draggable={false}
               onContextMenu={suppressLinkMenu}
-              className="relative z-[1]"
+              className="relative z-[1] flex min-w-0"
             >
               {mode === "desktop" ? (
                 <span
                   data-grav-item
                   className={cn(
-                    "inline-flex items-center justify-center h-8 px-3.5 rounded-full text-sm font-medium transition-colors",
+                    "flex w-full items-center justify-center h-8 px-3.5 rounded-full text-sm font-medium transition-colors",
                     highlighted
                       ? "text-[var(--on-glass-active-fg)]"
                       : "text-foreground"
@@ -1035,17 +1047,18 @@ const PillBarContent = memo(function PillBarContent({
                 <span
                   data-grav-item
                   className={cn(
-                    // The padding gives way below ~362px (an iPad window in
-                    // Split View is 320) so five tabs always fit the bar;
-                    // above that it is 10px, so every phone gets the same bar.
-                    "inline-flex flex-col items-center justify-center gap-1 h-12 px-[clamp(5px,calc((100vw-262px)/10),10px)] rounded-full transition-colors",
+                    // The whole column: every tab is one width, and so is
+                    // its highlight. A label too long for its share (an iPad
+                    // window in Split View is 320) truncates rather than
+                    // widening its column.
+                    "flex w-full min-w-0 flex-col items-center justify-center gap-1 h-12 px-0.5 rounded-full transition-colors",
                     highlighted
                       ? "text-[var(--on-glass-active-fg)]"
                       : "text-foreground"
                   )}
                 >
                   <Icon className="h-5 w-5" />
-                  <span className="text-[10px] leading-none">{tab.label}</span>
+                  <span className="max-w-full truncate text-[10px] leading-none">{tab.label}</span>
                 </span>
               )}
             </Link>
@@ -1795,6 +1808,14 @@ function MobilePillMorph({
    * Every other close goes through `dismissSidebar` too, so there is one path.
    */
   const dismissSidebar = useBackDismiss(sidebarOpen, () => setSidebarOpen(false))
+
+  // The shell's header steps out of the way while this is up (see
+  // `setOverlaySidebarOpen`); cleared on unmount, when the desktop pill
+  // takes over at 1120px.
+  useEffect(() => {
+    setOverlaySidebarOpen(sidebarOpen)
+    return () => setOverlaySidebarOpen(false)
+  }, [sidebarOpen])
 
   /**
    * A tap on a nav item has to release the marker BEFORE it navigates.
