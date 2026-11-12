@@ -1958,7 +1958,23 @@ zone).
   month (a pair two months, unless it is the other pane) and the day is
   chosen.
 - **Day numbers are grey; TODAY is the one in full ink, bold**, its cell lit
-  (`--on-glass-fill`); the selected day is a ring.
+  in the ACCENT (`--on-glass-accent-soft`) — a grey fill read as one more day
+  of another month in the light theme; inside a range the range's tint wins
+  and the bold number marks it. The selected day is a ring. "Today" follows
+  the clock (`useDayKey`), so a calendar left open overnight moves it.
+- **The grid is ONE tab stop per month** (the chosen day, else today, else the
+  1st) and the ARROWS move between days, a week up or down
+  (`onGridKeyDown`); past the month's edge the calendar moves with the focus.
+  Every day a tab stop put 42 presses (84 with two months) between the header
+  and the list. The focus outline sits INSIDE the day
+  (`outline-offset: -3px`): outside it, the row's paint containment cut it off.
+- **Today is on both calendars.** The dashboard's moves to the month that
+  holds today and chooses nothing (a tap there is one end of a range).
+- **Two months are a fixed odd|even pair on every page** (`pairStart`,
+  `lib/layout/panel-mode.ts`). The dashboard anchored on the period's end as it
+  was, so a December end showed Dec|Jan and a step moved it out of phase; it
+  snaps now, except while the wheels are up (the month being chosen is the
+  left pane) — closing them snaps it.
 - **The grid runs to the glass's edges** — no inner padding, a dual pane's
   right half ruled off from its left — and its bottom corners ARE the
   glass's (`cornerRadius`), so a lit corner cell follows the material's curve.
@@ -2047,10 +2063,12 @@ logbook's list spacer reserves, and the dashboard's summary too
 the calendar over it.** The dashboard's used to float, and the period's hero
 figure read through the calendar's glass between the day numbers.
 
-**A range is drawn one capsule PER WEEK ROW** — a cell that starts a row
-(Sunday, or the 1st) or ends one (Saturday, or the month's last day) is rounded
-on that side, endpoints included. Square there, a range across weeks read as
-one blocky slab with a notch cut out of it. The **absorb** logic stays in the logbook
+**A range fills its DAYS** — square cells, the ends a step darker
+(`--on-glass-accent`) than the days between (`--on-glass-accent-soft`). The
+per-week-row capsules it used to be drawn as went with the edge-to-edge grid:
+every other lit day (today, the selected one, another month's) is a whole cell
+between the day rules, and a capsule inside them read as a different control.
+The **absorb** logic stays in the logbook
 (`handleCalendarHeight`): only the ResizeObserver moved.
 
 ### The Logbook's Floating Panels (search + calendar)
@@ -3060,6 +3078,16 @@ re-renders).
   the height group's delay/duration) so the reveal and the growth are **one
   motion** — not the list fading in while the glass is still resizing (which read
   as two separate motions, "opens up while the glass expands down").
+- **The sidebar's sections** (`components/nav-sections.tsx`, the owner's
+  structure, Nov 2026): Dashboard and Logbook at the top, then DATABASE
+  (Aircraft, Airports, Crew), DUTY & COMPLIANCE (Currencies, FDP,
+  Discrepancies) and SYSTEM (Account, Settings, Bin). A section whose one row
+  carries its own name draws no heading (`heading: false`) — LOGBOOK over
+  Logbook is one word twice, with a chevron hiding one row. A row's
+  `description` ("Master fleet records") is its tooltip. Headings are ONE
+  line (11px caps, tight tracking): at 12px wide-tracked caps "Duty &
+  Compliance" wrapped onto two centred lines in the 191px panel. Every nav
+  destination is `navHrefs`, which the idle prefetch walks.
 - **Sidebar list** (`SidebarNav` in `components/nav-pill.tsx`) — the toggle +
   sync strip **floats over** the nav (`pointer-events-none` on the bar, the two
   controls re-enabled) so the list scrolls underneath it; the nav reserves the

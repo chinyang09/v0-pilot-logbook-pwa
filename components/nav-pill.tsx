@@ -28,7 +28,7 @@ import { useSidebar } from "@/hooks/use-sidebar-context"
 import { SIDEBAR_WIDTH_PX } from "@/lib/layout/panel-widths"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { useBackDismiss } from "@/hooks/use-back-dismiss"
-import { navSections, dashboardNavItem } from "@/components/nav-sections"
+import { navSections, navHrefs } from "@/components/nav-sections"
 import { SyncStatus } from "@/components/sync-status"
 import { haptic } from "@/lib/utils/haptics"
 import { isShortcut } from "@/lib/utils/shortcuts"
@@ -56,9 +56,11 @@ const TAB_CONFIG: Record<
     label: "Logbook",
     icon: Book,
     href: "/logbook",
-    // The sidebar's Logbook group: Currencies and the Bin light this tab. The
-    // roster is this list with its duties on, so what used to light the Roster
-    // tab — FDP and Discrepancies — lights it too.
+    // The pages with no tab of their own that are ABOUT the logbook light it:
+    // Duty & Compliance (Currencies, FDP, Discrepancies — the record checked
+    // against the rules) and the Bin (deleted entries, mostly flights). The
+    // roster is this list with its duties on, so the old Roster tab's pages
+    // are among them.
     isActive: (p) =>
       p === "/logbook" ||
       p?.startsWith("/flights/") ||
@@ -1245,10 +1247,9 @@ const SidebarNav = memo(function SidebarNav({
 
   // Rendered item order (matches DOM): dashboard, then each expanded section's
   // items. Drives the vertical gravity blob's target.
-  const orderedHrefs = [
-    dashboardNavItem.href,
-    ...navSections.flatMap((s) => (collapsed[s.label] ? [] : s.items.map((i) => i.href))),
-  ]
+  const orderedHrefs = navSections.flatMap((s) =>
+    s.heading && collapsed[s.label] ? [] : s.items.map((i) => i.href)
+  )
   const activeIndex = orderedHrefs.findIndex((href) => isItemActive(href))
 
   /**
@@ -1311,30 +1312,32 @@ const SidebarNav = memo(function SidebarNav({
           go: a short nav would otherwise be inert to a drag, which reads as the
           panel being stuck rather than simply full. */}
       <div className="min-h-[calc(100%+1px)]">
-      <SidebarNavItem
-        href={dashboardNavItem.href}
-        icon={dashboardNavItem.icon}
-        label={dashboardNavItem.label}
-        isActive={isItemActive("/")}
-      />
-      {navSections.map((section) => {
-        const isCollapsed = collapsed[section.label]
+      {navSections.map((section, index) => {
+        const isCollapsed = section.heading && collapsed[section.label]
         return (
-          <div key={section.label} className="mt-3">
-            <button
-              onClick={() => toggleSection(section.label)}
-              className="flex items-center justify-between w-full px-3 mb-1 group cursor-pointer"
-            >
-              <span className="text-xs font-semibold uppercase tracking-wider text-[var(--on-glass-muted)]">
-                {section.label}
-              </span>
-              <ChevronDown
-                className={cn(
-                  "h-4 w-4 text-[var(--on-glass-muted)] transition-transform duration-200",
-                  isCollapsed && "-rotate-90"
-                )}
-              />
-            </button>
+          // Sections without a heading (Dashboard, Logbook) sit together at
+          // the top; a heading opens a group of its own.
+          <div key={section.label} className={cn(section.heading && "mt-3", !section.heading && index > 0 && "mt-0.5")}>
+            {section.heading && (
+              <button
+                onClick={() => toggleSection(section.label)}
+                aria-expanded={!isCollapsed}
+                className="flex items-center justify-between gap-1.5 w-full pl-3 pr-1.5 mb-1 group cursor-pointer text-left"
+              >
+                {/* ONE line, like the rows under it: "Duty & Compliance" at
+                    the old 12px wide-tracked caps wrapped onto two centred
+                    lines in the 191px panel. */}
+                <span className="min-w-0 truncate whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.02em] text-[var(--on-glass-muted)]">
+                  {section.label}
+                </span>
+                <ChevronDown
+                  className={cn(
+                    "h-4 w-4 shrink-0 text-[var(--on-glass-muted)] transition-transform duration-200",
+                    isCollapsed && "-rotate-90"
+                  )}
+                />
+              </button>
+            )}
             {!isCollapsed &&
               section.items.map((item) => (
                 <SidebarNavItem
@@ -1342,6 +1345,7 @@ const SidebarNav = memo(function SidebarNav({
                   href={item.href}
                   icon={item.icon}
                   label={item.label}
+                  description={item.description}
                   isActive={isItemActive(item.href)}
                 />
               ))}
@@ -1358,16 +1362,19 @@ const SidebarNavItem = memo(function SidebarNavItem({
   href,
   icon,
   label,
+  description,
   isActive,
 }: {
   href: string
   icon: React.ReactNode
   label: string
+  description?: string
   isActive: boolean
 }) {
   return (
     <Link
       href={href}
+      title={description}
       scroll={false}
       // Warmed at idle instead — see prefetchNavRoutesWhenIdle.
       prefetch={false}
@@ -1491,7 +1498,7 @@ let navPrefetchScheduled = false
 function prefetchNavRoutesWhenIdle(prefetch: (href: string) => void) {
   if (navPrefetchScheduled || typeof window === "undefined") return
   navPrefetchScheduled = true
-  const hrefs = [dashboardNavItem.href, ...navSections.flatMap((s) => s.items.map((i) => i.href))]
+  const hrefs = [...navHrefs]
   const idle = (fn: () => void) =>
     typeof window.requestIdleCallback === "function" ? window.requestIdleCallback(fn, { timeout: 8000 }) : setTimeout(fn, 1500)
   const next = () => {

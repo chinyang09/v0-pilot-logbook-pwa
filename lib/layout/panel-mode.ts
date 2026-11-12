@@ -136,3 +136,12 @@ export function useIsFloatingPanelUnderHeader(): boolean {
     () => false
   )
 }
+
+/**
+ * In dual-month mode the two panes are a FIXED pair — odd month on the left,
+ * even on the right (Jan|Feb, Mar|Apr, …), months 0-based. Every page that
+ * shows two months anchors on this, so a pair never shuffles by one.
+ */
+export function pairStart(month: number): number {
+  return month - (month % 2)
+}
