@@ -303,7 +303,11 @@ export function SwipeableCard({
   const pressRef = useRef<{ id: number; x: number; y: number } | null>(null)
   const onArmDown = useCallback(
     (e: React.PointerEvent) => {
-      pressRef.current = armed || !hasActions ? null : { id: e.pointerId, x: e.clientX, y: e.clientY }
+      // A press inside a PORTAL the row opened (a row's option menu, rendered
+      // in <body>) still bubbles here through the React tree; a sideways move
+      // across that menu must not arm the row behind it.
+      const own = (e.currentTarget as Node).contains(e.target as Node)
+      pressRef.current = armed || !hasActions || !own ? null : { id: e.pointerId, x: e.clientX, y: e.clientY }
     },
     [armed, hasActions]
   )
@@ -602,7 +606,12 @@ export function SwipeableCard({
         focusActionsOnArm.current = true
         arm()
       }}
-      onPointerDown={onPointerDown}
+      onPointerDown={
+        onPointerDown &&
+        ((e: React.PointerEvent) => {
+          if ((e.currentTarget as Node).contains(e.target as Node)) onPointerDown(e)
+        })
+      }
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}

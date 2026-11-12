@@ -323,16 +323,12 @@
      starts here does not scroll the list — hence thin: 24px is enough to
      forgive a low tap without taking a meaningful strip of the list away. */
   --chrome-tap: 1.25rem;
-  /* Where the QUICK-SCROLL rail parks a row. Deliberately more than the
-     header treatment's own band (`FADE_TAIL`, 41px in chrome-overlays): a row
-     that lands exactly on the band's lower edge is sitting against it, and the
-     whole point of this target is that the row reads as clear of the chrome.
-     3.5rem leaves ~15px of air below the band.
-
-     Do NOT collapse the two to one number. Tying the band to this pushed the
-     darkening far too far down the screen; tying this to the band puts the
-     scrolled-to row back inside the treatment. */
-  --chrome-clear: calc(var(--chrome-top) + 3.5rem);
+  /* Where the QUICK-SCROLL rail parks a row — the same 20px below the bar a
+     list's first card starts at (`LIST_TOP_GAP`), 4px clear of the header
+     treatment's band (`FADE_TAIL`, 16px in chrome-overlays). A scrolled-to
+     row lands where the list's top row sits, just below the fade. It was
+     3.5rem under a 41px band, which spent a strip of every screen. */
+  --chrome-clear: calc(var(--chrome-top) + 1.25rem);
   /* How far BELOW the action buttons a tap still counts as "the header", and
      so scrolls that panel to the top. The header row itself ends level with
      the buttons, which put the target's lower edge exactly where the
@@ -373,7 +369,7 @@
      last row lands above the floating nav pill and above the home indicator /
      gesture bar rather than under them.
 
-     The pill occupies the 52px above --nav-bottom-offset, so 4.5rem (52px +
+     The pill occupies the 60px above --nav-bottom-offset, so 5rem (60px +
      20px breathing) + the offset leaves a real gap above it. Declared once
      and applied once per scroller: page content used to carry `pb-safe`
      INSIDE a container that already had this, which on iOS meant 96px + TWO
@@ -381,7 +377,7 @@
      bottom is padded" strip. Nothing here insets the layout: it is padding
      inside the scroller, so content still runs to the true bottom edge as
      you scroll. */
-  --chrome-bottom: calc(4.5rem + var(--content-bottom-inset));
+  --chrome-bottom: calc(5rem + var(--content-bottom-inset));
 }
 
 /* Prefer the `h-chrome-*` SPACERS over these padding utilities inside a

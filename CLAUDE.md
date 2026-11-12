@@ -1728,7 +1728,7 @@ found the work that RECURS rather than the work that is merely large:
   mount and on every zoom or pan step. (The chart has since been replaced by
   the hand-drawn timeline and the dependency removed, Nov 2026.)
 - **The gravity blob never reads style back** — an interrupted move's position
-  is computed from its own spring track and the animation's `currentTime`.
+  is computed from its own samples and the animation's `currentTime`.
 - **The legal page reads recency with `ninetyDayRecency`**, not the period
   aggregate, which built a totals breakdown and a detail row per flight ever
   logged to supply that one figure. `usePilotStatus` memoises the duty and
@@ -2222,7 +2222,7 @@ rejected twice: a year away was a tap per year, and it read as a web form.
 **The header steps aside for a floating panel hanging from it**
 (`useFloatingPanelUnderHeader`, `lib/layout/panel-mode.ts`). The calendar and
 the search field sit at `--chrome-top`, i.e. inside both the tap-to-top band
-(`--chrome-tap`) and the fade's 41px tail, so while one is open, over the MAIN
+(`--chrome-tap`) and the fade's 16px tail, so while one is open, over the MAIN
 panel:
 
 - the tap band is removed — with it in place the month selector could not be
@@ -2556,13 +2556,13 @@ report watermarks). Do not go back to an allowlist.
   `desktop-layout.tsx` (no more inline copies): a native-style bar of
   progressive **blur + darken**. Three masked backdrop-blur layers (smallest
   radius first, widest coverage, so the stack only ever adds blur toward the
-  edge) under a background gradient. It extends `FADE_TAIL` (**41px**) BEYOND
-  the bar it sits on, because native bars start softening well before their own
-  edge — confined to the bar's height, a card sitting just under the action
-  buttons still looked sharp and tappable, which is a lie about what you can
-  reach. 41 puts the band's bottom **45px** below the buttons. Apple publishes
-  no figure for the scroll-edge effect's falloff, so that is the owner's read
-  on device, not a spec number.
+  edge) under a background gradient. It extends `FADE_TAIL` (**16px**) BEYOND
+  the bar it sits on, because native bars start softening a little before
+  their own edge. It was 41 (45px below the buttons) until the owner's read on
+  device (Nov 2026): every list then had to START that far down to be
+  readable, a strip of every screen spent on a fade. 16 sits just inside the
+  first card's 20px gap (`LIST_TOP_GAP`, a page title's `pt-4`), so a list at
+  its top — or tapped back to it — is just clear of the band.
 
   **`--chrome-tap` is a THIRD number**: how far below the action buttons a tap
   still counts as "the header" and scrolls that panel to the top. The header
@@ -2574,16 +2574,16 @@ report watermarks). Do not go back to an allowlist.
   stays thin rather than covering the whole fade tail. And it is REMOVED while
   a floating panel (the logbook's search or calendar) sits under the buttons
   (`useFloatingPanelUnderHeader`): that panel's own first control lives in
-  this band. The fade's tail is cleared over the main panel then too.
+  this band. The fade's tail is cleared then too — but only under the panel's
+  own SHAPE (`tailCutMask`): its 8px gutters and the slivers outside its
+  rounded top corners keep the treatment. Clearing the whole width let content
+  scrolling past the calendar's corners come through sharp and undimmed.
 
-  **`--chrome-clear` is a DIFFERENT number again and is deliberately larger** (3.5rem
-  → 60px below the buttons, ~15px of air under the band). It is where the
-  quick-scroll rail parks a row, and a row landing exactly on the band's lower
-  edge is sitting against it — the whole point of the target is that the row
-  reads as clear of the chrome. Holding the two equal was tried in both
-  directions and is wrong both ways: tying the band to the target pushed the
-  darkening far down the screen, and tying the target to the band puts the
-  scrolled-to row back inside the treatment. The gradient is anchored to a fixed 64px ramp so taller chrome
+  **`--chrome-clear` is a DIFFERENT number, a few px larger** (1.25rem → 20px
+  below the bar, 4px clear of the band). It is where the quick-scroll rail
+  parks a row — the same place a list's first card sits at its top — and a
+  row landing exactly on the band's lower edge would be sitting against it.
+  The gradient is anchored to a fixed 52px ramp so taller chrome
   keeps the same boundary instead of stretching until content shows through the
   title. Because the veil is `--background` it darkens on the dark theme and
   lightens on the light one with no branch.
@@ -2935,72 +2935,35 @@ re-renders).
   **glides around** the rounded border (a "border beam"), used on the TOTP login
   OTP group while verifying. The full-border "confirmed" glow stays via the
   `.totp-success` box-shadow.
-- **Gravity nav indicator** (`GravityIndicator` in `components/nav-pill.tsx`) —
-  the active-tab/​item highlight blob (pill bar + bottom nav + sidebar). Its
-  motion is **two damped harmonic oscillators** (`springTrack()`), solved
-  analytically per move and sampled into WAAPI `transform` keyframes:
-  - **Travel** is the unit STEP response, damped hard (ζ 0.78 → ~2% overshoot,
-    one crossing, monotonic rise). A bouncy position curve reads as the blob
-    hunting for its seat — that was the owner's verdict on an earlier version.
-  - **Shape** is the IMPULSE response of a SECOND, looser oscillator (ζ 0.32),
-    which is the part the travel spring cannot express: a soft body's shape has
-    its own stiffness and damping, faster and looser than its centre of mass,
-    which is why jelly still wobbles after it has stopped. It stretches ALONG
-    the direction of travel, crosses neutral, compresses on landing (~31% of
-    the stretch — the ratio e^(−ζπ/√(1−ζ²)) between consecutive extremes) and
-    rings down. Measured on a real move: 1.20/0.83 at the stretch, 0.94/1.05
-    on the landing squash, then neutral.
+- **Nav highlight** (`GravityIndicator` in `components/nav-pill.tsx`) — the
+  active-tab/item highlight (pill bar + bottom nav + sidebar). It SLIDES to
+  its tab: one eased move (`slideTrack`, ease-out over `SLIDE_MS` 300), sampled
+  into WAAPI `transform` keyframes with linear easing, and no shape at all. It
+  was a soft body — two damped oscillators, one for the travel and one for a
+  stretch-and-squash that rang down after landing — and the owner read it on
+  device as springy rather than as a tab bar's light highlight (Nov 2026).
+  The shape child, its oscillator and the squash are gone.
 
-  In the SIDEBAR the blob is placed **instantly** — no spring at all. The list
-  is a scroller whose metrics re-measure as a route settles and as the panel
-  finishes morphing, and every re-measure was another chance for the spring to
-  re-fire and read as a double flash; a vertical list also gives the travel
-  nothing to say. The pill keeps the physics. (The drag-lens handoff used to
-  play the SHAPE oscillator in place as well; that is gone — the lens now
-  dissolves onto the blob rather than being swapped for it, so there is no cut
-  to cover and a wobble afterwards read as a second arrival.)
+  In the SIDEBAR it is placed **instantly**. The list is a scroller whose
+  metrics re-measure as a route settles and as the panel finishes morphing,
+  and every re-measure was another chance for a move to re-fire and read as a
+  double flash; a vertical list also gives the travel nothing to say.
 
   The effect **re-fires only for a new destination** (`animatedToRef`) and, if
-  it interrupts a move in flight, resumes from the blob's CURRENT transform
-  rather than the last move's origin. `rects` is re-measured by a
-  ResizeObserver as a route settles, so without the first guard a second
-  spring to the same place started mid-flight — the "blob flashes twice while
-  moving" report — and without the second, a tap during a move snapped it back
-  to the previous tab before setting off again.
-
-  Driving the squash from the travel spring's own **velocity** is what the
-  physics literally gives you, and it was tried first — but at ζ 0.78 the
-  velocity barely reverses (−0.02 against a +1.0 peak), so the blob stretched
-  out and then just stopped, with no landing squash. Loosening the travel
-  damping to grow that lobe brings the hunting back. Two oscillators is both
-  the better-looking answer and the more honest model. Both tracks are
-  normalised to their own peak, so a one-tab hop deforms as much as a five-tab
-  sweep (proportional deformation makes a short move look limp).
-
-  The shape animation lives on a **child** of the positioned element, because
-  the parent's `transform` carries the position and one element cannot run two.
-  (The standalone `scale` property would have kept it on one element, but Blink
-  does not animate `scale` from WAAPI — measured, the animation simply never
-  starts. `transform` on a child does, and both layers composite.) Both are
-  fired imperatively because they have to RE-FIRE on every move, and a CSS
-  animation only restarts if you tear it off and back on. `transform` is
-  deliberately absent from the box's CSS `transition` list — the spring owns
-  it, and the inline style is already the target, so the animation falls back
-  onto it cleanly when it finishes (measured: lands exactly, no drift).
-  `instant` places it with NO animation, for the frames where animating is
-  wrong rather than pretty: while the sidebar is still morphing (its metrics
-  re-measure as the panel grows, so a spring started mid-morph only gets going
-  as the panel lands and the blob visibly arrived a beat late), and under the
-  drag lens — where the blob also tracks the tab UNDER THE LENS rather than the
-  route's, so that when the lens fades it is already exactly where the lens
-  landed instead of springing across the whole bar once the route catches up.
-  The springs are **solved once and handed to the compositor**, never ticked in
-  JS — a Framer/JS spring ticks on the main thread and **hitches** when a heavy
-  page (dashboard/FDP) mounts. Only the box's `width`/`height` still ease on a
-  CSS transition, a touch quicker than the spring so a widening tab has settled
-  before the blob stops moving. Tab metrics are measured with a ResizeObserver
-  in **content coordinates** (so it's correct inside the scrollable sidebar).
-  Do **not** revert this to a Framer `animate()`/motion-value spring.
+  it interrupts a move in flight, resumes from where the highlight IS —
+  computed from the move's own samples and the animation's `currentTime`,
+  never read back with `getComputedStyle` (that was a whole-page style
+  recalculation on a navigation's commit). `rects` is re-measured by a
+  ResizeObserver as a route settles, so without the first guard a second move
+  to the same place started mid-flight, and without the second a tap during a
+  move snapped it back to the previous tab first. `transform` is deliberately
+  absent from the box's CSS `transition` list — the WAAPI move owns it — and
+  only `width`/`height` ease, on the slide's own clock. `instant` places it
+  with NO animation while the sidebar is still morphing and under the drag
+  lens, where it tracks the tab UNDER THE LENS so it is already there when the
+  lens fades. Tab metrics are measured in **content coordinates** (correct
+  inside the scrollable sidebar). Do not move it with a JS-ticked spring: it
+  hitches when a heavy page mounts.
 - **Nav morph** (`useMorphPhase` + `DesktopPillMorph`/`MobilePillMorph` +
   `morphTransition`) — the pill ↔ sidebar morph is a single `opening`/`closing`
   transition whose two geometry groups (**position+width** and **height**)
@@ -3048,10 +3011,11 @@ re-renders).
 
   **The phone's bottom bar is 12px inside a flight card's edges, up to
   25rem** — `MOBILE_PILL_WIDTH`, `min(calc(100% - 2 * var(--panel-gutter) -
-  1.5rem), 25rem)`, 52px tall (`MOBILE_PILL_HEIGHT`, a 44px tab inside), so it
-  keeps one proportion to the screen on every phone (it used to hug its tabs,
-  ~330px whatever the width; then edge to edge at 56px, which the owner read
-  as too big: 342×52 on a 390 phone now) without becoming a slab across an
+  1.5rem), 25rem)`, 60px tall (`MOBILE_PILL_HEIGHT`, a 48px tab inside —
+  raised from 52 on the owner's read on device, Nov 2026), so it keeps one
+  proportion to the screen on every phone (it used to hug its tabs, ~330px
+  whatever the width; then edge to edge at 56px, which the owner read as too
+  big: 342×60 on a 390 phone now) without becoming a slab across an
   iPad in portrait (400px there). A
   `min()`/`calc` interpolates against the sidebar's px width, so the morph
   needs no measurement there.
@@ -4944,7 +4908,7 @@ When making changes, be aware of these high-impact files:
 - `hooks/use-page-active.tsx` — Active route context and `usePageActive` hook
 - `hooks/use-detail-panel.tsx` — Detail panel provider (keep-alive route awareness)
 - `components/desktop-layout.tsx` — Responsive app shell (sidebar + detail panel)
-- `components/nav-pill.tsx` — The pill↔sidebar morph, the gravity blob's two springs, and the drag lens
+- `components/nav-pill.tsx` — The pill↔sidebar morph, the nav highlight's slide, and the drag lens
 - `lib/layout/panel-widths.ts` — the one panel-width budget (single/dual month, detail minimum, split minimum)
 
 **Edge-to-edge shell & chrome** (one number each — changing one moves every panel):
@@ -5584,8 +5548,9 @@ When making changes, be aware of these high-impact files:
 - Do not give the morph different open and close leads — one `MORPH_LEAD` keeps the two directions exact mirrors, which is what makes the top pill and the bottom pill read as the same animation
 - Do not put a `backdrop-filter` back into the sidebar backdrop, the modal backdrop, or a second layer into `ChromeFade`. Progressive BLUR is a chain of full-viewport readbacks that re-rasterise whenever the backdrop or the geometry changes — under the sidebar that is every frame of the morph, and under a header it is every scroll frame. All three are progressive DARKENING now (`SIDEBAR_BACKDROP_RAMP`, `--modal-scrim-core`, and `ChromeFade`'s single 1.8px layer under its veil), which is one paint and a composited opacity
 - Do not put `width: auto` back on the nav pill — `width` animates alongside `left`/`transform`, and CSS can't interpolate to `auto`, so it snaps on the morph's first frame and the pill resizes before it moves. Keep the measured px endpoint from `usePillWidth` (measured only while settled as a pill, in a ResizeObserver callback)
-- Do not animate the gravity nav indicator with a Framer/JS spring, and do not put its motion back on a bezier — it is two damped harmonic oscillators (`springTrack()`) sampled into WAAPI transform keyframes, so the physics runs on the compositor. A JS spring hitches when a heavy page mounts; a bezier can't express a landing squash that stays in step with the travel. Keep the travel heavily damped (no hunting) and the SHAPE on its own looser oscillator — deriving the squash from the travel spring's velocity gives no landing compression at that damping, and loosening the travel to fix it reintroduces the hunting For the nav morph, keep the overlapping per-property delays (`morphTransition`) with the **asymmetric** open/close leads (closing collapses height almost fully before it moves — do not make it symmetric or simultaneous), and keep the phase advancing on **both** the fallback timer **and** the *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed group is never cut). The **pill** content stays hidden until settled (it squishes mid-morph), but the **sidebar** content is intentionally visible + interactive for the whole open span with its opacity timed to the height (reveal + growth = one motion) — do not gate it back on the settled phase (drops taps) or fade it on its own timeline (reads as two motions)
+- Do not put a spring or a shape back on the nav highlight — it SLIDES (`slideTrack`, ease-out, sampled to WAAPI keyframes so it composites); the stretch-and-squash soft body read as springy on device. And do not move it with a Framer/JS spring: a main-thread tick hitches when a heavy page mounts. For the nav morph, keep the overlapping per-property delays (`morphTransition`) with the **asymmetric** open/close leads (closing collapses height almost fully before it moves — do not make it symmetric or simultaneous), and keep the phase advancing on **both** the fallback timer **and** the *delayed* property's `transitionEnd` (keyed to `propertyName` so the delayed group is never cut). The **pill** content stays hidden until settled (it squishes mid-morph), but the **sidebar** content is intentionally visible + interactive for the whole open span with its opacity timed to the height (reveal + growth = one motion) — do not gate it back on the settled phase (drops taps) or fade it on its own timeline (reads as two motions)
 - Do not add a rule, material or layout that only one engine gets — iOS and Android must render the app identically. In particular do not reintroduce `@supports (-webkit-touch-callout: none)`, the WebKit-only sniff: it silently made Android's date fields shorter and its focused fields slower to take a tap. A vendor-prefixed property paired with the standard one, or inert elsewhere, is fine. The sole exception is the PWA install prompt, where the OS flow itself differs
+- Do not let a press inside a PORTAL start a glass press or arm a swipe row — React bubbles synthetic events through portals along the COMPONENT tree, so a menu a glass button opened (the + menu, the camera's Take / Choose Photo, portalled to `<body>`) delivered its `pointerdown` to the button, which then bloomed and stretched after the finger across the menu. `GlassContainer` and `SwipeableCard` ignore a press whose target is not inside them in the DOM (`currentTarget.contains(target)`)
 - Do not end the glass press on `touchcancel`/`pointercancel` — Chrome fires those the moment a move looks like a scroll, which is what made the Android spotlight die as soon as the finger moved. Track on the window, treat a cancel as bloom-only, and let the grace timer close it out
 - Do not set the dark theme's `--glass-veil` back to `transparent` — a backdrop-filter has nothing to work with over pure black (blur/saturate of black is black; brightness is multiplicative), so the veil is the only thing giving the slab a face on an empty screen. Keep it warm rather than plain white, or the material reads grey over content again
 - Do not animate `.GlassBlur`'s filter VALUE — no transition on it, and no `data-morphing` surge. The nav morph already interpolates `left`/`width`/`height`, so the backdrop readback runs every frame; changing the blur RADIUS on top of that means the kernel changes too and nothing in the pass can be reused, for the busiest 300ms in the app. That was the mobile sidebar's jank. The swell it produced cannot be rebuilt compositor-side — a second element carrying the surged filter is the stacked-backdrop-filter construct below
@@ -5719,11 +5684,11 @@ When making changes, be aware of these high-impact files:
 - Do not give the bottom pill, the sidebar's lower end, or a scroller's bottom clearance their own safe-area math — they all derive from `--nav-bottom-offset` (`max(4px, env(safe-area-inset-bottom) - 10px)`: hugs the iOS home indicator, plain 4px on Android/desktop). One number keeps the pill↔sidebar morph endpoints aligned and the scrolled-to-rest last row on the same line; `components/bottom-edge-blur.tsx` adds the progressive blur under that line on iOS standalone only (below the nav in z-order so the sidebar and pill stay sharp)
 - Do not leave the cloned pill's `backdrop-filter`s (or `mix-blend-mode` anywhere in the lens subtree) in place during a drag or landing — they re-sample every frame and block layerisation, which is what made the release jank
 - Do not give the drag lens its own copy of the highlight to land on — it is portalled to `<body>`, so an opaque fill there covers the tab's icon and label and the landing flashes a solid pill with nothing in it. The REAL blob is revealed instead (it lives behind the row) and the glass dissolves off it; the lens stays translucent the whole way, so the content is never covered
-- Do not collapse `FADE_TAIL` and `--chrome-clear` into one number — the first is how far the DARKENING reaches (41px, i.e. 45 below the buttons), the second is where the quick-scroll rail PARKS a row (60 below, ~15px clear of the band). Equalising them is wrong in both directions: the band ends up far down the screen, or the scrolled-to row ends up inside the treatment
+- Do not lengthen `FADE_TAIL` past the first card's gap again — at 41px every list had to start 45px below the buttons to be readable. It is 16, `--chrome-clear` and `LIST_TOP_GAP` are 20, so a list's top row, a quick-scrolled row and a tap-to-top all land just clear of the band. And do not clear the tail across the whole width under a floating panel — only the panel's own shape (`tailCutMask`), or content past its rounded corners shows sharp
 - Do not put the drag-lens (`.PillDragLens`) release settle back on JS (framer `animate()`) or on layout properties — it must stay CSS `translate` + `scale`, which run on the compositor, because the release also fires `router.push` and a main-thread landing stalls against the route mount. Keep the two easings split (position no overshoot, scale overshoot = the splat), keep `--settle` dropping the glass's `backdrop-filter`, and keep the refract clone effect gated on `lensPhase === "drag"` so a deep clone of the pill never runs on the landing's first frame. Keep it clamped to the tab strip (edge overshoot → the liquid bounce) and keep the handoff timer longer than the rebound (or the last wobble is cut)
 - Do not re-gate the dashboard's meters / FDP chart behind a deferred-animation flag — the blob is compositor-driven now, so they can animate freely
 - Do not turn Recharts' series animation back on (`isAnimationActive` defaults to TRUE on every `Area`/`Bar`/`Line`) — it is a JS rAF loop that commits the whole chart through React every frame: ~120 commits of 430–520 components in the FDP page's first 3s at 4×, and the same again on every zoom and pan step, i.e. through a pinch. A new series takes `isAnimationActive={false}`; the chart's arrival is a compositor fade
-- Do not read computed style or layout in an effect that runs on a navigation's commit (`getComputedStyle(x).transform`, a rect) — the arriving page's DOM is still dirty, so the read is a style recalculation of the whole page. The gravity blob's interrupted-move position came from `getComputedStyle` and cost 312ms at 4× on a sidebar tap to FDP; it is computed from the move's own spring track and `currentTime` now
+- Do not read computed style or layout in an effect that runs on a navigation's commit (`getComputedStyle(x).transform`, a rect) — the arriving page's DOM is still dirty, so the read is a style recalculation of the whole page. The gravity blob's interrupted-move position came from `getComputedStyle` and cost 312ms at 4× on a sidebar tap to FDP; it is computed from the move's own samples and `currentTime` now
 - Do not let a keep-alive page listen to a background process's progress while it is hidden — the airports page re-rendered on every 250-row chunk of the seed it had started, while the pilot was on another page. Gate the listener on `usePageActive` as well as on there being something to wait for
 - Do not compute the whole period aggregate (`aggregateDashboard`) to read one figure off it — the legal page needs only recency, which is `ninetyDayRecency`. And keep `usePilotStatus`'s duty and legality halves in separate memos: one memo rebuilt the duty model (a pass over every duty window) each time an input it never reads landed
 - Do not reintroduce a second typeface — Inter is the single app font (`--font-sans` and `--font-mono` both resolve to Inter); use `tabular-nums` for aligned numbers, never a `font-mono` class or a new Google-Fonts `<link>`
@@ -5941,7 +5906,7 @@ When making changes, be aware of these high-impact files:
 - Do not hang a floating panel under the action buttons without holding `useFloatingPanelUnderHeader` while it is open (and its page active) — or the tap-to-top strip takes its first control's tap and the fade's tail dims and blurs its top as if it were content scrolling away. And do not try to fix that with a z-index: the page is in its keep-alive stacking context, below the shell's header. Clear the tail with a mask on the fade's LAYERS, never on the `ChromeFade` wrapper (an ancestor mask is a backdrop root, so the blur would sample nothing). And do not hide the calendar's date selector when the month/year picker opens: the picker REPLACES the grid in the same box, under the same selector, so the panel's height does not move
 - Do not leave a sign-out (or any action that awaits a network round trip before its first visible change) silent until the round trip returns — change its label on the TAP, and bound the wait (`flushBeforeSignOut(maxWaitMs)`)
 - Do not hand-roll a spinner — waiting is one thing and should look like one thing. `PageLoading` is the route-level state (every `loading.tsx`, the keep-alive Suspense fallback) and `PanelLoading` is the detail-panel one, both in `components/ui/page-loading.tsx`. The aircraft, airports and crew pages each carried an identical copy of a `border-2 border-primary border-t-transparent` ring, so waiting for a pane looked like a different kind of waiting depending on which tab you were on
-- Do not size the mobile bottom pill from `PILL_HEIGHT` — it is `MOBILE_PILL_HEIGHT` (52 against the desktop 44). They are not the same control: one is a row of text tabs in a dense header, the other is the phone's only navigation, aimed at with a thumb
+- Do not size the mobile bottom pill from `PILL_HEIGHT` — it is `MOBILE_PILL_HEIGHT` (60 against the desktop 44; `--chrome-bottom` clears it with 20px to spare). They are not the same control: one is a row of text tabs in a dense header, the other is the phone's only navigation, aimed at with a thumb
 - Do not give the bottom bar a squarer corner than a stadium — `MOBILE_PILL_RADIUS` is half its own height, the same rule the 44px controls follow; it is a separate constant only because the bar is a different height. A third-of-the-height radius was tried (the proportion the reference tab bars use) and rejected on the look: what reads as a squircle there is CONTINUOUS CURVATURE, not a smaller radius, and a circular arc at that radius is just a rounded rectangle. Drawing the real thing needs `corner-shape`, and a corner shape one engine falls back from would leave iOS and Android with different bars
 - Do not give the gravity blob a colour of its own — it is `--on-glass-active`, THE selected-thing fill, shared with an action button's active state so the nav and the header say "this is the one you are on" the same way. It must stay a mix of two OPAQUE colours: any translucency shows up as the blob letting the page through, which is the one thing it must not do
 - Do not put `--primary` on `--on-glass-active` — a 32% tint of a colour is the same hue at a similar lightness, which is exactly why the active action button read as barely selected. The label is `--on-glass-active-fg`, the primary pushed AWAY from the fill (lighter on dark, darker on light) so it still reads as the accent

@@ -804,7 +804,7 @@ export default function LogbookPage() {
           // the tab order (see CalendarPanel).
           inert={!showSearch}
         >
-          <div ref={searchBlockRef} className="px-2 pt-1 pb-2" style={searchStow.contentStyle}>
+          <div ref={searchBlockRef} className="px-2 pb-2" style={searchStow.contentStyle}>
             <GlassContainer cornerRadius={20} className="w-full">
               <div className="flex flex-wrap items-center gap-1.5 px-3 py-2">
                 <Search className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
