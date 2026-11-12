@@ -343,6 +343,12 @@ export function GlassContainer({
     // bloom the glass — the "phantom tap" on the calendar/upload buttons while
     // scrolling the import dialog.
     if (rootRef.current?.closest('[aria-hidden="true"]')) return
+    // Only a press ON this glass. React bubbles a synthetic event through
+    // PORTALS along the component tree, so a press on a menu a glass button
+    // opened (the + menu, the camera's Take / Choose Photo — portalled to
+    // <body>) arrived here too, and the button bloomed and stretched after
+    // the finger as it moved over the menu.
+    if (!rootRef.current?.contains(e.target as Node)) return
     detachRef.current?.()
     pressedRef.current = true
     setSpotlightAt(e.clientX, e.clientY)

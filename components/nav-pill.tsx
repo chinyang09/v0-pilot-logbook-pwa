@@ -133,10 +133,12 @@ const PILL_HEIGHT = 44 // h-11
  * They are not the same control at the same size: the desktop pill is a row of
  * text tabs in a dense header, the phone's is the app's primary navigation and
  * the only one, with an icon over a label and a thumb rather than a cursor
- * aiming at it. 52px holds a 44px tab (the touch-target floor) with 4px of
- * glass above and below; at 56 the owner read the bar as too big.
+ * aiming at it. 60px holds a 48px tab with 6px of glass above and below —
+ * raised from 52 on the owner's read on device (Nov 2026) that the bar was
+ * cramped; at 56 an earlier round had read it as too big, when it was also
+ * full-width.
  */
-const MOBILE_PILL_HEIGHT = 52
+const MOBILE_PILL_HEIGHT = 60
 /**
  * The bottom bar is a STADIUM — half its own height, so its ends are
  * semicircular and it reads as one continuous capsule, the same rule the 44px
@@ -249,71 +251,30 @@ function SyncIconButton({ className }: { className?: string }) {
  */
 
 /**
- * TWO damped harmonic oscillators (Hooke's law with viscous damping), sampled
- * for WAAPI — one for where the blob is, one for what shape it is.
+ * The highlight SLIDES to its tab — one eased move, no spring and no shape.
  *
- * **Travel** is the unit STEP response — mass dragged to a new rest position:
+ * It was a soft body: two damped oscillators, one for the travel and one for
+ * a stretch-and-squash that rang down after it landed. On device the owner
+ * read it as springy rather than as the light, quick highlight a tab bar
+ * wants (Nov 2026), so the shape is gone and the travel is a plain ease-out:
+ * fast off the tab it leaves, settling into the one it lands on.
  *
- *   x(t) = 1 − e^(−ζωt)·[cos(ω_d t) + (ζω/ω_d)·sin(ω_d t)]     ω_d = ω√(1−ζ²)
- *
- * heavily damped (ζ 0.78 → ~2% overshoot, one crossing) because a blob that
- * visibly hunts for its seat reads as mechanical — that was the owner's
- * verdict on an earlier bouncy curve.
- *
- * **Shape** is the IMPULSE response of a SECOND, lighter oscillator:
- *
- *   s(t) = e^(−ζ_s ω_s t)·sin(ω_ds t)
- *
- * which is the physically real part the first spring can't express. A soft
- * body's shape has its own stiffness and its own damping, faster and looser
- * than its centre of mass — that is exactly why jelly is still wobbling after
- * it has stopped travelling. Starting from rest it stretches along the
- * direction of travel, crosses through neutral, compresses (~31% of the
- * stretch, the ratio e^(−ζπ/√(1−ζ²)) between consecutive extremes), and rings
- * down.
- *
- * Deriving the squash from the travel spring's own velocity was tried first
- * and is what the physics literally gives you — but at ζ 0.78 the velocity
- * barely reverses (peak −0.02 against +1.0), so the blob stretched on the way
- * out and then simply stopped, with no landing squash at all. Softening the
- * travel damping to grow that lobe brings back the hunting. Two oscillators
- * is both the better-looking answer and the more honest model.
- *
- * Both are normalised to their own peak, so a one-tab hop deforms exactly as
- * much as a five-tab sweep — a short move that deforms proportionally less
- * just looks limp.
+ * Still sampled to keyframes and handed to WAAPI with linear easing — not a
+ * CSS transition — so an interrupted move can be resumed from where the
+ * highlight actually IS, computed from these samples and the animation's
+ * clock rather than read back from the DOM (see the effect below).
  */
-/* Softened twice, on the owner's read that it was still "aggressive" and should
-   be "like Apple's lens to blob": longer (480 → 620ms), the shape oscillator
-   nearly critically damped (ζ 0.32 → 0.72) so it does not ring, and both
-   deformations cut to a quarter of where they started (travel 0.20 → 0.06,
-   handoff 0.34 → 0.07). At this size the wobble is felt rather than watched,
-   which is the whole intent — the blob should look like it has weight, not
-   like it is made of jelly. */
-const GRAVITY_SPRING_MS = 680
-const TRAVEL_ZETA = 0.86
-const TRAVEL_OMEGA = 8.4
-const SHAPE_ZETA = 0.85
-const SHAPE_OMEGA = 7.0
-/** Peak deformation along the direction of travel. */
-const STRETCH = 0.03
-/** How much of it the cross axis gives back — near 1 reads as volume held. */
-const CROSS = 0.85
-const SPRING_SAMPLES = 40
+const SLIDE_MS = 300
+const SLIDE_SAMPLES = 24
 
-function springTrack(): { xs: number[]; ss: number[] } {
-  const wd = TRAVEL_OMEGA * Math.sqrt(1 - TRAVEL_ZETA * TRAVEL_ZETA)
-  const wds = SHAPE_OMEGA * Math.sqrt(1 - SHAPE_ZETA * SHAPE_ZETA)
+function slideTrack(): number[] {
   const xs: number[] = []
-  const raw: number[] = []
-  for (let i = 0; i <= SPRING_SAMPLES; i++) {
-    const t = i / SPRING_SAMPLES
-    const decay = Math.exp(-TRAVEL_ZETA * TRAVEL_OMEGA * t)
-    xs.push(1 - decay * (Math.cos(wd * t) + ((TRAVEL_ZETA * TRAVEL_OMEGA) / wd) * Math.sin(wd * t)))
-    raw.push(Math.exp(-SHAPE_ZETA * SHAPE_OMEGA * t) * Math.sin(wds * t))
+  for (let i = 0; i <= SLIDE_SAMPLES; i++) {
+    const t = i / SLIDE_SAMPLES
+    // easeOutQuart: quick away, a long soft landing.
+    xs.push(1 - Math.pow(1 - t, 4))
   }
-  const peak = Math.max(...raw.map(Math.abs)) || 1
-  return { xs, ss: raw.map((s) => s / peak) }
+  return xs
 }
 type GravRect = { left: number; top: number; width: number; height: number }
 
@@ -389,31 +350,14 @@ function GravityIndicator({
     return () => ro.disconnect()
   }, [containerRef, revision])
 
-  // The blob's motion is a real DAMPED HARMONIC OSCILLATOR, not a bezier.
-  //
-  // Both the travel and the squash are sampled from the SAME spring solution,
-  // which is what makes it read as one soft body rather than a box sliding
-  // under a separately-authored wobble: the stretch is proportional to the
-  // spring's VELOCITY, so the blob is longest exactly when it is moving
-  // fastest, and as the spring decelerates the velocity reverses and the
-  // stretch becomes a recoil the other way. Hand-keyframed squash could
-  // approximate the shape but never stayed in step with the travel.
-  //
-  // Damping is deliberately high (`ZETA` 0.78 → ~2% overshoot). The owner
-  // rejected a bouncy position curve before — a blob that visibly hunts for
-  // its seat reads as mechanical. All the elasticity a viewer actually
-  // registers is in the shape; the position just needs to arrive like mass on
-  // a spring rather than on a curve someone drew.
-  //
-  // Sampled to keyframes and handed to WAAPI rather than ticked in JS: a
-  // main-thread spring hitches when a heavy page mounts (that is why this was
-  // a CSS transition before). Transform keyframes with linear easing
-  // composite, so the physics runs off the main thread.
+  // The highlight's move is sampled (`slideTrack`) and handed to WAAPI with
+  // linear easing, so it composites off the main thread — a JS-ticked move
+  // hitches when a heavy page mounts — and an interrupted move can be
+  // resumed from the samples.
   const target = rects[activeIndex]
   const blobRef = useRef<HTMLDivElement>(null)
   const prevTargetRef = useRef<{ left: number; top: number } | null>(null)
   const travelRef = useRef<Animation | null>(null)
-  const shapeRef = useRef<Animation | null>(null)
   const animatedToRef = useRef<{ left: number; top: number } | null>(null)
   /** The running move's own terms, so where the blob IS can be computed. */
   const flightRef = useRef<{ fromLeft: number; fromTop: number; dx: number; dy: number; xs: number[] } | null>(null)
@@ -431,7 +375,7 @@ function GravityIndicator({
 
     // Already on the way there. This effect re-runs whenever `rects` is
     // re-measured — the sidebar's ResizeObserver fires as the route settles —
-    // and firing a SECOND spring to the same destination mid-flight is what
+    // and firing a SECOND move to the same destination mid-flight is what
     // made the blob look like it flashed twice on its way across.
     const going = animatedToRef.current
     if (going && Math.abs(going.left - t.left) < 1 && Math.abs(going.top - t.top) < 1) return
@@ -442,7 +386,7 @@ function GravityIndicator({
     // cancelled the computed value reverts to the inline style, which is
     // already the new target.
     //
-    // Computed from the move's own spring track and the animation's clock, NOT
+    // Computed from the move's own samples and the animation's clock, NOT
     // read back with `getComputedStyle(box).transform`. This effect runs on
     // the commit a navigation lands in, with the arriving page's DOM still
     // dirty, so that read forced a style recalculation of the whole page —
@@ -452,7 +396,7 @@ function GravityIndicator({
     const flight = flightRef.current
     const running = travelRef.current
     if (flight && running?.playState === "running") {
-      const p = Math.min(1, Math.max(0, Number(running.currentTime ?? 0) / GRAVITY_SPRING_MS))
+      const p = Math.min(1, Math.max(0, Number(running.currentTime ?? 0) / SLIDE_MS))
       const at = p * (flight.xs.length - 1)
       const i = Math.floor(at)
       const x = flight.xs[i] + (flight.xs[Math.min(i + 1, flight.xs.length - 1)] - flight.xs[i]) * (at - i)
@@ -460,33 +404,19 @@ function GravityIndicator({
       fromTop = flight.fromTop + flight.dy * x
     }
     travelRef.current?.cancel()
-    shapeRef.current?.cancel()
 
     const dx = t.left - fromLeft
     const dy = t.top - fromTop
     animatedToRef.current = { left: t.left, top: t.top }
 
-    const { xs, ss } = springTrack()
+    const xs = slideTrack()
     flightRef.current = { fromLeft, fromTop, dx, dy, xs }
-    const along = Math.abs(dx) >= Math.abs(dy)
 
-    // Travel: the spring's displacement, from where it was to where it goes.
     travelRef.current = box.animate(
       xs.map((x) => ({
         transform: `translate(${fromLeft + dx * x}px, ${fromTop + dy * x}px)`,
       })),
-      { duration: GRAVITY_SPRING_MS, easing: "linear" },
-    )
-
-    // Shape: the ringing oscillator. Signed, so the landing squash and the
-    // ring-down after it come from the same curve as the outward stretch.
-    shapeRef.current = shape.animate(
-      ss.map((s) => {
-        const stretch = 1 + STRETCH * s
-        const across = 1 - STRETCH * s * CROSS
-        return { transform: `scale(${along ? stretch : across}, ${along ? across : stretch})` }
-      }),
-      { duration: GRAVITY_SPRING_MS, easing: "linear" },
+      { duration: SLIDE_MS, easing: "linear" },
     )
   }, [activeIndex, rects, reduce, instant])
 
@@ -507,12 +437,12 @@ function GravityIndicator({
         transform: target ? `translate(${target.left}px, ${target.top}px)` : undefined,
         width: target?.width,
         height: target?.height,
-        // `transform` is deliberately NOT in this list — the spring above owns
+        // `transform` is deliberately NOT in this list — the slide above owns
         // it, and a CSS transition on the same property would race the WAAPI
         // animation to the same endpoint (the inline value is already the
         // target, so the animation simply falls back onto it when it
-        // finishes). Only the box's SIZE eases, a touch quicker than the
-        // spring so a widening tab has settled before the blob stops moving.
+        // finishes). Only the box's SIZE eases, on the slide's own clock, so a
+        // wider tab and the move land together.
         // Opacity eases even when `instant` is set, because `instant` is about
         // PLACEMENT. The drag lens's release un-hides the blob at the
         // destination and then dissolves the glass off it, so a hard 0→1 here
@@ -521,7 +451,7 @@ function GravityIndicator({
         transition: [
           ...(reduce || instant
             ? []
-            : [`width 0.34s ${SETTLE_BEZIER}`, `height 0.34s ${SETTLE_BEZIER}`]),
+            : [`width ${SLIDE_MS}ms ${SETTLE_BEZIER}`, `height ${SLIDE_MS}ms ${SETTLE_BEZIER}`]),
           ...(reduce ? [] : ["opacity 0.34s ease"]),
         ].join(", ") || "none",
       }}
@@ -597,7 +527,7 @@ const SIDEBAR_BACKDROP_RAMP =
  *
  * How far it can go is set by the CONTENT, not by taste: the counter-scaled row
  * still has to fit inside the copy's box, which is the pill's true height. The
- * mobile pill's tab item is 44px inside a 56px bar, so 44 / 0.84 ≈ 52px — just
+ * mobile pill's tab item is 48px inside a 60px bar, so 48 / 0.84 ≈ 57px — just
  * inside. Squeeze harder and the icons and labels get clipped by the copy's own
  * edge, which is what a first pass at 0.72 did: the labels vanished inside the
  * lens entirely.
@@ -1019,7 +949,7 @@ const PillBarContent = memo(function PillBarContent({
       className={cn(
         "flex items-center px-1.5",
         // The bottom bar is the taller of the two — see MOBILE_PILL_HEIGHT.
-        mode === "desktop" ? "h-11" : "h-13"
+        mode === "desktop" ? "h-11" : "h-15"
       )}
     >
       {/* Sidebar toggle — fixed width bookend */}
@@ -1108,7 +1038,7 @@ const PillBarContent = memo(function PillBarContent({
                     // The padding gives way below ~362px (an iPad window in
                     // Split View is 320) so five tabs always fit the bar;
                     // above that it is 10px, so every phone gets the same bar.
-                    "inline-flex flex-col items-center justify-center gap-0.5 h-11 px-[clamp(5px,calc((100vw-262px)/10),10px)] rounded-full transition-colors",
+                    "inline-flex flex-col items-center justify-center gap-1 h-12 px-[clamp(5px,calc((100vw-262px)/10),10px)] rounded-full transition-colors",
                     highlighted
                       ? "text-[var(--on-glass-active-fg)]"
                       : "text-foreground"

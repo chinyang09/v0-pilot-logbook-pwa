@@ -20,12 +20,12 @@ import { cn } from "@/lib/utils";
 type Side = "top" | "bottom";
 
 /**
- * Height of the fade itself. The main panel's header is a 64px bar carrying
- * the whole 0% → 60% → transparent ramp, so 64px IS that curve — anchoring to
+ * Height of the fade itself. The main panel's header is a 52px bar (plus the
+ * status bar) carrying the whole ramp, so 52px IS that curve — anchoring to
  * it keeps taller chrome (a title + tab row) identical at the boundary instead
  * of stretching the ramp until cards show through the title.
  */
-const FADE = 64;
+const FADE = 52;
 
 /**
  * The main panel header's gradient, anchored to the fading edge.
@@ -94,27 +94,52 @@ const BLUR_RAMP = "58%";
  * begins at the buttons' edge.
  *
  * This is the VISUAL band only. `--chrome-clear` — where the quick-scroll rail
- * parks a row — is deliberately LARGER: a row landing exactly on the band's
- * lower edge sits against it, and the point of the target is that the row is
- * clear of the treatment, not level with the end of it. The two were briefly
- * held equal and that pushed the darkening much too far down the screen.
+ * parks a row — is a few px LARGER: a row landing exactly on the band's lower
+ * edge sits against it.
  *
- * 41px puts the band's bottom 45px below the action buttons (34 gave 38).
- * Apple does not publish a figure for the scroll-edge effect's falloff, so
- * this is the owner's read on device rather than a spec number.
+ * 16px (Nov 2026, the owner's read on device): at 41 the band reached 45px
+ * below the action buttons, and every list had to START that far down to be
+ * readable — a strip of every screen spent on a fade. 16 is the first card's
+ * gap (`LIST_TOP_GAP`, a page's `pt-4` title) less a hair, so a list at its
+ * top — or tapped back to it — sits just clear of the band, and
+ * `--chrome-clear` parks a scrolled-to row at the same place.
  */
-const FADE_TAIL = 41;
+const FADE_TAIL = 16;
 
 /**
- * The mask that clears the tail over a region starting at the left edge:
- * keep the bar's own band (`--chrome-top` tall) across the full width, plus
- * everything to the RIGHT of `width`. Two solid layers, added.
+ * Where a floating panel hangs under the bar (`useFloatingPanelUnderHeader`):
+ * the logbook's search and calendar, the dashboard's calendar. Both sit at
+ * `--chrome-top`, 8px (`px-2`) in from the panel's edges, with 20px corners.
+ */
+const PANEL_INSET = 8;
+const PANEL_RADIUS = 20;
+
+/**
+ * The mask that clears the tail UNDER a floating panel — and only under it.
+ * KEEP (five solid layers, added): the bar's own band across the full width,
+ * the gutter left of the panel, everything right of it (`width` from the left
+ * edge, less the gutter), and the two slivers OUTSIDE its rounded top corners.
+ *
+ * It used to clear the whole width below the bar, so content scrolling past
+ * the calendar's corners and down its 8px gutters came through sharp and
+ * undimmed — a corner of crisp flight card beside a frosted header.
  */
 function tailCutMask(width: string) {
+  const g = `${PANEL_INSET}px`;
+  const r = `${PANEL_RADIUS}px`;
+  const solid = "linear-gradient(#000, #000)";
+  const corner = (at: string) => `radial-gradient(circle ${r} at ${at}, transparent ${PANEL_RADIUS - 0.5}px, #000 ${PANEL_RADIUS}px)`;
   return {
-    image: "linear-gradient(#000, #000), linear-gradient(#000, #000)",
-    size: `100% var(--chrome-top), calc(100% - ${width}) 100%`,
-    position: "0 0, 100% 0",
+    image: [solid, solid, solid, corner("100% 100%"), corner("0 100%")].join(", "),
+    size: [`100% var(--chrome-top)`, `${g} 100%`, `calc(100% - ${width} + ${g}) 100%`, `${r} ${r}`, `${r} ${r}`].join(", "),
+    position: [
+      "0 0",
+      "0 0",
+      "100% 0",
+      `${g} var(--chrome-top)`,
+      `calc(${width} - ${g} - ${r}) var(--chrome-top)`,
+    ].join(", "),
+    layers: 5,
   };
 }
 
@@ -150,8 +175,8 @@ export function ChromeFade({
         WebkitMaskPosition: `0 0, ${cut.position}`,
         maskRepeat: "no-repeat",
         WebkitMaskRepeat: "no-repeat",
-        maskComposite: "intersect, add, add",
-        WebkitMaskComposite: "source-in, source-over, source-over",
+        maskComposite: ["intersect", ...Array(cut.layers).fill("add")].join(", "),
+        WebkitMaskComposite: ["source-in", ...Array(cut.layers).fill("source-over")].join(", "),
       }
     : { maskImage: ramp, WebkitMaskImage: ramp };
   const veilMask = cut
@@ -164,8 +189,8 @@ export function ChromeFade({
         WebkitMaskPosition: cut.position,
         maskRepeat: "no-repeat",
         WebkitMaskRepeat: "no-repeat",
-        maskComposite: "add",
-        WebkitMaskComposite: "source-over",
+        maskComposite: Array(cut.layers).fill("add").join(", "),
+        WebkitMaskComposite: Array(cut.layers).fill("source-over").join(", "),
       }
     : undefined;
   return (

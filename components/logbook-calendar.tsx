@@ -981,7 +981,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
     // one ("Dec 2026 – Jan 2027", which "Dec – Jan 27" would put in the
     // wrong year).
     const monthTitle = (() => {
-      const year = (y: number) => <span className="font-normal text-[var(--on-glass-muted)]">{y}</span>;
+      const year = (y: number) => <span className="font-normal text-[var(--on-glass-label)]">{y}</span>;
       if (!dualMonth) {
         return (
           <>

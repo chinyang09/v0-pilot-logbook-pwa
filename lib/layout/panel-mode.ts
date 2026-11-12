@@ -89,9 +89,11 @@ export function useIsMainPanelFullWidth(): boolean {
  *   so the calendar's month selector could not be tapped on a desktop: the
  *   tap scrolled the list to the top instead.
  * - the fade's TAIL (`ChromeFade`'s `clearBelowBar`). The panel sits at
- *   `--chrome-top`, i.e. inside the tail, and its top 41px came out dimmed and
+ *   `--chrome-top`, i.e. inside the tail, and its top came out dimmed and
  *   blurred as if it were content scrolling away under the bar. It is a
- *   control surface hanging from the bar. It cannot simply be raised above
+ *   control surface hanging from the bar. Only the panel's own SHAPE is
+ *   cleared — its gutters and the slivers outside its rounded corners keep
+ *   the treatment, or content scrolling past them came through sharp. It cannot simply be raised above
  *   the header: the page lives in its own keep-alive stacking context, below
  *   the shell's.
  *
