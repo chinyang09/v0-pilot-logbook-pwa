@@ -191,6 +191,8 @@ function barToneFull(tone: BarTone): { className: string; background: string } {
 
 /** The gap a bar leaves at each end it does not continue past: 3px between neighbours. */
 const BAR_INSET_PX = 1.5;
+/** How far the grid keeps clear of the glass's rim on the sides it reaches. */
+const RIM_CLEAR_PX = 2;
 /** A bar's horizontal padding, each side. */
 const BAR_PAD_PX = 2;
 /** The narrowest a label is condensed to before its airport is dropped. */
@@ -731,8 +733,13 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       // The grid runs to the glass's edges, so its bottom corners ARE the
       // glass's: a lit corner cell is clipped to the material's own curve.
       const last = weeks.length - 1;
-      const bottomLeft = edges.left ? cornerRadius : 0;
-      const bottomRight = edges.right ? cornerRadius : 0;
+      // The grid stops RIM_CLEAR_PX short of the glass on the sides it
+      // reaches, so the material's rim — a ~2px ring painted under the
+      // contents — is never covered: a duty bar running off a week row, a
+      // range's fill or the chosen day at the edge used to sit right over it,
+      // and the calendar lost its edge there.
+      const bottomLeft = edges.left ? cornerRadius - RIM_CLEAR_PX : 0;
+      const bottomRight = edges.right ? cornerRadius - RIM_CLEAR_PX : 0;
       const cornerRadiusOf = (w: number, col: number) =>
         w === last ? `0 0 ${col === 6 ? bottomRight : 0}px ${col === 0 ? bottomLeft : 0}px` : undefined;
       const hasFullRange = !!(rangeStart && rangeEnd) && rangeStart !== rangeEnd;
@@ -740,7 +747,15 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
       const inMonth = days.filter((d) => d.isCurrentMonth).map((d) => d.dateStr);
       const tabStop = [selectedDate, today].find((d) => !!d && inMonth.includes(d)) ?? inMonth[0];
       return (
-        <div className="mx-auto w-full" style={{ maxWidth: paneMaxWidth }}>
+        <div
+          className="mx-auto w-full"
+          style={{
+            maxWidth: paneMaxWidth,
+            paddingLeft: edges.left ? RIM_CLEAR_PX : 0,
+            paddingRight: edges.right ? RIM_CLEAR_PX : 0,
+            paddingBottom: RIM_CLEAR_PX,
+          }}
+        >
           <div className="grid grid-cols-7 gap-0 pb-0.5">
             {DAYS.map((day) => (
               <div
@@ -800,27 +815,42 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
                           // through. A solid fill there blocked the material
                           // and read as a grey slab under the calendar.
                           !isCurrentMonth && "bg-black/[0.07] dark:bg-black/30",
-                          isInRange && "bg-[var(--on-glass-accent-soft)]",
-                          isRangeEnd && "bg-[var(--on-glass-accent)]",
-                          // Today is the whole DAY, lit — in the ACCENT: a
-                          // grey fill read as one more day of another month
-                          // in the light theme. Inside a range the range's
-                          // own tint wins and the bold number still says it.
-                          isToday && !isRangeEnd && !isInRange && "bg-[var(--on-glass-accent-soft)]",
-                          isSelected && "ring-2 ring-inset ring-primary",
+                          // A chosen PERIOD (the dashboard) is the accent, a
+                          // step up from the soft tint it was — that tint was
+                          // also today's, and a week's range read as faintly
+                          // as one lit day. Its ends are the selected-thing
+                          // fill, with their numbers badged (below).
+                          isInRange && "bg-[var(--on-glass-accent)]",
+                          isRangeEnd && "bg-[var(--on-glass-active)]",
+                          // The chosen DAY is a NEUTRAL fill with an inverted
+                          // number. It was an accent ring — the colour every
+                          // flight still to fly is drawn in, so the day you
+                          // tapped read as one more of them; and at the edge
+                          // the ring sat over the glass's rim.
+                          isSelected && !isRangeEnd && "bg-[var(--on-glass-fill)]",
                         )}
                         style={{ borderRadius: cornerRadiusOf(w, col) }}
                       >
                         <span
                           className={cn(
-                            // Day numbers are grey; TODAY is the one in full
-                            // ink, bold — white on dark, black on light.
+                            // Day numbers are grey. TODAY's is a solid accent
+                            // badge — the calendar's ONE solid accent mark, as
+                            // on the platform's own calendars; a lit cell and a
+                            // bold number were the same tint as a range and
+                            // easy to miss. The chosen day inverts (ink on the
+                            // face); a range's ends are bold accent numbers on
+                            // their stronger fill — badged like today, today
+                            // inside a range read as a third end.
                             "text-[10px] leading-3 tabular-nums",
                             isToday
-                              ? "font-bold text-foreground"
-                              : isCurrentMonth
-                                ? "text-[var(--on-glass-muted)]"
-                                : "text-[var(--on-glass-faint)]",
+                              ? "-ml-0.5 inline-flex h-3 min-w-3.5 items-center justify-center rounded-full bg-primary px-[3px] font-bold text-primary-foreground"
+                              : isSelected && !isRangeEnd
+                                ? "-ml-0.5 inline-flex h-3 min-w-3.5 items-center justify-center rounded-full bg-foreground px-[3px] font-bold text-background"
+                                : isRangeEnd
+                                  ? "font-bold text-[var(--on-glass-active-fg)]"
+                                  : isCurrentMonth
+                                    ? "text-[var(--on-glass-muted)]"
+                                    : "text-[var(--on-glass-faint)]",
                           )}
                         >
                           {dayInfo.date.getDate()}

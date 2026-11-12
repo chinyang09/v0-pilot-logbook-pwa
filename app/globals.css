@@ -317,11 +317,17 @@
      `--top-inset`, never the raw env(), for anything under the banner. */
   --top-inset: env(safe-area-inset-top, 0px);
   --install-banner-height: 0px;
-  /* Where the QUICK-SCROLL rail parks a row — the same 20px below the bar a
+  /* Where the QUICK-SCROLL rail parks a row — the same 16px below the bar a
      list's first card starts at (`LIST_TOP_GAP`, a page title's spacing). The
      header's band ends AT the bar (`ChromeFade` has no tail), so a
      scrolled-to row lands where the list's top row sits, clear of it. */
-  --chrome-clear: calc(var(--chrome-top) + 1.25rem);
+  --chrome-clear: calc(var(--chrome-top) + var(--content-top-gap));
+  /* The ONE gap between the header's band and the first thing on a page —
+     a page's large title (`PageContainer`, `DetailFormPanel`: pt-4), the
+     logbook's first card (`LIST_TOP_GAP`), the legal dashboard's surface.
+     The lists and the dashboard were 20px under titled pages' 16, so the
+     logbook opened visibly lower than the tab beside it. */
+  --content-top-gap: 1rem;
   --chrome-top-sm: calc(2.75rem + var(--top-inset));
   /* How far above the physical bottom edge the floating nav rests — the ONE
      number the bottom pill, the sidebar's lower end, and the content

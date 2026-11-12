@@ -41,7 +41,7 @@ export function AlertsDropdown() {
           variant="ghost"
           size="icon"
           aria-label={`Import notes${count > 0 ? `, ${count}` : ""}`}
-          className="relative h-9 w-9 rounded-full"
+          className="relative h-10 w-10 rounded-full"
         >
           <Bell className="h-5 w-5" />
           {count > 0 && (

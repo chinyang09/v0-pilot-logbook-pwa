@@ -1957,11 +1957,15 @@ zone).
   as a slab under the calendar. They are TAPPABLE: the calendar moves to that
   month (a pair two months, unless it is the other pane) and the day is
   chosen.
-- **Day numbers are grey; TODAY is the one in full ink, bold**, its cell lit
-  in the ACCENT (`--on-glass-accent-soft`) — a grey fill read as one more day
-  of another month in the light theme; inside a range the range's tint wins
-  and the bold number marks it. The selected day is a ring. "Today" follows
-  the clock (`useDayKey`), so a calendar left open overnight moves it.
+- **Day numbers are grey; TODAY's is a solid ACCENT BADGE** — the calendar's
+  ONE solid accent mark, as on the platform's own calendars (Nov 2026: a lit
+  cell and a bold number were the range's tint and easy to miss). **The
+  chosen day is a NEUTRAL fill** (`--on-glass-fill`) **with an inverted
+  badge** (ink on the face): it was an accent ring, the colour every flight
+  still to fly is drawn in, so the day tapped read as one more of them. Only
+  today is badged in the accent — a range's ends are bold accent numbers, or
+  today inside a range read as a third end. "Today" follows the clock
+  (`useDayKey`), so a calendar left open overnight moves it.
 - **The grid is ONE tab stop per month** (the chosen day, else today, else the
   1st) and the ARROWS move between days, a week up or down
   (`onGridKeyDown`); past the month's edge the calendar moves with the focus.
@@ -1984,11 +1988,13 @@ zone).
   routed that region's listeners synchronously. The patch drags whatever the
   flag says and `[data-rwp]` carries `touch-action: none`, so the page cannot
   pan under the drag either way.
-- **The grid runs to the glass's edges** — no inner padding, a dual pane's
-  right half ruled off from its left — and its bottom corners ARE the
-  glass's (`cornerRadius`), so a lit corner cell follows the material's curve.
-  Measured at 390, 360 and 1180 (dual): the grid flush with the glass on both
-  sides and the bottom, nothing overflowing it.
+- **The grid runs to the glass's edges but for its RIM** (`RIM_CLEAR_PX`,
+  2px on the sides a pane reaches and the bottom) — a dual pane's right half
+  ruled off from its left — and its bottom corners follow the glass's
+  (`cornerRadius` less the clearance), so a lit corner cell follows the
+  material's curve. Flush to the edge, a duty bar running off a week row, a
+  range's fill or the chosen day's ring sat over the rim (a ~2px ring painted
+  UNDER the contents) and the calendar lost its edge there.
 - **The day's width is read in a ResizeObserver** (`data-cal-week` /7), never
   in a commit, and each week row is `contain: layout paint`.
 - **Bars take no taps.** A tap is the DAY's, which the page scrolls to.
@@ -2072,8 +2078,10 @@ logbook's list spacer reserves, and the dashboard's summary too
 the calendar over it.** The dashboard's used to float, and the period's hero
 figure read through the calendar's glass between the day numbers.
 
-**A range fills its DAYS** — square cells, the ends a step darker
-(`--on-glass-accent`) than the days between (`--on-glass-accent-soft`). The
+**A range fills its DAYS** — square cells in the accent (`--on-glass-accent`),
+the ends the selected-thing fill (`--on-glass-active`) with bold accent
+numbers. It was the soft tint (today's too), and the dashboard's chosen period
+read no stronger than one lit day. The
 per-week-row capsules it used to be drawn as went with the edge-to-edge grid:
 every other lit day (today, the selected one, another month's) is a whole cell
 between the day rules, and a capsule inside them read as a different control.
@@ -2111,6 +2119,14 @@ at `--chrome-top`, and the list reserves their combined height in its
   therefore always MOUNTED and collapsed to `height: 0` (rather than
   conditionally rendered), so its natural height is always measurable and the
   collapse is a plain px transition the spacer can match exactly.
+
+**The calendar follows the list by the row at least HALF on screen**
+(`FlightList`'s `handleScroll`: the first row whose card midpoint is at or
+below the line the rows pass under — the scroll offset less `topGapPx`, the
+open space above the first card). It took the first row with ANY pixel left,
+so a card all but gone under the calendar still named the day, and it ignored
+that gap. The day changes as the next card takes over that half, in both
+directions.
 
 **Search is a token field, stowed by default.** A header button opens it
 between the action buttons and the calendar, and it collapses on the same
@@ -2253,9 +2269,16 @@ nothing to step aside, and the hook and the mask are gone.
   strip over the status bar — scrolls that panel to the top; the phone
   overlay's bar does the same for the record.
 
-  **`--chrome-clear`** (the bar + 1.25rem) is where the quick-scroll rail
-  parks a row — the same place a list's first card sits at its top
-  (`LIST_TOP_GAP`, 20px).
+  **`--chrome-clear`** (the bar + `--content-top-gap`) is where the
+  quick-scroll rail parks a row — the same place a list's first card sits at
+  its top.
+
+  **Every page starts `--content-top-gap` (16px) under the band** — a
+  page's large title (`PageContainer`, `DetailFormPanel`: `pt-4`), the
+  logbook's first card (`LIST_TOP_GAP`), the legal dashboard's surface, the
+  flight form's first section. The logbook and the dashboard were 20px, so
+  the logbook opened visibly lower than the tab beside it. Measured: every
+  main and detail panel's first content at 68px (390 and 1180).
 
   **The header is `inert` while the phone's sidebar is up**
   (`setOverlaySidebarOpen` / `useIsOverlaySidebarOpen`,
@@ -2692,8 +2715,9 @@ re-renders).
 
   **The phone's bottom bar is 12px inside a flight card's edges, up to
   25rem** — `MOBILE_PILL_WIDTH`, `min(calc(100% - 2 * var(--panel-gutter) -
-  1.5rem), 25rem)`, 60px tall (`MOBILE_PILL_HEIGHT`, a 48px tab inside —
-  raised from 52 on the owner's read on device, Nov 2026), so it keeps one
+  1.5rem), 25rem)`, 60px tall (`MOBILE_PILL_HEIGHT`, a 56px tab inside —
+  2px of bar round the highlight, `GROUP_ITEM`'s rule; the bar was raised
+  from 52 on the owner's read on device, Nov 2026), so it keeps one
   proportion to the screen on every phone (it used to hug its tabs, ~330px
   whatever the width; then edge to edge at 56px, which the owner read as too
   big: 342×60 on a 390 phone now) without becoming a slab across an
@@ -3086,7 +3110,8 @@ open flight, both themes (Nov 2026: zero violations). What it took:
   second one under the zone's name.
 - **Every new record names itself the same way**: New Aircraft is a
   `DetailFormPanel` like New Duty and New Currency (it was a bare scroller with
-  no title), and a helper line says something only once there is something to
+  no title), and New Airport carries the same title (`NewAirportPanel` —
+  its actions are the form's own, so it is not a `DetailFormPanel`), and a helper line says something only once there is something to
   say ("Not found online…" read over an empty field).
 - **A short code field is sized to its code** (`SettingsRow`'s `maxLength`):
   a text input claims ~200px, which squeezed the Airline row's helper text
@@ -5435,7 +5460,7 @@ When making changes, be aware of these high-impact files:
 - Do not cache the scroll indicator's scroller box behind a ResizeObserver alone — opening the sidebar SLIDES the main panel across without resizing it (`0..360` → `199..559`), so no observer fires and the thumb stays at the closed layout's right edge, drawing a grey rule down the middle of the flight cards. Re-read the box in the update
 - Do not rely on the cascade's event blocking alone to keep cards still — while a menu is open `SwipeableCard` sets `pointer-events: none` on its root and drops `drag` (`lib/utils/menu-lock.ts`). Intercepting events only covers the events you thought of, in the order an engine happens to send them; removing the row as a hit-test target covers all of them, and the touch still reaches the scroller behind it so the list keeps scrolling. The lock is a COUNTED hold (`setMenuOpen(true)` takes one, `false` releases one): with a single flag, whichever overlay's cleanup ran last decided the answer, so a menu closing as another opened could unlock the rows under the one still up
 - Do not move the scroll indicator's thumb back INSIDE the scroller — it is a `position: fixed` element in `document.body`, placed against the scroller's cached box. It lived on a sticky anchor inside the scroller once, with its drift measured and cancelled per frame: that pinned correctly while a finger dragged, but the rubber-band RELEASE is compositor-animated and the correction runs on the main thread from coalesced scroll events, so the track visibly snapped back with the bounce. Nothing inside the scroller can win that race. The zero-height sticky marker that remains is only a rubber-band **sensor** (its drift is the bounce distance for engines that clamp `scrollTop`) and is read at the TOP only — at the bottom it stays pinned, so measuring there returns the whole scrolled distance and collapses the thumb
-- Do not let the logbook's first card butt against the chrome — `LIST_TOP_GAP` (20px) starts it where crew / aircraft / airports start theirs (measured: first card at 72 against `--chrome-top` 52 on both). It is DROPPED while the search or the calendar is open: that panel's own bottom edge is the separation there, and the gap read as slack hanging off the calendar (measured: first card at 415, exactly the calendar's bottom)
+- Do not let the logbook's first card butt against the chrome, or start it lower than any other page — `LIST_TOP_GAP` is `--content-top-gap` (16px), where every page's title starts (measured: 68 against `--chrome-top` 52 on every page). It is DROPPED while the search or the calendar is open: that panel's own bottom edge is the separation there, and the gap read as slack hanging off the calendar (measured: first card at 415, exactly the calendar's bottom)
 - Do not give a page's content its own bottom padding on top of the shared clearance — one clearance per scroller, from `--chrome-bottom` (`.pb-chrome` / `.h-chrome-bottom`), and a card list's per-row gap belongs on the row's TOP (`pt-1`), never its bottom. A trailing per-row gap stacks on the spacer and lands that panel's last row lower than every other panel's (the logbook, aircraft, airports and crew lists each had one; the logbook's 8px is subtracted from its spacer because its wrapper padding can't move)
 - Do not let ANY scroller chain its overscroll to the document — every app scroller carries `overscroll-contain`, so a flick that reaches the end of a list can never reach the page. Together with the clipped shell above that is what removed the "free play" where a page with nothing to scroll still moved and carried the fixed action buttons off screen. Verified by sampling `scrollHeight − clientHeight` on the document continuously through load: 0 on every route, in both axes
 - Do not bleed a row past the panel edge with a hardcoded `-mx-*` — use `.-mx-panel`, the negative of `--panel-gutter`. A `-mx-4` against the 12px gutter pushed the chip strip 4px past both edges, which is horizontal overflow the root no longer clips (that was the left/right jiggle on currencies and discrepancies)
@@ -5600,7 +5625,7 @@ When making changes, be aware of these high-impact files:
 - Do not animate the gravity blob in the SIDEBAR — it is placed instantly there. The list's metrics re-measure as a route settles and as the panel morphs, and each re-measure was a chance for the spring to re-fire (the "flashes twice" report)
 - Do not carry a flight's OOOI times, takeoffs/landings, signature, lock or import/sync stamps into a derived flight (`deriveFlight`) — those are the record of a specific flight having happened, and copying them forward fabricates a logbook entry
 - Do not judge a virtual list's scroll convergence by `virtualizer.scrollOffset` — it is written by the scroll listener, so reading it in the same tick as `scrollToIndex` always says "unchanged" and the retry loop gives up after one pass
-- Do not put a control taller than `h-9` inside a `GlassButtonGroup` — the group is `h-11` with `px-1`, and the glass CLIPS, so a 48px child had its icon cut off top and bottom (the dashboard's period filter) and made the group wider than it was tall, turning a single-button group into an oval (the alerts bell). `GlassGroupButton` is `h-9 w-9`; anything hand-rolled into a group has to match
+- Do not put a control taller than `h-10` inside a `GlassButtonGroup`, or give a highlight more than 2px of capsule round it — the group is `h-11` with `px-0.5`, and what goes in it is `GROUP_ITEM` (`h-10`), so its highlight fills the capsule but for a hairline (the owner's ask, Nov 2026: at 4px in the groups and 6px in the nav a highlight read as a smaller thing floating inside its control). The nav bars (a 56px tab in the 60px bar, 40px in the 44px pill) and `SegmentedTabs` (`p-0.5`, `h-10` segments) keep the same 2px. The glass CLIPS, so a taller child had its icon cut off top and bottom (the dashboard's period filter) and made the group wider than it was tall (the alerts bell). The dashboard's period pills are group items too — `h-10`, the selected-thing fill, not 24px solid accent pills
 - Do not size the floating controls or the desktop nav pill independently — they are one 44px family (`CONTROL_RADIUS` 22 = half the height, so a pill stays a stadium — the bottom bar follows the same rule at its own height, see `MOBILE_PILL_RADIUS`), the header row is `h-13` to match, and `--chrome-top` is derived from them. They were 56px, which read as oversized next to the platform's own chrome on the same iPad
 - Do not print a four-digit year in the logbook's month label — in dual mode ("Jul – Aug 2026") the left action group grew far enough to reach the centred nav pill
 - Do not bring back the three-panel month carousel. It measured its container height from a ref taken "at rest" that had never been taken on the first entry into dual mode, so the calendar collapsed to 8px, and its end-of-animation handler tested `dataset.animAnchor` against `data-anim-anchor=""` — the empty string, which is falsy — so it never recovered. A dual step moves the pair by TWO months, so there is nothing sliding across to animate
