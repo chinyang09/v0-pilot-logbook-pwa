@@ -105,6 +105,7 @@ export function AlertsDropdown() {
                   role="menu"
                   label="Import notes"
                   placement={placement}
+                  glyph={<Bell className="h-5 w-5" />}
                   className="p-2"
                   onKeyDown={(e) => e.key === "Escape" && dismiss()}
                 >
