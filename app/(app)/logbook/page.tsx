@@ -1,5 +1,6 @@
 "use client"
 
+import { flightSearchFields, matchesTerms, prepareTerm, squashFields } from "@/lib/utils/logbook-search"
 import { SEARCH_INPUT_PROPS } from "@/lib/utils/input-props"
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react"
 import { FlightList, type FlightListRef, type TopRow } from "@/components/flight-list"
@@ -462,51 +463,27 @@ export default function LogbookPage() {
   }, [setSelectedFlightId])
 
   /**
-   * One lowercased haystack per flight, built once per flights array rather
-   * than per keystroke. The previous form allocated an 11-element array and
-   * lowercased every field of every flight on every term change — with a few
-   * thousand flights that is tens of thousands of string allocations between
-   * one character and the next, which is exactly when the main thread is
-   * needed for the caret.
-   *
-   * Kept as a per-field LIST rather than one joined string, so a term still has
-   * to sit inside a single field — joining would let "wsss wica" match across
-   * the boundary between two fields that are only adjacent by accident.
+   * One SQUASHED haystack per flight (`flightSearchFields`), built once per
+   * flights array rather than per keystroke — with a few thousand flights,
+   * rebuilding it between one character and the next is exactly when the
+   * main thread is needed for the caret. What a term matches is
+   * `lib/utils/logbook-search.ts`: case, spacing and dashes do not matter,
+   * a flight number's leading zeros do not, a route is one term, a date is
+   * found in the forms a pilot writes one.
    */
-  const searchIndex = useMemo(
-    () =>
-      flights.map((f) =>
-        [
-          f.flightNumber,
-          f.aircraftReg,
-          f.aircraftType,
-          f.departureIcao,
-          f.arrivalIcao,
-          f.departureIata,
-          f.arrivalIata,
-          f.picName,
-          f.sicName,
-          ...(f.additionalCrew?.map((c) => c.name) ?? []),
-          f.date,
-        ]
-          .filter((v): v is string => !!v)
-          .map((v) => v.toLowerCase()),
-      ),
-    [flights],
-  )
+  const searchIndex = useMemo(() => flights.map(flightSearchFields), [flights])
+
+  // Committed chips AND the text still being typed — so a query narrows the
+  // list live, and pressing Enter only pins it so the next one can stack.
+  const preparedTerms = useMemo(() => {
+    const pending = debouncedSearchQuery.trim()
+    return [...searchTerms, ...(pending ? [pending] : [])].map(prepareTerm)
+  }, [searchTerms, debouncedSearchQuery])
 
   const filteredFlights = useMemo(() => {
-    // Committed chips AND the text still being typed — so a query narrows the
-    // list live, and pressing Enter only pins it so the next one can stack.
-    const pending = debouncedSearchQuery.trim().toLowerCase()
-    const terms = [...searchTerms.map((t) => t.toLowerCase()), ...(pending ? [pending] : [])]
-    if (terms.length === 0) return flights
-
-    return flights.filter((_, i) => {
-      const fields = searchIndex[i]
-      return terms.every((term) => fields.some((v) => v.includes(term)))
-    })
-  }, [flights, searchTerms, debouncedSearchQuery, searchIndex])
+    if (preparedTerms.length === 0) return flights
+    return flights.filter((_, i) => matchesTerms(searchIndex[i], preparedTerms))
+  }, [flights, preparedTerms, searchIndex])
 
   /** Stow/open the search row. Opening focuses the field; stowing clears the
    *  filters, because a hidden filter silently narrowing the logbook is the
@@ -547,14 +524,9 @@ export default function LogbookPage() {
 
   // The same terms narrow the duties: a code, a description, the kind ("standby").
   const filteredDuties = useMemo(() => {
-    const pending = debouncedSearchQuery.trim().toLowerCase()
-    const terms = [...searchTerms.map((t) => t.toLowerCase()), ...(pending ? [pending] : [])]
-    if (terms.length === 0) return rosterDuties
-    return rosterDuties.filter((entry) => {
-      const fields = dutySearchFields(entry)
-      return terms.every((term) => fields.some((v) => v.includes(term)))
-    })
-  }, [rosterDuties, searchTerms, debouncedSearchQuery])
+    if (preparedTerms.length === 0) return rosterDuties
+    return rosterDuties.filter((entry) => matchesTerms(squashFields(dutySearchFields(entry)), preparedTerms))
+  }, [rosterDuties, preparedTerms])
 
   const hasActiveFilters = searchTerms.length > 0 || searchQuery.trim().length > 0
   const isLoading = dbLoading || !dbReady

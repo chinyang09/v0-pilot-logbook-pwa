@@ -3,7 +3,7 @@
 import { useId, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { AnimatePresence } from "framer-motion"
-import { MorphSurface, menuHeight, placeOver, type Placement } from "@/components/ui/option-menu"
+import { MorphSurface, controlBox, menuHeight, placeOver, type Placement } from "@/components/ui/option-menu"
 import { Camera, Images } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -133,10 +133,13 @@ export function ImageImportButton({
         onPointerDown={() => warmOCR()}
         onClick={() => {
           warmOCR()
-          const r = buttonRef.current?.getBoundingClientRect()
-          // The menu grows out of the button, its top-right corner on the
-          // button's (`placeOver`) — two rows under a heading.
-          if (r) setMenuAt(placeOver(r, menuHeight(2), 208))
+          const el = buttonRef.current
+          // The menu grows out of the button's capsule, its corner on the
+          // capsule's (`controlBox`, `placeOver`) — two rows under a heading.
+          if (el) {
+            const { rect, hide } = controlBox(el)
+            setMenuAt(placeOver(rect, menuHeight(2), 208, hide))
+          }
         }}
       >
         {/* No spinner: the processing dialog covers this button and says

@@ -96,11 +96,19 @@ export function ChromeFade({ side, className }: { side: Side; className?: string
       // treatment, which needed its own mask to clear.
       className={cn("pointer-events-none absolute inset-0 z-0", className)}
     >
+      {/* The blur covers the STATUS-BAR STRIP and stops where the controls
+          begin. Over the whole band it lay across the action buttons and the
+          nav pill, and on the owner's iPad their labels came out soft — the
+          header "blurring out" its own controls. Whatever order an engine
+          composites a masked backdrop-filter in against the controls beside
+          it, it cannot blur what it does not cover. With no status bar (a
+          browser tab) there is no strip and no blur: the veil carries the
+          band, as it always has. The bottom band has no blur at all. */}
       <div
         className="absolute inset-x-0"
         style={{
           ...anchor,
-          height: "100%",
+          height: side === "top" ? "calc(var(--top-inset, 0px) + 4px)" : 0,
           backdropFilter: `blur(${FACE_BLUR}px)`,
           WebkitBackdropFilter: `blur(${FACE_BLUR}px)`,
           maskImage: ramp,

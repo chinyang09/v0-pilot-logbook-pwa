@@ -8,7 +8,7 @@ import { Bell, AlertCircle } from "lucide-react"
 import { createPortal } from "react-dom"
 import { AnimatePresence } from "framer-motion"
 import { Button } from "@/components/ui/button"
-import { MorphSurface, menuHeight, placeOver, type Placement } from "@/components/ui/option-menu"
+import { MorphSurface, controlBox, menuHeight, placeOver, type Placement } from "@/components/ui/option-menu"
 import { useBackDismiss } from "@/hooks/use-back-dismiss"
 import { useUnresolvedDiscrepancies } from "@/hooks/data/use-discrepancies"
 import { cn } from "@/lib/utils"
@@ -77,9 +77,11 @@ export function AlertsDropdown() {
         aria-expanded={placement !== null}
         className="relative h-10 w-10 rounded-full"
         onClick={() => {
-          const r = buttonRef.current?.getBoundingClientRect()
-          // Grows out of the bell, its top-right corner on the bell's.
-          if (r) setPlacement(placeOver(r, count === 0 ? 116 : menuHeight(Math.min(items.length + (count > items.length ? 1 : 0), 9)) + 12, 288))
+          const el = buttonRef.current
+          if (!el) return
+          // Grows out of the bell's own capsule, its corner on the capsule's.
+          const { rect, hide } = controlBox(el)
+          setPlacement(placeOver(rect, count === 0 ? 116 : menuHeight(Math.min(items.length + (count > items.length ? 1 : 0), 9)) + 12, 288, hide))
         }}
       >
         <Bell className="h-5 w-5" />
