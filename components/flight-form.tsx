@@ -470,10 +470,17 @@ function TimeRow({
   nextUp = false,
   clockSeparator = "colon",
   derivedValue,
+  zoneKnown = true,
 }: {
   label: string;
   utcValue: string;
   timezoneOffset: number;
+  /**
+   * The airport is known. Before it is, the offset is a 0 that means nothing,
+   * and the local column would read "UTC" beside the UTC one — two identical
+   * columns. It says "Local" instead.
+   */
+  zoneKnown?: boolean;
   onTap: (frame: "utc" | "local") => void;
   onNow?: () => void;
   showNow?: boolean;
@@ -491,7 +498,7 @@ function TimeRow({
    */
   derivedValue?: string;
 }) {
-  const tzLabel = formatTimezoneOffset(timezoneOffset);
+  const tzLabel = zoneKnown ? formatTimezoneOffset(timezoneOffset) : "Local";
   const hasValue = isValidHHMM(utcValue);
   const hasDerived = !hasValue && isValidHHMM(derivedValue || "");
   // A derived value is in force, so its local time is shown beside it (muted,
@@ -527,44 +534,43 @@ function TimeRow({
           </span>
           <span className="text-xs text-muted-foreground">UTC</span>
         </div>
-        {/* An empty row with no NOW shows its one blank: a second "--:--"
-            under the zone's name said nothing the first did not. */}
-        {(showNow || hasValue || hasDerived) && (
-        <div className="flex flex-col items-end">
-          {showNow && !hasValue && !hasDerived ? (
-            <Button
-              variant={nextUp ? "default" : "outline"}
-              size="sm"
-              aria-label={nextUp ? `${label} now, next` : `${label} now`}
-              className={cn("h-9 min-w-11 px-2 text-xs control-surface-inset", !nextUp && "text-primary")}
-              onClick={(e) => {
-                e.stopPropagation();
-                onNow?.();
-              }}
-              onKeyDown={(e) => e.stopPropagation()}
-            >
-              NOW
-            </Button>
-          ) : (
-            <div
-              {...clockColumn(
-                () => onTap("local"),
-                `${label}, ${hasValue || hasDerived ? localValue : "not set"} ${tzLabel}`
-              )}
-            >
-              <span
-                className={`text-lg ${
-                  hasValue ? "text-foreground" : "text-muted-foreground"
-                }`}
-              >
-                {hasValue || hasDerived
-                  ? formatClockDisplay(localValue, clockSeparator)
-                  : "--:--"}
-              </span>
-              <span className="text-xs text-muted-foreground">{tzLabel}</span>
-            </div>
+        {/* BOTH clocks, always — the local column used to appear only once
+            the UTC one had a value, so an empty row showed one blank and the
+            pilot could not start from the local time (the owner asked for
+            both even when empty). Tapping either opens the picker in that
+            clock. */}
+        <div
+          {...clockColumn(
+            () => onTap("local"),
+            `${label}, ${hasValue || hasDerived ? localValue : "not set"} ${tzLabel}`
           )}
+        >
+          <span
+            className={`text-lg ${
+              hasValue ? "text-foreground" : "text-muted-foreground"
+            }`}
+          >
+            {hasValue || hasDerived
+              ? formatClockDisplay(localValue, clockSeparator)
+              : formatClockDisplay("--:--", clockSeparator, "--:--")}
+          </span>
+          <span className="text-xs text-muted-foreground">{tzLabel}</span>
         </div>
+        {/* NOW follows the clocks while the row is empty. */}
+        {showNow && !hasValue && !hasDerived && (
+          <Button
+            variant={nextUp ? "default" : "outline"}
+            size="sm"
+            aria-label={nextUp ? `${label} now, next` : `${label} now`}
+            className={cn("h-9 min-w-11 px-2 text-xs control-surface-inset", !nextUp && "text-primary")}
+            onClick={(e) => {
+              e.stopPropagation();
+              onNow?.();
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            NOW
+          </Button>
         )}
       </div>
     </div>
@@ -2331,6 +2337,7 @@ function FlightFormImpl({
               utcValue={formData.reportTime || ""}
               derivedValue={rosteredReport}
               timezoneOffset={depTimezone}
+              zoneKnown={!!formData.departureIcao}
               onTap={(frame) => openTimePicker("reportTime", frame)}
               onNow={() => setNowTime("reportTime")}
               showNow={canStampNow}
@@ -2343,6 +2350,7 @@ function FlightFormImpl({
               label="Scheduled Out"
               utcValue={formData.scheduledOut || ""}
               timezoneOffset={depTimezone}
+              zoneKnown={!!formData.departureIcao}
               onTap={(frame) => openTimePicker("scheduledOut", frame)}
               onNow={() => setNowTime("scheduledOut")}
               // A schedule is published, not stamped: NOW is for the times
@@ -2358,6 +2366,7 @@ function FlightFormImpl({
               label="Scheduled In"
               utcValue={formData.scheduledIn || ""}
               timezoneOffset={arrTimezone}
+              zoneKnown={!!formData.arrivalIcao}
               onTap={(frame) => openTimePicker("scheduledIn", frame)}
               onNow={() => setNowTime("scheduledIn")}
               // A schedule is published, not stamped: NOW is for the times
@@ -2373,6 +2382,7 @@ function FlightFormImpl({
               label="Out"
               utcValue={formData.outTime || ""}
               timezoneOffset={depTimezone}
+              zoneKnown={!!formData.departureIcao}
               onTap={(frame) => openTimePicker("outTime", frame)}
               onNow={() => setNowTime("outTime")}
               showNow={canStampNow}
@@ -2386,6 +2396,7 @@ function FlightFormImpl({
               label="Off"
               utcValue={formData.offTime || ""}
               timezoneOffset={depTimezone}
+              zoneKnown={!!formData.departureIcao}
               onTap={(frame) => openTimePicker("offTime", frame)}
               onNow={() => setNowTime("offTime")}
               showNow={canStampNow}
@@ -2399,6 +2410,7 @@ function FlightFormImpl({
               label="On"
               utcValue={formData.onTime || ""}
               timezoneOffset={arrTimezone}
+              zoneKnown={!!formData.arrivalIcao}
               onTap={(frame) => openTimePicker("onTime", frame)}
               onNow={() => setNowTime("onTime")}
               showNow={canStampNow}
@@ -2412,6 +2424,7 @@ function FlightFormImpl({
               label="In"
               utcValue={formData.inTime || ""}
               timezoneOffset={arrTimezone}
+              zoneKnown={!!formData.arrivalIcao}
               onTap={(frame) => openTimePicker("inTime", frame)}
               onNow={() => setNowTime("inTime")}
               showNow={canStampNow}

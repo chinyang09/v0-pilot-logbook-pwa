@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { motion, AnimatePresence } from "framer-motion"
 import { Calendar, SlidersHorizontal } from "lucide-react"
 
 import { GlassButtonGroup, GlassGroupButton } from "@/components/ui/glass-icon-button"
@@ -16,15 +15,20 @@ import {
   useDashboardView,
 } from "@/hooks/use-dashboard-view"
 import { AlertsDropdown } from "./alerts-dropdown"
+import { ChoicePicker, type MenuOption } from "@/components/ui/option-menu"
 import { cn } from "@/lib/utils"
 
-// Bouncy spring for the OPEN (expand) of the period pills.
-const SPRING = { type: "spring" as const, stiffness: 340, damping: 24 }
-// The COLLAPSE uses a deterministic tween instead: a spring eases toward its
-// width:auto→0 target and is considered "done" within a rest threshold, so the
-// last ~10% of width vanishes instantly when AnimatePresence unmounts the
-// element (the visible "stuck then snap"). A tween reaches exactly 0 at the end.
-const COLLAPSE = { duration: 0.22, ease: [0.4, 0, 0.2, 1] as const }
+const PERIOD_HINTS: Record<DashboardPreset, string> = {
+  "7d": "Last 7 days",
+  "28d": "Last 28 days",
+  "1y": "Last 12 months",
+  all: "Whole logbook",
+}
+const PERIOD_OPTIONS: Array<MenuOption<string>> = PERIOD_PRESETS.map((p) => ({
+  value: p.value,
+  label: p.label,
+  hint: PERIOD_HINTS[p.value],
+}))
 
 /**
  * The dashboard's header actions.
@@ -45,8 +49,6 @@ export function DashboardActions() {
     period,
     resolved,
     setPeriod,
-    showFilter,
-    setShowFilter,
     showCalendar,
     setShowCalendar,
   } = useDashboardPeriod()
@@ -106,68 +108,28 @@ export function DashboardActions() {
               grew the left action group into the centred nav pill on the
               logbook before it was removed there. */}
 
-          <button
-            type="button"
-            aria-label="Period filter"
-            aria-expanded={showFilter}
-            onClick={() => setShowFilter(!showFilter)}
+          {/* The period is a MENU that grows out of its button, like the +
+              and the calendar's Duties — not pills that expand inline. The
+              left action group is anchored to the viewport edge and the nav
+              pill is centred, so a bar that grew pushed its last buttons under
+              the pill (the owner's iPad screenshot: 7d / 28d / 1y running into
+              Dashboard). A menu keeps the bar the same width whatever is open. */}
+          <ChoicePicker
+            label="Period"
+            value={activePreset ?? "custom"}
+            options={PERIOD_OPTIONS}
+            onValueChange={(v) => setPeriod({ kind: "preset", preset: v as DashboardPreset })}
+            morph
             className={cn(
-              // h-9, like every other control in a GlassButtonGroup: the group
-              // is h-11 with px-1, so a 48px child overflows a 44px box and the
-              // glass — which clips — cut the icon off top and bottom.
-              "flex h-10 min-w-10 flex-col items-center justify-center rounded-full px-2 transition-colors",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              showFilter
-                ? "bg-[var(--on-glass-active)] text-[var(--on-glass-active-fg)]"
-                : "text-foreground hover:bg-[var(--on-glass-fill-soft)]",
+              "flex h-10 min-w-10 flex-col items-center justify-center rounded-full px-2 text-foreground transition-colors",
+              "hover:bg-[var(--on-glass-fill-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             )}
           >
-            <SlidersHorizontal className="h-[15px] w-[15px]" />
+            <SlidersHorizontal className="h-[15px] w-[15px]" aria-hidden />
             <span className="mt-0.5 text-[10px] font-semibold leading-none tabular-nums">
               {filterLabel}
             </span>
-          </button>
-
-          <AnimatePresence initial={false}>
-            {showFilter && (
-              <motion.div
-                key="period-pills"
-                role="tablist"
-                aria-label="Dashboard period"
-                initial={{ width: 0, opacity: 0 }}
-                animate={{ width: "auto", opacity: 1 }}
-                exit={{ width: 0, opacity: 0, transition: COLLAPSE }}
-                transition={SPRING}
-                className="flex items-center gap-0.5 overflow-hidden whitespace-nowrap pr-1"
-              >
-                {PERIOD_PRESETS.map((p) => {
-                  const isActive = activePreset === p.value
-                  return (
-                    <button
-                      key={p.value}
-                      role="tab"
-                      type="button"
-                      aria-selected={isActive}
-                      onClick={() => setPeriod({ kind: "preset", preset: p.value })}
-                      className={cn(
-                        // One height and one selected fill with every other
-                        // control in a header group: they were 24px solid
-                        // accent pills, a different thing from the Legal /
-                        // Summary capsule beside them.
-                        "h-10 px-3 rounded-full text-xs font-semibold transition-colors",
-                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        isActive
-                          ? "bg-[var(--on-glass-active)] text-[var(--on-glass-active-fg)]"
-                          : "text-muted-foreground hover:text-foreground hover:bg-[var(--on-glass-fill-soft)]",
-                      )}
-                    >
-                      {p.label}
-                    </button>
-                  )
-                })}
-              </motion.div>
-            )}
-          </AnimatePresence>
+          </ChoicePicker>
         </GlassButtonGroup>
       )}
 

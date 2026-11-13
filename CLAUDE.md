@@ -58,7 +58,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 | `lib/ocr/__tests__/` | both OCR screenshot layouts from synthetic boxes, the engine's plumbing with stand-in models (boxes, CTC decode, the keypad never recognised), device-first routing with the server as the backstop, and SEVEN REAL MCDU PHOTOS (`fixtures/mcdu/`) — what the engine actually reads from each, on the server AND on the device, every slot checked; `OCR_ENGINE=1 pnpm test` runs the photos through the real server engine (`OCR_FIXTURE_WRITE=1` re-pins the reads) |
 | `lib/settings/__tests__/` | per-user settings — flat sparse fields, only moved keys written, the legacy carry-up seeding only non-default choices the account lacks, theme kept off the record |
 | `lib/theme/__tests__/` | the palette generator — contrast and gamut for every preset in both modes and a sweep of custom seeds, and that globals.css carries the default palette exactly |
-| `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | pending actions, the 90-day window, the recycle bin, sync compaction, conflict resolution, the canonical document shape + write modes, push batching, the sync triggers |
+| `lib/utils/__tests__/`, `lib/sync/__tests__/`, `lib/db/.../__tests__/` | the logbook search (squashed terms, routes, dates, the word fallback), pending actions, the 90-day window, the recycle bin, sync compaction, conflict resolution, the canonical document shape + write modes, push batching, the sync triggers |
 | `cloudflare-worker/__tests__/` | the FR24 gateway Worker — its normalizers (FR24 shapes → the app's), each lookup chain against stand-in upstreams (which source answers when another is challenged, 404 vs 502, failures never cached, `/raw` kept to FR24 hosts), the legacy passthroughs, and the probe's explore mode (`shapeOf`); `lib/airports/__tests__/` the browser's online lookup (the shared pool asked before the gateway, its offset dropped, a blank timezone derived) |
 | `lib/sync/server/__tests__/` | the server engine end to end — two devices pushing and pulling, deletions, stale pushes, paging, the migration — against an in-memory Mongo stand-in (`fake-mongo.ts`; it implements only the operators the engine sends) |
 
@@ -1159,9 +1159,13 @@ hydrated inside `subscribe` (which React calls in an effect), so there is no
 setState-in-effect and no first render with the wrong page.
 
 **The period controls belong to the summary page only.** The calendar button and
-the expanding period pills are meaningless on the legal page, and the action bar
-is the one thing that can push a button under the centred nav pill — so they are
-not rendered there at all.
+the period are meaningless on the legal page, so they are not rendered there at
+all. On the summary page the period is a MENU that grows out of its button
+(`ChoicePicker` with `morph`, the same surface as the + menu) — it used to be
+pills that EXPANDED inline, and the left action group, anchored to the
+viewport edge, then grew under the centred nav pill (the owner's iPad
+screenshot: 7d / 28d / 1y running into Dashboard). A menu keeps the bar one
+width whatever is open.
 
 #### The legal page is ONE CONTINUOUS SURFACE
 
@@ -2157,6 +2161,18 @@ the last chip back, and stowing clears the terms, because a hidden filter
 quietly narrowing the logbook is the kind of thing you don't notice for ten
 minutes.
 
+**A term is matched SQUASHED, not exactly** (`lib/utils/logbook-search.ts`,
+`logbook-search.test.ts`). Both sides are lowercase letters and digits only,
+so "9vnca", "9V NCA" and "9v-nca" all find 9V-NCA; a flight number drops its
+leading zeros and is also findable by its digits ("TR0288", "tr 288", "288");
+the route is a field of its own in both codes ("WSSS-WICA", "sin kno"); the
+date in the forms a pilot writes one ("7 Nov", "07 nov 26", "2026-11-07",
+"nov 2026"). A term of several words that matches nothing whole matches when
+EVERY word is inside some field ("ming tan", "wica wsss") — except when a word
+is a bare day number, or "8 Nov" found TR288 in November. The haystack is
+built once per flights array (`flightSearchFields`), so a key costs only the
+comparisons.
+
 The category tabs (Flight / Aircraft / Airport / Crew) are **gone**. They were
 a precondition rather than a refinement — with none active `filteredFlights`
 ignored the query completely — and once a term matches any field, stacking
@@ -2277,6 +2293,13 @@ nothing to step aside, and the hook and the mask are gone.
   main shell header and the mobile detail overlay header in
   `desktop-layout.tsx` (no more inline copies): a native-style bar of
   progressive **blur + darken** (one masked blur layer under a veil).
+
+  **The blur covers the STATUS-BAR STRIP only** (`calc(var(--top-inset) +
+  4px)`); the band the controls sit in is the veil alone. Over the full band
+  the masked blur blurred the action buttons and the nav pill on iPad (the
+  owner's screenshot, Nov 2026) — WebKit composited the controls into the
+  blurred backdrop. On a phone the strip is where the blur was doing its work
+  anyway.
 
   **ONE band: the blur, the tap-to-top target and the bar end at the same
   line, `--chrome-top`** — 4px below the 44px controls as they are 4px below
@@ -3158,8 +3181,12 @@ open flight, both themes (Nov 2026: zero violations). What it took:
   date the flight is keyed on; ±1 covers a duty across midnight and a local
   day that is not the UTC one). Five NOW buttons stood down a flight from
   last March, each offering to stamp this minute onto it. Five NOW buttons ran
-  down an empty form. An empty row with no NOW shows its one `--:--`, not a
-  second one under the zone's name.
+  down an empty form. An empty row shows BOTH clocks (`--:--` under UTC and
+  under the zone), with NOW after them where it is offered — the owner wants
+  the local column there before the UTC one is filled, not only after; it is
+  the column that opens the picker in local time. Until the row's airport is
+  known (`zoneKnown`) the local column is captioned "Local", not a second
+  "UTC".
 - **Every new record names itself the same way**: New Aircraft is a
   `DetailFormPanel` like New Duty and New Currency (it was a bare scroller with
   no title), and New Airport carries the same title (`NewAirportPanel` —
@@ -3218,18 +3245,28 @@ open flight, both themes (Nov 2026: zero violations). What it took:
   half of the screen, top-right in the right half, the other way when that
   side has no room), and it opens as a CLIP that starts as exactly the
   button's shape — its box and its own corner radius, `inset(… round 22px)`
-  for a 44px button (`from.clip`) — and widens into the 18px menu, so the
-  button's circle IS the menu's first frame. It used to scale from the
+  for a 44px button (`from.clip`) — and keeps THAT radius as it widens, so the
+  menu's corners are the control's corners and the button's circle IS the
+  menu's first frame. The shape it starts from is the GLASS CAPSULE the button
+  sits in (`controlBox`): a lone button's capsule, or the capsule's height
+  around a button inside a group — so the bell's menu starts at the top of its
+  capsule, not 2px inside it. The clip's bottom inset is
+  `calc(100% - <button height>px)` against the menu's REAL height (an estimate
+  drew a strip on the first frame when the rows carried hints), and the open
+  clip is the same template (`calc(0% - 0px)`) so the two interpolate. It used to scale from the
   button's box, and a scaled radius is a different corner (the owner: "the
   squircle corner doesn't match the button"). The rows arrive a beat later,
   the shadow lives on a sibling layer (a clip would cut it) and arrives with
-  the full shape. The surface is OPAQUE from frame one, in the colour the
-  glass face reads as (`.menu-surface-solid`, `--on-glass`), and carries a
-  copy of the button's own face (`glyph` — the icon, or a `ChoicePicker`
-  trigger's children in its classes) that fades as the rows arrive and
-  returns as the close lands: the BUTTON becomes the menu. Translucent, the
-  real button showed through the growing menu (the owner: "I should not see
-  the underlying action button"). A menu too wide for either side NARROWS to
+  the full shape. The surface is the glass menu face (`.menu-surface`), and the
+  CONTROL IT GREW FROM IS HIDDEN while it is open (`from.hide`, opacity 0 —
+  the capsule for a lone button, the button itself inside a group) and
+  restored on unmount. It carries a copy of the button's own face (`glyph` —
+  the icon, or a `ChoicePicker` trigger's children in its classes) that fades
+  as the rows arrive and returns as the close lands: the BUTTON becomes the
+  menu. The round before painted the menu SOLID to cover the button, which the
+  owner rejected ("i don't want the pop up to be solid color just to hide the
+  action button"); hiding the button is what the solid face was standing in
+  for. A menu too wide for either side NARROWS to
   the room on the button's side (down to 200px) rather than being clamped
   across the bar — the bell's notes on a phone. ~260ms. A ROW's picker (`SelectRow`) still hangs
   below its row — `morph` is for a control in a bar. The bell is the same
@@ -5099,8 +5136,15 @@ When making changes, be aware of these high-impact files:
   same `rounded-xl border bg-card` — and then travels to the centre while the
   detail and the action row unfurl beneath it. Closing plays the same thing
   backwards and only then unmounts, which is why `onClose` is called on a timer
-  rather than the overlay being torn down on the tap. The close is its OWN,
-  shorter clock (`CLOSE_MS` 280 against the open's 400): the detail and the
+  rather than the overlay being torn down on the tap. Both directions are
+  SPRINGS on a stated duration (`MORPH`: 0.4s, bounce 0.14 — it lands with a
+  hint of settle; `CLOSE`: 0.3s, no bounce — it goes home without
+  overshooting the row), where they were cubic curves that started and
+  stopped dead, which the owner read as not natural. The card's corner is in
+  `style` on the `layout` node (`CARD_RADIUS` 12, the shadow layer too), so
+  framer counter-scales it each frame: a radius in a CSS class was squashed
+  with the box and the corners went oval mid-morph. The close is its OWN,
+  shorter clock (`CLOSE_MS` 300 against the open's 400): the detail and the
   actions leave at once (`LEAVE`, 100ms — the open's delays used to apply to
   the exit too), and the action row's `AnimatePresence` is `popLayout`, so it
   fades where it stands — in flow, it was re-centred into the space the card
@@ -5604,7 +5648,9 @@ When making changes, be aware of these high-impact files:
 - Do not put an action back on the card surface (`bg-secondary`, `bg-card`, `bg-muted`) or give it a rectangle's corners — a thing you press is a CAPSULE or circle on `.control-surface`, a thing you read is a rounded rectangle. On the card surface the context preview's action row read as more card. And do not use the REAL glass (`GlassContainer`) for an action that sits over a scrim, a row or a panel: the painted surface is the same look with no `backdrop-filter`, and these pop in on exactly the frames a readback would cost most
 - Do not put a sync button or cloud back in the tab bar — it cost every phone a tab's width. Sync state is the bar's edge (`NavSyncRim`), the sidebar button's badge (`SyncBadge`) and the sidebar strip's words (`SyncStatus`)
 - Do not fire a swipe action on the CLICK alone — the click straight after a swipe is lost on device (Delete took two taps). Actions fire on the lift (`fireOnPointerUp`, default on), and only for a press that started on the button
-- Do not make a morphing header menu translucent or drop its `glyph` — it covers its button exactly, so a see-through face showed the button underneath and the morph read as a menu laid over a button
+- Do not leave the control visible under a morphing header menu, and do not paint the menu SOLID to hide it — the control is hidden while the menu is open (`from.hide`, from `controlBox`) and the menu keeps the glass face. Keep its `glyph`, its corners at the control's own radius (never a menu radius of its own), and start it from the control's GLASS capsule, not the bare button
+- Do not let `ChromeFade`'s blur cover the header's controls — it is confined to the status-bar strip (`calc(var(--top-inset) + 4px)`); the band below is the veil alone. On iPad the masked blur reached over the action buttons and the nav pill and blurred them
+- Do not match a logbook search term exactly — go through `lib/utils/logbook-search.ts` (squashed fields, the route and date forms, the word fallback); and do not split a bare day number off a date in the word fallback
 - Do not give the context preview's exit the open's delays, or let its action row exit in flow — the close is `CLOSE_MS`, the detail and actions leave on `LEAVE`, and the row pops out of layout (`popLayout`) so it cannot slide past the collapsing card
 - Do not open a header menu by SCALING it from its button — a scaled radius is not the button's corner. It is a clip from the button's exact box and radius (`placeOver`'s `from.clip`), with the shadow on a sibling layer
 - Do not group header controls page by page — a header is VIEW (search, calendar, period) → TOOLS (import, Quick Check, alerts, read-from-photo) → CREATE (+, alone and last), one capsule per role, with a page switch first and detail commits (Cancel / Save / Edit, Back) one capsule each (`glass-icon-button.tsx`). And do not add a Refresh button: every list follows every write and every sync, so it re-reads the same rows, and it reads as "sync" — which is the sidebar strip's job

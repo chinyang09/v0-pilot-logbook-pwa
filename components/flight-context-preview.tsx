@@ -134,6 +134,8 @@ const MIN_GROWTH = 48;
  * everything else. framer scale-corrects `boxShadow` and `borderRadius` on a
  * projected node, which is exactly what this needs and nothing else does.
  */
+/** The card's own corner (`rounded-xl`), stated so the projection can keep it. */
+const CARD_RADIUS = 12;
 const LIFT_SHADOW = "0px 25px 50px -12px rgba(0,0,0,0.45)";
 /** The gap between the card and its action row — inside the collapsing box, so
  *  it disappears with the row rather than holding the card off its mark. */
@@ -154,9 +156,17 @@ const GAP = 14;
  * once, and only the card travels.
  */
 const MORPH_MS = 400;
-const MORPH = { duration: MORPH_MS / 1000, ease: [0.32, 0.72, 0, 1] as const };
-const CLOSE_MS = 280;
-const CLOSE = { duration: CLOSE_MS / 1000, ease: [0.4, 0, 0.2, 1] as const };
+/**
+ * SPRINGS, not curves (the owner: the expand "doesn't feel natural"). The
+ * quint ease-out did most of its travel in the first third and crawled the
+ * rest, which reads as a mechanism rather than an object; a spring carries
+ * its speed through the middle the way a lifted card does. The open settles
+ * with a touch of give (an iOS context menu's), the close is critically
+ * damped — a card going home should not bounce off its row.
+ */
+const MORPH = { type: "spring" as const, duration: MORPH_MS / 1000, bounce: 0.14 };
+const CLOSE_MS = 300;
+const CLOSE = { type: "spring" as const, duration: CLOSE_MS / 1000, bounce: 0 };
 /** What leaves on the close leaves at once, before the card has moved far. */
 const LEAVE = { duration: 0.1, ease: "easeOut" as const };
 /** The detail settles into the room the box just made — a beat after it. */
@@ -418,8 +428,8 @@ export function FlightContextPreview({
           <motion.div
             layout
             aria-hidden
-            className="pointer-events-none absolute inset-0 rounded-xl"
-            style={{ boxShadow: LIFT_SHADOW }}
+            className="pointer-events-none absolute inset-0"
+            style={{ boxShadow: LIFT_SHADOW, borderRadius: CARD_RADIUS }}
             initial={{ opacity: 0 }}
             animate={{ opacity: open ? 1 : 0 }}
             transition={closing ? CLOSE : MORPH}
@@ -430,9 +440,15 @@ export function FlightContextPreview({
               the detail is still mounted while it exits and would otherwise
               spill straight out of the collapsing box. Expanded, the wrapper's
               height comes from this, so the percentage is dropped. */}
-          <div
-            className="relative overflow-hidden rounded-xl border border-border bg-card"
-            style={{ height: open ? undefined : "100%" }}
+          {/* A projected node with its radius in STYLE — framer corrects a
+              radius only where it can read it, and on a plain child of the
+              scaled card the corners were squashed with it (at a third of the
+              height on the first frames). */}
+          <motion.div
+            layout
+            transition={closing ? CLOSE : MORPH}
+            className="relative overflow-hidden border border-border bg-card"
+            style={{ height: open ? undefined : "100%", borderRadius: CARD_RADIUS }}
           >
             {/* FULL `layout` here, `layout="position"` on every block below,
                 and that difference is what lets the card widen at all.
@@ -541,7 +557,7 @@ export function FlightContextPreview({
                   </motion.div>
               ) : null}
             </AnimatePresence>
-          </div>
+          </motion.div>
         </motion.div>
 
         {/* The actions, as a row beneath the card. In flow, so the flex column

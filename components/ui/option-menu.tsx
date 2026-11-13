@@ -28,7 +28,7 @@
  */
 
 import { haptic } from "@/lib/utils/haptics"
-import { forwardRef, useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react"
+import { forwardRef, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { AnimatePresence, motion } from "framer-motion"
 import { Check } from "lucide-react"
@@ -66,12 +66,52 @@ export interface Placement {
     clip: string
     /** The control's box inside the menu's — where its glyph is drawn. */
     box: { left: number; top: number; width: number; height: number }
+    /** The control's corner radius — the menu keeps it, so the corners match. */
+    radius: number
+    /**
+     * What to take off screen while the menu is up: the control's own glass
+     * capsule (a button alone in it) or the button (one of a group). The menu
+     * IS the control for that time — translucent glass over the real one
+     * showed the button through it.
+     */
+    hide?: HTMLElement
   }
 }
 
-/** The menu's own corner, as the open ends on it. */
-const MENU_RADIUS = 18
-const OPEN_CLIP = `inset(0px 0px 0px 0px round ${MENU_RADIUS}px)`
+/** A DOM write, outside the component: the control is the PAGE's element. */
+function setOpacity(el: HTMLElement, value: string) {
+  el.style.opacity = value
+}
+
+/** Anything with a box: a DOMRect, or one built from the control's glass. */
+export type Box = Pick<DOMRect, "left" | "top" | "width" | "height" | "right" | "bottom">
+
+/**
+ * The box a header menu grows from, and what it stands in for.
+ *
+ * A header control is a button inside a glass capsule. A button ALONE in its
+ * capsule (the +) is the capsule: the menu starts as the capsule and hides it.
+ * A button in a GROUP (the bell, the camera, the period) starts as the
+ * capsule's HEIGHT around the button — the bell is a 40px circle 2px inside
+ * a 44px capsule, so a menu started from the button sat 2px below its own bar
+ * (the owner: "not lined up") — and hides only the button. A control in
+ * anything taller than a bar (the calendar's Duties) is its own box.
+ */
+export function controlBox(el: HTMLElement): { rect: Box; hide: HTMLElement } {
+  const r = el.getBoundingClientRect()
+  const glass = el.closest<HTMLElement>(".GlassContainer")
+  const g = glass?.getBoundingClientRect()
+  if (!glass || !g || g.height > 56) return { rect: r, hide: el }
+  if (g.width <= r.width + 8) return { rect: g, hide: glass }
+  const pad = Math.max(0, (g.height - r.height) / 2)
+  const left = r.left - pad
+  const width = r.width + pad * 2
+  return {
+    rect: { left, top: g.top, width, height: g.height, right: left + width, bottom: g.top + g.height },
+    hide: el,
+  }
+}
+
 
 /** Where the menu goes for a control at `rect` — read in the tap, never mid-commit. */
 function place(rect: DOMRect, count: number, align: "start" | "end"): Placement {
@@ -103,9 +143,10 @@ function place(rect: DOMRect, count: number, align: "start" | "end"): Placement 
  * and the close ends — transform and opacity only, nothing laid out per frame.
  */
 export function placeOver(
-  rect: DOMRect,
+  rect: Box,
   estimatedHeight: number,
-  width = MIN_W
+  width = MIN_W,
+  hide?: HTMLElement
 ): Placement {
   const vw = window.innerWidth
   const vh = window.innerHeight
@@ -130,13 +171,11 @@ export function placeOver(
   const rawLeft = align === "end" ? rect.right - w : rect.left
   const left = Math.min(Math.max(MARGIN, rawLeft), vw - MARGIN - w)
   const maxHeight = Math.max(ROW_H * 2, vh - rect.top - MARGIN)
-  const h = Math.min(estimatedHeight, maxHeight)
   // The control's box inside the menu's, as an inset clip: what is left
   // showing at the start is the control's own shape, its own corner radius
   // (half its height — every header control is a circle or a capsule).
   const l = Math.max(0, rect.left - left)
   const r = Math.max(0, left + w - rect.right)
-  const b = Math.max(0, h - rect.height)
   const radius = Math.min(rect.width, rect.height) / 2
   return {
     left,
@@ -146,8 +185,14 @@ export function placeOver(
     originX: align === "end" ? "right" : "left",
     originY: "top",
     from: {
-      clip: `inset(0px ${r}px ${b}px ${l}px round ${radius}px)`,
+      // The BOTTOM inset is against the menu's own height (`calc`), not an
+      // estimate of it: rows with a second line (the period's "Last 7 days")
+      // made the menu taller than estimated, and the first frame was the
+      // button with a strip hanging down below it.
+      clip: `inset(0px ${r}px calc(100% - ${rect.height}px) ${l}px round ${radius}px)`,
       box: { left: l, top: 0, width: rect.width, height: rect.height },
+      radius,
+      hide,
     },
   }
 }
@@ -195,6 +240,17 @@ export const MorphSurface = forwardRef<
   }
 >(function MorphSurface({ placement, role, label, id, className, onKeyDown, glyph, children }, ref) {
   const from = placement.from
+  // The control is off screen for exactly as long as this is mounted — from
+  // the first frame, under a glyph copy of itself, until the close has run
+  // back into its box. Opacity, not visibility: focus goes back to it as the
+  // menu dismisses, and a hidden element cannot take it.
+  const hideEl = from?.hide
+  useLayoutEffect(() => {
+    if (!hideEl) return
+    const prev = hideEl.style.opacity
+    setOpacity(hideEl, "0")
+    return () => setOpacity(hideEl, prev)
+  }, [hideEl])
   if (!from) {
     return (
       <motion.div
@@ -226,7 +282,7 @@ export const MorphSurface = forwardRef<
       <motion.div
         aria-hidden
         className="pointer-events-none absolute inset-0"
-        style={{ borderRadius: MENU_RADIUS, boxShadow: "var(--menu-shadow, var(--glass-shadow))" }}
+        style={{ borderRadius: from.radius, boxShadow: "var(--menu-shadow, var(--glass-shadow))" }}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1, transition: { duration: 0.12, delay: 0.16 } }}
         exit={{ opacity: 0, transition: { duration: 0.06 } }}
@@ -237,15 +293,20 @@ export const MorphSurface = forwardRef<
         role={role}
         aria-label={label}
         onKeyDown={onKeyDown}
-        // OPAQUE from the first frame, in the colour the glass face reads as
-        // (`.menu-surface-solid`): it covers the control exactly, so the
-        // control is never seen underneath — translucent, the button showed
-        // through the growing menu and it read as a menu over a button.
+        // The glass's own face — the same material as the control — with the
+        // control itself taken off screen (`from.hide`), so nothing shows
+        // through: the control grows into the menu. Its corner is the
+        // CONTROL's radius all the way (22 for a 44px button), so the menu's
+        // corner over the control's corner is the same curve.
         initial={{ clipPath: from.clip }}
-        animate={{ clipPath: OPEN_CLIP, transition: { clipPath: { duration: 0.26, ease: MORPH_EASE } } }}
+        animate={{
+          // The same template as the start's, so it interpolates term by term.
+          clipPath: `inset(0px 0px calc(0% - 0px) 0px round ${from.radius}px)`,
+          transition: { clipPath: { duration: 0.26, ease: MORPH_EASE } },
+        }}
         exit={{ clipPath: from.clip, transition: { clipPath: { duration: 0.2, ease: MORPH_EASE } } }}
-        className={cn("menu-surface menu-surface-solid relative overflow-y-auto overscroll-contain shadow-none", className)}
-        style={{ maxHeight: placement.maxHeight, borderRadius: MENU_RADIUS }}
+        className={cn("menu-surface relative overflow-y-auto overscroll-contain shadow-none", className)}
+        style={{ maxHeight: placement.maxHeight, borderRadius: from.radius }}
       >
         <motion.div
           initial={{ opacity: 0 }}
@@ -317,8 +378,12 @@ export function ChoicePicker<T extends string>({
   const open = () => {
     const el = triggerRef.current
     if (!el || disabled) return
-    const rect = el.getBoundingClientRect()
-    setPlacement(morph ? placeOver(rect, menuHeight(options.length)) : place(rect, options.length + 1, align))
+    if (morph) {
+      const { rect, hide } = controlBox(el)
+      setPlacement(placeOver(rect, menuHeight(options.length), undefined, hide))
+    } else {
+      setPlacement(place(el.getBoundingClientRect(), options.length + 1, align))
+    }
   }
 
   return (
