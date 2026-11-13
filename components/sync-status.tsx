@@ -1,128 +1,188 @@
 "use client"
 
-import { useState, useEffect, useSyncExternalStore } from "react"
+/**
+ * Sync status, told WITHOUT taking a slot in the tab bar.
+ *
+ * The bar used to end in a cloud button — a fixed 32px bookend that cost the
+ * tabs their width on every phone, to show a state that is "fine" almost all
+ * of the time. Now the state lives in what the bar already has:
+ *
+ * | | the bar's EDGE (`NavSyncRim`) | the sidebar button (`SyncBadge`) |
+ * |---|---|---|
+ * | synced | nothing | nothing |
+ * | changes waiting | nothing | their COUNT, amber |
+ * | syncing | a light sweeping along the bottom edge | the count while it drains |
+ * | sync failed | a solid amber hairline | "!" amber |
+ * | offline | a dashed grey hairline | a grey dot |
+ *
+ * The detail and the manual sync (`SyncStatus`) live where there is room for
+ * words: the sidebar's top strip, one tap away on the button carrying the
+ * badge — "Synced", "3 to Sync", "Offline", "Sync Failed · Retry". The
+ * sidebar button's accessible name carries the state too, so a screen reader
+ * hears it where a sighted reader sees the badge.
+ */
+
+import { useSyncExternalStore } from "react"
 import { syncService } from "@/lib/sync"
-import { Cloud, CloudOff, RefreshCw } from "lucide-react"
+import type { SyncStatus as SyncState } from "@/lib/sync/sync-service"
+import { AlertTriangle, Cloud, CloudOff, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/components/providers/auth-provider"
 
-export function SyncStatus({ className }: { className?: string }) {
-  const { ensureValidSession } = useAuth()
+/**
+ * The queue count, ONE store for every reader. The rim, the badge and the
+ * strip each read it, in both bars (desktop and mobile are both mounted, one
+ * hidden by CSS) — as per-component state that was a count of the queue per
+ * reader on every status change.
+ */
+let pendingCount = 0
+const pendingListeners = new Set<() => void>()
+let pendingStarted = false
+
+async function refreshPending() {
+  // Counted off the index — reading the whole queue to take `.length`
+  // deserialised every pending row, on the sync path.
+  const { getSyncQueueCount } = await import("@/lib/db")
+  const n = await getSyncQueueCount()
+  if (n === pendingCount) return
+  pendingCount = n
+  for (const l of pendingListeners) l()
+}
+
+function subscribePending(onChange: () => void) {
+  pendingListeners.add(onChange)
+  if (!pendingStarted) {
+    pendingStarted = true
+    // Event-driven: status flips on sync start/end, onDataChanged after every
+    // completed cycle; a local write is seen when its debounced sync starts.
+    syncService.subscribe(() => void refreshPending())
+    syncService.onDataChanged(() => void refreshPending())
+    void refreshPending()
+  }
+  return () => {
+    pendingListeners.delete(onChange)
+  }
+}
+
+export function useSyncState(): { status: SyncState; pending: number } {
   // A store read, not state seeded from `getStatus()`: the server has no
   // network to report and renders "offline", the browser knows it is online,
   // and seeding state from the browser's answer made the very first render
-  // disagree with the HTML — a hydration error on every page load. The server
-  // snapshot is what hydration renders; the live value follows immediately.
+  // disagree with the HTML — a hydration error on every page load.
   const status = useSyncExternalStore(
     (onChange) => syncService.subscribe(onChange),
     () => syncService.getStatus(),
     () => "offline" as const
   )
-  const [pendingCount, setPendingCount] = useState(0)
+  const pending = useSyncExternalStore(subscribePending, () => pendingCount, () => 0)
+  return { status, pending }
+}
 
-  useEffect(() => {
-    const checkPending = async () => {
-      // Counted off the index. This runs three times per sync cycle (status
-      // flips to syncing, back to online, then onDataChanged), and reading the
-      // whole queue to take `.length` deserialised every pending row each time
-      // — on the sync path, where the main thread is already busy.
-      const { getSyncQueueCount } = await import("@/lib/db")
-      setPendingCount(await getSyncQueueCount())
-    }
+/** What the state is called, in a few words. */
+export function describeSync(status: SyncState, pending: number): string {
+  if (status === "syncing") return "Syncing"
+  if (status === "offline") return pending > 0 ? `Offline, ${pending} to sync` : "Offline"
+  if (status === "error") return "Sync failed"
+  return pending > 0 ? `${pending} to sync` : "Synced"
+}
 
-    // Event-driven instead of a 5s poll (which ran forever in every open tab):
-    // status flips on sync start/end (covers the pending count draining) and
-    // onDataChanged fires after every completed cycle. A local write is picked
-    // up when its debounced sync starts moments later.
-    const unsubscribeStatus = syncService.subscribe(() => {
-      void checkPending()
-    })
-    const unsubscribeData = syncService.onDataChanged(() => {
-      void checkPending()
-    })
-
-    checkPending()
-
-    return () => {
-      unsubscribeStatus()
-      unsubscribeData()
-    }
-  }, [])
+/**
+ * The full control, with words — the sidebar's top strip. A tap syncs now,
+ * through `ensureValidSession()`, so a dead session asks for the passkey
+ * instead of failing silently with a 401.
+ */
+export function SyncStatus({ className }: { className?: string }) {
+  const { ensureValidSession } = useAuth()
+  const { status, pending } = useSyncState()
 
   const handleSync = async () => {
-    // Intercept a manual resync attempted against a dead session: re-authenticate
-    // via the custom passkey flow first. If that can't recover the session,
-    // ensureValidSession routes to the login flow and we abort the sync.
     const valid = await ensureValidSession()
     if (!valid) return
-
-    // Use force sync which triggers immediately via trigger manager
     await syncService.forceSyncNow()
-    // Refresh pending count after sync
-    const { getSyncQueueCount } = await import("@/lib/db")
-    setPendingCount(await getSyncQueueCount())
   }
 
   const busy = status === "offline" || status === "syncing"
+  const Icon = status === "offline" ? CloudOff : status === "syncing" ? RefreshCw : status === "error" ? AlertTriangle : Cloud
+  const label =
+    status === "error"
+      ? "Sync Failed · Retry"
+      : status === "syncing"
+        ? "Syncing…"
+        : status === "offline"
+          ? "Offline"
+          : pending > 0
+            ? `${pending > 99 ? "99+" : pending} to Sync`
+            : "Synced"
 
   return (
     <button
+      type="button"
       onClick={handleSync}
       disabled={busy}
-      aria-label={
-        status === "syncing"
-          ? "Syncing"
-          : status === "offline"
-            ? "Offline"
-            : status === "error"
-              ? "Last sync failed, tap to retry"
-              : pendingCount > 0
-                ? `Sync now, ${pendingCount} pending`
-                : "Sync now"
-      }
-      title={
-        status === "offline"
-          ? "Offline"
-          : status === "syncing"
-            ? "Syncing…"
-            : status === "error"
-              ? "Last sync failed — tap to retry"
-              : "Tap to sync"
-      }
+      aria-label={status === "error" ? "Last sync failed, tap to retry" : `${describeSync(status, pending)}${busy ? "" : ", tap to sync now"}`}
       className={cn(
-        "relative flex items-center justify-center p-1.5 rounded-full transition-colors",
-        status === "online" && "text-[var(--status-synced)]",
+        "relative flex h-8 min-w-0 items-center gap-1.5 rounded-full px-2 text-xs font-semibold transition-colors",
+        "after:absolute after:-inset-1 after:content-['']",
+        status === "online" && (pending > 0 ? "text-[var(--status-pending)]" : "text-[var(--status-synced)]"),
         // Not the offline red: the device is connected, the server did not
-        // take the last cycle. Amber, with its own mark, so it is not colour
-        // alone that says so.
+        // take the last cycle. Amber, with its own mark.
         status === "error" && "text-[var(--status-pending)]",
-        status === "offline" && "text-[var(--status-offline)] cursor-not-allowed",
-        status === "syncing" && "text-[var(--status-pending)] cursor-wait",
-        className,
+        status === "offline" && "cursor-not-allowed text-muted-foreground",
+        status === "syncing" && "cursor-wait text-[var(--status-pending)]",
+        className
       )}
     >
-      {status === "online" && <Cloud className="h-5 w-5" />}
-      {status === "error" && (
-        <span className="relative flex">
-          <Cloud className="h-5 w-5" />
-          <span className="absolute inset-0 flex items-center justify-center pt-0.5 text-[10px] font-bold leading-none" aria-hidden>
-            !
-          </span>
-        </span>
-      )}
-      {status === "offline" && <CloudOff className="h-5 w-5" />}
-      {status === "syncing" && <RefreshCw className="h-5 w-5 animate-spin" />}
-      {pendingCount > 0 && (
-        // INSIDE the button's box, not hanging off its corner. The button is
-        // the last thing in the nav pill, so its top-right corner sits on the
-        // pill's rounded end — and the glass clips its content — so a badge at
-        // -top-1/-right-1 lost its right half to the curve ("128" read as
-        // "12"). This position clears the curve on both the 56px mobile bar
-        // and the 44px desktop pill. Capped at 99+ so it cannot grow back out.
-        <span className="pointer-events-none absolute top-0 right-1 bg-[var(--status-pending-fill)] text-background text-[9px] leading-none min-w-[14px] h-[14px] flex items-center justify-center px-[3px] rounded-full font-semibold tabular-nums">
-          {pendingCount > 99 ? "99+" : pendingCount}
-        </span>
-      )}
+      <Icon className={cn("h-4 w-4 shrink-0", status === "syncing" && "animate-spin")} aria-hidden />
+      <span className="truncate">{label}</span>
     </button>
   )
+}
+
+/**
+ * The bar's bottom edge, saying what the cloud used to. A hairline in the 2px
+ * between the tabs' highlight and the bar's own edge, inset past the rounded
+ * ends so it never meets the curve. Nothing at all while synced — the common
+ * case — so the bar is quiet unless there is something to know. Transform and
+ * opacity only: the sweep is a compositor animation, and it runs only while a
+ * cycle is actually syncing (a poll that finds nothing never raises it).
+ */
+export function NavSyncRim({ radius }: { radius: number }) {
+  const { status } = useSyncState()
+  if (status === "online") return null
+  const inset = Math.round(radius * 0.8)
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute bottom-px z-[3] h-[1.5px] overflow-hidden rounded-full"
+      style={{ left: inset, right: inset }}
+    >
+      {status === "syncing" ? (
+        <span className="nav-sync-sweep absolute inset-y-0 left-0 w-2/5 rounded-full" />
+      ) : (
+        <span
+          className={cn(
+            "absolute inset-0 rounded-full",
+            status === "error" ? "bg-[var(--status-pending)]" : "nav-sync-offline"
+          )}
+        />
+      )}
+    </span>
+  )
+}
+
+/**
+ * The badge on the sidebar button: changes waiting (their count), a failed
+ * sync ("!") or offline (a grey dot). INSIDE the button's box — the glass
+ * clips anything hanging past it.
+ */
+export function SyncBadge() {
+  const { status, pending } = useSyncState()
+  const base =
+    "pointer-events-none absolute -right-0.5 -top-0.5 flex h-[14px] min-w-[14px] items-center justify-center rounded-full px-[3px] text-[9px] font-semibold leading-none tabular-nums"
+  if (pending > 0)
+    return <span className={cn(base, "bg-[var(--status-pending-fill)] text-background")}>{pending > 99 ? "99+" : pending}</span>
+  if (status === "error") return <span className={cn(base, "bg-[var(--status-pending-fill)] text-background")}>!</span>
+  if (status === "offline")
+    return <span className="pointer-events-none absolute right-0 top-0 h-2 w-2 rounded-full bg-muted-foreground ring-2 ring-[var(--on-glass)]" />
+  return null
 }

@@ -1911,3 +1911,28 @@ textarea:focus-within {
 .text-primary-muted {
   color: color-mix(in oklch, var(--primary) 55%, var(--muted-foreground));
 }
+
+/* ─── Sync status on the nav bar's edge (`NavSyncRim`) ────────────────────
+   A light sweeping along the bar's bottom hairline while a cycle syncs — a
+   transform on a small element, composited, and only while syncing — and a
+   dashed grey hairline while offline. */
+@keyframes nav-sync-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+.nav-sync-sweep {
+  background: linear-gradient(90deg, transparent, var(--primary), transparent);
+  animation: nav-sync-sweep 1.1s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  will-change: transform;
+}
+.nav-sync-offline {
+  background: repeating-linear-gradient(90deg, var(--muted-foreground) 0 4px, transparent 4px 8px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-sync-sweep {
+    animation: none;
+    width: 100%;
+    opacity: 0.7;
+    background: var(--primary);
+  }
+}

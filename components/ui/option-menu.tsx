@@ -57,12 +57,17 @@ export interface Placement {
   originX: "left" | "right"
   originY: "top" | "bottom"
   /**
-   * Set when the menu GROWS OUT OF its control (`placeOver`): the scale that
-   * maps the menu's box back onto the control's, and the point (in the menu's
-   * own px) it grows from — the control's anchored corner.
+   * Set when the menu GROWS OUT OF its control (`placeOver`): the clip that
+   * cuts the menu down to exactly the control's box AND corner — a circle or
+   * a capsule at the control's own radius — which the open widens to the
+   * whole menu and the close narrows back.
    */
-  from?: { scaleX: number; scaleY: number; origin: string }
+  from?: { clip: string }
 }
+
+/** The menu's own corner, as the open ends on it. */
+const MENU_RADIUS = 18
+const OPEN_CLIP = `inset(0px 0px 0px 0px round ${MENU_RADIUS}px)`
 
 /** Where the menu goes for a control at `rect` — read in the tap, never mid-commit. */
 function place(rect: DOMRect, count: number, align: "start" | "end"): Placement {
@@ -116,7 +121,13 @@ export function placeOver(
   const left = Math.min(Math.max(MARGIN, rawLeft), vw - MARGIN - w)
   const maxHeight = Math.max(ROW_H * 2, vh - rect.top - MARGIN)
   const h = Math.min(estimatedHeight, maxHeight)
-  const ox = (align === "end" ? rect.right : rect.left) - left
+  // The control's box inside the menu's, as an inset clip: what is left
+  // showing at the start is the control's own shape, its own corner radius
+  // (half its height — every header control is a circle or a capsule).
+  const l = Math.max(0, rect.left - left)
+  const r = Math.max(0, left + w - rect.right)
+  const b = Math.max(0, h - rect.height)
+  const radius = Math.min(rect.width, rect.height) / 2
   return {
     left,
     top: rect.top,
@@ -124,7 +135,7 @@ export function placeOver(
     maxHeight,
     originX: align === "end" ? "right" : "left",
     originY: "top",
-    from: { scaleX: rect.width / w, scaleY: Math.min(1, rect.height / h), origin: `${ox}px 0px` },
+    from: { clip: `inset(0px ${r}px ${b}px ${l}px round ${radius}px)` },
   }
 }
 
@@ -134,10 +145,23 @@ export const menuHeight = (rows: number) => rows * ROW_H + 40
 const MORPH_EASE = [0.2, 0.9, 0.3, 1] as const
 
 /**
- * The menu face, placed and animated. With `placement.from` it grows out of
- * its control: the surface scales from the control's box to its own and fades
- * up over the first beats, while the contents arrive a moment later so text
- * is never seen squeezed. Without it, the plain pop from the nearest corner.
+ * The menu face, placed and animated.
+ *
+ * With `placement.from` it EXPANDS OUT OF its control. The menu is laid out
+ * at its full size from the first frame and REVEALED by a clip that starts as
+ * exactly the control — the same box and the same round corner — and widens
+ * to the menu's own 18px corner; the close runs it back into the control.
+ * Nothing is scaled, so the corner is never stretched (a scale from a 44px
+ * circle drew a squashed rectangle at the start, not the button) and the text
+ * is never squeezed. Its rows fade up a beat after the face, so for the first
+ * frames the control simply grows.
+ *
+ * A clip also clips the box-shadow, so the lift is a SIBLING layer under the
+ * face, faded in once the face has reached it. Opacity is animated on the
+ * face itself (its own `backdrop-filter` keeps sampling — only an ANCESTOR's
+ * opacity makes a backdrop root) and on the shadow layer, never on a parent.
+ *
+ * Without `from`, the plain pop from the nearest corner.
  */
 export const MorphSurface = forwardRef<
   HTMLDivElement,
@@ -152,60 +176,75 @@ export const MorphSurface = forwardRef<
   }
 >(function MorphSurface({ placement, role, label, id, className, onKeyDown, children }, ref) {
   const from = placement.from
+  if (!from) {
+    return (
+      <motion.div
+        ref={ref}
+        id={id}
+        role={role}
+        aria-label={label}
+        onKeyDown={onKeyDown}
+        initial={{ opacity: 0, scale: 0.92 }}
+        animate={{ opacity: 1, scale: 1, transition: { duration: 0.16, ease: MORPH_EASE } }}
+        exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.16, ease: MORPH_EASE } }}
+        className={cn("menu-surface fixed z-[201] overflow-y-auto overscroll-contain", className)}
+        style={{
+          left: placement.left,
+          top: placement.top,
+          bottom: placement.bottom,
+          width: placement.width,
+          maxHeight: placement.maxHeight,
+          transformOrigin: `${placement.originY} ${placement.originX}`,
+        }}
+      >
+        {children}
+      </motion.div>
+    )
+  }
   return (
-    <motion.div
-      ref={ref}
-      id={id}
-      role={role}
-      aria-label={label}
-      onKeyDown={onKeyDown}
-      initial={from ? { opacity: 0, scaleX: from.scaleX, scaleY: from.scaleY } : { opacity: 0, scale: 0.92 }}
-      animate={
-        from
-          ? {
-              opacity: 1,
-              scaleX: 1,
-              scaleY: 1,
-              transition: { scaleX: { duration: 0.24, ease: MORPH_EASE }, scaleY: { duration: 0.24, ease: MORPH_EASE }, opacity: { duration: 0.08 } },
-            }
-          : { opacity: 1, scale: 1, transition: { duration: 0.16, ease: MORPH_EASE } }
-      }
-      exit={
-        from
-          ? {
-              opacity: 0,
-              scaleX: from.scaleX,
-              scaleY: from.scaleY,
-              transition: {
-                scaleX: { duration: 0.18, ease: MORPH_EASE },
-                scaleY: { duration: 0.18, ease: MORPH_EASE },
-                opacity: { duration: 0.08, delay: 0.1 },
-              },
-            }
-          : { opacity: 0, scale: 0.96, transition: { duration: 0.16, ease: MORPH_EASE } }
-      }
-      className={cn("menu-surface fixed z-[201] overflow-y-auto overscroll-contain", className)}
-      style={{
-        left: placement.left,
-        top: placement.top,
-        bottom: placement.bottom,
-        width: placement.width,
-        maxHeight: placement.maxHeight,
-        transformOrigin: from ? from.origin : `${placement.originY} ${placement.originX}`,
-      }}
-    >
-      {from ? (
+    <div className="fixed z-[201]" style={{ left: placement.left, top: placement.top, width: placement.width }}>
+      {/* The lift, outside the clip; it arrives with the full shape. */}
+      <motion.div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{ borderRadius: MENU_RADIUS, boxShadow: "var(--menu-shadow, var(--glass-shadow))" }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1, transition: { duration: 0.12, delay: 0.16 } }}
+        exit={{ opacity: 0, transition: { duration: 0.06 } }}
+      />
+      <motion.div
+        ref={ref}
+        id={id}
+        role={role}
+        aria-label={label}
+        onKeyDown={onKeyDown}
+        initial={{ clipPath: from.clip, opacity: 0 }}
+        animate={{
+          clipPath: OPEN_CLIP,
+          opacity: 1,
+          // The button's own glyph fades under the growing face rather than
+          // vanishing on the first frame.
+          transition: { clipPath: { duration: 0.26, ease: MORPH_EASE }, opacity: { duration: 0.1 } },
+        }}
+        exit={{
+          clipPath: from.clip,
+          opacity: 0,
+          // Fading over the second half of the collapse, so the button is
+          // there under it when it lands — a blank shape sat over the +.
+          transition: { clipPath: { duration: 0.2, ease: MORPH_EASE }, opacity: { duration: 0.12, delay: 0.08 } },
+        }}
+        className={cn("menu-surface relative overflow-y-auto overscroll-contain shadow-none", className)}
+        style={{ maxHeight: placement.maxHeight, borderRadius: MENU_RADIUS }}
+      >
         <motion.div
           initial={{ opacity: 0 }}
-          animate={{ opacity: 1, transition: { duration: 0.14, delay: 0.08 } }}
-          exit={{ opacity: 0, transition: { duration: 0.08 } }}
+          animate={{ opacity: 1, transition: { duration: 0.14, delay: 0.1 } }}
+          exit={{ opacity: 0, transition: { duration: 0.06 } }}
         >
           {children}
         </motion.div>
-      ) : (
-        children
-      )}
-    </motion.div>
+      </motion.div>
+    </div>
   )
 })
 
