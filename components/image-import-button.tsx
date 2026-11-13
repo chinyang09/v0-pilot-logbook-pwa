@@ -2,7 +2,8 @@
 
 import { useId, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { AnimatePresence, motion } from "framer-motion"
+import { AnimatePresence } from "framer-motion"
+import { MorphSurface, menuHeight, placeOver, type Placement } from "@/components/ui/option-menu"
 import { Camera, Images } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -38,7 +39,7 @@ export function ImageImportButton({
   const libraryInputRef = useRef<HTMLInputElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   // Where the source menu hangs, read off the button in the tap.
-  const [menuAt, setMenuAt] = useState<{ top: number; right: number } | null>(null)
+  const [menuAt, setMenuAt] = useState<Placement | null>(null)
   const ids = useId()
   const cameraId = `${ids}-camera`
   const libraryId = `${ids}-library`
@@ -133,7 +134,9 @@ export function ImageImportButton({
         onClick={() => {
           warmOCR()
           const r = buttonRef.current?.getBoundingClientRect()
-          if (r) setMenuAt({ top: r.bottom + 6, right: Math.max(12, window.innerWidth - r.right) })
+          // The menu grows out of the button, its top-right corner on the
+          // button's (`placeOver`) — two rows under a heading.
+          if (r) setMenuAt(placeOver(r, menuHeight(2), 208))
         }}
       >
         {/* No spinner: the processing dialog covers this button and says
@@ -176,7 +179,7 @@ function PhotoSourceMenu({
   libraryId,
   onClosed,
 }: {
-  at: { top: number; right: number } | null
+  at: Placement | null
   cameraId: string
   libraryId: string
   onClosed: () => void
@@ -198,18 +201,17 @@ function PhotoSourceMenu({
       {at && (
         <>
           <div key="scrim" aria-hidden className="fixed inset-0 z-[200]" onPointerDown={(e) => (e.preventDefault(), dismiss())} />
-          <motion.div
+          <MorphSurface
             key="menu"
             role="menu"
-            aria-label="Photo"
-            initial={{ opacity: 0, scale: 0.92 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.96 }}
-            transition={{ duration: 0.16, ease: [0.2, 0.9, 0.3, 1] }}
-            className="menu-surface fixed z-[201] w-52 py-1.5"
-            style={{ top: at.top, right: at.right, transformOrigin: "top right" }}
+            label="Photo"
+            placement={at}
+            className="py-1.5"
             onKeyDown={(e) => e.key === "Escape" && dismiss()}
           >
+            <div className="px-4 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Photo
+            </div>
             <label htmlFor={cameraId} role="menuitem" tabIndex={0} className={row} onClick={() => dismiss()} onKeyDown={onKey(cameraId)}>
               <Camera className="h-4 w-4 text-muted-foreground" aria-hidden />
               Take Photo
@@ -218,7 +220,7 @@ function PhotoSourceMenu({
               <Images className="h-4 w-4 text-muted-foreground" aria-hidden />
               Choose Photo
             </label>
-          </motion.div>
+          </MorphSurface>
         </>
       )}
     </AnimatePresence>,

@@ -60,6 +60,7 @@ import {
   purgeExpiredAcceptedDiscrepancies,
 } from "@/lib/db"
 import type { Discrepancy } from "@/types/entities/roster.types"
+import { COMPARISON_TYPES } from "@/lib/utils/roster/discrepancy-kinds"
 import type { FlightLog } from "@/types/entities/flight.types"
 
 /**
@@ -76,7 +77,7 @@ const TABS = ["comparisons", "accepted", "notes"] as const
 type FilterType = (typeof TABS)[number]
 
 /** Discrepancy types that are a standing pilot-vs-company comparison. */
-const MISMATCH_TYPES = new Set(["pilot_flying_mismatch", "day_night_mismatch"])
+const MISMATCH_TYPES = COMPARISON_TYPES
 
 /** Fields stored as numbers, so a taken value goes back as one. */
 const NUMERIC_FIELDS = new Set([

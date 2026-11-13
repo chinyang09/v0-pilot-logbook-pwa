@@ -718,9 +718,23 @@ textarea:focus-within {
      stays recognisably the accent rather than going neutral. Derived, so it
      follows the palette's accent. */
   --on-glass-active-fg: color-mix(in oklab, var(--primary) 78%, black);
+  /* A CONTACT shadow, not a bloom. It was `0 8px 28px` at 10%: on the light
+     ground that reached ~36px past every glass surface, so the open calendar
+     (a 340px slab) cast a grey band under itself and the header capsules and
+     the bottom bar each sat in a smudge. A hairline ring, a 1px contact and a
+     short shadow with a NEGATIVE spread — the spread keeps it inside the
+     surface's footprint, so a big surface does not bloom more than a small
+     one. Reach ~6px below; the rim and the tone step do the separating. */
   --glass-shadow:
-    0 1px 2px rgba(45, 38, 30, 0.05),
-    0 8px 28px rgba(45, 38, 30, 0.10);
+    0 0 0 0.5px rgba(45, 38, 30, 0.06),
+    0 1px 2px rgba(45, 38, 30, 0.06),
+    0 4px 10px -6px rgba(45, 38, 30, 0.14);
+  /* A MENU is above the page, not on it: a deeper lift, still held inside
+     its footprint by the negative spread. */
+  --menu-shadow:
+    0 0 0 0.5px rgba(45, 38, 30, 0.06),
+    0 2px 4px rgba(45, 38, 30, 0.06),
+    0 12px 24px -10px rgba(45, 38, 30, 0.22);
   --glass-edge-filter: blur(var(--total-strength)) brightness(1.03) saturate(1.05);
 }
 .dark {
@@ -819,6 +833,7 @@ textarea:focus-within {
     inset 0 -1px 1px rgba(0, 0, 0, 0.10),
     0 2px 6px rgba(0, 0, 0, 0.10),
     0 14px 36px -14px rgba(0, 0, 0, 0.28);
+  --menu-shadow: var(--glass-shadow);
   --glass-edge-filter: blur(var(--total-strength)) brightness(1.2) saturate(1.2);
 }
 
@@ -1411,7 +1426,7 @@ textarea:focus-within {
     background-color: var(--glass-base);
     background-image: linear-gradient(var(--glass-veil), var(--glass-veil));
     backdrop-filter: blur(var(--glass-face-blur, 4.4px)) brightness(var(--glass-blur-brightness, 1.25)) saturate(1.5);
-    box-shadow: var(--glass-shadow);
+    box-shadow: var(--menu-shadow, var(--glass-shadow));
     border-radius: 18px;
   }
   .menu-surface::before {
