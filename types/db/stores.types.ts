@@ -162,9 +162,11 @@ export const DEFAULT_IMPORT_DEFAULTS: ImportDefaults = {
 export type BottomNavTab =
   | "dashboard" | "logbook" | "roster" | "aircraft"
   | "crew" | "airports" | "currencies" | "settings" | "account"
+  | "fdp" | "discrepancies" | "bin"
 
 export interface NavigationPreferences {
-  bottomNavTabs: [BottomNavTab, BottomNavTab, BottomNavTab, BottomNavTab]
+  /** Two to four tabs, in the bar's order (`normaliseNavTabs`). */
+  bottomNavTabs: BottomNavTab[]
 }
 
 export const DEFAULT_NAVIGATION_PREFERENCES: NavigationPreferences = {

@@ -13,19 +13,15 @@ import { FormSection } from "@/components/ui/form-section"
 import { SettingsRow, ToggleRow, SelectRow } from "@/components/ui/settings-row"
 import { DateRow } from "@/components/ui/date-row"
 import { PageLoading } from "@/components/ui/page-loading"
-import { SortableNavList } from "@/components/sortable-nav-list"
+import { NavBarEditor } from "@/components/sortable-nav-list"
 import { normaliseNavTabs } from "@/lib/utils/nav-tabs"
 import { AppearanceSettings } from "@/components/appearance-settings"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
-import {
-  Monitor, Clock, Plane, Sun,
-  LayoutDashboard, Book, Users, MapPin, Award,
-  Settings, UserCircle, Navigation, ChevronRight, NotebookPen,
-} from "lucide-react"
+import { Monitor, Clock, Plane, Sun, Settings, Navigation, ChevronRight, NotebookPen } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LOGBOOK_AUTHORITIES, OFFERED_AUTHORITIES, TIME_CATEGORIES, categoryLabel, roleLabel, type LogbookAuthority } from "@/lib/utils/logbook-rules"
-import type { DisplayPreferences, AutoFillPreferences, BottomNavTab } from "@/types/db/stores.types"
+import type { DisplayPreferences, AutoFillPreferences } from "@/types/db/stores.types"
 
 // ─── Data ────────────────────────────────────────────────────
 
@@ -45,17 +41,6 @@ const AUTO_FILL_HOW: Record<keyof AutoFillPreferences, string> = {
   simInst: "Flight time, every flight.",
 }
 
-const ALL_NAV_TABS: Array<{ value: BottomNavTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-  { value: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { value: "logbook", label: "Logbook", icon: Book },
-  { value: "aircraft", label: "Aircraft", icon: Plane },
-  { value: "crew", label: "Crew", icon: Users },
-  { value: "airports", label: "Airports", icon: MapPin },
-  { value: "currencies", label: "Currencies", icon: Award },
-  { value: "settings", label: "Settings", icon: Settings },
-  { value: "account", label: "Account", icon: UserCircle },
-]
-
 type SectionKey = "appearance" | "logging" | "navigation" | "display" | "autofill" | "duty"
 
 interface SectionDef {
@@ -68,7 +53,7 @@ interface SectionDef {
 const SECTIONS: SectionDef[] = [
   { key: "appearance", label: "Appearance", icon: Sun, description: "Mode and palette" },
   { key: "logging", label: "Logging", icon: NotebookPen, description: "Seat, role and airline" },
-  { key: "navigation", label: "Navigation", icon: Navigation, description: "Bottom tab bar" },
+  { key: "navigation", label: "Navigation", icon: Navigation, description: "Tab bar" },
   { key: "display", label: "Display Options", icon: Monitor, description: "Times, airports, coordinates" },
   { key: "autofill", label: "Auto-Fill Fields", icon: Clock, description: "Times filled in for you" },
   { key: "duty", label: "Duty Time Defaults", icon: Plane, description: "Report and debrief times" },
@@ -202,13 +187,11 @@ function NavigationSection({ preferences, updateNavigation }: {
   updateNavigation: ReturnType<typeof usePreferences>["updateNavigation"]
 }) {
   return (
-    <ReadingPanel title="Navigation" description="Up to 4 tabs in the tab bar.">
+    <ReadingPanel title="Navigation" description="Two to four tabs, as the bar will show them.">
       <FormSection>
         <div className="p-3">
-          <SortableNavList
-            tabs={ALL_NAV_TABS}
-            // Roster is the Logbook tab's second view: a stored Roster tab
-            // reads as Logbook here, as it does in the nav.
+          <NavBarEditor
+            // Normalised as the nav normalises it, so the preview is the bar.
             selectedTabs={normaliseNavTabs(preferences.navigation.bottomNavTabs)}
             onUpdate={updateNavigation}
           />

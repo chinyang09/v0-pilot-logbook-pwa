@@ -752,6 +752,7 @@ export default function LogbookPage() {
             value=""
             options={ADD_OPTIONS}
             onValueChange={handleAdd}
+            morph
             className="flex h-11 w-11 items-center justify-center rounded-full text-foreground transition-colors hover:bg-[var(--on-glass-fill-soft)]"
           >
             <Plus className="h-5 w-5" />

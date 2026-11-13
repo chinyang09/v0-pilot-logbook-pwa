@@ -1604,6 +1604,13 @@ The old dashboard printed several things twice. Each now has exactly one home:
 
 The bell (`AlertsDropdown`) is therefore scoped to **import notes only** — the
 one alert class neither page otherwise shows, and not a legality question.
+**A COMPARISON is not a note** (`openImportNotes`,
+`lib/utils/roster/discrepancy-kinds.ts`): the PF/PM and day/night comparisons
+are a standing record kept whichever way the pilot decided and never
+"resolved", so counting them made the bell read 18 over changes the pilot had
+already approved. They live on the Discrepancies page's Comparisons tab. A
+note is named by its type's label (`DISCREPANCY_TYPE_CONFIG`), never the code
+(`pilot_flying_mismatch`), and the bell's link opens the Notes tab.
 
 #### Charts: only where there is something to plot
 
@@ -2984,7 +2991,15 @@ card above it, so the owner could not tell the actions from the card.
   on the dimmed list, which read as a different material. A `-float` control
   must FADE ITSELF: under an ancestor whose opacity animates (a backdrop root)
   its blur samples nothing until the fade ends and then snaps on.
-- The shadow is the glass's own (`--glass-shadow`), not a hard black one.
+- The shadow is the glass's own (`--glass-shadow`), not a hard black one —
+  and on the LIGHT theme it is a CONTACT shadow (a 0.5px ring, a 1px contact,
+  `0 4px 10px -6px`), not a bloom. It was `0 8px 28px` at 10%: ~36px of grey
+  past every glass surface, so the open calendar cast a band under itself and
+  each header capsule and the bottom bar sat in a smudge. The negative spread
+  keeps the shadow inside the footprint, so a large surface blooms no more
+  than a small one. A MENU, above the page rather than on it, takes
+  `--menu-shadow` (a deeper lift held in the same way; the dark theme maps it
+  to `--glass-shadow`).
 - The surface lives in `@layer components`, so a call site's utilities still
   win. Unlayered it beat every Tailwind class, and the login page's outline
   button over the photo silently took the opaque face.
@@ -3170,6 +3185,18 @@ open flight, both themes (Nov 2026: zero violations). What it took:
   follow-up. The trigger is the WHOLE row, and its accessible name carries the
   value ("Pilot role: P2"). A record holding a value the list lacks (LogTen's
   "VISUAL" approach) keeps it as an option rather than showing nothing.
+- **A HEADER button's menu GROWS OUT OF the button** (`placeOver` +
+  `MorphSurface`, `option-menu.tsx`; the owner, Nov 2026) — the + menu, the
+  calendar's Duties, the camera's Take / Choose Photo and the alerts bell. The
+  menu's top corner sits ON the button's (top-left for a button in the left
+  half of the screen, top-right in the right half, the other way when that
+  side has no room), and it opens by scaling from exactly the button's box
+  (`from`) while fading up over the first 80ms; its rows arrive a beat later,
+  so text is never seen squeezed. Closing plays it back into the button.
+  Transform and opacity only, ~240ms. A ROW's picker (`SelectRow`) still hangs
+  below its row — `morph` is for a control in a bar. The bell is the same
+  surface now, not a Radix dropdown, and its navigation runs as the
+  dismissal's follow-up.
 - **The camera button offers Take Photo / Choose Photo** (`PhotoSourceMenu`,
   the app's menu face) over TWO inputs — one with `capture="environment"`, one
   without. A single input with no `capture` was meant to bring up the OS sheet
@@ -5519,6 +5546,7 @@ When making changes, be aware of these high-impact files:
 - Do not bring back the month-capsule grid or a year stepper in the calendar's month/year picker — it is two wheels, live, closed by the date selector; and in the dual layout it takes the RIGHT pane with the month being chosen still drawn on the left. Keep `WHEEL_ITEM_PX` small enough that the wheel fits a dual pane's grid, or the panel grows (or clips) when it opens
 - Do not cap a date wheel's past at a few years — a pilot back-filling a paper logbook enters flights from decades ago; the default is 70
 - Do not make "Add Crew" open the crew picker directly, and do not lay an additional crew member out differently from the PIC/SIC rows — role on the LEFT (the menu), name on the RIGHT (the picker, for THAT row), a swipe to clear. The pick carries the row's role and index (`additionalCrewField`); address rows by index, never by crew-card id
+- Do not fix the tab bar at four tabs, or edit it as a list — it carries TWO to FOUR (`normaliseNavTabs`, `MIN_NAV_TABS`/`MAX_NAV_TABS`; a stored Roster tab still hands its slot on so an old bar keeps its size), chosen from the sidebar's destinations (`NAV_TAB_CHOICES` — FDP, Discrepancies and Bin included) in `components/nav-tab-config.ts`, the one table the nav and Settings both read. Settings › Navigation (`NavBarEditor`) is a COPY of the bar the device shows — the bottom bar on a phone, the top pill where the nav sits at the top (`useDesktopPill`) — whose tabs are dragged sideways to reorder, with a × each (down to two) and the rest as chips to add (up to four)
 - Do not size the phone's bottom bar to its tabs, or let it run the full width of a tablet — it is `MOBILE_PILL_WIDTH`, the screen less the panel gutter and 12px more each side (the same proportion of every phone), capped at 25rem so an iPad in portrait keeps a bar rather than a slab. The tabs are EQUAL columns (`grid-flow-col`: `minmax(0, 1fr)` in the fixed-width bar, `1fr` — the widest label — in the desktop pill, whose width is its content), so every tab and the highlight that slides between them is one width and the labels are evenly spaced; sized to their labels, "Dashboard" carried a wider highlight than "Crew". A label too long for its column truncates (an iPad Split View window of 320). The bar's HEIGHT is not scaled: an iPad window at "iPhone size" draws CSS px at ~132 px/inch against a phone's ~150–160, so everything there is physically ~20% larger — that is the device, and sizing per platform would break the one-look rule
 - Do not put per-row `measureElement` on ANY virtualised list of same-height rows (airports, aircraft, crew, logbook) — calibrate once with `useCalibratedRowHeight`, and keep the card one height by construction (truncate, reserve empty lines). And never pass `useVirtualizer` an inline `getItemKey`: its measurements are memoised on that function's identity, so a new arrow per render rebuilds every row's position on every scroll-driven render (29k rows on the airports list)
 - Do not hand-roll a suggestion list under a field — `SuggestionList` (`components/ui/suggestion-list.tsx`) is the one (an inset well, 44px rows, inset dividers), and `AircraftTypeSuggestions` and the add-aircraft / add-airport candidate lists all render through it; the aircraft form, panel and page each carried a bordered `hover:bg-accent` web dropdown

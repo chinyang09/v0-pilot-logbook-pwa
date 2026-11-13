@@ -28,7 +28,7 @@
  */
 
 import { haptic } from "@/lib/utils/haptics"
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react"
+import { forwardRef, useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { AnimatePresence, motion } from "framer-motion"
 import { Check } from "lucide-react"
@@ -48,7 +48,7 @@ const GAP = 6
 const MIN_W = 200
 const MAX_W = 320
 
-interface Placement {
+export interface Placement {
   left: number
   top?: number
   bottom?: number
@@ -56,6 +56,12 @@ interface Placement {
   width: number
   originX: "left" | "right"
   originY: "top" | "bottom"
+  /**
+   * Set when the menu GROWS OUT OF its control (`placeOver`): the scale that
+   * maps the menu's box back onto the control's, and the point (in the menu's
+   * own px) it grows from — the control's anchored corner.
+   */
+  from?: { scaleX: number; scaleY: number; origin: string }
 }
 
 /** Where the menu goes for a control at `rect` — read in the tap, never mid-commit. */
@@ -80,6 +86,130 @@ function place(rect: DOMRect, count: number, align: "start" | "end"): Placement 
 }
 
 /**
+ * Where a menu goes when it GROWS OUT OF a header control: its top corner on
+ * the control's top corner (the right one for a control at the right of the
+ * bar, the left one otherwise), so the control reads as enlarging into the
+ * menu rather than a menu appearing under it. `from` is the scale that puts
+ * the menu's box exactly over the control's, which is where the open starts
+ * and the close ends — transform and opacity only, nothing laid out per frame.
+ */
+export function placeOver(
+  rect: DOMRect,
+  estimatedHeight: number,
+  width = MIN_W
+): Placement {
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  // The corner is the one on the control's side of the screen: a control in
+  // the left half grows rightward from its top-left, one in the right half
+  // leftward from its top-right — and if the menu does not fit that way, the
+  // other way, so it never slides off its control to stay on screen. Only a
+  // menu wider than the room on both sides is clamped (the scale still starts
+  // from the control's corner, `ox`).
+  const w = Math.min(width, vw - MARGIN * 2)
+  const fitsStart = rect.left + w <= vw - MARGIN
+  const fitsEnd = rect.right - w >= MARGIN
+  const prefer: "start" | "end" = rect.left + rect.width / 2 < vw / 2 ? "start" : "end"
+  const align: "start" | "end" =
+    prefer === "start" ? (fitsStart || !fitsEnd ? "start" : "end") : fitsEnd || !fitsStart ? "end" : "start"
+  const rawLeft = align === "end" ? rect.right - w : rect.left
+  const left = Math.min(Math.max(MARGIN, rawLeft), vw - MARGIN - w)
+  const maxHeight = Math.max(ROW_H * 2, vh - rect.top - MARGIN)
+  const h = Math.min(estimatedHeight, maxHeight)
+  const ox = (align === "end" ? rect.right : rect.left) - left
+  return {
+    left,
+    top: rect.top,
+    width: w,
+    maxHeight,
+    originX: align === "end" ? "right" : "left",
+    originY: "top",
+    from: { scaleX: rect.width / w, scaleY: Math.min(1, rect.height / h), origin: `${ox}px 0px` },
+  }
+}
+
+/** The height a menu of `rows` 44px rows under a heading will come out at. */
+export const menuHeight = (rows: number) => rows * ROW_H + 40
+
+const MORPH_EASE = [0.2, 0.9, 0.3, 1] as const
+
+/**
+ * The menu face, placed and animated. With `placement.from` it grows out of
+ * its control: the surface scales from the control's box to its own and fades
+ * up over the first beats, while the contents arrive a moment later so text
+ * is never seen squeezed. Without it, the plain pop from the nearest corner.
+ */
+export const MorphSurface = forwardRef<
+  HTMLDivElement,
+  {
+    placement: Placement
+    role: string
+    label: string
+    id?: string
+    className?: string
+    onKeyDown?: (e: React.KeyboardEvent) => void
+    children: ReactNode
+  }
+>(function MorphSurface({ placement, role, label, id, className, onKeyDown, children }, ref) {
+  const from = placement.from
+  return (
+    <motion.div
+      ref={ref}
+      id={id}
+      role={role}
+      aria-label={label}
+      onKeyDown={onKeyDown}
+      initial={from ? { opacity: 0, scaleX: from.scaleX, scaleY: from.scaleY } : { opacity: 0, scale: 0.92 }}
+      animate={
+        from
+          ? {
+              opacity: 1,
+              scaleX: 1,
+              scaleY: 1,
+              transition: { scaleX: { duration: 0.24, ease: MORPH_EASE }, scaleY: { duration: 0.24, ease: MORPH_EASE }, opacity: { duration: 0.08 } },
+            }
+          : { opacity: 1, scale: 1, transition: { duration: 0.16, ease: MORPH_EASE } }
+      }
+      exit={
+        from
+          ? {
+              opacity: 0,
+              scaleX: from.scaleX,
+              scaleY: from.scaleY,
+              transition: {
+                scaleX: { duration: 0.18, ease: MORPH_EASE },
+                scaleY: { duration: 0.18, ease: MORPH_EASE },
+                opacity: { duration: 0.08, delay: 0.1 },
+              },
+            }
+          : { opacity: 0, scale: 0.96, transition: { duration: 0.16, ease: MORPH_EASE } }
+      }
+      className={cn("menu-surface fixed z-[201] overflow-y-auto overscroll-contain", className)}
+      style={{
+        left: placement.left,
+        top: placement.top,
+        bottom: placement.bottom,
+        width: placement.width,
+        maxHeight: placement.maxHeight,
+        transformOrigin: from ? from.origin : `${placement.originY} ${placement.originX}`,
+      }}
+    >
+      {from ? (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1, transition: { duration: 0.14, delay: 0.08 } }}
+          exit={{ opacity: 0, transition: { duration: 0.08 } }}
+        >
+          {children}
+        </motion.div>
+      ) : (
+        children
+      )}
+    </motion.div>
+  )
+})
+
+/**
  * A control that opens the menu. Its children are what the control shows
  * (a row's label and value, a bare value with a chevron); it is a real
  * `button`, so the whole area is the target and it is reachable by keyboard.
@@ -91,6 +221,7 @@ export function ChoicePicker<T extends string>({
   onValueChange,
   disabled = false,
   align = "end",
+  morph = false,
   className,
   children,
 }: {
@@ -102,6 +233,11 @@ export function ChoicePicker<T extends string>({
   disabled?: boolean
   /** Which edge of the control the menu lines up with. */
   align?: "start" | "end"
+  /**
+   * A HEADER control: the menu grows out of it, its top corner over the
+   * control's (`placeOver`), instead of hanging below a row.
+   */
+  morph?: boolean
   className?: string
   children: ReactNode
 }) {
@@ -115,7 +251,8 @@ export function ChoicePicker<T extends string>({
   const open = () => {
     const el = triggerRef.current
     if (!el || disabled) return
-    setPlacement(place(el.getBoundingClientRect(), options.length + 1, align))
+    const rect = el.getBoundingClientRect()
+    setPlacement(morph ? placeOver(rect, menuHeight(options.length)) : place(rect, options.length + 1, align))
   }
 
   return (
@@ -208,26 +345,15 @@ function OptionMenu<T extends string>({
         <>
           {/* Takes the dismissing tap so it does not land on what is beneath. */}
           <div key="scrim" aria-hidden className="fixed inset-0 z-[200]" onPointerDown={(e) => (e.preventDefault(), dismiss())} />
-          <motion.div
+          <MorphSurface
             key="menu"
             ref={listRef}
             id={id}
             role="listbox"
-            aria-label={label}
+            label={label}
             onKeyDown={onKeyDown}
-            initial={{ opacity: 0, scale: 0.92 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.96 }}
-            transition={{ duration: 0.16, ease: [0.2, 0.9, 0.3, 1] }}
-            className="menu-surface fixed z-[201] overflow-y-auto overscroll-contain py-1.5"
-            style={{
-              left: placement.left,
-              top: placement.top,
-              bottom: placement.bottom,
-              width: placement.width,
-              maxHeight: placement.maxHeight,
-              transformOrigin: `${placement.originY} ${placement.originX}`,
-            }}
+            placement={placement}
+            className="py-1.5"
           >
             <div className="px-4 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               {label}
@@ -254,7 +380,7 @@ function OptionMenu<T extends string>({
                 </button>
               )
             })}
-          </motion.div>
+          </MorphSurface>
         </>
       )}
     </AnimatePresence>,

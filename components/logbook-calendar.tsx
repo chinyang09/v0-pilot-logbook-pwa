@@ -1153,6 +1153,7 @@ export const LogbookCalendar = forwardRef<CalendarHandle, LogbookCalendarProps>(
             value={dutyValue}
             options={dutyOptions}
             onValueChange={setDutiesView}
+            morph
             className={cn(
               "flex h-7 items-center gap-1 rounded-full px-2.5 text-xs font-semibold transition-colors",
               hit,
