@@ -405,8 +405,9 @@ the reliable way to catch up. `sync-triggers.test.ts` pins it.
 `online` / `offline` / `syncing`, and a cycle that ended `ok: false` while
 online — the server answering 5xx, a session that could not be renewed, an
 item rejected — fell straight back to `online`: a green cloud over edits that
-were not reaching the server. It now ends in `error` (an amber cloud with its
-own mark, still tappable to retry) until the next clean cycle. A cycle that
+were not reaching the server. It now ends in `error` (a solid amber rim on the
+bar and "!" on the sidebar button — see "Sync status lives in the bar's edge")
+until the next clean cycle. A cycle that
 stopped at the round cap is `partial`, unfinished rather than failed, and
 stays `online`.
 
@@ -2765,6 +2766,25 @@ re-renders).
   the height group's delay/duration) so the reveal and the growth are **one
   motion** — not the list fading in while the glass is still resizing (which read
   as two separate motions, "opens up while the glass expands down").
+- **Sync status lives in the bar's EDGE, not a slot** (`components/sync-status.tsx`;
+  the owner, Nov 2026). The bar used to end in a cloud button — 32px of every
+  phone's tab width, to show a state that is "fine" nearly always. Now:
+
+  | | the bar's bottom edge (`NavSyncRim`) | the sidebar button (`SyncBadge`) |
+  |---|---|---|
+  | synced | nothing | nothing |
+  | changes waiting | nothing | their count, amber |
+  | syncing | a light sweeping along the edge | the count while it drains |
+  | failed | a solid amber hairline | "!", amber |
+  | offline | a dashed grey hairline | a grey dot |
+
+  The rim is a 1.5px line in the 2px between the tab highlight and the bar's
+  edge, inset past the rounded ends; the sweep is a transform, and runs only
+  while a cycle really syncs. The words and the manual sync (`SyncStatus`,
+  through `ensureValidSession`) are in the sidebar's top strip — "Synced",
+  "3 to Sync", "Offline", "Sync Failed · Retry" — and the sidebar button's
+  accessible name carries the state ("Open sidebar · Offline"). The queue
+  count is ONE module store for every reader (both bars are mounted).
 - **The sidebar's sections** (`components/nav-sections.tsx`, the owner's
   structure, Nov 2026): Dashboard and Logbook at the top, then DATABASE
   (Aircraft, Airports, Crew), DUTY & COMPLIANCE (Currencies, FDP,
@@ -3190,10 +3210,15 @@ open flight, both themes (Nov 2026: zero violations). What it took:
   calendar's Duties, the camera's Take / Choose Photo and the alerts bell. The
   menu's top corner sits ON the button's (top-left for a button in the left
   half of the screen, top-right in the right half, the other way when that
-  side has no room), and it opens by scaling from exactly the button's box
-  (`from`) while fading up over the first 80ms; its rows arrive a beat later,
-  so text is never seen squeezed. Closing plays it back into the button.
-  Transform and opacity only, ~240ms. A ROW's picker (`SelectRow`) still hangs
+  side has no room), and it opens as a CLIP that starts as exactly the
+  button's shape — its box and its own corner radius, `inset(… round 22px)`
+  for a 44px button (`from.clip`) — and widens into the 18px menu, so the
+  button's circle IS the menu's first frame. It used to scale from the
+  button's box, and a scaled radius is a different corner (the owner: "the
+  squircle corner doesn't match the button"). The rows arrive a beat later,
+  the shadow lives on a sibling layer (a clip would cut it) and arrives with
+  the full shape; closing plays the clip back and fades over its second half,
+  so the button's glyph is there when it lands. ~260ms. A ROW's picker (`SelectRow`) still hangs
   below its row — `morph` is for a control in a bar. The bell is the same
   surface now, not a Radix dropdown, and its navigation runs as the
   dismissal's follow-up.
@@ -5558,7 +5583,9 @@ When making changes, be aware of these high-impact files:
 - Do not tell the layers apart with shadows and rims — ground, card and control are generated tones (`--background` / `--card` / `--control`), each a visible step from the one under it; a rim and a shadow belong only to a surface that floats. Do not put `bg-card/70` or a `shadow-sm` on a card
 - Do not forbid zoom in the viewport, and do not give a text field less than 16px on a phone (iOS zooms on focus once zoom is allowed). Do not read `--destructive` as text — `text-destructive` is `--destructive-text`. Do not nest a focusable control inside a `role="button"` row; make the row a plain tap target and an inner element the keyboard target
 - Do not put an action back on the card surface (`bg-secondary`, `bg-card`, `bg-muted`) or give it a rectangle's corners — a thing you press is a CAPSULE or circle on `.control-surface`, a thing you read is a rounded rectangle. On the card surface the context preview's action row read as more card. And do not use the REAL glass (`GlassContainer`) for an action that sits over a scrim, a row or a panel: the painted surface is the same look with no `backdrop-filter`, and these pop in on exactly the frames a readback would cost most
-- Do not group header controls page by page — a header is VIEW (search, calendar, period) → TOOLS (import, Quick Check, alerts, read-from-photo) → CREATE (+, alone and last), one capsule per role, with a page switch first and detail commits (Cancel / Save / Edit, Back) one capsule each (`glass-icon-button.tsx`). And do not add a Refresh button: every list follows every write and every sync, so it re-reads the same rows, and it reads as "sync" — which is the cloud in the nav
+- Do not put a sync button or cloud back in the tab bar — it cost every phone a tab's width. Sync state is the bar's edge (`NavSyncRim`), the sidebar button's badge (`SyncBadge`) and the sidebar strip's words (`SyncStatus`)
+- Do not open a header menu by SCALING it from its button — a scaled radius is not the button's corner. It is a clip from the button's exact box and radius (`placeOver`'s `from.clip`), with the shadow on a sibling layer
+- Do not group header controls page by page — a header is VIEW (search, calendar, period) → TOOLS (import, Quick Check, alerts, read-from-photo) → CREATE (+, alone and last), one capsule per role, with a page switch first and detail commits (Cancel / Save / Edit, Back) one capsule each (`glass-icon-button.tsx`). And do not add a Refresh button: every list follows every write and every sync, so it re-reads the same rows, and it reads as "sync" — which is the sidebar strip's job
 - Do not give the context preview's compact body `layout="position"` — it is the one block that exists in BOTH states, so it takes a FULL `layout`. Its height is unchanged either way, which makes its delta scaleX only: the row's content is condensed at the first frame and relaxes out as the card widens. `layout="position"` cancels the horizontal scale too, which lays it out at the RESTING width from frame one and lets the card clip it — on a tablet the arrival time and ICAO are missing until the card widens past them. The detail and the actions DO take `layout="position"`; they exist only while open. And keep the lift a static shadow on its own PROJECTED (`layout`) node faded by opacity, outside the clip: an interpolated `boxShadow` is rebuilt as a string every frame, and `overflow: hidden` on an ancestor eats a shadow entirely
 - Do not let the context preview come to rest in the row's own column — it settles CENTRED ON THE VIEWPORT at `MAX_WIDTH`, and only ever GROWS (a row already wider than that keeps its own width rather than shrinking, which would be the same frame-one mismatch in reverse). Keep the detail's own delayed reveal (opacity + y, ~30% of the morph in): the box growing and the content arriving are two things, and running them together reads as a jump. It does NOT animate `blur()` — that is a per-frame filter pass on the busiest frames of the overlay, and the delayed opacity/travel already says "settling into the room"
 - Do not give the context preview's backdrop a blur — it is a plain darken (`SCRIM`). Full-viewport `backdrop-filter` layers each sample the one below, so the whole stack recomputes every frame their opacity changes, and that landed on exactly the frames the card is travelling. Giving it its own short clock helped and was not enough; the reference implementation this morph was measured against has no blur either. A DIALOG's backdrop keeps its blur — nothing is animating a card behind it

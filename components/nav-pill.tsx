@@ -19,7 +19,7 @@ import { SIDEBAR_WIDTH_PX } from "@/lib/layout/panel-widths"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { useBackDismiss } from "@/hooks/use-back-dismiss"
 import { navSections, navHrefs } from "@/components/nav-sections"
-import { SyncStatus } from "@/components/sync-status"
+import { NavSyncRim, SyncBadge, SyncStatus, describeSync, useSyncState } from "@/components/sync-status"
 import { haptic } from "@/lib/utils/haptics"
 import { isShortcut } from "@/lib/utils/shortcuts"
 import type { BottomNavTab } from "@/types/db/stores.types"
@@ -127,19 +127,28 @@ const suppressLinkMenu = (e: React.MouseEvent) => e.preventDefault()
  * clipped and every page owns its own scroller.
  */
 
-// ─── Sync status icon ────────────────────────────────────────
+// ─── Sync status ─────────────────────────────────────────────
 
 /**
- * The nav's sync affordance is the shared <SyncStatus/> — it uses the theme's
- * `--status-*` colors, shows the pending-count badge, and (critically) routes a
- * manual sync through `ensureValidSession()` so a dead session prompts passkey
- * re-auth instead of silently 401ing. Do not reintroduce a bespoke button here.
+ * The sidebar button, carrying the sync state as a BADGE — the bar no longer
+ * ends in a cloud (see `components/sync-status.tsx`). Its accessible name
+ * says the state too, so a screen reader hears what the badge shows. The
+ * words and the manual sync are in the sidebar it opens.
  */
-function SyncIconButton({ className }: { className?: string }) {
+function SidebarToggle({ onClick, label, badge = true }: { onClick: () => void; label: string; badge?: boolean }) {
+  const { status, pending } = useSyncState()
+  const state = describeSync(status, pending)
   return (
-    <SyncStatus
-      className={cn("relative h-8 w-8 flex-shrink-0 after:absolute after:-inset-1 after:content-['']", className)}
-    />
+    <button
+      onClick={onClick}
+      aria-label={state === "Synced" ? label : `${label} · ${state}`}
+      // 32px drawn, 40px hit: the pill's height has no room for a bigger
+      // circle, so the target grows on the pseudo-element instead.
+      className="relative flex items-center justify-center h-8 w-8 rounded-full text-foreground flex-shrink-0 after:absolute after:-inset-1 after:content-['']"
+    >
+      <PanelLeft className="h-5 w-5" />
+      {badge && <SyncBadge />}
+    </button>
   )
 }
 
@@ -448,7 +457,8 @@ const LENS_SQUASH = 0.84
 /**
  * Shared pill bar row — used in both desktop and mobile collapsed states.
  *
- * Layout: [PanelLeft] | [divider] | [equally spaced tabs] | [SyncIcon]
+ * Layout: [PanelLeft + sync badge] | [equally spaced tabs], the sync state
+ * along the bottom edge (`NavSyncRim`)
  *
  * Desktop: tabs render as text labels
  * Mobile: tabs render as icon + tiny label
@@ -862,21 +872,13 @@ const PillBarContent = memo(function PillBarContent({
         // capsule with a highlight in it uses (`HIGHLIGHT_INSET` in
         // glass-icon-button.tsx). It was 6px, and the highlight read as a
         // smaller thing floating inside the bar rather than filling its slot.
-        "flex items-center px-0.5",
+        "relative flex items-center px-0.5",
         // The bottom bar is the taller of the two — see MOBILE_PILL_HEIGHT.
         mode === "desktop" ? "h-11" : "h-15"
       )}
     >
-      {/* Sidebar toggle — fixed width bookend */}
-      <button
-        onClick={onToggleSidebar}
-        aria-label="Open sidebar"
-        // 32px drawn, 40px hit: the pill's height has no room for a bigger
-        // circle, so the target grows on the pseudo-element instead.
-        className="relative flex items-center justify-center h-8 w-8 rounded-full text-foreground flex-shrink-0 after:absolute after:-inset-1 after:content-['']"
-      >
-        <PanelLeft className="h-5 w-5" />
-      </button>
+      {/* Sidebar toggle — the bar's one bookend, carrying the sync badge. */}
+      <SidebarToggle onClick={onToggleSidebar} label="Open sidebar" />
 
       {/* Tabs — equally spaced, fill remaining space. The gravity blob sits
           behind the labels and stretches between tabs as the route changes.
@@ -1017,8 +1019,8 @@ const PillBarContent = memo(function PillBarContent({
           document.body
         )}
 
-      {/* Sync status — fixed width bookend */}
-      <SyncIconButton />
+      {/* Sync status along the bar's bottom edge — no slot of its own. */}
+      <NavSyncRim radius={mode === "desktop" ? PILL_HEIGHT / 2 : MOBILE_PILL_RADIUS} />
     </div>
   )
 })
@@ -1048,7 +1050,7 @@ const SIDEBAR_HEADER_HEIGHT = PILL_HEIGHT
 function SidebarTopStrip({ onToggle }: { onToggle: () => void }) {
   return (
     <div
-      className="absolute inset-x-0 top-0 z-[2] flex items-center justify-end px-3 gap-1"
+      className="absolute inset-x-0 top-0 z-[2] flex items-center justify-between px-3 gap-1"
       style={{ height: SIDEBAR_HEADER_HEIGHT }}
       // Bare-area tap scrolls the nav list back to top, same as tapping the
       // main/detail headers. The strip captures taps anyway (see above), so
@@ -1067,14 +1069,11 @@ function SidebarTopStrip({ onToggle }: { onToggle: () => void }) {
           One element, one filter list — see globals.css on why the glass
           itself must never go back to stacking these. */}
       <div aria-hidden className="SidebarTopBlur" />
-      <button
-        onClick={onToggle}
-        aria-label="Close sidebar"
-        className="relative flex items-center justify-center h-8 w-8 rounded-full text-foreground flex-shrink-0 after:absolute after:-inset-1 after:content-['']"
-      >
-        <PanelLeft className="h-5 w-5" />
-      </button>
-      <SyncIconButton className="relative" />
+      {/* The sync state in WORDS, and the manual sync — the bar shows it as a
+          badge and an edge, and this is the room for what they mean. */}
+      <SyncStatus className="relative -ml-1" />
+      {/* No badge here: the words are right beside it. */}
+      <SidebarToggle onClick={onToggle} label="Close sidebar" badge={false} />
     </div>
   )
 }
