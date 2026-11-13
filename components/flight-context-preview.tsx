@@ -147,9 +147,18 @@ const GAP = 14;
  * choreography below is expressed as fractions of this so the whole sequence
  * stretches together: retiming the box alone would leave the detail arriving
  * at the same absolute moment and the beat between them would go.
+ *
+ * 460 then read as LOOSE (the owner: "more crisp"), so the open is 400 and
+ * the CLOSE is its own, shorter clock — a dismissal is not something to
+ * watch. On the close nothing waits: the detail and the actions leave at
+ * once, and only the card travels.
  */
-const MORPH_MS = 460;
+const MORPH_MS = 400;
 const MORPH = { duration: MORPH_MS / 1000, ease: [0.32, 0.72, 0, 1] as const };
+const CLOSE_MS = 280;
+const CLOSE = { duration: CLOSE_MS / 1000, ease: [0.4, 0, 0.2, 1] as const };
+/** What leaves on the close leaves at once, before the card has moved far. */
+const LEAVE = { duration: 0.1, ease: "easeOut" as const };
 /** The detail settles into the room the box just made — a beat after it. */
 const DETAIL_DELAY = MORPH_MS * 0.3;
 const DETAIL_MS = MORPH_MS * 0.76;
@@ -261,7 +270,7 @@ export function FlightContextPreview({
     // overlay unmounted while the card was still a few pixels off the row and
     // the row un-hid underneath it, which is the flash on collapse. The extra
     // frames here mean this only ever fires if the animation never reports.
-    window.setTimeout(finishClose, MORPH_MS + 120);
+    window.setTimeout(finishClose, CLOSE_MS + 120);
   }, [finishClose]);
 
   // The system BACK gesture closes the preview instead of navigating out from
@@ -391,7 +400,7 @@ export function FlightContextPreview({
             width: open ? width : anchor.width,
             height: open ? "auto" : anchor.height,
           }}
-          transition={MORPH}
+          transition={closing ? CLOSE : MORPH}
           // The card landing back on its row is what "closed" MEANS, so it is
           // what unmounts the overlay — not a timer running alongside it.
           onLayoutAnimationComplete={() => {
@@ -413,7 +422,7 @@ export function FlightContextPreview({
             style={{ boxShadow: LIFT_SHADOW }}
             initial={{ opacity: 0 }}
             animate={{ opacity: open ? 1 : 0 }}
-            transition={MORPH}
+            transition={closing ? CLOSE : MORPH}
           />
 
           {/* The card's surface, and the clip. Collapsed, the wrapper above
@@ -462,7 +471,9 @@ export function FlightContextPreview({
                   className="px-4 py-2"
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 8 }}
+                  // Its OWN exit timing: the open's delay applied to the exit
+                  // too, so the detail hung on while the card collapsed under it.
+                  exit={{ opacity: 0, transition: LEAVE }}
                   transition={{
                     duration: DETAIL_MS / 1000,
                     ease: [0.32, 0.72, 0, 1],
@@ -536,7 +547,12 @@ export function FlightContextPreview({
         {/* The actions, as a row beneath the card. In flow, so the flex column
             centres the card and the actions together and the card's projection
             carries the shift — no height animation here either. */}
-        <AnimatePresence>
+        {/* `popLayout`: on the close the card leaves the column (it goes back to
+            `position: fixed` on its row), and an exiting row still in flow was
+            re-centred into the space — the buttons slid down past where the
+            card had been. Popped, it is taken out of flow where it stands and
+            fades there. */}
+        <AnimatePresence mode="popLayout">
           {open ? (
             <motion.div
               key="actions"
@@ -560,7 +576,9 @@ export function FlightContextPreview({
                   aria-label={a.label}
                   initial={{ scale: 0.4, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0.4, opacity: 0 }}
+                  // No stagger and no spring on the way out — the open's delay
+                  // held them on screen while the card had already gone.
+                  exit={{ scale: 0.85, opacity: 0, transition: LEAVE }}
                   transition={{ ...POP_SPRING, delay: 0.08 + i * 0.03 }}
                   style={{
                     width: ACTION_TILE_PX,

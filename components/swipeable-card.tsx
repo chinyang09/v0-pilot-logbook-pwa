@@ -73,6 +73,12 @@ export interface SwipeAction {
    * all — on device only, which is exactly the kind of bug a click's ordering
    * produces. `pointerup` is the same gesture, one step earlier and with none
    * of that.
+   *
+   * ON BY DEFAULT for every action (`false` opts out): Delete had the same
+   * lost first tap after a swipe that `…` had, and every swipe action is
+   * reached the same way — straight after a drag. The lift counts only when
+   * the press STARTED on the button, so a swipe released over Delete never
+   * deletes. A confirm (`holdToConfirm`) action keeps the click.
    */
   fireOnPointerUp?: boolean
   variant?: "default" | "destructive" | "secondary"
@@ -170,13 +176,28 @@ function SwipeActionButton({
   const popScale = useSpring(useTransform(reveal, [0, 1], [0.4, 1]), POP_SPRING)
   const scale = useTransform(popScale, (v) => Math.min(v, 1))
   const opacity = useSpring(reveal, POP_SPRING)
+  const onLift = action.fireOnPointerUp !== false && !action.holdToConfirm
+  // The press must START here: a swipe released with the finger over this
+  // button is a pointerup on it with no pointerdown, and must not fire it.
+  const pressedRef = useRef(false)
 
   return (
     <motion.button
       type="button"
       aria-label={action.ariaLabel ?? action.label}
+      onPointerDown={() => {
+        pressedRef.current = true
+      }}
+      onPointerLeave={() => {
+        pressedRef.current = false
+      }}
+      onPointerCancel={() => {
+        pressedRef.current = false
+      }}
       onPointerUp={(e: React.PointerEvent) => {
-        if (!action.fireOnPointerUp || action.disabled || action.holdToConfirm) return
+        const pressed = pressedRef.current
+        pressedRef.current = false
+        if (!onLift || !pressed || action.disabled) return
         e.stopPropagation()
         action.onClick(e.currentTarget.getBoundingClientRect())
         if (!action.keepOpen) onClose()
@@ -187,7 +208,7 @@ function SwipeActionButton({
         // KEYBOARD, where Enter/Space produce a click with no pointer at all
         // (`detail === 0`). Skipping every click left the flight card's `…`
         // unreachable without a pointer.
-        if (action.disabled || (action.fireOnPointerUp && e.detail !== 0)) return
+        if (action.disabled || (onLift && e.detail !== 0)) return
         // Confirm actions don't fire on tap — they hand off to an overlay
         // where the action counts down and the button cancels it.
         if (action.holdToConfirm) {

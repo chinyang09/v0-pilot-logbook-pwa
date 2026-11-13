@@ -2600,7 +2600,13 @@ re-renders).
 - **Actions** (`SwipeAction[]`): `onClick` receives the BUTTON's own box, so an
   action that opens something can anchor it to itself (the flight card's `…`),
   and `keepOpen` leaves the panel up afterwards — for an action that reveals
-  more actions, the row they belong to has to stay put beneath them. Rendered
+  more actions, the row they belong to has to stay put beneath them. Every
+  action FIRES ON THE LIFT (`fireOnPointerUp`, on by default; `false` opts
+  out), not on the click: straight after a swipe the click is lost on device,
+  so Delete took two taps where `…` (already on the lift) took one. The lift
+  counts only for a press that STARTED on that button — a swipe released
+  over Delete never deletes — and a keyboard click (`detail === 0`) still
+  fires. Rendered
   as **separate CAPSULES on the action surface** (`.control-surface`; a
   destructive one red) that
   **scale/pop in** (spring, staggered, trailing first) and fill the row height.
@@ -3217,8 +3223,15 @@ open flight, both themes (Nov 2026: zero violations). What it took:
   button's box, and a scaled radius is a different corner (the owner: "the
   squircle corner doesn't match the button"). The rows arrive a beat later,
   the shadow lives on a sibling layer (a clip would cut it) and arrives with
-  the full shape; closing plays the clip back and fades over its second half,
-  so the button's glyph is there when it lands. ~260ms. A ROW's picker (`SelectRow`) still hangs
+  the full shape. The surface is OPAQUE from frame one, in the colour the
+  glass face reads as (`.menu-surface-solid`, `--on-glass`), and carries a
+  copy of the button's own face (`glyph` — the icon, or a `ChoicePicker`
+  trigger's children in its classes) that fades as the rows arrive and
+  returns as the close lands: the BUTTON becomes the menu. Translucent, the
+  real button showed through the growing menu (the owner: "I should not see
+  the underlying action button"). A menu too wide for either side NARROWS to
+  the room on the button's side (down to 200px) rather than being clamped
+  across the bar — the bell's notes on a phone. ~260ms. A ROW's picker (`SelectRow`) still hangs
   below its row — `morph` is for a control in a bar. The bell is the same
   surface now, not a Radix dropdown, and its navigation runs as the
   dismissal's follow-up.
@@ -5086,7 +5099,13 @@ When making changes, be aware of these high-impact files:
   same `rounded-xl border bg-card` — and then travels to the centre while the
   detail and the action row unfurl beneath it. Closing plays the same thing
   backwards and only then unmounts, which is why `onClose` is called on a timer
-  rather than the overlay being torn down on the tap. Measured at the first
+  rather than the overlay being torn down on the tap. The close is its OWN,
+  shorter clock (`CLOSE_MS` 280 against the open's 400): the detail and the
+  actions leave at once (`LEAVE`, 100ms — the open's delays used to apply to
+  the exit too), and the action row's `AnimatePresence` is `popLayout`, so it
+  fades where it stands — in flow, it was re-centred into the space the card
+  left and slid down past the card (the owner: "the buttons go beyond the
+  flight card position"). Measured at the first
   frame against the row's own box: **dTop 0.0, dLeft 0.0, dWidth 0.0,
   dHeight 0.0**.
 
@@ -5584,6 +5603,9 @@ When making changes, be aware of these high-impact files:
 - Do not forbid zoom in the viewport, and do not give a text field less than 16px on a phone (iOS zooms on focus once zoom is allowed). Do not read `--destructive` as text — `text-destructive` is `--destructive-text`. Do not nest a focusable control inside a `role="button"` row; make the row a plain tap target and an inner element the keyboard target
 - Do not put an action back on the card surface (`bg-secondary`, `bg-card`, `bg-muted`) or give it a rectangle's corners — a thing you press is a CAPSULE or circle on `.control-surface`, a thing you read is a rounded rectangle. On the card surface the context preview's action row read as more card. And do not use the REAL glass (`GlassContainer`) for an action that sits over a scrim, a row or a panel: the painted surface is the same look with no `backdrop-filter`, and these pop in on exactly the frames a readback would cost most
 - Do not put a sync button or cloud back in the tab bar — it cost every phone a tab's width. Sync state is the bar's edge (`NavSyncRim`), the sidebar button's badge (`SyncBadge`) and the sidebar strip's words (`SyncStatus`)
+- Do not fire a swipe action on the CLICK alone — the click straight after a swipe is lost on device (Delete took two taps). Actions fire on the lift (`fireOnPointerUp`, default on), and only for a press that started on the button
+- Do not make a morphing header menu translucent or drop its `glyph` — it covers its button exactly, so a see-through face showed the button underneath and the morph read as a menu laid over a button
+- Do not give the context preview's exit the open's delays, or let its action row exit in flow — the close is `CLOSE_MS`, the detail and actions leave on `LEAVE`, and the row pops out of layout (`popLayout`) so it cannot slide past the collapsing card
 - Do not open a header menu by SCALING it from its button — a scaled radius is not the button's corner. It is a clip from the button's exact box and radius (`placeOver`'s `from.clip`), with the shadow on a sibling layer
 - Do not group header controls page by page — a header is VIEW (search, calendar, period) → TOOLS (import, Quick Check, alerts, read-from-photo) → CREATE (+, alone and last), one capsule per role, with a page switch first and detail commits (Cancel / Save / Edit, Back) one capsule each (`glass-icon-button.tsx`). And do not add a Refresh button: every list follows every write and every sync, so it re-reads the same rows, and it reads as "sync" — which is the sidebar strip's job
 - Do not give the context preview's compact body `layout="position"` — it is the one block that exists in BOTH states, so it takes a FULL `layout`. Its height is unchanged either way, which makes its delta scaleX only: the row's content is condensed at the first frame and relaxes out as the card widens. `layout="position"` cancels the horizontal scale too, which lays it out at the RESTING width from frame one and lets the card clip it — on a tablet the arrival time and ICAO are missing until the card widens past them. The detail and the actions DO take `layout="position"`; they exist only while open. And keep the lift a static shadow on its own PROJECTED (`layout`) node faded by opacity, outside the clip: an interpolated `boxShadow` is rebuilt as a string every frame, and `overflow: hidden` on an ancestor eats a shadow entirely

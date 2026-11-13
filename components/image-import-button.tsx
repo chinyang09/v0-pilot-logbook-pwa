@@ -206,6 +206,7 @@ function PhotoSourceMenu({
             role="menu"
             label="Photo"
             placement={at}
+            glyph={<Camera className="h-4 w-4" />}
             className="py-1.5"
             onKeyDown={(e) => e.key === "Escape" && dismiss()}
           >

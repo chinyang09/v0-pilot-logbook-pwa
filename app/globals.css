@@ -1429,6 +1429,16 @@ textarea:focus-within {
     box-shadow: var(--menu-shadow, var(--glass-shadow));
     border-radius: 18px;
   }
+  /* A menu that GROWS OUT OF its control (`MorphSurface` with `from`): opaque,
+     in the colour the glass face reads as. It starts as exactly the control's
+     shape over the control, so a translucent face showed the button through
+     it and read as a menu laid over a button rather than the button becoming
+     the menu. No backdrop-filter: there is nothing to see through it. */
+  .menu-surface.menu-surface-solid {
+    background-color: var(--on-glass);
+    background-image: none;
+    backdrop-filter: none;
+  }
   .menu-surface::before {
     content: "";
     position: absolute;

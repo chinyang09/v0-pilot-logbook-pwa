@@ -62,7 +62,11 @@ export interface Placement {
    * a capsule at the control's own radius — which the open widens to the
    * whole menu and the close narrows back.
    */
-  from?: { clip: string }
+  from?: {
+    clip: string
+    /** The control's box inside the menu's — where its glyph is drawn. */
+    box: { left: number; top: number; width: number; height: number }
+  }
 }
 
 /** The menu's own corner, as the open ends on it. */
@@ -111,10 +115,16 @@ export function placeOver(
   // other way, so it never slides off its control to stay on screen. Only a
   // menu wider than the room on both sides is clamped (the scale still starts
   // from the control's corner, `ox`).
-  const w = Math.min(width, vw - MARGIN * 2)
+  let w = Math.min(width, vw - MARGIN * 2)
+  const prefer: "start" | "end" = rect.left + rect.width / 2 < vw / 2 ? "start" : "end"
+  // Fits neither way (the bell's 288px notes on a phone): NARROW it to the
+  // room on the control's own side, down to MIN_W, rather than clamping it
+  // across the screen — clamped, its corner left the control and it spread
+  // both ways out of the middle of the bar.
+  const room = prefer === "start" ? vw - MARGIN - rect.left : rect.right - MARGIN
+  if (rect.left + w > vw - MARGIN && rect.right - w < MARGIN && room >= MIN_W) w = room
   const fitsStart = rect.left + w <= vw - MARGIN
   const fitsEnd = rect.right - w >= MARGIN
-  const prefer: "start" | "end" = rect.left + rect.width / 2 < vw / 2 ? "start" : "end"
   const align: "start" | "end" =
     prefer === "start" ? (fitsStart || !fitsEnd ? "start" : "end") : fitsEnd || !fitsStart ? "end" : "start"
   const rawLeft = align === "end" ? rect.right - w : rect.left
@@ -135,7 +145,10 @@ export function placeOver(
     maxHeight,
     originX: align === "end" ? "right" : "left",
     originY: "top",
-    from: { clip: `inset(0px ${r}px ${b}px ${l}px round ${radius}px)` },
+    from: {
+      clip: `inset(0px ${r}px ${b}px ${l}px round ${radius}px)`,
+      box: { left: l, top: 0, width: rect.width, height: rect.height },
+    },
   }
 }
 
@@ -172,9 +185,15 @@ export const MorphSurface = forwardRef<
     id?: string
     className?: string
     onKeyDown?: (e: React.KeyboardEvent) => void
+    /**
+     * The control's own face (its icon, its label), drawn on the surface's
+     * first frames exactly where the control is and faded into the menu — so
+     * the CONTROL turns into the menu rather than a menu opening over it.
+     */
+    glyph?: ReactNode
     children: ReactNode
   }
->(function MorphSurface({ placement, role, label, id, className, onKeyDown, children }, ref) {
+>(function MorphSurface({ placement, role, label, id, className, onKeyDown, glyph, children }, ref) {
   const from = placement.from
   if (!from) {
     return (
@@ -218,22 +237,14 @@ export const MorphSurface = forwardRef<
         role={role}
         aria-label={label}
         onKeyDown={onKeyDown}
-        initial={{ clipPath: from.clip, opacity: 0 }}
-        animate={{
-          clipPath: OPEN_CLIP,
-          opacity: 1,
-          // The button's own glyph fades under the growing face rather than
-          // vanishing on the first frame.
-          transition: { clipPath: { duration: 0.26, ease: MORPH_EASE }, opacity: { duration: 0.1 } },
-        }}
-        exit={{
-          clipPath: from.clip,
-          opacity: 0,
-          // Fading over the second half of the collapse, so the button is
-          // there under it when it lands — a blank shape sat over the +.
-          transition: { clipPath: { duration: 0.2, ease: MORPH_EASE }, opacity: { duration: 0.12, delay: 0.08 } },
-        }}
-        className={cn("menu-surface relative overflow-y-auto overscroll-contain shadow-none", className)}
+        // OPAQUE from the first frame, in the colour the glass face reads as
+        // (`.menu-surface-solid`): it covers the control exactly, so the
+        // control is never seen underneath — translucent, the button showed
+        // through the growing menu and it read as a menu over a button.
+        initial={{ clipPath: from.clip }}
+        animate={{ clipPath: OPEN_CLIP, transition: { clipPath: { duration: 0.26, ease: MORPH_EASE } } }}
+        exit={{ clipPath: from.clip, transition: { clipPath: { duration: 0.2, ease: MORPH_EASE } } }}
+        className={cn("menu-surface menu-surface-solid relative overflow-y-auto overscroll-contain shadow-none", className)}
         style={{ maxHeight: placement.maxHeight, borderRadius: MENU_RADIUS }}
       >
         <motion.div
@@ -244,6 +255,22 @@ export const MorphSurface = forwardRef<
           {children}
         </motion.div>
       </motion.div>
+      {/* The control's face, over the surface where the control is: there on
+          the first frame, gone as the menu's rows arrive — and back as the
+          close lands, so what unmounts is a copy of the control over the
+          control. */}
+      {glyph && (
+        <motion.div
+          aria-hidden
+          className="pointer-events-none absolute flex items-center justify-center text-foreground"
+          style={from.box}
+          initial={{ opacity: 1 }}
+          animate={{ opacity: 0, transition: { duration: 0.1 } }}
+          exit={{ opacity: 1, transition: { duration: 0.08, delay: 0.12 } }}
+        >
+          {glyph}
+        </motion.div>
+      )}
     </div>
   )
 })
@@ -316,6 +343,15 @@ export function ChoicePicker<T extends string>({
         options={options}
         value={value}
         onSelect={onValueChange}
+        // The control's own face, which the morph starts from: the same
+        // classes, so a filled control (the calendar's Duties) starts filled.
+        glyph={
+          morph ? (
+            <span className={className} style={{ width: "100%", height: "100%" }}>
+              {children}
+            </span>
+          ) : undefined
+        }
         onClosed={() => {
           setPlacement(null)
           triggerRef.current?.focus({ preventScroll: true })
@@ -333,6 +369,7 @@ function OptionMenu<T extends string>({
   value,
   onSelect,
   onClosed,
+  glyph,
 }: {
   id: string
   label: string
@@ -341,6 +378,7 @@ function OptionMenu<T extends string>({
   value: T
   onSelect: (value: T) => void
   onClosed: () => void
+  glyph?: ReactNode
 }) {
   const active = placement !== null
   const dismiss = useBackDismiss(active, onClosed)
@@ -391,6 +429,7 @@ function OptionMenu<T extends string>({
             role="listbox"
             label={label}
             onKeyDown={onKeyDown}
+            glyph={glyph}
             placement={placement}
             className="py-1.5"
           >
