@@ -2294,12 +2294,11 @@ nothing to step aside, and the hook and the mask are gone.
   `desktop-layout.tsx` (no more inline copies): a native-style bar of
   progressive **blur + darken** (one masked blur layer under a veil).
 
-  **The blur covers the STATUS-BAR STRIP only** (`calc(var(--top-inset) +
-  4px)`); the band the controls sit in is the veil alone. Over the full band
-  the masked blur blurred the action buttons and the nav pill on iPad (the
-  owner's screenshot, Nov 2026) — WebKit composited the controls into the
-  blurred backdrop. On a phone the strip is where the blur was doing its work
-  anyway.
+  **The heavy blur over the header on iPadOS 27 is the SYSTEM's, not this
+  band's** (the owner, Nov 2026): iOS 27 applies its own blur under a web
+  app's top edge, with no way to turn it down. Confining this band's blur to
+  the status-bar strip was tried for it and taken back — it changed nothing
+  the owner could see and cost the band its own treatment.
 
   **ONE band: the blur, the tap-to-top target and the bar end at the same
   line, `--chrome-top`** — 4px below the 44px controls as they are 4px below
@@ -3181,12 +3180,23 @@ open flight, both themes (Nov 2026: zero violations). What it took:
   date the flight is keyed on; ±1 covers a duty across midnight and a local
   day that is not the UTC one). Five NOW buttons stood down a flight from
   last March, each offering to stamp this minute onto it. Five NOW buttons ran
-  down an empty form. An empty row shows BOTH clocks (`--:--` under UTC and
-  under the zone), with NOW after them where it is offered — the owner wants
-  the local column there before the UTC one is filled, not only after; it is
-  the column that opens the picker in local time. Until the row's airport is
-  known (`zoneKnown`) the local column is captioned "Local", not a second
-  "UTC".
+  down an empty form. An empty row keeps its two columns, and where NOW is
+  offered it stands OVER THE LOCAL COLUMN (the owner's choice, Nov 2026) —
+  the zone caption still under it, the row's height unchanged — so the
+  picker's UTC | Local switch is how an empty row is started from local
+  time. The two columns are one fixed width (`CLOCK_COLUMN`) with a rule
+  between them: side by side at 12px a thumb meant for one landed on the
+  other. The column a tap lands on LIGHTS (`data-open`, for as long as its
+  picker is up), and a NOW stamp lights both columns for a moment
+  (`[data-stamped]`, `clock-stamp`), so a wrong row or a wrong clock is seen
+  at once. Until the row's airport is known (`zoneKnown`) the local column is
+  captioned "Local", not a second "UTC".
+- **The time picker says which clock it sets, in the largest type on the
+  sheet.** A `SegmentedTabs` UTC | Local UTC+7 under the row's own name
+  ("Off"), the other clock beneath it ("= 17:00 UTC"), and the frame on the
+  selected wheel row itself (UTC / LT). Switching keeps the INSTANT (00:00
+  LT becomes 17:00 UTC) and reports back (`onFrameChange`) so the row's lit
+  column follows. With no offset there is one clock and no switch.
 - **Every new record names itself the same way**: New Aircraft is a
   `DetailFormPanel` like New Duty and New Currency (it was a bare scroller with
   no title), and New Airport carries the same title (`NewAirportPanel` —
@@ -3268,7 +3278,15 @@ open flight, both themes (Nov 2026: zero violations). What it took:
   action button"); hiding the button is what the solid face was standing in
   for. A menu too wide for either side NARROWS to
   the room on the button's side (down to 200px) rather than being clamped
-  across the bar — the bell's notes on a phone. ~260ms. A ROW's picker (`SelectRow`) still hangs
+  across the bar — the bell's notes on a phone. ~260ms. **A menu stays in
+  its PANEL** (`regionFor`, `place` and `placeOver` alike): beside a detail
+  panel, a menu from the main panel's calendar or header ran across the
+  divider into the detail (the owner: "respect the confines of each
+  section"); a control over neither panel has the viewport. **A LIT control
+  stays lit into its menu** (`from.fill`, read off the control's computed
+  background in the tap): the growing surface starts in the control's fill
+  and turns into the menu's face as it widens — the Duties button, filled
+  while duties show, used to become plain glass on the first frame. A ROW's picker (`SelectRow`) still hangs
   below its row — `morph` is for a control in a bar. The bell is the same
   surface now, not a Radix dropdown, and its navigation runs as the
   dismissal's follow-up.
@@ -5131,152 +5149,39 @@ When making changes, be aware of these high-impact files:
   for the scrim — on a phone, where hardly any scrim is left uncovered, that
   meant the preview could not be dismissed at all.
 
-  **It GROWS OUT OF the row you held, and goes back into it.** The preview
-  opens as an exact copy of that card, on that card — same `px-3 py-1` body,
-  same `rounded-xl border bg-card` — and then travels to the centre while the
-  detail and the action row unfurl beneath it. Closing plays the same thing
-  backwards and only then unmounts, which is why `onClose` is called on a timer
-  rather than the overlay being torn down on the tap. Both directions are
-  SPRINGS on a stated duration (`MORPH`: 0.4s, bounce 0.14 — it lands with a
-  hint of settle; `CLOSE`: 0.3s, no bounce — it goes home without
-  overshooting the row), where they were cubic curves that started and
-  stopped dead, which the owner read as not natural. The card's corner is in
-  `style` on the `layout` node (`CARD_RADIUS` 12, the shadow layer too), so
-  framer counter-scales it each frame: a radius in a CSS class was squashed
-  with the box and the corners went oval mid-morph. The close is its OWN,
-  shorter clock (`CLOSE_MS` 300 against the open's 400): the detail and the
-  actions leave at once (`LEAVE`, 100ms — the open's delays used to apply to
-  the exit too), and the action row's `AnimatePresence` is `popLayout`, so it
-  fades where it stands — in flow, it was re-centred into the space the card
-  left and slid down past the card (the owner: "the buttons go beyond the
-  flight card position"). Measured at the first
-  frame against the row's own box: **dTop 0.0, dLeft 0.0, dWidth 0.0,
-  dHeight 0.0**.
+  **It GROWS OUT OF the row you held, and goes back into it — by TRAVEL and
+  a CLIP, never a scale** (Nov 2026, after the FLIP below was rejected through
+  several rounds as not natural). The whole card — compact body, signature,
+  the detail grid — is laid out ONCE, at its resting size, from the first
+  frame, `position: fixed` on the held row's box. Two things animate: its
+  POSITION (`x`/`y`, from the row to the middle of the screen with its action
+  row under it) and a CLIP, `inset(0 0 calc(100% - <row height>px) 0 round
+  12px)` → `inset(0 0 calc(0% - 0px) 0 round 12px)`, that starts as exactly
+  the row and opens downward over the detail. So the first frame IS the row,
+  and nothing is ever scaled — the header menus' technique (a clip from the
+  control's own shape), which the owner judged right. ONE spring for both
+  (`OPEN` 0.42s, bounce 0.12; `CLOSE` 0.32s, no bounce). The card's height is
+  read by a ResizeObserver; until it lands the card sits on the row, clipped
+  to it, so there is no blank frame. The detail rises in a beat behind the
+  clip's edge on the open and STAYS while the clip closes over it — fading it
+  first left an empty box collapsing. The lift is a sibling shadow outside the
+  clip, arriving once the card is mostly open; the actions sit under the
+  card's RESTING place and pop in there, leaving at once on the close. The
+  overlay unmounts on the card's own `onAnimationComplete` (a timer is only
+  the safety net).
 
-  It is **NOT** framer's shared-layout (`layoutId`) morph, and the reference
-  implementation that asked for one was deliberately not followed:
+  **It keeps the ROW's width, on a tablet too** — it travels to the centre of
+  the screen at that width. Widening meant laying the compact body out wider
+  than the row, which a clip from the row cuts off at the arrival time.
 
-  - The source card lives inside the **virtualised** list. A `layout`/`layoutId`
-    prop there puts every rendered row into framer's measurement pass on every
-    layout change — exactly the per-row measuring the logbook list was rebuilt
-    to remove (see the virtualised-list note above).
-  - A FLIP morph animates the box by **scale**, and this growth is nearly all
-    height, so the card's text would visibly stretch on the way up.
-
-  **The morph IS Shadix UI's `expandable-card` technique** — framer's `layout`
-  projection (a FLIP), adopted after three rounds of the hand-derived version
-  still reading as less smooth than the nav morph. The difference is
-  structural, not a matter of tuning: **nothing animates a length any more.**
-  The card is laid out COLLAPSED on one commit (`position: fixed` on the row's
-  own box, which we already measure as `anchor`) and EXPANDED on the next (an
-  ordinary centred flex child at its natural height), and framer interpolates
-  the difference as a transform. Per frame that is a transform and some
-  opacities, where it used to be `width` plus two `height: 0 → auto` boxes plus
-  an interpolated `boxShadow`.
-
-  The two objections that held it off for three rounds both have answers:
-
-  - **`layoutId` would put every virtualised row into framer's measurement
-    pass.** So there is no `layoutId` and the list is not involved at all.
-    Shadix shares an id between a collapsed card and an expanded one; we
-    already measure the row when the hold fires, so the collapsed box is stated
-    outright. Same projection, none of the cost.
-  - **FLIP animates the box by SCALE, so `tabular-nums` text stretches.** Every
-    content block therefore carries `layout="position"`, which makes it its own
-    projection node — framer cancels the parent's scale on it, so it animates
-    where it SITS and never how big it is. One wrapper per block is enough;
-    everything inside a corrected node is corrected with it. This is what
-    Shadix's `layout="position"` on its title and description is for.
-
-  Measured on a 390×844 viewport, opening (row at `[12,12,366,105]`):
-
-  | t | card box | scaleY | compact body |
-  |---|---|---|---|
-  | 51ms | 12,12,366,105 | — | 103×364 |
-  | 108ms | 12,12,366,105 | 0.329 | 103×364 |
-  | 250ms | 12,201,366,295 | 0.927 | 103×364 |
-  | 649ms | 12,224,366,319 | none | 103×364 |
-
-  The first frame is the row to the pixel, and the compact body is **103×364 in
-  every frame** while the card's scaleY runs 0.33 → 1 — the scale correction
-  holds exactly. Closing: the card lands back on `[12,12,366,105]` at 459ms and
-  the overlay unmounts at 510ms, with **zero frames** where both the overlay and
-  the un-hidden row are visible.
-
-  **The card WIDENS, and which projection mode each block gets is what makes
-  that possible.** The card's projection scales its subtree on both axes. The
-  vertical part must be cancelled — it would crush the row's text to a fifth of
-  its height — but the horizontal part IS the card widening, and the compact
-  body is supposed to follow it. So:
-
-  | | prop | why |
-  |---|---|---|
-  | compact body | `layout` (full) | exists in BOTH states, and its own height is 103 either way — so its delta is **scaleX only**. Condensed at the first frame, relaxing out as the card widens. |
-  | detail, actions | `layout="position"` | exist only while open, so they have no delta of their own; this cancels the parent's scale outright, which is what keeps them true-size while the card collapses under them on close. |
-
-  `layout="position"` on the compact body was tried first and is wrong for it:
-  it lays the body out at the RESTING width from the first frame and lets the
-  card clip it, so on a tablet the arrival time and ICAO are simply missing
-  until the card has widened past them. Condensed type reads as motion; half
-  the flight missing reads as broken. (Shadix hits this too — its title is
-  `layout="position"` and laid out at the expanded width from frame one — but
-  its text is short enough to fit the collapsed card, so nothing is clipped.)
-
-  Measured at 1180 wide, from a 312px row: card `[12,12,312,105]` at the first
-  frame with the body at **310×103**, and `[254,212,672,319]` at rest with the
-  body at **670×103** — the body's height is 103 in every frame while its width
-  tracks the card's. On a phone `MIN_GROWTH` suppresses the growth entirely
-  (measured: scaleX exactly 1 throughout, body 364×103 in every frame), because
-  a row is `innerWidth − 24` and the wrapper's margin only allows
-  `innerWidth − 32`, so "growing" would mean getting 8px narrower.
-
-  The width only ever GROWS. A row already wider than `MAX_WIDTH` rests at its
-  own width rather than shrinking to 672 — shrinking would mean laying the body
-  out narrow and stretching it, which is the frame-one mismatch again in the
-  other direction.
-
-  **Every style key is supplied in BOTH states, never a switch between two
-  differently-shaped objects.** A `motion` component does not clear a style
-  property that simply disappears from the object — measured: with the
-  collapsed branch dropping `position`/`top`/`left`/`height`, those stayed on
-  the element as `position: fixed; top: 12px; left: 12px; height: 104.75px` for
-  the whole morph, so the card never left the row and there was no layout
-  change to animate at all.
-
-  What remains: the CARD carries `layout`; the compact body, the detail and the
-  action row carry `layout="position"`; the detail and the actions are MOUNTED
-  only while open (inside `AnimatePresence`) so the card's natural height is
-  what changes; and the lift is a static shadow on its own projected node
-  (`LIFT_SHADOW`), faded by opacity — it needs `layout` of its own or the
-  card's scale would squash a 50px blur, and it sits OUTSIDE the clip because a
-  box-shadow paints beyond its element's box and `overflow: hidden` on an
-  ancestor takes all of it. That is why the wrapper and the surface are two
-  elements rather than one.
-
-  The anchor is the **card's** box (`[data-slot="card"]`), not the row
-  wrapper's — the wrapper carries the list's per-row top gap, and 4px out is a
-  visible jump on the first frame. And the source row is `invisible` while the
-  preview is up: the copy opens on top of it, so leaving it would show the same
-  flight twice through the scrim. It comes back at the unmount, into the box
-  the preview has just collapsed onto, so there is nothing to see.
-
-  **It comes to rest centred on the VIEWPORT at `MAX_WIDTH` (672 — `max-w-2xl`),
-  not in the column the row lives in.** That is what makes the transformation
-  visible at all on anything bigger than a phone: held to the width of the panel
-  it came out of, the card barely moved and the morph read as nothing happening.
-  Measured on a 1180-wide tablet: the row is 336 wide and the preview settles at
-  672, centred at x 254. On a phone the row already fills the screen, so the
-  width clamps to what it had and the growth is all height (measured: +143px);
-  there is nowhere else for it to go.
-
-  The DETAIL arrives a beat after the box that holds it — `opacity` and `y`,
-  delayed 30% into the box growth and running for 76% of it. There is
-  deliberately **no `blur()`** in that reveal: it is a per-frame filter pass on
-  the busiest frames of the overlay, and the delay plus the travel already read
-  as content settling in. The box growing is
-  the card changing shape; this is the content settling into the room that just
-  appeared, and separating the two is most of what makes the expansion legible
-  rather than a jump.
+  **What it replaced, and why** (so it is not rebuilt): a framer `layout`
+  projection (a FLIP) — the card laid out collapsed on one commit and expanded
+  on the next, the difference animated as a SCALE with every block
+  counter-scaled. Filmed frame by frame, its close faded the detail at once
+  and left a large empty box being squashed while the compact body slid inside
+  it on its own correction, and its open stretched the border and corners
+  before the radius correction caught up. A FLIP grows a box by scaling it;
+  a card that keeps its size and is revealed has nothing to distort.
 
   The hold that drives it is the one that was removed from the ACTIONS menu,
   and it keeps every hard-won guard: it cancels on any movement past
@@ -5648,19 +5553,16 @@ When making changes, be aware of these high-impact files:
 - Do not put an action back on the card surface (`bg-secondary`, `bg-card`, `bg-muted`) or give it a rectangle's corners — a thing you press is a CAPSULE or circle on `.control-surface`, a thing you read is a rounded rectangle. On the card surface the context preview's action row read as more card. And do not use the REAL glass (`GlassContainer`) for an action that sits over a scrim, a row or a panel: the painted surface is the same look with no `backdrop-filter`, and these pop in on exactly the frames a readback would cost most
 - Do not put a sync button or cloud back in the tab bar — it cost every phone a tab's width. Sync state is the bar's edge (`NavSyncRim`), the sidebar button's badge (`SyncBadge`) and the sidebar strip's words (`SyncStatus`)
 - Do not fire a swipe action on the CLICK alone — the click straight after a swipe is lost on device (Delete took two taps). Actions fire on the lift (`fireOnPointerUp`, default on), and only for a press that started on the button
+- Do not let a menu cross out of the panel its control belongs to — `regionFor` bounds `place` and `placeOver`; and do not drop `from.fill`, or a lit control turns into plain glass on its menu's first frame
 - Do not leave the control visible under a morphing header menu, and do not paint the menu SOLID to hide it — the control is hidden while the menu is open (`from.hide`, from `controlBox`) and the menu keeps the glass face. Keep its `glyph`, its corners at the control's own radius (never a menu radius of its own), and start it from the control's GLASS capsule, not the bare button
-- Do not let `ChromeFade`'s blur cover the header's controls — it is confined to the status-bar strip (`calc(var(--top-inset) + 4px)`); the band below is the veil alone. On iPad the masked blur reached over the action buttons and the nav pill and blurred them
+- Do not chase the iPadOS 27 header blur in `ChromeFade` — it is the system's own blur under a web app's top edge, and no page CSS reaches it
 - Do not match a logbook search term exactly — go through `lib/utils/logbook-search.ts` (squashed fields, the route and date forms, the word fallback); and do not split a bare day number off a date in the word fallback
-- Do not give the context preview's exit the open's delays, or let its action row exit in flow — the close is `CLOSE_MS`, the detail and actions leave on `LEAVE`, and the row pops out of layout (`popLayout`) so it cannot slide past the collapsing card
 - Do not open a header menu by SCALING it from its button — a scaled radius is not the button's corner. It is a clip from the button's exact box and radius (`placeOver`'s `from.clip`), with the shadow on a sibling layer
 - Do not group header controls page by page — a header is VIEW (search, calendar, period) → TOOLS (import, Quick Check, alerts, read-from-photo) → CREATE (+, alone and last), one capsule per role, with a page switch first and detail commits (Cancel / Save / Edit, Back) one capsule each (`glass-icon-button.tsx`). And do not add a Refresh button: every list follows every write and every sync, so it re-reads the same rows, and it reads as "sync" — which is the sidebar strip's job
-- Do not give the context preview's compact body `layout="position"` — it is the one block that exists in BOTH states, so it takes a FULL `layout`. Its height is unchanged either way, which makes its delta scaleX only: the row's content is condensed at the first frame and relaxes out as the card widens. `layout="position"` cancels the horizontal scale too, which lays it out at the RESTING width from frame one and lets the card clip it — on a tablet the arrival time and ICAO are missing until the card widens past them. The detail and the actions DO take `layout="position"`; they exist only while open. And keep the lift a static shadow on its own PROJECTED (`layout`) node faded by opacity, outside the clip: an interpolated `boxShadow` is rebuilt as a string every frame, and `overflow: hidden` on an ancestor eats a shadow entirely
-- Do not let the context preview come to rest in the row's own column — it settles CENTRED ON THE VIEWPORT at `MAX_WIDTH`, and only ever GROWS (a row already wider than that keeps its own width rather than shrinking, which would be the same frame-one mismatch in reverse). Keep the detail's own delayed reveal (opacity + y, ~30% of the morph in): the box growing and the content arriving are two things, and running them together reads as a jump. It does NOT animate `blur()` — that is a per-frame filter pass on the busiest frames of the overlay, and the delayed opacity/travel already says "settling into the room"
+- Do not animate the context preview by SCALE again (a `layout`/`layoutId` FLIP, or a `scale` on the card) — it is laid out once at its resting size and moved (`x`/`y`) and revealed (a `clip-path` inset from the row's own box, `round 12px`). A FLIP squashed an empty box on the close and stretched the corners on the open, and put the virtualised rows into framer's measurement pass if a `layoutId` was used. Keep the card at the ROW's width, keep the detail under the closing clip rather than fading it first, unmount on the card's `onAnimationComplete` (never a timer of the close's own length), and anchor on `[data-slot="card"]`, not the row wrapper
 - Do not give the context preview's backdrop a blur — it is a plain darken (`SCRIM`). Full-viewport `backdrop-filter` layers each sample the one below, so the whole stack recomputes every frame their opacity changes, and that landed on exactly the frames the card is travelling. Giving it its own short clock helped and was not enough; the reference implementation this morph was measured against has no blur either. A DIALOG's backdrop keeps its blur — nothing is animating a card behind it
-- Do not unmount the context preview on a timer set to `MORPH_MS` — the collapse only STARTS on the commit after the closing state flips, so that timer is systematically a frame or two early and the overlay disappeared with the card still short of its row, which un-hid underneath and read as a flash on the flight card. The card's own `onLayoutAnimationComplete` is what "closed" means; the timer stays only as a safety net, and longer than the morph (measured: card lands at 459ms, overlay unmounts at 510ms, zero frames with both visible)
 - **Blur animation rules, app-wide.** Never ANIMATE `backdrop-filter`, `filter`, `mask-image`, `height` or `top` — they are layout- or paint-bound and re-rasterise every frame. Animate `opacity` and `transform` only. Where a progressive blur has to appear or disappear, fade the layers' OPACITY on a SHORT clock of their own (~160ms) rather than the surrounding motion's, so the blur settles before the thing it sits behind has finished moving and the rest of the animation composites a texture that no longer changes. And keep the stack to THREE layers on a full-viewport effect: each layer samples the output of the one below, so it is a chain rather than a sum, and the fourth link is the one a weak mobile GPU shows. `RadialBlurBackdrop` and `SIDEBAR_BACKDROP_BLUR` both follow this; `ChromeFade` is static and does not animate at all
 - Do not fade a `backdrop-filter` layer by fading an ANCESTOR — an element with `opacity` below 1 (or `will-change: opacity`, a mask, or a filter) is a **backdrop root**, so its descendants' `backdrop-filter` can only sample inside it. The context preview's `RadialBlurBackdrop` used to sit inside the scrim that fades: for the whole morph the layers blurred nothing, then the full stack snapped on the instant the scrim hit exactly 1 — a hitch at the end of the animation, and the part of that overlay most likely to be felt on a phone. Fade each LAYER's own opacity instead (an element's own opacity is fine — the root is an ancestor boundary), which is how `SIDEBAR_BACKDROP_BLUR` has always done it. A CSS transition there also needs the layers to MOUNT at 0, or there is no previous value to run from
-- Do not put a `layout`/`layoutId` prop on a flight card in the LIST to morph the context preview out of it — the rows are VIRTUALISED, and that hands framer every rendered row to measure on every layout change. The preview is a FLIP, but only the OVERLAY carries the projection: the collapsed box is stated outright from the anchor we already measure when the hold fires, so the list is never involved. Anchor it to the card (`[data-slot="card"]`), not the row wrapper — the wrapper carries the per-row top gap and 4px out is a visible jump on the first frame
 - Do not use `transition-all` (or `transition: all`) anywhere — name the properties (`transition-colors`, `transition-[background-color,color,scale]`). It includes `visibility`, which is how the kept-alive stack hides pages, so every element carrying it there started a visibility transition — and was restyled every frame — on each tab switch, and it makes each style change compare every animatable property, Tailwind's ~87 registered custom properties included. Tailwind's plain `transition` does not include `visibility` and is fine
 - Do not write a custom property on a CONTAINER per frame or per tap — it inherits, so the write restyles the container's whole subtree. The glass's spotlight properties go on its own empty element (`.GlassSpotlight`, reached from outside with `glassSpotlight(root)`); written on the glass root they restyled the entire nav (~170 elements, 45–60ms at 4×) on every tap and every frame a finger moved over it
 - Do not drop `content-visibility: hidden` from a hidden kept-alive page. `visibility` alone is inherited, so the tab switch restyled BOTH pages' whole subtrees (~1,400 elements, 155–171ms at 4×); `content-visibility` skips the hidden one entirely and keeps its scroll offsets. `visibility` stays beside it for an engine without `content-visibility` — the result on screen is the same either way

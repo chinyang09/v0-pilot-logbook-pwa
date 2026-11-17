@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import type { FlightLog } from "@/lib/db";
 import { FlightCardBody } from "@/components/flight-card-body";
 import { SignatureMark } from "@/components/signature-mark";
@@ -23,77 +23,37 @@ import {
 
 /**
  * The flight card's CONTEXT PREVIEW — a press-and-hold on a row lifts that one
- * card out of the list, enlarges it, and shows the detail the compact card has
- * no room for, with the same action set alongside.
+ * card out of the list, shows the detail the compact card has no room for, and
+ * puts the same action set beneath it.
  *
- * This is deliberately NOT the `…` cascade, and the distinction is the whole
- * point of having both. The cascade is a menu: you already know what you want
- * to do and you go and do it, from a control that advertises itself in the
- * swipe panel. This is a LOOK: you are scanning the list, you want to know more
- * about one row without leaving your place, and a hold is the gesture that has
- * always meant "tell me about this". The actions come along because once you
- * are looking at it, acting on it is the obvious next thing.
+ * This is deliberately NOT the `…` cascade. The cascade is a menu: you know
+ * what you want to do and go to a control that advertises itself. This is a
+ * LOOK: you want to know more about one row without leaving your place, and a
+ * hold is the gesture that has always meant "tell me about this".
  *
- * A hold on a row inside a virtualised scroller was a fight the last time it
- * drove the actions menu, and the lessons are kept (see `flight-list`): the
- * hold cancels on any real movement, and firing it ENDS the card's pointer
- * session so framer cannot carry a half-started drag into the overlay.
+ * ── THE MORPH: a card that TRAVELS and is REVEALED, never scaled ──────────
+ * The whole card — compact body, detail and all — is laid out ONCE, at its
+ * resting size, from the first frame. Two things animate:
  *
- * ── THE MORPH ──────────────────────────────────────────────────────────────
- * The preview GROWS OUT OF the row you held, and goes back into it. It opens
- * as an exact copy of that card, sitting exactly where it sits in the list
- * (same `px-3 py-1` body, same `rounded-xl border bg-card`), then travels to
- * the centre while the detail and the action row unfurl beneath it.
+ *   • its POSITION (`x`/`y`), from the held row to the middle of the screen;
+ *   • a CLIP (`clip-path: inset(… round 12px)`) that starts as exactly the
+ *     row — its height, its corners — and opens downward over the detail.
  *
- * It comes to rest CENTRED ON THE VIEWPORT and as wide as the screen allows
- * (`MAX_WIDTH`) — a dialog held to the width of the panel it came out of barely
- * moves on a tablet. On a phone the row already fills the screen, so it rests
- * at the row's own width and the growth is all height (see `MIN_GROWTH`).
+ * So the first frame IS the row, to the pixel, and nothing is ever scaled:
+ * no text squeezed, no border thinned, no corner stretched. It is the header
+ * menus' technique (a clip from the control's own shape), which the owner
+ * judged right, applied to the card.
  *
- * ── IT IS A FLIP (framer's `layout` projection) ───────────────────────────
+ * It replaced a `layout` projection (a FLIP), which the owner found unnatural
+ * through several rounds of tuning, and the frames show why: a FLIP grows a
+ * box by SCALE and counter-scales what is inside, so on the close the detail
+ * faded at once and left the card a large EMPTY box being squashed, while the
+ * compact body slid inside it on its own correction. A clip closing over a
+ * card that keeps its size has nothing to distort.
  *
- * This is the Shadix expandable-card technique, and it replaced a
- * hand-derived morph that animated `width` and two `height: 0 → auto` boxes.
- * The difference is structural rather than a matter of tuning: NOTHING here
- * animates a length any more. The card is laid out collapsed on one commit
- * (`position: fixed` on the row's own box) and expanded on the next (an
- * ordinary centred flex child at its natural height), and framer measures both
- * boxes and interpolates the difference as a transform. Per frame that is a
- * transform and some opacities.
- *
- * Two objections were held against this for a while, and both have answers:
- *
- *   • **"`layoutId` puts every virtualised row into framer's measurement
- *     pass."** True, and that is why there is no `layoutId` and the list is not
- *     involved at all. Shadix shares an id between a collapsed card and an
- *     expanded one; we already MEASURE the row (`anchor`) when the hold fires,
- *     so the collapsed box can be stated outright. Same projection, none of
- *     the cost — the logbook's rows stay plain.
- *   • **"FLIP animates the box by scale, so the text stretches."** Also true,
- *     and it is why every content block carries `layout="position"`. That makes
- *     each one its own projection node, which framer cancels the parent's scale
- *     on, so it animates where it SITS and never how big it is. One wrapper per
- *     block is enough — everything inside a corrected node is corrected with
- *     it. Shadix does exactly this on its title and description; our card is
- *     `tabular-nums` clock times, so it needs it more, not less.
- *
- * What is left:
- *
- *   • the CARD carries `layout` — the projection;
- *   • the compact body, the detail and the action row carry
- *     `layout="position"` — the scale correction;
- *   • the detail and the actions are MOUNTED only while open, inside
- *     `AnimatePresence`, so the card's natural height is what changes and the
- *     projection does the rest;
- *   • the lift is a static shadow on its own projected node (`LIFT_SHADOW`),
- *     faded by opacity — framer scale-corrects a box-shadow, which is why it
- *     can sit there rather than being interpolated as a string.
- *
- * Closing plays the same thing backwards, and the UNMOUNT is driven by the
- * card's own animation finishing rather than by a timer running beside it —
- * see `finishClose`.
- *
- * The backdrop is a plain darken with NO blur (`SCRIM`).
+ * The card keeps the ROW's width, on a tablet too: widening it meant laying
+ * the compact body out at the wider width, which a clip from the row would
+ * cut off at the arrival time. A panel is a phone; its card stays a phone's.
  */
 export interface PreviewAnchor {
   left: number;
@@ -103,103 +63,26 @@ export interface PreviewAnchor {
 }
 
 const MARGIN = 16;
-/** How wide the lifted card is allowed to GROW (Tailwind's `max-w-2xl`).
- *
- *  On anything bigger than a phone the row is the width of one panel, and
- *  expanding to a screen-centred card plainly bigger than the row IS the
- *  transformation. See the compact body's `layout` prop for how the projection
- *  is made to widen without clipping or crushing what is inside it. */
-const MAX_WIDTH = 672;
-/**
- * How much wider the card has to be able to GET before it grows sideways.
- *
- * A logbook row is `innerWidth - 2 x --panel-gutter` (24) and the wrapper's
- * margin would allow `innerWidth - 2 x MARGIN` (32), so on a phone "growing"
- * would mean the card getting 8px NARROWER. Below this threshold it rests at
- * the row's own width instead and there is no horizontal scale at all.
- *
- * 48px is about where a width change reads as the card growing rather than
- * twitching.
- */
-const MIN_GROWTH = 48;
-/**
- * The lift — a STATIC shadow on its own projected node, faded with `opacity`.
- *
- * It used to be an animated `boxShadow` on the card, which framer interpolates
- * by rebuilding the declaration string every frame for the browser to re-parse
- * and re-blur at 50px.
- *
- * It needs `layout` of its own even though it is `absolute inset-0`: without a
- * projection node the card's scale would squash a 50px blur along with
- * everything else. framer scale-corrects `boxShadow` and `borderRadius` on a
- * projected node, which is exactly what this needs and nothing else does.
- */
-/** The card's own corner (`rounded-xl`), stated so the projection can keep it. */
+/** The card's own corner (`rounded-xl`) — the clip keeps it at every frame. */
 const CARD_RADIUS = 12;
 const LIFT_SHADOW = "0px 25px 50px -12px rgba(0,0,0,0.45)";
-/** The gap between the card and its action row — inside the collapsing box, so
- *  it disappears with the row rather than holding the card off its mark. */
+/** The gap between the card and its action row. */
 const GAP = 14;
 /**
- * One clock for the whole morph, so the travel and the unfurl are one motion.
- * Ease-out with no overshoot: the card is arriving, not landing.
- *
- * 340 read as SNAPPY rather than smooth — the card had arrived before the eye
- * had finished following it, which makes an expansion feel like a cut. The
- * choreography below is expressed as fractions of this so the whole sequence
- * stretches together: retiming the box alone would leave the detail arriving
- * at the same absolute moment and the beat between them would go.
- *
- * 460 then read as LOOSE (the owner: "more crisp"), so the open is 400 and
- * the CLOSE is its own, shorter clock — a dismissal is not something to
- * watch. On the close nothing waits: the detail and the actions leave at
- * once, and only the card travels.
+ * ONE spring for the travel and the reveal, so they are one motion. A touch
+ * of give on the open (an iOS context menu's), none on the close: a card
+ * going home should not bounce off its row.
  */
-const MORPH_MS = 400;
+const OPEN = { type: "spring" as const, duration: 0.42, bounce: 0.12 };
+const CLOSE = { type: "spring" as const, duration: 0.32, bounce: 0 };
+const EASE = [0.32, 0.72, 0, 1] as const;
 /**
- * SPRINGS, not curves (the owner: the expand "doesn't feel natural"). The
- * quint ease-out did most of its travel in the first third and crawled the
- * rest, which reads as a mechanism rather than an object; a spring carries
- * its speed through the middle the way a lifted card does. The open settles
- * with a touch of give (an iOS context menu's), the close is critically
- * damped — a card going home should not bounce off its row.
- */
-const MORPH = { type: "spring" as const, duration: MORPH_MS / 1000, bounce: 0.14 };
-const CLOSE_MS = 300;
-const CLOSE = { type: "spring" as const, duration: CLOSE_MS / 1000, bounce: 0 };
-/** What leaves on the close leaves at once, before the card has moved far. */
-const LEAVE = { duration: 0.1, ease: "easeOut" as const };
-/** The detail settles into the room the box just made — a beat after it. */
-const DETAIL_DELAY = MORPH_MS * 0.3;
-const DETAIL_MS = MORPH_MS * 0.76;
-/**
- * The backdrop is a PLAIN DARKEN — no blur.
- *
- * It used to fade in `RadialBlurBackdrop`: three full-viewport
- * `backdrop-filter` layers, each sampling the output of the one below, so
- * while their opacity moved the whole stack was recomputed every frame — and
- * that landed on exactly the frames the card is travelling. It was already the
- * most expensive thing in this overlay by a wide margin (which is why it had
- * its own short clock rather than the morph's), and on a phone it is the one
- * cost here big enough to be felt on its own.
- *
- * Shadix's expandable card — the reference this morph was measured against —
- * uses a flat `bg-black/40` with no blur at all, and its `backdrop-blur-xs`
- * variant is commented out in its own source. That difference, not the morph
- * technique, was always the largest cost gap between the two.
- *
- * Deeper than the shared `MODAL_SCRIM` in both themes, because the blur was
- * carrying part of the separation and now nothing else is: a dialog keeps its
- * blur, this does not. ONE constant, so it is a single number to retune.
- *
- * 0.60 on the dark theme left the list's bright figures readable straight
- * through it, so the row of action buttons sat on top of a flight card's
- * route and the eye had two things to read at once. 0.75 takes the list down
- * to a texture: still there (you know where you are), no longer competing.
+ * The backdrop is a PLAIN DARKEN — no blur: a full-viewport backdrop-filter
+ * recomputed on every frame the card travels was the one cost here big
+ * enough to feel on a phone. Deeper than `MODAL_SCRIM`, because nothing else
+ * separates the card from the list.
  */
 const SCRIM = "bg-black/45 dark:bg-black/75";
-/** The scrim is not part of the morph — it is just the lights going down. */
-const SCRIM_FADE = { duration: 0.2, ease: [0.32, 0.72, 0, 1] as const };
 
 /**
  * Day/night counts, written the way the card's chips write them (`1D`, `2N`)
@@ -247,19 +130,25 @@ export function FlightContextPreview({
   const scrimPressRef = useRef(false);
 
   /**
-   * The card is laid out COLLAPSED on the first commit and EXPANDED on the
-   * next, and the flip between them is the whole animation.
-   *
-   * framer's `layout` measures a box before and after a real layout change and
-   * interpolates the difference as a transform. It therefore needs two commits
-   * with two different layouts — rendering the card in its final place on
-   * mount gives it nothing to animate from. So: mount `position: fixed` on the
-   * row's own box, then on the very next frame put it in the centred flex
-   * column at its natural size.
+   * The card's full height, read by a ResizeObserver (after the browser's own
+   * layout, never mid-commit). Until it is known the card sits on the row,
+   * clipped to it — identical to the row — so there is no blank frame.
    */
-  const [expanded, setExpanded] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const h = entry.borderBoxSize?.[0]?.blockSize ?? el.getBoundingClientRect().height;
+      setHeight((prev) => (prev !== null && Math.abs(prev - h) < 0.5 ? prev : h));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // The morph runs BOTH ways, so closing is a state the component passes
-  // through rather than an unmount: collapse back onto the row, then go.
+  // through rather than an unmount: back onto the row, then go.
   const [closing, setClosing] = useState(false);
   const closingRef = useRef(false);
   /** Fires once, whichever of the two paths below gets there first. */
@@ -272,40 +161,21 @@ export function FlightContextPreview({
     if (closingRef.current) return;
     closingRef.current = true;
     setClosing(true);
-    // Back to the collapsed layout — the same projection, run the other way.
-    setExpanded(false);
-    // A SAFETY NET, not the trigger — see onAnimationComplete on the card.
-    // The animation only starts on the commit after this state change, so a
-    // timer of exactly MORPH_MS is systematically a frame or two EARLY: the
-    // overlay unmounted while the card was still a few pixels off the row and
-    // the row un-hid underneath it, which is the flash on collapse. The extra
-    // frames here mean this only ever fires if the animation never reports.
-    window.setTimeout(finishClose, CLOSE_MS + 120);
+    // A safety net only: the card landing on its row (onAnimationComplete)
+    // is what unmounts the overlay. A timer of exactly the close's length is
+    // a frame or two EARLY — the row un-hid under a card still short of it.
+    window.setTimeout(finishClose, 520);
   }, [finishClose]);
 
   // The system BACK gesture closes the preview instead of navigating out from
-  // under it. On Android that swipe is a history back, and with nothing of ours
-  // on the stack it took the router to the previous page while this — portalled
-  // to `document.body` — stayed up over it.
-  //
-  // Everything else dismisses through the returned `requestClose` so there is
-  // exactly one close path; see the hook for why an action's `router.push` has
-  // to wait for the marker entry to be released.
+  // under it; everything else dismisses through `requestClose`, so an
+  // action's `router.push` runs after the marker entry is released.
   const requestClose = useBackDismiss(true, startClose);
 
-  // Same lock as the cascade: while the preview is up nothing behind it is a
-  // hit-test target, so the list cannot be swiped or tapped through the scrim.
+  // While the preview is up nothing behind it is a hit-test target.
   useEffect(() => {
     setMenuOpen(true);
     return () => setMenuOpen(false);
-  }, []);
-
-  // The second commit — see `expanded`. A rAF rather than a plain effect so the
-  // collapsed layout is actually PAINTED first; flipping in the effect body
-  // lands in the same frame and framer has one box, not two.
-  useEffect(() => {
-    const id = requestAnimationFrame(() => setExpanded(true));
-    return () => cancelAnimationFrame(id);
   }, []);
 
   useEffect(() => {
@@ -318,32 +188,29 @@ export function FlightContextPreview({
 
   if (typeof document === "undefined") return null;
 
-  // `clockSeparator` punctuates a point in time; `timeFormat` writes a
-  // DURATION. Two different settings — see the display-preferences note.
-  const clock = (t?: string) =>
-    t ? formatClockDisplay(t, displayPrefs?.clockSeparator) : "—";
-  const dur = (t?: string) =>
-    t && t !== "00:00" ? formatHHMMDisplay(t, displayPrefs?.timeFormat) : "—";
+  const clock = (t?: string) => (t ? formatClockDisplay(t, displayPrefs?.clockSeparator) : "—");
+  const dur = (t?: string) => (t && t !== "00:00" ? formatHHMMDisplay(t, displayPrefs?.timeFormat) : "—");
 
   const locked = !!flight.isLocked;
   const items = QUICK_ACTION_ITEMS(locked);
-  const open = expanded && !closing;
+  const open = height !== null && !closing;
 
-  // It comes to rest CENTRED ON THE VIEWPORT and as wide as it is allowed to
-  // grow — not in the row's own column. A dialog that stayed the width of the
-  // panel it came from barely moved on a desktop, which is what made the morph
-  // invisible there. It still OPENS at the row's own width and place, wherever
-  // that is, so the first frame is the row to the pixel.
-  const available = Math.min(MAX_WIDTH, window.innerWidth - MARGIN * 2);
-  // Grow only where there is somewhere to grow to — see MIN_GROWTH. On a phone
-  // there is not, so the card rests at exactly the ROW's width (not at
-  // `available`, which is 8px narrower) and there is no horizontal scale at all.
-  const width =
-    available - anchor.width >= MIN_GROWTH ? available : anchor.width;
-  // Nothing else to derive. The travel used to be computed by hand — the delta
-  // between the row's box and where a centred flex column would put the
-  // collapsed card — because the card was moved with `x`/`y`. The projection
-  // measures both boxes itself, so those numbers are gone.
+  // Where it comes to rest: the card and its action row centred together on
+  // the screen, the card no taller than leaves room for the row.
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const maxCard = vh - MARGIN * 2 - GAP - ACTION_TILE_PX;
+  const restH = Math.min(height ?? anchor.height, maxCard);
+  const restTop = Math.max(MARGIN, (vh - (restH + GAP + ACTION_TILE_PX)) / 2);
+  const restLeft = (vw - anchor.width) / 2;
+  const dx = restLeft - anchor.left;
+  const dy = restTop - anchor.top;
+  // The clip's bottom inset against the card's OWN height (`calc`), so the
+  // row's box is exact whatever the card's height turns out to be — and the
+  // open is the same template, so the two interpolate term by term.
+  const rowClip = `inset(0px 0px calc(100% - ${anchor.height}px) 0px round ${CARD_RADIUS}px)`;
+  const fullClip = `inset(0px 0px calc(0% - 0px) 0px round ${CARD_RADIUS}px)`;
+  const motionT = closing ? CLOSE : OPEN;
 
   return createPortal(
     <div className="fixed inset-0 z-[210]">
@@ -353,263 +220,140 @@ export function FlightContextPreview({
         className={cn("absolute inset-0", SCRIM)}
         initial={{ opacity: 0 }}
         animate={{ opacity: open ? 1 : 0 }}
-        transition={SCRIM_FADE}
-        // Only a tap that STARTED here dismisses. Lifting the finger that
-        // held the row is the same gesture, and an engine may still turn that
-        // release into a click — which lands on this scrim, because the card
-        // has moved out from under the finger — and the preview closed the
-        // moment it was let go.
+        transition={{ duration: closing ? 0.24 : 0.3, ease: EASE }}
+        // Only a tap that STARTED here dismisses: lifting the finger that
+        // held the row can turn into a click on this scrim, which closed the
+        // preview the moment it was let go.
         onPointerDown={() => {
           scrimPressRef.current = true;
         }}
-        // Wrapped, not passed directly — the handler's MouseEvent would
-        // otherwise arrive as `requestClose`'s follow-up action.
         onClick={() => {
           if (scrimPressRef.current) requestClose();
           scrimPressRef.current = false;
         }}
       />
 
-      {/* The positioning wrapper is `pointer-events-none` and only the card and
-          the action row take pointers back.
-          It spans nearly the whole screen so that the card can be centred — and
-          with pointers on, that box swallowed almost every tap meant for the
-          scrim. On a phone, where there is barely any scrim left uncovered,
-          that meant the preview could not be dismissed at all. */}
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Flight preview"
-        className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center"
-        // Vertical only. The card carries the ROW's width, which is already
-        // wider than this margin would allow — see `width`.
-        style={{ paddingTop: MARGIN, paddingBottom: MARGIN }}
-      >
-        {/* THE CARD.
-            `layout` is the whole technique: framer measures this box before and
-            after the layout change below and interpolates the difference as a
-            TRANSFORM. Collapsed it is `position: fixed` on the row's own box —
-            so the first frame is the row, to the pixel, as it always was — and
-            expanded it is an ordinary centred flex child at its natural height.
-            Nothing here animates a length. */}
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Flight preview" className="pointer-events-none absolute inset-0">
+        {/* THE CARD — on the row, at the row's width, travelling with x/y. */}
         <motion.div
-          layout
-          className="pointer-events-auto relative"
-          // EVERY key in both states, never a switch between two different
-          // shapes of object. A `motion` component does not clear a style
-          // property that simply disappears from the object — measured: with
-          // the collapsed branch dropping `position`/`top`/`left`/`height`,
-          // those stayed on the element as `position: fixed; top: 12px;
-          // left: 12px; height: 104.75px` for the whole morph, so the card
-          // never left the row and there was no layout change to animate.
-          style={{
-            position: open ? "relative" : "fixed",
-            top: open ? "auto" : anchor.top,
-            left: open ? "auto" : anchor.left,
-            width: open ? width : anchor.width,
-            height: open ? "auto" : anchor.height,
-          }}
-          transition={closing ? CLOSE : MORPH}
-          // The card landing back on its row is what "closed" MEANS, so it is
-          // what unmounts the overlay — not a timer running alongside it.
-          onLayoutAnimationComplete={() => {
-            if (closing) finishClose();
+          className="pointer-events-auto fixed"
+          style={{ left: anchor.left, top: anchor.top, width: anchor.width }}
+          initial={{ x: 0, y: 0 }}
+          animate={open ? { x: dx, y: dy } : { x: 0, y: 0 }}
+          transition={motionT}
+          onAnimationComplete={() => {
+            if (closingRef.current) finishClose();
           }}
         >
-          {/* The lift. Its own node so framer scale-corrects the shadow rather
-              than letting the card's projection squash a 50px blur, and so the
-              only thing animating on it is an opacity.
-
-              It sits OUTSIDE the clip below, because a box-shadow paints beyond
-              the element's own box and `overflow: hidden` on an ancestor takes
-              all of it. That is the whole reason this wrapper and the surface
-              are two elements rather than one. */}
+          {/* The lift: OUTSIDE the clip (a clip cuts a shadow), and it arrives
+              once the card is mostly open, leaves at once on the close. */}
           <motion.div
-            layout
             aria-hidden
             className="pointer-events-none absolute inset-0"
-            style={{ boxShadow: LIFT_SHADOW, borderRadius: CARD_RADIUS }}
+            style={{ boxShadow: LIFT_SHADOW, borderRadius: CARD_RADIUS, height: restH }}
             initial={{ opacity: 0 }}
             animate={{ opacity: open ? 1 : 0 }}
-            transition={closing ? CLOSE : MORPH}
+            transition={open ? { duration: 0.2, delay: 0.16, ease: EASE } : { duration: 0.08 }}
           />
-
-          {/* The card's surface, and the clip. Collapsed, the wrapper above
-              carries an explicit height (the row's), so this is pinned to it —
-              the detail is still mounted while it exits and would otherwise
-              spill straight out of the collapsing box. Expanded, the wrapper's
-              height comes from this, so the percentage is dropped. */}
-          {/* A projected node with its radius in STYLE — framer corrects a
-              radius only where it can read it, and on a plain child of the
-              scaled card the corners were squashed with it (at a third of the
-              height on the first frames). */}
           <motion.div
-            layout
-            transition={closing ? CLOSE : MORPH}
-            className="relative overflow-hidden border border-border bg-card"
-            style={{ height: open ? undefined : "100%", borderRadius: CARD_RADIUS }}
+            ref={cardRef}
+            className="relative overflow-y-auto overscroll-contain border border-border bg-card"
+            style={{ borderRadius: CARD_RADIUS, maxHeight: maxCard }}
+            initial={{ clipPath: rowClip }}
+            animate={{ clipPath: open ? fullClip : rowClip }}
+            transition={motionT}
           >
-            {/* FULL `layout` here, `layout="position"` on every block below,
-                and that difference is what lets the card widen at all.
-
-                The card's projection scales its subtree on BOTH axes: from a
-                105px row to a ~500px card, and on a tablet from a 336px row to
-                a 672px one. The VERTICAL part would crush this row's text to a
-                fifth of its height and must be cancelled. The HORIZONTAL part
-                is the card widening, which this content is meant to follow.
-
-                `layout="position"` cancels both. That is right for a block
-                which only exists while open, but for this one it would lay the
-                body out at the RESTING width from the first frame and let the
-                card clip it — so on a tablet the arrival time and ICAO would
-                simply be missing until the card had widened past them.
-
-                Full `layout` gives this its own projection node with its own
-                delta. Its height is 103 in both states, so that delta is
-                scaleX ONLY: the row's content is horizontally condensed at the
-                first frame and relaxes out as the card widens, with no vertical
-                distortion and nothing hidden. Condensed type reads as motion;
-                half the flight missing reads as broken. */}
-            <motion.div layout className="px-3 py-1">
+            <div className="px-3 py-1">
               <FlightCardBody flight={flight} displayPrefs={displayPrefs} />
-            </motion.div>
+            </div>
 
-            {/* What the compact card has no room for. Mounted only while open, so
-                the card's NATURAL height is the thing that changes and the
-                projection does the rest — where this used to animate its own
-                `height` from 0 to auto every frame. */}
-            <AnimatePresence>
-              {open ? (
-                <motion.div
-                  key="detail"
-                  layout="position"
-                  className="px-4 py-2"
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  // Its OWN exit timing: the open's delay applied to the exit
-                  // too, so the detail hung on while the card collapsed under it.
-                  exit={{ opacity: 0, transition: LEAVE }}
-                  transition={{
-                    duration: DETAIL_MS / 1000,
-                    ease: [0.32, 0.72, 0, 1],
-                    delay: DETAIL_DELAY / 1000,
-                  }}
-                >
-                  <div className="mb-2 border-t border-border/70" />
-                  {/* THE SIGNATURE FIRST, above everything it attests to.
-                        A signed entry is a statement about the flight, so the mark
-                        and who made it come before the figures rather than being
-                        filed at the bottom with the remarks. Absent when unsigned —
-                        an empty signature strip would imply one is missing. */}
-                    {flight.signature ? (
-                      <div className="mb-2 border-b border-border/70 pb-2">
-                        {/* Backed at the card's RESTING content width (the detail's
-                            `px-4` either side), not whatever the box is mid-morph —
-                            the card's width animates, and a bitmap painted at the
-                            opening width would be upscaled by the time it settles. */}
-                        <SignatureMark
-                          signature={flight.signature}
-                          height={52}
-                          renderWidth={width - 32}
-                        />
-                        <div className="mt-1 flex items-baseline justify-between gap-3">
-                          <span className="truncate text-[13px] font-medium text-foreground">
-                            {flight.signature.signerName || "Signed"}
-                            {flight.signature.signerRole ? (
-                              <span className="ml-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
-                                {flight.signature.signerRole}
-                              </span>
-                            ) : null}
-                          </span>
-                          {flight.signature.signerLicenseNumber ? (
-                            <span className="shrink-0 text-[12px] tabular-nums text-muted-foreground">
-                              {flight.signature.signerLicenseNumber}
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
+            {/* What the compact card has no room for. Always laid out (the
+                clip reveals it); it rises in a beat behind the clip's edge on
+                the open, and on the close it stays put while the clip closes
+                over it — fading it first left an empty box collapsing. */}
+            <motion.div
+              className="px-4 py-2"
+              initial={{ opacity: 0, y: -6 }}
+              animate={open || closing ? { opacity: 1, y: 0 } : { opacity: 0, y: -6 }}
+              transition={{ duration: 0.3, delay: 0.08, ease: EASE }}
+            >
+              <div className="mb-2 border-t border-border/70" />
+              {/* THE SIGNATURE FIRST, above everything it attests to. Absent
+                  when unsigned — an empty strip would imply one is missing. */}
+              {flight.signature ? (
+                <div className="mb-2 border-b border-border/70 pb-2">
+                  <SignatureMark signature={flight.signature} height={52} renderWidth={anchor.width - 32} />
+                  <div className="mt-1 flex items-baseline justify-between gap-3">
+                    <span className="truncate text-[13px] font-medium text-foreground">
+                      {flight.signature.signerName || "Signed"}
+                      {flight.signature.signerRole ? (
+                        <span className="ml-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+                          {flight.signature.signerRole}
+                        </span>
+                      ) : null}
+                    </span>
+                    {flight.signature.signerLicenseNumber ? (
+                      <span className="shrink-0 text-[12px] tabular-nums text-muted-foreground">
+                        {flight.signature.signerLicenseNumber}
+                      </span>
                     ) : null}
-
-                    <div className="grid grid-cols-2 gap-x-6">
-                      <Row label="Out" value={clock(flight.outTime)} />
-                      <Row label="Off" value={clock(flight.offTime)} />
-                      <Row label="On" value={clock(flight.onTime)} />
-                      <Row label="In" value={clock(flight.inTime)} />
-                      <Row label="Block" value={dur(flight.blockTime)} />
-                      <Row label="Flight" value={dur(flight.flightTime)} />
-                      <Row label="Night" value={dur(flight.nightTime)} />
-                      <Row label="IFR" value={dur(flight.ifrTime)} />
-                      <Row label="Role" value={flight.pilotRole || "—"} />
-                      <Row label="Reg" value={flight.aircraftReg || "—"} />
-                      <Row label="Take-off" value={dayNight(flight.dayTakeoffs, flight.nightTakeoffs)} />
-                      <Row label="Landing" value={dayNight(flight.dayLandings, flight.nightLandings)} />
-                    </div>
-
-                    {/* No PIC/SIC rows — the card body above already names the
-                        crew, so repeating them here was the one part of the detail
-                        that said nothing new. */}
-                    {flight.remarks ? (
-                      <p className="mt-2 border-t border-border/70 pt-2 text-[13px] leading-snug text-muted-foreground">
-                        {flight.remarks}
-                      </p>
-                    ) : null}
-                  </motion.div>
+                  </div>
+                </div>
               ) : null}
-            </AnimatePresence>
+
+              <div className="grid grid-cols-2 gap-x-6">
+                <Row label="Out" value={clock(flight.outTime)} />
+                <Row label="Off" value={clock(flight.offTime)} />
+                <Row label="On" value={clock(flight.onTime)} />
+                <Row label="In" value={clock(flight.inTime)} />
+                <Row label="Block" value={dur(flight.blockTime)} />
+                <Row label="Flight" value={dur(flight.flightTime)} />
+                <Row label="Night" value={dur(flight.nightTime)} />
+                <Row label="IFR" value={dur(flight.ifrTime)} />
+                <Row label="Role" value={flight.pilotRole || "—"} />
+                <Row label="Reg" value={flight.aircraftReg || "—"} />
+                <Row label="Take-off" value={dayNight(flight.dayTakeoffs, flight.nightTakeoffs)} />
+                <Row label="Landing" value={dayNight(flight.dayLandings, flight.nightLandings)} />
+              </div>
+
+              {/* No PIC/SIC rows — the card body above already names the crew. */}
+              {flight.remarks ? (
+                <p className="mt-2 border-t border-border/70 pt-2 text-[13px] leading-snug text-muted-foreground">
+                  {flight.remarks}
+                </p>
+              ) : null}
+            </motion.div>
           </motion.div>
         </motion.div>
 
-        {/* The actions, as a row beneath the card. In flow, so the flex column
-            centres the card and the actions together and the card's projection
-            carries the shift — no height animation here either. */}
-        {/* `popLayout`: on the close the card leaves the column (it goes back to
-            `position: fixed` on its row), and an exiting row still in flow was
-            re-centred into the space — the buttons slid down past where the
-            card had been. Popped, it is taken out of flow where it stands and
-            fades there. */}
-        <AnimatePresence mode="popLayout">
-          {open ? (
-            <motion.div
-              key="actions"
-              layout="position"
-              className="pointer-events-auto flex items-start justify-center gap-2"
-              style={{ paddingTop: GAP }}
-              // No opacity HERE: the buttons carry a backdrop-filter, and a
-              // fading ancestor is a backdrop root — the glass would blur
-              // nothing for the whole fade and snap on at the end. Each button
-              // fades itself.
+        {/* The actions, a row under the card's RESTING place. They do not
+            travel: they pop in there as the card arrives, and on the close
+            they go at once, before the card has moved far. Each button fades
+            itself — a fading ancestor would be a backdrop root. */}
+        <div
+          className="pointer-events-auto fixed inset-x-0 flex items-start justify-center gap-2"
+          style={{ top: restTop + restH + GAP, visibility: height === null ? "hidden" : undefined }}
+        >
+          {items.map((a, i) => (
+            <motion.button
+              key={a.id}
+              type="button"
+              // The action runs as the CLOSE's follow-up: most end in a
+              // `router.push`, and the marker entry has to be released first.
+              onClick={() => requestClose(() => onSelect(a.id))}
+              aria-label={a.label}
+              tabIndex={open ? 0 : -1}
+              initial={{ scale: 0.5, opacity: 0 }}
+              animate={open ? { scale: 1, opacity: 1 } : { scale: 0.85, opacity: 0 }}
+              transition={open ? { ...POP_SPRING, delay: 0.12 + i * 0.03 } : { duration: 0.1, ease: "easeOut" }}
+              style={{ width: ACTION_TILE_PX, height: ACTION_TILE_PX, touchAction: "manipulation" }}
+              className={actionTileClass}
             >
-              {items.map((a, i) => (
-                <motion.button
-                  key={a.id}
-                  type="button"
-                  // The action runs as the CLOSE's follow-up, not before it.
-                  // Most of these end in a `router.push` (Next Leg opens the
-                  // flight it just created), and the marker history entry has
-                  // to be released first or our own `back()` would undo it.
-                  onClick={() => requestClose(() => onSelect(a.id))}
-                  aria-label={a.label}
-                  initial={{ scale: 0.4, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  // No stagger and no spring on the way out — the open's delay
-                  // held them on screen while the card had already gone.
-                  exit={{ scale: 0.85, opacity: 0, transition: LEAVE }}
-                  transition={{ ...POP_SPRING, delay: 0.08 + i * 0.03 }}
-                  style={{
-                    width: ACTION_TILE_PX,
-                    height: ACTION_TILE_PX,
-                    touchAction: "manipulation",
-                  }}
-                  className={actionTileClass}
-                >
-                  {a.icon}
-                  <span className={ACTION_LABEL_CLASS}>{a.label}</span>
-                </motion.button>
-              ))}
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
+              {a.icon}
+              <span className={ACTION_LABEL_CLASS}>{a.label}</span>
+            </motion.button>
+          ))}
+        </div>
       </div>
     </div>,
     document.body
