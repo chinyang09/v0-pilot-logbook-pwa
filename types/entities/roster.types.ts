@@ -52,7 +52,8 @@ export type DiscrepancyType =
   | "day_night_mismatch"    // Day/night takeoff or landing split differs
 
 // Only track flight crew (pilots) - cabin crew not tracked
-export type CrewRole = "CPT" | "PIC" | "FO"
+// SO: a second officer — a cruise relief pilot, listed on long sectors.
+export type CrewRole = "CPT" | "PIC" | "FO" | "SO"
 
 // FDP calculation types (CAAS Reg 14/15)
 export type CrewConfiguration = "two-pilot" | "single-pilot"
@@ -85,7 +86,7 @@ export interface ScheduledSector {
  * CPT/PIC maps to PIC role, FO maps to SIC role
  */
 export interface ScheduledCrewMember {
-  role: CrewRole                    // "CPT", "PIC", or "FO"
+  role: CrewRole                    // "CPT", "PIC", "FO" or "SO"
   crewId: string                    // "2727"
   name: string                      // "Yu Shuqing"
   personnelId?: string              // Linked to Personnel table

@@ -70,6 +70,14 @@ export interface ParsedSector {
   /** UTC HH:MM. Present when CSV row uses 'A' prefix (actuals). */
   actualOut?: string;
   actualIn?: string;
+  /**
+   * UTC HH:MM — the duty's REPORT as the company recorded it (the schedule
+   * report's "Report times" column), on the duty's FIRST sector only. It
+   * moves when a delay is notified before the crew leave their rest, so it is
+   * what the duty actually began at (`FlightLog.reportTime`). Before midnight
+   * UTC of the sector's date when it reads later than the OUT.
+   */
+  reportTime?: string;
   /** Line number in source CSV — for error reporting. */
   sourceLine: number;
   /**
@@ -308,7 +316,7 @@ export interface ReconcileInput {
 // Constants
 // ============================================================
 
-const AIRLINE_FLIGHT_NUMBER_RE = /^TR\d+$/i;
+const AIRLINE_FLIGHT_NUMBER_RE = /^TR\d+R?$/i;
 const EDIT_DETECTION_BUFFER_MS = 60_000;
 
 // ============================================================
@@ -364,9 +372,11 @@ export function deriveSectorCrew(
   const isSelf = (c: { crewId: string }) => Boolean(currentUser.crewId && c.crewId === currentUser.crewId);
   const captains = sector.crew?.filter((c) => c.role === "CPT" || c.role === "PIC") ?? [];
   const fos = sector.crew?.filter((c) => c.role === "FO") ?? [];
+  // A second officer is a cruise relief pilot: on the flight, never in a seat.
+  const sos = sector.crew?.filter((c) => c.role === "SO") ?? [];
   const captain = captains.find((c) => c.commander) ?? captains[0];
   const fo = fos.find(isSelf) ?? fos[0];
-  const additionalCrew: AdditionalCrew[] = [...captains, ...fos]
+  const additionalCrew: AdditionalCrew[] = [...captains, ...fos, ...sos]
     .filter((c) => c !== captain && c !== fo)
     .map((c) => ({
       id: isSelf(c) ? currentUser.id : c.personnelId || undefined,
@@ -452,7 +462,10 @@ function diffCrewSeat(
  * (a create beside the flight that was already there).
  */
 function normalizeFlightNumber(fn: string): string {
-  return fn.replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+  // The digits, leading zeros dropped — and a return-to-ramp's R kept, so
+  // "627R" is never the same leg as the "627" that followed it.
+  const rtr = /\dR$/i.test(fn.trim()) ? "R" : "";
+  return fn.replace(/\D/g, "").replace(/^0+(?=\d)/, "") + rtr;
 }
 
 /**
@@ -772,6 +785,15 @@ function diffSectorVsFlight(
       field: "scheduledIn",
       from: flight.scheduledIn || "",
       to: sector.scheduledIn,
+    });
+  }
+
+  // The company's record of when the duty began — theirs, like the OOOI.
+  if (sector.reportTime && sector.reportTime !== flight.reportTime) {
+    changes.push({
+      field: "reportTime",
+      from: flight.reportTime || "",
+      to: sector.reportTime,
     });
   }
 

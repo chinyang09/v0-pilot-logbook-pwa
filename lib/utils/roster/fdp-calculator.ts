@@ -540,7 +540,12 @@ function createDutyPeriodFromFlightGroup(
     // An explicitly recorded report — only a duty's first sector normally
     // carries one, but take the earliest so it does not matter which.
     if (flight.reportTime) {
-      earliestStatedReport = Math.min(earliestStatedReport, hhmmToMinutes(flight.reportTime))
+      // A report is before the sector's OUT: one that reads later is the
+      // evening before (23:30Z for a 00:30Z departure).
+      let stated = hhmmToMinutes(flight.reportTime)
+      const out = flight.outTime || flight.scheduledOut
+      if (out && stated > hhmmToMinutes(out)) stated -= 1440
+      earliestStatedReport = Math.min(earliestStatedReport, stated)
     }
     if (flight.inTime) {
       let inMin = hhmmToMinutes(flight.inTime)

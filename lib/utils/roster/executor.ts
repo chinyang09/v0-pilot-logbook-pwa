@@ -55,7 +55,7 @@ import {
   type ReportSource,
 } from "@/lib/utils/roster/report-tracking";
 import type { ImportDefaults } from "@/types/db/stores.types";
-import { recalculateFlightFields } from "@/lib/utils/flight-calculations";
+import { isReturnToRamp, recalculateFlightFields } from "@/lib/utils/flight-calculations";
 import { normalizeAircraftType } from "@/lib/utils/parsers/shared/aircraft-type-map";
 import { hhmmToMinutes } from "@/lib/utils/time";
 import { flightInstantMs } from "@/lib/airports/code-changes";
@@ -196,6 +196,9 @@ async function hydrateFlightFromSector(
   // of a previously-imported flight look like an edited conflict.
   const remarks = sector.remarks ?? "";
 
+  // A return to ramp never left the ground: block time, nothing else.
+  const rtr = isReturnToRamp(sector);
+
   const create: FlightLogCreate = {
     date: sector.date,
     flightNumber: sector.flightNumber
@@ -213,6 +216,7 @@ async function hydrateFlightFromSector(
     arrivalTimezone: arrOffset,
     scheduledOut: sector.scheduledOut || "",
     scheduledIn: sector.scheduledIn || "",
+    ...(sector.reportTime ? { reportTime: sector.reportTime } : {}),
     outTime: sector.actualOut || "",
     offTime: "",
     onTime: "",
@@ -238,10 +242,10 @@ async function hydrateFlightFromSector(
     // reconciler already applies the calculated split to an UPDATE; a create
     // wrote the report's, and with no OFF/ON on a logbook row the recalculation
     // afterwards never revisits it.
-    dayTakeoffs: sector.suggestedDayTakeoffs ?? sector.dayTakeoffs ?? 0,
-    dayLandings: sector.suggestedDayLandings ?? sector.dayLandings ?? 0,
-    nightTakeoffs: sector.suggestedNightTakeoffs ?? sector.nightTakeoffs ?? 0,
-    nightLandings: sector.suggestedNightLandings ?? sector.nightLandings ?? 0,
+    dayTakeoffs: rtr ? 0 : (sector.suggestedDayTakeoffs ?? sector.dayTakeoffs ?? 0),
+    dayLandings: rtr ? 0 : (sector.suggestedDayLandings ?? sector.dayLandings ?? 0),
+    nightTakeoffs: rtr ? 0 : (sector.suggestedNightTakeoffs ?? sector.nightTakeoffs ?? 0),
+    nightLandings: rtr ? 0 : (sector.suggestedNightLandings ?? sector.nightLandings ?? 0),
     autolands: 0,
     remarks,
     endorsements: "",

@@ -47,11 +47,43 @@ export function airborneTimes(f: {
   offTime?: string | null
   onTime?: string | null
   inTime?: string | null
+  flightNumber?: string | null
+  departureIcao?: string | null
+  departureIata?: string | null
+  arrivalIcao?: string | null
+  arrivalIata?: string | null
 }): { off: string; on: string; fromGate: boolean } | null {
   const ok = (t: string | null | undefined): t is string => !!t && isValidHHMM(t)
   if (ok(f.offTime) && ok(f.onTime)) return { off: f.offTime, on: f.onTime, fromGate: false }
+  // A return to ramp moved and came back without leaving the ground: its
+  // OUT/IN are block time and nothing else.
+  if (isReturnToRamp(f)) return null
   if (ok(f.outTime) && ok(f.inTime)) return { off: f.outTime, on: f.inTime, fromGate: true }
   return null
+}
+
+/**
+ * A RETURN TO RAMP — the company's "627R": the aeroplane pushed back and came
+ * back to the stand before take-off. It is the flight number with an R, from
+ * and to the same airport, with no OFF/ON. The company counts its block time
+ * (the schedule report's Block Hours include it) but no landing, so it is
+ * logged with its block and no flight time, takeoff or landing. The R is
+ * required: a circuit flight also starts and ends at one airport, and does fly.
+ */
+export function isReturnToRamp(f: {
+  flightNumber?: string | null
+  offTime?: string | null
+  onTime?: string | null
+  departureIcao?: string | null
+  departureIata?: string | null
+  arrivalIcao?: string | null
+  arrivalIata?: string | null
+}): boolean {
+  if (!/\dR$/i.test((f.flightNumber || "").trim())) return false
+  if (f.offTime || f.onTime) return false
+  const dep = (f.departureIcao || f.departureIata || "").toUpperCase()
+  const arr = (f.arrivalIcao || f.arrivalIata || "").toUpperCase()
+  return !!dep && dep === arr
 }
 
 /**

@@ -49,6 +49,17 @@ describe("parseCrewColumn", () => {
     expect(crew[1]).toMatchObject({ role: "FO", crewId: "9766", name: "Lim Chin Yang" });
   });
 
+  it("keeps a second officer (SO) and reads a senior first officer (SFO) as FO", () => {
+    const crew = parseCrewColumn(
+      ["CPT - PIC - 2644 - Prorok Andriy", "SFO - 1200 - Senior First", "SO - 9766 - Lim Chin Yang", "CC - 3095 - Tan Shi Yun"].join("\n")
+    );
+    expect(crew.map((c) => [c.role, c.crewId])).toEqual([
+      ["CPT", "2644"],
+      ["FO", "1200"],
+      ["SO", "9766"],
+    ]);
+  });
+
   it("joins a captain name wrapped across two lines", () => {
     const cell = [
       "CPT - PIC - 6409 - Siah Yang Tek,",

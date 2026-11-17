@@ -1121,6 +1121,11 @@ function FlightFormImpl({
       offTime: formData.offTime,
       onTime: formData.onTime,
       inTime: formData.inTime,
+      flightNumber: formData.flightNumber,
+      departureIcao: formData.departureIcao,
+      departureIata: formData.departureIata,
+      arrivalIcao: formData.arrivalIcao,
+      arrivalIata: formData.arrivalIata,
     });
     const flightTime = airborne ? calculateFlightTime(airborne.off, airborne.on) : "00:00";
 
