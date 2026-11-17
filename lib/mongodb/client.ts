@@ -134,6 +134,12 @@ async function ensureIndexes(mongoClient: MongoClient): Promise<void> {
     safe("deletions.seq", () =>
       db.collection("deletions").createIndex({ userId: 1, serverSeq: 1 }),
     ),
+    // In-app feedback (/api/feedback): a report is keyed by the id the device
+    // gave it, so a resend from the outbox lands on the same document.
+    safe("feedback.id", () =>
+      db.collection("feedback").createIndex({ userId: 1, id: 1 }, { unique: true }),
+    ),
+    safe("feedback.triage", () => db.collection("feedback").createIndex({ status: 1, createdAt: -1 })),
     // Auth: expire WebAuthn challenges automatically (they are also consumed via
     // findOneAndDelete, but this sweeps abandoned ceremonies). `expiresAt` is a
     // BSON Date, so a 0-second TTL deletes each doc at its own expiry instant.

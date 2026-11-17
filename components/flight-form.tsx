@@ -1268,6 +1268,10 @@ function FlightFormImpl({
     formPilotRole,
     formData.departureIcao,
     formData.arrivalIcao,
+    // A return to ramp is told by its number and its two ends.
+    formData.flightNumber,
+    formData.departureIata,
+    formData.arrivalIata,
     formData.aircraftType,
     formData.picName,
     formData.sicName,

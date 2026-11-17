@@ -11,6 +11,7 @@ import { AppShell } from "@/components/desktop-layout"
 import { KeepAlivePages } from "@/components/keep-alive-pages"
 import { FirstSyncSplash } from "@/components/first-sync-splash"
 import { UndoToastHost } from "@/components/undo-toast"
+import { FeedbackOutbox } from "@/components/feedback-outbox"
 import { StorageNotice } from "@/components/storage-notice"
 
 function AppLayoutContent({ children }: { children: React.ReactNode }) {
@@ -19,6 +20,7 @@ function AppLayoutContent({ children }: { children: React.ReactNode }) {
       <KeepAlivePages>{children}</KeepAlivePages>
       <FirstSyncSplash />
       <UndoToastHost />
+      <FeedbackOutbox />
       <StorageNotice />
     </AppShell>
   )
