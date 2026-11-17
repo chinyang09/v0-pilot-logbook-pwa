@@ -169,8 +169,14 @@ function displayFlight(op: AcceptableOperation): FlightLog {
 
   const s = op.sector;
   const crew = s.crew ?? [];
-  const cpt = crew.find((c) => c.role === "CPT" || c.role === "PIC");
+  // The seats as the import will write them (`deriveSectorCrew`): the
+  // COMMANDER in the left seat, a first officer in the right, and every other
+  // pilot — a second captain, a second FO, a second officer — on board as a
+  // relief pilot.
+  const captains = crew.filter((c) => c.role === "CPT" || c.role === "PIC");
+  const cpt = captains.find((c) => c.commander) ?? captains[0];
   const fo = crew.find((c) => c.role === "FO");
+  const relief = crew.filter((c) => (c.role === "CPT" || c.role === "PIC" || c.role === "FO" || c.role === "SO") && c !== cpt && c !== fo);
 
   return {
     ...EMPTY_FLIGHT,
@@ -190,6 +196,7 @@ function displayFlight(op: AcceptableOperation): FlightLog {
     blockTime: s.blockTime || "",
     picName: cpt?.name || s.picResolvedName || "",
     sicName: fo?.name || "",
+    additionalCrew: relief.map((c) => ({ name: c.name, role: "Relief Pilot" as const })),
   };
 }
 
