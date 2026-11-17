@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { airborneTimes, flightTimeRepairPatch, recalculateFlightFields } from "@/lib/utils/flight-calculations"
+import { airborneTimes, flightTimeRepairPatch, isReturnToRamp, recalculateFlightFields } from "@/lib/utils/flight-calculations"
 import type { Airport } from "@/types/entities/airport.types"
 import type { FlightLog } from "@/types/entities/flight.types"
 
@@ -68,5 +68,43 @@ describe("flightTimeRepairPatch", () => {
     expect(flightTimeRepairPatch(flight({ offTime: "14:15", onTime: "16:00", flightTime: "00:00" }))).toEqual({})
     expect(flightTimeRepairPatch(flight({ flightTime: "01:50" }))).toEqual({})
     expect(flightTimeRepairPatch(flight({ flightTime: "00:00", entryType: "simulator", isSimulator: true }))).toEqual({})
+  })
+})
+
+// The company's "627R": pushed back and came back to the stand. Its block
+// counts (the schedule report's Block Hours include it); it never flew, so no
+// flight time, takeoff or landing comes out of its OUT/IN.
+describe("a return to ramp", () => {
+  const rtr = flight({
+    flightNumber: "TR627R",
+    departureIcao: "VTBS",
+    arrivalIcao: "VTBS",
+    outTime: "13:39",
+    inTime: "14:02",
+    flightTime: "00:00",
+    dayTakeoffs: 0,
+    dayLandings: 0,
+    nightTakeoffs: 0,
+    nightLandings: 0,
+  })
+
+  it("is the R, one airport, and no OFF/ON", () => {
+    expect(isReturnToRamp(rtr)).toBe(true)
+    // A circuit flies: same airport, no R.
+    expect(isReturnToRamp({ ...rtr, flightNumber: "TR627" })).toBe(false)
+    expect(isReturnToRamp({ ...rtr, arrivalIcao: "WSSS" })).toBe(false)
+    expect(isReturnToRamp({ ...rtr, offTime: "13:50", onTime: "13:55" })).toBe(false)
+  })
+
+  it("keeps its block and derives no flight time, takeoff or landing", () => {
+    expect(airborneTimes(rtr)).toBeNull()
+    expect(flightTimeRepairPatch(rtr)).toEqual({})
+    const out = recalculateFlightFields(rtr, BKK, BKK)
+    expect(out.blockTime).toBe("00:23")
+    expect(out.flightTime).toBeUndefined()
+    expect(out.dayTakeoffs ?? 0).toBe(0)
+    expect(out.dayLandings ?? 0).toBe(0)
+    expect(out.nightTakeoffs ?? 0).toBe(0)
+    expect(out.nightLandings ?? 0).toBe(0)
   })
 })

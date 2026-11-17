@@ -64,6 +64,7 @@ import {
 import { normalizeAircraftType } from "./shared/aircraft-type-map";
 import { codeConflictMessage, enrichAirportBatch } from "./shared/airport-enricher";
 import { icaoForIataAt, isReassignedIata } from "@/lib/airports/code-changes";
+import { readReportTotals, type ReportTotals } from "@/lib/utils/roster/report-totals";
 import {
   flightMatchWindow,
   inWindow,
@@ -102,6 +103,12 @@ export interface PlannedImport {
    * Null when the footer wasn't found — stale-report gating disabled.
    */
   generatedAt: number | null;
+  /**
+   * The report's own "Total Hours and Statistics" — actual where flown,
+   * scheduled where not (`lib/utils/roster/report-totals.ts`). Checked against
+   * the logbook's figures once the import is written. Null when absent.
+   */
+  reportTotals: { figures: ReportTotals; range: { start: string; end: string } } | null;
   crewMember: {
     crewId: string;
     name: string;
@@ -169,6 +176,11 @@ const CREW_ROLE_MAP: Record<string, CrewRole> = {
   CPT: "CPT",
   PIC: "PIC",
   FO: "FO",
+  // A senior first officer sits in the FO seat; a SECOND officer is a cruise
+  // relief pilot. Neither was mapped, so an SO on an augmented sector was
+  // dropped from the flight altogether (the owner's report).
+  SFO: "FO",
+  SO: "SO",
 };
 
 // ============================================================
@@ -473,6 +485,8 @@ interface RawSector {
   rawSchedIn?: string;
   rawActualOut?: string;
   rawActualIn?: string;
+  /** The duty's "Report times" cell — set on its first sector only. */
+  rawReport?: string;
   rowDate: string;
   sourceLine: number;
   crew?: ScheduledCrewMember[];
@@ -489,6 +503,10 @@ function extractSectorsFromRow(
   const dutiesCell = cols[header.columnIndices.duties] || "";
   const detailsCell = cols[header.columnIndices.details] || "";
   const actualsCell = cols[header.columnIndices.actualTimes] || "";
+  // One report per date row — the duty's — carried by its first sector.
+  const reportCell =
+    header.columnIndices.reportTimes >= 0 ? cols[header.columnIndices.reportTimes] || "" : "";
+  const rawReport = /\d{2}:\d{2}(?:\s*(?:⁺¹|⁻¹|¹)|\+1|-1)?/.exec(reportCell)?.[0];
 
   const dutyLines = dutiesCell.split(/\r?\n/).filter(Boolean);
   const detailLines = detailsCell.split(/\r?\n/).filter(Boolean);
@@ -501,11 +519,13 @@ function extractSectorsFromRow(
     const detailLine = detailLines[i]?.trim() || "";
     const actualLine = actualLines[i]?.trim() || "";
 
-    const flightMatch = dutyLine.match(/^(\w*\d+)\s*\[(\w+)\]$/);
+    // A trailing letter is part of the flight number: "627R" is a return to
+    // ramp, which the company counts in its Block Hours (see `isReturnToRamp`).
+    const flightMatch = dutyLine.match(/^(\w*\d+[A-Z]?)\s*\[(\w+)\]$/);
     if (!flightMatch) continue;
 
     let flightNumber = flightMatch[1];
-    const hasPrefix = /[A-Za-z]/.test(flightNumber.replace(/\d/g, ""));
+    const hasPrefix = /^[A-Za-z]/.test(flightNumber);
     if (!hasPrefix) flightNumber = `TR${flightNumber}`;
 
     const routeMatch = detailLine.match(/^(\w{3})\s*-\s*(\w{3})/);
@@ -543,6 +563,7 @@ function extractSectorsFromRow(
       }
     }
 
+    if (rawReport && sectors.length === 0) sector.rawReport = rawReport;
     sectors.push(sector);
   }
 
@@ -619,6 +640,7 @@ async function normalizeSector(
   const schedIn = norm(raw.rawSchedIn, "in");
   const actOut = norm(raw.rawActualOut, "out");
   const actIn = norm(raw.rawActualIn, "in");
+  const report = norm(raw.rawReport, "out");
 
   // UTC date of the flight anchors on OUT (preferring actual when present).
   const anchor = actOut || schedOut;
@@ -651,6 +673,7 @@ async function normalizeSector(
     scheduledIn: schedIn?.utcTime,
     actualOut: actOut?.utcTime,
     actualIn: actIn?.utcTime,
+    ...(report ? { reportTime: report.utcTime } : {}),
     sourceLine: raw.sourceLine,
     crew: raw.crew,
     ...(timesUncertain ? { timesUncertain: true } : {}),
@@ -671,7 +694,7 @@ const CREW_MEMBER_START_RE =
   /^([A-Z]{1,4})\s-\s(?:([A-Z]{1,5})\s-\s)?(\d+)\s-\s(.+)$/;
 
 /**
- * Parse the multi-line Crew column into pilot crew members (CPT + FO only).
+ * Parse the multi-line Crew column into pilot crew members (CPT, FO and SO).
  *
  * The schedule PDF wraps long names onto a second line, e.g.
  *
@@ -968,6 +991,7 @@ export async function parseScheduleCSV(
     timeReference: "UTC",
     dateRange: { start: "", end: "" },
     generatedAt: null,
+    reportTotals: null,
     crewMember: { crewId: "", name: "", base: "", role: "", aircraftType: "" },
     operations: [],
     simSessions: [],
@@ -1000,6 +1024,10 @@ export async function parseScheduleCSV(
     const header = parseHeader(doc.rows);
     plan.timeReference = header.timeReference;
     plan.dateRange = header.dateRange;
+    // The report's own totals, kept with the range they cover: a
+    // cross-hydrated import widens `dateRange` to both reports'.
+    const figures = readReportTotals(doc.rows);
+    plan.reportTotals = figures ? { figures, range: header.dateRange } : null;
     plan.crewMember = header.crewInfo;
 
     // The report has to SAY which zone it is in. Defaulting to UTC in silence
@@ -1163,7 +1191,7 @@ export async function parseScheduleCSV(
               name: member.name,
               crewId: member.crewId,
               organization: "Scoot",
-              roles: member.role === "FO" ? ["SIC"] : ["PIC"],
+              roles: member.role === "FO" || member.role === "SO" ? ["SIC"] : ["PIC"],
               isMe: false,
               createdAt: Date.now(),
               syncStatus: "pending",

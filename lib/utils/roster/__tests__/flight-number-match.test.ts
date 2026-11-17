@@ -28,4 +28,9 @@ describe("sameFlightNumber", () => {
     expect(sameFlightNumber("TR", "TR")).toBe(false)
     expect(sameFlightNumber("TR288", "TR289")).toBe(false)
   })
+
+  it("keeps a return to ramp apart from the flight that followed it", () => {
+    expect(sameFlightNumber("TR627R", "TR627")).toBe(false)
+    expect(sameFlightNumber("TR627R", "627R")).toBe(true)
+  })
 })

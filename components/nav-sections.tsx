@@ -12,6 +12,7 @@ import {
   UserCircle,
   Settings,
   Trash2,
+  MessageSquarePlus,
 } from "lucide-react"
 
 export interface NavItem {
@@ -82,6 +83,12 @@ export const navSections: NavSection[] = [
       { label: "Account", href: "/account", icon: <UserCircle className="h-4 w-4" /> },
       { label: "Settings", href: "/settings", icon: <Settings className="h-4 w-4" /> },
       { label: "Bin", href: "/recently-deleted", icon: <Trash2 className="h-4 w-4" /> },
+      {
+        label: "Feedback",
+        href: "/feedback",
+        icon: <MessageSquarePlus className="h-4 w-4" />,
+        description: "Report a bug or ask for a change",
+      },
     ],
   },
 ]

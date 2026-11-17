@@ -36,6 +36,9 @@ const SAFE_FIELDS = new Set<keyof FlightLog>([
   "onTime",
   "scheduledOut",
   "scheduledIn",
+  // The duty's report as the company recorded it (a delay notified at the
+  // place of rest moves it) — the record of when the duty began.
+  "reportTime",
   "blockTime",
   "flightTime",
 ]);

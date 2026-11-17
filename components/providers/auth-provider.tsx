@@ -40,7 +40,7 @@ const AUTH_FETCH_TIMEOUT_MS = 15_000
  */
 const OFFLINE_PAGES = [
   "/", "/logbook", "/aircraft", "/airports", "/crew", "/settings", "/account",
-  "/currencies", "/discrepancies", "/fdp", "/recently-deleted",
+  "/currencies", "/discrepancies", "/fdp", "/recently-deleted", "/feedback",
 ]
 
 /**

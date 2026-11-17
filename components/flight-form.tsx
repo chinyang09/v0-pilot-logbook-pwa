@@ -1121,6 +1121,11 @@ function FlightFormImpl({
       offTime: formData.offTime,
       onTime: formData.onTime,
       inTime: formData.inTime,
+      flightNumber: formData.flightNumber,
+      departureIcao: formData.departureIcao,
+      departureIata: formData.departureIata,
+      arrivalIcao: formData.arrivalIcao,
+      arrivalIata: formData.arrivalIata,
     });
     const flightTime = airborne ? calculateFlightTime(airborne.off, airborne.on) : "00:00";
 
@@ -1263,6 +1268,10 @@ function FlightFormImpl({
     formPilotRole,
     formData.departureIcao,
     formData.arrivalIcao,
+    // A return to ramp is told by its number and its two ends.
+    formData.flightNumber,
+    formData.departureIata,
+    formData.arrivalIata,
     formData.aircraftType,
     formData.picName,
     formData.sicName,

@@ -230,7 +230,7 @@ export const DutyEntryCard = memo(function DutyEntryCard({
             <Users className="h-3.5 w-3.5 flex-shrink-0" />
             <span className="truncate">
               {entry.crew
-                .map((c) => `${c.role === "CPT" || c.role === "PIC" ? "CPT" : "FO"} ${c.name}`)
+                .map((c) => `${c.role === "CPT" || c.role === "PIC" ? "CPT" : c.role} ${c.name}`)
                 .join(", ")}
             </span>
           </div>

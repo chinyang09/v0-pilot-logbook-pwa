@@ -49,8 +49,9 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 | Area | What it pins down |
 |---|---|
 | `lib/utils/roster/__tests__/` | reconciler classification, repeated-route matching, the spilled-duty match window, import decisions + retention, report tracking, pilot-role rules, sim dedup, tracked fields, the accepted-comparison stamp, that the single-pass timeline sums and acclimatisation equal their per-item definitions, the rolling windows in six time zones, the duty timeline's blocks (duty vs FDP, the FDP's limit at the last on-blocks) and the state at its pointer, the rolling limits at an instant (equal to the day figure once duties end), the Quick Check's violations, and `fifth-schedule-scenarios.test.ts` — the Fifth and First Schedules clause by clause as worked scenarios through the real pipeline, days off (para 5) included; `fdp-pipeline.test.ts` — `runFDPPipeline` itself on the owner's part-flown day (7 Nov 26) and the dashboard on a late last leg |
-| `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation, and a REAL schedule PDF (`fixtures/schedule-oct-2026-local-base.pdf`) run through the actual extractor |
+| `lib/utils/parsers/__tests__/` | PDF row merge, crew-column wrapping, Flt-time/PIC bleed, logbook→sector mapping, aircraft type map, time-reference normalisation, and a REAL schedule PDF (`fixtures/schedule-oct-2026-local-base.pdf`) run through the actual extractor — and `schedule-report-totals.test.ts`, that report's own Total Hours and Statistics equal to the figures the app works out from its flights through the REAL FDP pipeline (block, duty, time away, off / flight / training days, landings) |
 | `lib/utils/parsers/shared/__tests__/pooled-map.test.ts` | the bounded fan-out both enrichment chains end in |
+| `lib/lookup/__tests__/changi.test.ts` | Changi's flight enquiry read off REAL pages (`fixtures/changi/`) — a departure, an arrival, a flight not yet assigned, "No Flight Record Found.", local times to UTC, a page that is not the enquiry rejected rather than read as no record |
 | `lib/lookup/__tests__/search-candidates.test.ts`, `lib/lookup/__tests__/composite.test.ts`, `app/api/lookup/__tests__/` | search candidates — airframe and live-flight hits, exact / begins / inside ranking, one row per tail, airport codes off the label; the composed `aircraft/candidates` asking the flight history only for a whole registration search missed, and `exact=1` answering 404 only when every source answered; the door's sign-in rule over both kinds of route; enrichment never taking a near miss |
 | `lib/airports/__tests__/code-changes.test.ts`, `lib/utils/parsers/shared/__tests__/airport-enricher.test.ts` | codes that moved between airports (VTZ) — the date rule, each end at its own instant, which stored flights the repair corrects, both airports bundled in one zone; the chain resolving a moved code through its airports and flagging a pool that disagrees |
 | `lib/utils/__tests__/history-markers.test.ts` | overlay marker ordering — which dialog `history.back()` would actually take |
@@ -675,7 +676,7 @@ one looks it up in full like a typed code.
 |---|---|---|
 | a flight from its number + date (`flight/suggest`, `lib/lookup/flight-suggest.ts`) | the number's list (`/flight`): a week ahead SCHEDULED, a week back flown; the registration appears on the day the aeroplane is assigned | `basis: "scheduled"` is that UTC date's row; past the list, `"usual"` moves the nearest day's times onto the date and NEVER carries its registration |
 | filling the form (`lib/utils/flight-seed.ts` `lookupPatch`, `useFlightLookup`) | — | asked ONLY on the form's Lookup button (or Enter in Flight #) — it used to ask by itself once the number settled, a lookup per pause while typing. An answer is applied only while the form still holds the number and date it was asked for (`sameFlightNumber`) — one landing after the pilot moved on is dropped, and the status line hides once either changes. Writes BLANK fields and whatever the PREVIOUS lookup wrote that the pilot has not touched since (`ownedAfter`), so 288 then 289 moves the route and times with the number and clears 288's aeroplane; anything the pilot entered is kept, and "Replace" writes over it. Replace is offered only where the pilot's OWN non-blank value differs — a blank is filled, and a value that merely completes theirs (the IATA of their ICAO, the type of their registration) is filled too; "9VTNF" and "wsss" are not differences. It is read off the form AS IT STANDS (`lookupDiffers`), not stored when the answer came, so it follows edits; the line names the rows ("Kept yours: Aircraft, To") under the summary, never beside it A `usual` answer fills route and times (the pilot asked; the status line says "Usual times (6 Nov)") but never the aeroplane; never OOOI, never a simulator, signed or locked entry. The status line wraps between its parts (`whitespace-nowrap` per part), never inside a registration |
-| gates (`flight/gates`, `useDutyLookups`) | the tracked flight's `info`, else the departures board at the origin and the arrivals board at the destination, from an hour before | NOT in the flight form (it is for logging): drawn on the dashboard's sector chain, under each stop, asked ONLY while the page is on screen and the duty within 18h of now (no SWR key otherwise, so coming back asks about the duty as it now stands — deduplicated to 5 min — instead of showing a stale "nothing yet"), every 15 min while it stays up, with a refresh; never stored (a gate is published late and moves). The duty's legs end at the first 8h on the ground (`dutyFlights` — 18h can reach the next duty's first sector). The line under the chain (`describeDuty`, `lib/utils/dashboard/duty-line.ts`) never calls a failure "not published yet": checking / not checked / unavailable / not published are four different sentences |
+| gates (`flight/gates`, `useDutyLookups`) | for a SINGAPORE end, Changi's own flight record first (`lib/lookup/changi.ts`, below); then the tracked flight's `info`, else the departures board at the origin and the arrivals board at the destination, from an hour before | NOT in the flight form (it is for logging): drawn on the dashboard's sector chain, under each stop, asked ONLY while the page is on screen and the duty within 18h of now (no SWR key otherwise, so coming back asks about the duty as it now stands — deduplicated to 5 min — instead of showing a stale "nothing yet"), every 15 min while it stays up, with a refresh; never stored (a gate is published late and moves). The duty's legs end at the first 8h on the ground (`dutyFlights` — 18h can reach the next duty's first sector). The line under the chain (`describeDuty`, `lib/utils/dashboard/duty-line.ts`) never calls a failure "not published yet": checking / not checked / unavailable / not published are four different sentences |
 | a fleet (`airline/fleet`, `AirlineFleetSection`, the add-aircraft form's **By fleet** mode) | the airline's fleet page, by type | By registration is the default; By fleet asks for the pilot's airline when it opens, and otherwise only on Find / Enter — never per keystroke. Add writes a whole type in one `bulkPut` (`addFleetAircraftToDatabase`); a registration already held is left as it is |
 | the network (`airline/routes`, `airline/routes/from`) | the routes page's `arrRoutes`; a map pin's per-airport JSON | in the door, nothing reads them yet — the destination seeding they enable is on hold |
 | where the aeroplane is (`aircraft/whereabouts`, `lib/lookup/aircraft-whereabouts.ts`) | the registration's list: the last flight it DEPARTS on before `at` (our departure, or now) — landed / airborne / not yet left — and the one after; the inbound's ARRIVAL gate from the live flight, else the arrivals board | the duty band's line under the chain for the NEXT LEG STILL TO FLY (`inboundLeg` — on duty a later leg can be another tail; legs in FLOWN order, `sortFlights` is newest first), the duty panel, and the aircraft panel's **Now** section (on a tap); "9V-NCA · Landed 03:00Z · 30m ago · TR289 from DPS" — the inbound's arrival gate is said only while the leg's OWN departure gate is not yet published (it is drawn under the stop, and in the panel's Gates row; saying it twice was the owner's report), and then it comes first so a cut-short line keeps it; never stored; a departure within 20 min of `at` is our own flight pushing back, not the inbound |
@@ -686,6 +687,23 @@ one looks it up in full like a typed code.
 
 The flight number's list, the boards and the per-airport timetable all reach
 only a few days ahead: a date further out gets usual times, not a schedule.
+
+**Changi's own record answers for a Singapore end** (`lib/lookup/changi.ts`,
+Nov 2026 — the owner: its gate is the most current there is, ahead of the
+trackers). The airport's flight enquiry, `POST /icargo/do/searchFlight`
+(form-encoded, no session), keyed on the flight number and the SINGAPORE date
+of the movement at SIN, reaching about a week back and two days ahead:
+
+| | |
+|---|---|
+| read | by LABEL off the page's text (`parseChangiFlightPage`), never by position; a blank field is "", never the next label |
+| gives | status (DP / LD), scheduled / estimated / actual (Singapore local → UTC), terminal, the other end, the registration ("9VTNG" → "9V-TNG"), the type, the CURRENT gate (else the scheduled), the stand, the belt, and the rotation — a departure's inbound flight, an arrival's onward one |
+| used by | `flight/gates`: asked ALONGSIDE the trackers for a SIN end, and its gate, stand, belt and aeroplane win (`source: "airport"`, `inboundFlight` / `onwardFlight`); `flight/suggest`: the day's registration when the trackers have none yet. The dashboard's Gates row adds "Stand 512" only where it is not the gate itself, and "Inbound TR733" / "On to TR134" |
+| fails | a page that is not the enquiry REJECTS (`fetchChangiFlights`) — never read as "no record"; the composite then falls back to the trackers as before |
+
+Plain http, no CORS: only the door (Edge) asks it. Node's fetch in this
+container does not use the proxy, so a live check from here is curl; the
+parser is pinned on saved real pages.
 
 **An IATA code is not an airport for all time** (`lib/airports/code-changes.ts`).
 VTZ moved from Visakhapatnam's old airport (VOVZ) to Bhogapuram (VOVI) at 00:01
@@ -813,6 +831,23 @@ the next import (earliest kept, rest deleted, counted in the summary).
 `update_consult`, `update_conflict` (legacy), `edited_conflict`,
 `delete_missing`. `plan-summary.ts` owns the default-acceptance set and the
 summary counts — one definition, not a switch per call site.
+
+**What else the schedule report carries** (Nov 2026, from the owner's
+October report):
+
+| | Rule |
+|---|---|
+| SO / SFO | a second officer (cruise relief) is read from the crew column and goes on the flight as a RELIEF PILOT, never into a seat; an SFO is a first officer |
+| return to ramp ("627R", BKK-BKK) | its own sector: the flight number keeps its letter (and is never the same leg as the "627" after it — `sameFlightNumber`), and it carries BLOCK time only: `isReturnToRamp` (an R, one airport, no OFF/ON) keeps `airborneTimes` from turning its OUT/IN into flight time, a takeoff and a landing. The company's Block Hours count it; its Landings do not |
+| Report times | the duty's REPORT as the company recorded it — moved when a delay is notified at the place of rest — is read off the column onto the duty's FIRST sector (`ParsedSector.reportTime` → `FlightLog.reportTime`, a company-owned SAFE field). Without it the duty was taken from the actual pushback: 51 minutes of October's duty went missing. A report later in the day than the sector's OUT is the evening before |
+| Total Hours and Statistics | read (`readReportTotals`, by label — the PDF merges cells) into `plan.reportTotals` with the range it covers, and checked once the import is written (`checkReportTotals`: the logbook's own figures through `runFDPPipeline`), shown under the import's summary. Actual + planned: flown sectors at their actual times, the rest at their schedule. Duty = flight duties report → debrief + training days; Time Away = report → debrief per trip off base; Off Days = days off and leave; Flight / Training Days = local-base days a duty of that kind REPORTED on; Landings = sectors that went somewhere. A report is the plan after the day it was generated, so a difference after that is said as such, not called an error |
+
+Known, owner's call: production holds the October EBT sessions at 4 hours
+(an older build took the schedule row's 10:30–14:30), where the current
+parser takes the Training Details window (09:30–15:30, 6 hours) and the
+report's Duty Hours count the 6; a re-import does not move an existing
+simulator entry's times, so that month's duty reads 4 hours short of the
+report until they are changed.
 
 ### LogTen Pro Migration (`lib/utils/parsers/logten/`)
 
@@ -2816,7 +2851,7 @@ re-renders).
 - **The sidebar's sections** (`components/nav-sections.tsx`, the owner's
   structure, Nov 2026): Dashboard and Logbook at the top, then DATABASE
   (Aircraft, Airports, Crew), DUTY & COMPLIANCE (Currencies, FDP,
-  Discrepancies) and SYSTEM (Account, Settings, Bin). A section whose one row
+  Discrepancies) and SYSTEM (Account, Settings, Bin, Feedback). A section whose one row
   carries its own name draws no heading (`heading: false`) — LOGBOOK over
   Logbook is one word twice, with a chevron hiding one row. A row's
   `description` ("Master fleet records") is its tooltip. Headings are ONE
@@ -3467,6 +3502,29 @@ are read only by the shell's header) and the SETTERS (which never change, and
 are all the register hooks need). Held together, one page registering its
 buttons re-rendered the other five.
 
+### Feedback — reports written on the go (`/feedback`, `lib/feedback/`)
+
+System › Feedback is where a pilot writes down a bug, a new feature or a
+tweak the moment they meet it, for the work to be picked up later from
+MongoDB (`feedback`). Main / detail: the list (Waiting to Send, Sent) beside
+the report; + opens New Report in the detail panel — Type, Area (guessed from
+the page they came from), Title, Details. With it goes what reproduces it
+without asking: the page they were on BEFORE opening Feedback
+(`rememberRoute`, kept by `FeedbackOutbox` in the app layout), the build
+(`NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA`), the user agent, the screen, installed
+or not.
+
+- **Written offline, sent later.** A report the server cannot take now
+  (offline, 5xx) waits in a per-pilot OUTBOX in localStorage and goes on the
+  next `online`, app start or Feedback visit (`flushOutbox`, one at a time).
+  It carries the id the device gave it, and the route inserts once per
+  `{userId, id}` (`$setOnInsert`), so a resend after a lost answer is the
+  same report. A 400 is dropped — it would be refused every time.
+- **The outbox is per account.** A report is never sent under another
+  account than the one that wrote it.
+- **Reading them.** `feedback` holds one document per report, newest
+  `createdAt` first under the `{status, createdAt}` index.
+
 ### Settings are the USER's; only the look is the device's (`lib/settings/user-settings.ts`)
 
 Preferences used to be one IndexedDB row per DEVICE, so signing in on a new
@@ -3721,6 +3779,7 @@ Notable route groups:
 | `/api/account/totp/reveal` | POST | Yes (passkey step-up) | Reveal the TOTP seed + otpauth URI to re-add an authenticator |
 | `/api/account/callsign` | PUT | Yes (passkey step-up **or** TOTP) | Change callsign |
 | `/api/account/sessions` | GET/DELETE | Yes | List sessions (with device `userAgent`); revoke one (incl. current) or all |
+| `/api/feedback` | GET/POST | Yes | In-app feedback: POST files a report (idempotent on the device's id), GET lists the pilot's own |
 
 ### Console Logging
 
@@ -4719,6 +4778,7 @@ other user collection.
 | `airportSubmissions` | User-submitted airports with enrichment status |
 | `sessions` | User sessions with TTL |
 | `deletions` | Tombstones (TTL 30d) for propagating deletes across devices |
+| `feedback` | In-app bug / feature / tweak reports: `{userId, callsign, id, kind, area, title, details, context{route, build, userAgent, viewport, standalone, online}, writtenAt, status, createdAt, response?}`. The app writes `status: "open"` only; triage (`planned` / `done` / `wontfix`, a `response`) is done on the collection and shows on the pilot's report |
 | `flights`, `aircraft`, `personnel`, etc. | Synced user data collections |
 
 **Indexes:** `lib/mongodb/client.ts` runs an idempotent, best-effort

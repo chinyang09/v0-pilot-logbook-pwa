@@ -1098,6 +1098,19 @@ describe("deriveSectorCrew — an augmented crew", () => {
     expect(result.additionalCrew).toEqual([{ id: "me", name: "Self", role: "Relief Pilot" }]);
   });
 
+  it("puts a second officer on the flight as a relief pilot, never in a seat", () => {
+    const result = deriveSectorCrew(
+      sector([
+        { role: "CPT", crewId: "2000", name: "Commander", personnelId: "p-cmd", commander: true },
+        { role: "FO", crewId: "9766", name: "Lim Chin Yang", personnelId: "me" },
+        { role: "SO", crewId: "4000", name: "Second Officer", personnelId: "p-so" },
+      ]),
+      currentUser
+    );
+    expect(result).toMatchObject({ picName: "Commander", sicName: "Self" });
+    expect(result.additionalCrew).toEqual([{ id: "p-so", name: "Second Officer", role: "Relief Pilot" }]);
+  });
+
   it("adds no relief pilots to an ordinary two-pilot crew", () => {
     const result = deriveSectorCrew(
       sector([

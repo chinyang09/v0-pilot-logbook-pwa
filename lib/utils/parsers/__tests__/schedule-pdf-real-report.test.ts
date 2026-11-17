@@ -95,6 +95,8 @@ describe("schedule PDF — October 2026 report", () => {
       "TR982",
       "TR983",
       "TR626",
+      // The return to ramp before it: a sector of its own (block only).
+      "TR627R",
       "TR627",
       "TR784",
       "TR785",

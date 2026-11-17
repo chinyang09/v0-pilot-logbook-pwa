@@ -75,6 +75,7 @@ import { ImportReviewModalV2 } from "./import-review-modal-v2";
 import { ImportStatusDialog, type ImportStage } from "./import-status-dialog";
 import type { Personnel } from "@/types/entities/crew.types";
 import { nonPicPfRoleOf } from "@/lib/utils/roster/pilot-role";
+import type { ReportTotalsCheck } from "@/lib/utils/roster/report-totals-check";
 
 interface Props {
   /** Where the button is mounted — affects success-message wording. */
@@ -103,6 +104,8 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
   const [pendingPlan, setPendingPlan] = useState<PlannedImport | null>(null);
   const [showReview, setShowReview] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
+  // The report's own totals against the logbook's, once the import is written.
+  const [totals, setTotals] = useState<ReportTotalsCheck | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // An account with no "This is me" card, importing a report that names its
@@ -249,6 +252,16 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         if (result.identical) parts.push(`${result.identical} unchanged`);
         if (result.errors.length)
           parts.push(count(result.errors.length, "error"));
+        // A second account of the month: the report's Total Hours and
+        // Statistics against the same figures worked out from the logbook
+        // the import just wrote, through the FDP pipeline.
+        if (plan.reportTotals) {
+          const { figures, range } = plan.reportTotals;
+          await import("@/lib/utils/roster/report-totals-check")
+            .then(({ checkReportTotals }) => checkReportTotals(figures, range, reportStampsRef.current.scheduleGeneratedAt ?? plan.generatedAt))
+            .then(setTotals)
+            .catch(() => setTotals(null));
+        }
         setSummary(parts.join(", ") || "No changes applied");
         setErrorMsg(null);
         onComplete?.();
@@ -270,6 +283,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
   const handleFiles = useCallback(
     async (files: File[]) => {
       setSummary(null);
+      setTotals(null);
       setErrorMsg(null);
       setIsOpen(true);
       setBusy(true);
@@ -554,6 +568,8 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
             timeReference: "UTC",
             dateRange: logbookPlan.dateRange,
             generatedAt: logbookPlan.generatedAt,
+            // The crew logbook report prints no totals block.
+            reportTotals: null,
             crewMember: { crewId: "", name: "", base: "", role: "", aircraftType: "" },
             operations: acceptedOps,
             simSessions: [],
@@ -675,6 +691,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         progress={progress}
         errorMsg={errorMsg}
         summary={summary}
+        totals={totals}
         question={
           subject
             ? {
@@ -704,6 +721,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         onDone={() => {
           setIsOpen(false);
           setSummary(null);
+      setTotals(null);
           setErrorMsg(null);
         }}
       />
@@ -721,6 +739,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           setShowReview(false);
           setPendingPlan(null);
           setSummary(null);
+      setTotals(null);
           setProgress(null);
           setIsOpen(false);
         }}
@@ -740,6 +759,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
           logtenDocsRef.current = [];
           setIsOpen(false);
           setSummary(null);
+      setTotals(null);
           setProgress(null);
         }}
         onTimeReferenceChange={handleLogtenTimeReference}
