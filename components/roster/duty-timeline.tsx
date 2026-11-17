@@ -37,7 +37,7 @@ import { usePreferences } from "@/components/providers/preferences-provider"
 import { FDP_COLORS } from "@/components/roster/fdp-colors"
 import { formatInstant, tzFormatter } from "@/lib/utils/tz-format"
 import { formatHHMMDisplay, minutesToHHMM } from "@/lib/utils/time"
-import { pointerState, REST_RULE_LABEL, type DutyBlock, type RestBefore } from "@/lib/utils/roster/duty-timeline"
+import { pointerState, REST_RULE_LABEL, type DutyBlock, type OpenRest, type RestBefore } from "@/lib/utils/roster/duty-timeline"
 import { createRollingIndex, rollingAt, rollingSeries, type RollingIndex, type RollingKind } from "@/lib/utils/roster/rolling-at"
 import { analyseDaysOff } from "@/lib/utils/roster/days-off"
 import { formatRestSpan, LONG_REST_MIN } from "@/lib/utils/dashboard/duty-status"
@@ -128,7 +128,8 @@ interface RollingView {
   color: string
 }
 
-type Selection = { kind: "duty" | "rest"; id: string } | null
+/** "after": the open rest after the last duty, keyed on that duty. */
+type Selection = { kind: "duty" | "rest" | "after"; id: string } | null
 
 function localZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -457,7 +458,9 @@ export function DutyTimeline({
   const visible = useMemo(
     () =>
       blocks.filter(
-        (b) => Math.max(b.endMs, b.showMax ? (b.fdpLimitMs ?? 0) : 0) > drawFrom && (b.restBefore?.startMs ?? b.startMs) < drawTo,
+        (b) =>
+          (b.restAfter ? Infinity : Math.max(b.endMs, b.showMax ? (b.fdpLimitMs ?? 0) : 0)) > drawFrom &&
+          (b.restBefore?.startMs ?? b.startMs) < drawTo,
       ),
     [blocks, drawFrom, drawTo],
   )
@@ -516,10 +519,11 @@ export function DutyTimeline({
 
   const selectedDuty = selection?.kind === "duty" ? (byId.get(selection.id) ?? null) : null
   const restAfter = selection?.kind === "rest" ? (byId.get(selection.id) ?? null) : null
+  const openRestOf = selection?.kind === "after" ? (byId.get(selection.id) ?? null) : null
   const restBefore = restAfter?.restBefore ? (byId.get(restAfter.restBefore.previousId) ?? null) : null
 
   const toggle = useCallback(
-    (kind: "duty" | "rest", id: string) => setSelection((cur) => (cur?.kind === kind && cur.id === id ? null : { kind, id })),
+    (kind: "duty" | "rest" | "after", id: string) => setSelection((cur) => (cur?.kind === kind && cur.id === id ? null : { kind, id })),
     [],
   )
   // From a rest's detail to one of its duties: select it and bring it to the pointer.
@@ -765,6 +769,8 @@ export function DutyTimeline({
                     duration={duration}
                     dutySelected={selection?.kind === "duty" && selection.id === b.id}
                     restSelected={selection?.kind === "rest" && selection.id === b.id}
+                    afterSelected={selection?.kind === "after" && selection.id === b.id}
+                    openEndMs={drawTo}
                     onSelect={toggle}
                   />
                 ))}
@@ -837,6 +843,17 @@ export function DutyTimeline({
         )}
 
         {selectedDuty && <DutyDetail block={selectedDuty} clock={clock} duration={duration} onClose={() => setSelection(null)} />}
+        {openRestOf?.restAfter && (
+          <OpenRestDetail
+            block={openRestOf}
+            rest={openRestOf.restAfter}
+            nowMs={nowMs}
+            clock={clock}
+            duration={duration}
+            onDuty={showDuty}
+            onClose={() => setSelection(null)}
+          />
+        )}
         {restAfter?.restBefore && (
           <RestDetail
             after={restAfter}
@@ -995,8 +1012,8 @@ function stateCells(
       s.minutes < 0
         ? { caption: "Rest", value: `In ${duration(-s.minutes)}`, muted: true }
         : long
-          ? { caption: req != null ? `Rest · Min ${duration(req)}` : "Rest", value: formatRestSpan(s.minutes), over: s.rest.status === "short" }
-          : { caption: "Rest", value: req != null ? `${duration(s.minutes)}/${duration(req)}` : duration(s.minutes), over: s.rest.status === "short" }
+          ? { caption: req != null ? `Rest · Min ${duration(req)}` : "Rest", value: formatRestSpan(s.minutes), over: "status" in s.rest && s.rest.status === "short" }
+          : { caption: "Rest", value: req != null ? `${duration(s.minutes)}/${duration(req)}` : duration(s.minutes), over: "status" in s.rest && s.rest.status === "short" }
     return [...ahead(s.block), rest]
   }
   return [...ahead(s.next), { ...none, caption: "Rest" }]
@@ -1138,6 +1155,8 @@ function DutyDeck({
   duration,
   dutySelected,
   restSelected,
+  afterSelected,
+  openEndMs,
   onSelect,
 }: {
   block: DutyBlock
@@ -1147,7 +1166,10 @@ function DutyDeck({
   duration: (min: number) => string
   dutySelected: boolean
   restSelected: boolean
-  onSelect: (kind: "duty" | "rest", id: string) => void
+  afterSelected: boolean
+  /** Where an open rest is drawn to: the right edge of what is drawn. */
+  openEndMs: number
+  onSelect: (kind: "duty" | "rest" | "after", id: string) => void
 }) {
   const future = b.isFuture
   const base = b.scenario ? FDP_COLORS.scenario : future ? FDP_COLORS.planned : FDP_COLORS.duty
@@ -1224,7 +1246,109 @@ function DutyDeck({
       {b.restBefore && (
         <RestBar rest={b.restBefore} signOnMs={b.startMs} future={future} selected={restSelected} xOf={xOf} wOf={wOf} duration={duration} onSelect={() => onSelect("rest", b.id)} />
       )}
+      {b.restAfter && b.restAfter.startMs < openEndMs && (
+        <OpenRestBar rest={b.restAfter} endMs={openEndMs} future={future} selected={afterSelected} xOf={xOf} wOf={wOf} duration={duration} onSelect={() => onSelect("after", b.id)} />
+      )}
     </>
+  )
+}
+
+/**
+ * The rest after the LAST duty: commenced an hour after sign-off, the minimum
+ * solid, then the rest running on with no duty to end it — drawn to the edge
+ * of what is drawn and faded there, because it has no end yet.
+ */
+function OpenRestBar({
+  rest,
+  endMs,
+  future,
+  selected,
+  xOf,
+  wOf,
+  duration,
+  onSelect,
+}: {
+  rest: OpenRest
+  endMs: number
+  future: boolean
+  selected: boolean
+  xOf: (ms: number) => number
+  wOf: (a: number, b: number) => number
+  duration: (min: number) => string
+  onSelect: () => void
+}) {
+  const left = xOf(rest.startMs)
+  const width = wOf(rest.startMs, endMs)
+  const h = hit(left, width)
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-pressed={selected}
+        aria-label={`Rest after the last duty, minimum ${duration(rest.requiredMinutes)}`}
+        className="absolute"
+        style={{ left: h.left, width: h.width, top: REST_Y, height: REST_LABEL_Y + LABEL_H - REST_Y }}
+      >
+        <span
+          className={cn("absolute rounded-bl-sm", future && "border border-r-0 border-t-0 border-dashed", selected && "ring-2 ring-primary ring-offset-1 ring-offset-card")}
+          style={{
+            left: h.inset,
+            top: 0,
+            height: REST_H,
+            width,
+            borderColor: REST,
+            background: `linear-gradient(to right, ${tint(REST, future ? 18 : 28)} 70%, transparent)`,
+          }}
+        />
+      </button>
+      <span
+        className="pointer-events-none absolute rounded-bl-sm"
+        style={{ left, width: wOf(rest.startMs, Math.min(rest.minimumEndMs, endMs)), top: REST_Y, height: REST_H, background: tint(REST, future ? 60 : 80) }}
+        aria-hidden
+      />
+    </>
+  )
+}
+
+function OpenRestDetail({
+  block,
+  rest,
+  nowMs,
+  clock,
+  duration,
+  onDuty,
+  onClose,
+}: {
+  block: DutyBlock
+  rest: OpenRest
+  nowMs: number
+  clock: (ms: number) => string
+  duration: (min: number) => string
+  onDuty: (b: DutyBlock) => void
+  onClose: () => void
+}) {
+  const sofar = Math.floor((nowMs - rest.startMs) / MIN)
+  return (
+    <div className="space-y-2 pt-1">
+      <DetailHeader
+        title="Rest After the Last Duty"
+        subtitle={`From ${clock(rest.startMs)} · no duty after it`}
+        onClose={onClose}
+        closeLabel="Close rest details"
+      />
+      <div className="overflow-hidden rounded-xl border bg-card">
+        {sofar > 0 && <ReadOnlyRow label="Rest So Far" value={formatRestSpan(sofar, duration)} />}
+        <ReadOnlyRow label="Minimum" value={duration(rest.requiredMinutes)} />
+        <ReadOnlyRow label="Legal From" value={clock(rest.minimumEndMs)} />
+        <ReadOnlyRow label="Rule" value={REST_RULE_LABEL[rest.rule]} />
+        <ReadOnlyRow label="Signed Off" value={clock(rest.signOffMs)} />
+        <ReadOnlyRow label="Rest Commenced" value={clock(rest.startMs)} />
+      </div>
+      <div className="overflow-hidden rounded-xl border bg-card">
+        <NeighbourRow caption="Before" block={block} when={`Sign-off ${clock(block.endMs)}`} onSelect={() => onDuty(block)} />
+      </div>
+    </div>
   )
 }
 

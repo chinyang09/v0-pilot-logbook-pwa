@@ -27,7 +27,7 @@ import { useAuth } from "@/components/providers/auth-provider"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
-import { appAlert } from "@/lib/utils/app-alert"
+import { showToast } from "@/lib/utils/undo-toast"
 import { formatStamp } from "@/lib/utils/date"
 import { cn } from "@/lib/utils"
 import {
@@ -165,12 +165,13 @@ export default function FeedbackPage() {
         onSent={async (id, outcome) => {
           creatingRef.current = false
           if (outcome === "sent") await load()
-          setSelectedId(id)
-          void appAlert(
-            outcome === "sent"
-              ? { title: "Thanks — Report Sent", message: "It is on the list to be worked through." }
-              : { title: "Saved to Send", message: "You are offline. It sends by itself once you are back online." },
-          )
+          // A phone goes back to the list, where the report now leads; a
+          // tablet shows it beside the list. A dialog to acknowledge here put
+          // its own history entry over the overlay's, and Back then landed on
+          // an empty "Select …" pane before it reached the list.
+          if (isDesktop) setSelectedId(id)
+          else setSelectedId(null)
+          showToast(outcome === "sent" ? "Report sent" : "Saved · sends once you're online")
         }}
       />,
     )

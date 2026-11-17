@@ -3520,6 +3520,14 @@ or not.
   It carries the id the device gave it, and the route inserts once per
   `{userId, id}` (`$setOnInsert`), so a resend after a lost answer is the
   same report. A 400 is dropped — it would be refused every time.
+- **Sending says so with a TOAST, not a dialog** (`showToast`, the undo
+  toast without its Undo), and a phone goes back to the list. A dialog
+  waiting for its OK put a history entry over the report's, and Back then
+  landed on an empty "Select …" pane before the list (the owner's report).
+- **The line under a form's title is ONE line** (`DetailFormPanel`): an
+  error, else why Save is unavailable, else the description — swapped in
+  place. As its own line, "Give it a title" vanished with the first letter
+  and moved every field up.
 - **The outbox is per account.** A report is never sent under another
   account than the one that wrote it.
 - **Reading them.** `feedback` holds one document per report, newest
@@ -4454,6 +4462,13 @@ period and where it is focused", so they are ONE scroller on ONE time axis:
   PIC's 2:00 (para 3(2), the local night satisfied where required), its rule,
   and the days off it holds. A simulator or positioning duty is named ("SIM",
   "POS" → Simulator / Positioning) and reads "Not a flight duty period".
+- **The rest after the LAST duty is drawn too** (`DutyBlock.restAfter`, the
+  owner's feedback). Every other rest is the `restBefore` of the duty that
+  ends it, so after the last one the chart drew nothing. It commences an hour
+  after sign-off with para 3's minimum after that duty solid (`earliestLegalRestEnd`;
+  para 4 needs a disruptive duty AHEAD, and there is none), then runs on,
+  faded at the edge of what is drawn. The pointer reads it as a rest with no
+  next duty; a tap opens "Rest After the Last Duty".
 - **A tapped duty or rest expands IN PLACE under the chart** — sign-on,
   sign-off, FDP against its maximum, latest sign-off, sectors; a rest's length,
   minimum and when it ends, and the duties before and after it — an exception
@@ -5567,7 +5582,7 @@ When making changes, be aware of these high-impact files:
 - Do not drive the glass's opacity from `--glass-veil` — that coat is a warm LIGHTENING paint and raising its alpha whitens a dark surface instead of solidifying it. Opacity belongs to `--glass-base`, the card-coloured undercoat; the two are separate on purpose
 - Do not paint an extra background over a glass surface to make one instance more opaque (the calendar did, at `--background` 0.85, and read as a different material from every other glass surface). Change the shared material instead
 - Do not put a translucent fill or a `/NN` text colour on a glass surface — contents ON glass are SOLID (`--on-glass-*`). Only the slab is translucent; a translucent highlight over it shows the page twice and changes tone as the content scrolls underneath
-- Do not save or restore the flight form's scroll offset without the flight it belongs to — the restore is for coming BACK to a flight (from a picker, from another section), and saved bare it opened the next, different flight at the depth the last one was read to. A flight changing under a mounted form (desktop) starts at its top. And offer no "USE" while the block is 0:00: a column of "USE 0:00" down an unflown sector offers to copy a zero
+- Do not send the flight form back to its top when another flight opens — the depth CARRIES from flight to flight (the owner's feedback, Nov 2026: "allows easy comparison between flights"), on a phone's re-mount (the saved offset) and under a desktop's mounted form alike. Only a flight created in the last minute (`FRESH_FLIGHT_MS` — a new one, a Next Leg, a Return) starts at its top, because it is filled from the top. And offer no "USE" while the block is 0:00: a column of "USE 0:00" down an unflown sector offers to copy a zero
 - Do not put a padded `CardContent` in a bare `Card` — the shadcn `Card` carries `py-6 gap-6` of its own, so the two stacked: the currency, discrepancy and duty cards each had ~24px of empty band above their header and below their last line, and every `EmptyState` sat in 72px of top padding. A card whose content brings its own padding takes `py-0 gap-0`
 - Do not turn the currencies page back into a card per currency or put filter chips over it — it is ONE grouped list (`CurrencyCard` is a row), "Needs attention" then "Current", soonest first, and a pilot's ten documents fit one phone screen (measured: 0px overflow at 390×844 and 360×780). A card each was ~210px and five screens of scrolling to learn what runs out next. Thresholds, notes and the auto-update switch are settings OF a currency and live in its editor; past a year the figure is years ("7.9y"), not "2888d". The code under the name is shown only when it says something the name does not (`describesMoreThanCode`, `lib/utils/string.ts` — the dashboard's rule): "Passport / PASSPORT" and "CRM / CRM" were the same word twice
 - Do not let a `useBackDismiss` overlay close on a popstate that was not its own — every listener hears every pop, so a date picker opened OVER a form sheet closed the sheet too when it saved. Each marker entry carries `__overlayId`, and a listener whose entry is still the current one ignores the pop

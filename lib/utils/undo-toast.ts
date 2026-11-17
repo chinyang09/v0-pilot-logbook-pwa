@@ -23,7 +23,8 @@ export interface UndoToast {
   /** Changes with every message, so a second delete restarts the toast. */
   key: number
   message: string
-  undo: () => Promise<unknown> | unknown
+  /** Absent for a plain confirmation ("Report sent") — nothing to take back. */
+  undo?: () => Promise<unknown> | unknown
 }
 
 let current: UndoToast | null = null
@@ -40,6 +41,20 @@ export function showUndoToast(message: string, undo: UndoToast["undo"]) {
   // Every delete in the app ends here, so this is where it is felt.
   haptic("thud")
   current = { key: nextKey++, message, undo }
+  if (timer) clearTimeout(timer)
+  timer = setTimeout(dismissUndoToast, UNDO_TOAST_MS)
+  emit()
+}
+
+/**
+ * The same toast with no Undo: a confirmation that something landed where it
+ * cannot be seen from here (a report sent). Not a dialog — one that waits
+ * for an OK puts a history entry on top of the page, and a Back then lands
+ * on it.
+ */
+export function showToast(message: string) {
+  haptic("tick")
+  current = { key: nextKey++, message }
   if (timer) clearTimeout(timer)
   timer = setTimeout(dismissUndoToast, UNDO_TOAST_MS)
   emit()
