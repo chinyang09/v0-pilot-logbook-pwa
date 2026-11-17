@@ -25,6 +25,7 @@ import { callFr24Worker } from "@/lib/fr24/worker-client"
 import type { Fr24Flight, Fr24Result } from "@/lib/fr24/types"
 import { normalizeRegistration } from "@/lib/utils/string"
 import { findOnBoard, normalizeFlightNumber, pickFlightOnDate, suggestFlight, type FlightGates } from "./flight-suggest"
+import { fetchChangiFlights, singaporeDate, type ChangiFlight } from "./changi"
 import { movementOf, pickWhereabouts } from "./aircraft-whereabouts"
 import { aircraftCandidates, airportCandidates } from "./search-candidates"
 import type { LookupRoutes } from "./types"
@@ -103,6 +104,26 @@ async function flightSuggestRoute(query: Query): Promise<Fr24Result<LookupRoutes
   if (isFailure(list)) return list
   const suggestion = suggestFlight(list.flights, list.number, list.date, list.out)
   if (!suggestion) return { ok: false, status: 404, error: `No flight ${list.number} found` }
+  // The day's aeroplane, where the trackers have none yet and one end is
+  // Singapore: Changi assigns it before they list it. Never for `usual`, whose
+  // times are another day's.
+  if (suggestion.basis === "scheduled" && !suggestion.registration) {
+    const atSin =
+      suggestion.origin?.iata === "SIN" || suggestion.origin?.icao === "WSSS"
+        ? { direction: "departure" as const, at: suggestion.scheduledDeparture }
+        : suggestion.destination?.iata === "SIN" || suggestion.destination?.icao === "WSSS"
+          ? { direction: "arrival" as const, at: suggestion.scheduledArrival }
+          : null
+    if (atSin?.at) {
+      const found = await fetchChangiFlights(list.number, singaporeDate(Date.parse(atSin.at)), STEP_TIMEOUT_MS).catch(() => [])
+      const match = found.find(
+        (f) => f.direction === atSin.direction && normalizeFlightNumber(f.flightNumber) === normalizeFlightNumber(list.number),
+      )
+      if (match?.registration) {
+        return { ok: true, status: 200, data: { ...suggestion, registration: match.registration, typecode: suggestion.typecode || match.aircraftType }, source: list.source }
+      }
+    }
+  }
   return { ok: true, status: 200, data: suggestion, source: list.source }
 }
 
@@ -120,22 +141,58 @@ async function flightGatesRoute(query: Query): Promise<Fr24Result<LookupRoutes["
   if (!row || !flight) return { ok: false, status: 404, error: `No flight ${list.number} on ${list.date}` }
 
   const code = (a: Fr24Flight["origin"]) => a?.iata || a?.icao || ""
-  const answer = (dep: Fr24Flight | null, arr: Fr24Flight | null, source: FlightGates["source"], from: string) => ({
-    ok: true as const,
-    status: 200,
-    source: from,
-    data: {
-      flight,
-      departure: { airport: code(row.origin), gate: dep?.origin?.gate ?? "", terminal: dep?.origin?.terminal ?? "" },
-      arrival: {
-        airport: code(row.destination),
-        gate: arr?.destination?.gate ?? "",
-        terminal: arr?.destination?.terminal ?? "",
-        baggage: arr?.destination?.baggage ?? "",
+  // A SINGAPORE end is asked of Changi's own record first — the most current
+  // gate there is, with the stand, the belt and the aeroplane — alongside the
+  // trackers rather than before them, so it costs no time.
+  const changi = (end: Fr24Flight["origin"], direction: ChangiFlight["direction"], at: string | null) =>
+    end && at && (end.iata === "SIN" || end.icao === "WSSS")
+      ? fetchChangiFlights(list.number, singaporeDate(Date.parse(at)), STEP_TIMEOUT_MS)
+          .then(
+            (found) =>
+              found.find(
+                (f) => f.direction === direction && normalizeFlightNumber(f.flightNumber) === normalizeFlightNumber(list.number),
+              ) ?? null,
+          )
+          .catch(() => null)
+      : Promise.resolve(null)
+  const changiPending = Promise.all([
+    changi(row.origin, "departure", row.scheduledDeparture),
+    changi(row.destination, "arrival", row.scheduledArrival),
+  ])
+  const answer = async (dep: Fr24Flight | null, arr: Fr24Flight | null, source: FlightGates["source"], from: string) => {
+    const [atDep, atArr] = await changiPending
+    const departure = {
+      airport: code(row.origin),
+      gate: atDep?.gate || (dep?.origin?.gate ?? ""),
+      terminal: atDep?.terminal || (dep?.origin?.terminal ?? ""),
+      ...(atDep?.stand ? { stand: atDep.stand } : {}),
+    }
+    const arrival = {
+      airport: code(row.destination),
+      gate: atArr?.gate || (arr?.destination?.gate ?? ""),
+      terminal: atArr?.terminal || (arr?.destination?.terminal ?? ""),
+      baggage: atArr?.belt || (arr?.destination?.baggage ?? ""),
+      ...(atArr?.stand ? { stand: atArr.stand } : {}),
+    }
+    const fromAirport = !!(atDep?.gate || atDep?.stand || atArr?.gate || atArr?.stand)
+    return {
+      ok: true as const,
+      status: 200,
+      source: fromAirport ? "changi" : from,
+      data: {
+        flight: {
+          ...flight,
+          // The airport knows the aeroplane before the trackers do.
+          registration: flight.registration || atDep?.registration || atArr?.registration || "",
+        },
+        departure,
+        arrival,
+        source: fromAirport ? ("airport" as const) : source,
+        inboundFlight: atDep?.linkedFlight ?? "",
+        onwardFlight: atArr?.linkedFlight ?? "",
       },
-      source,
-    },
-  })
+    }
+  }
 
   if (row.live && row.fr24Id) {
     const live = await callFr24Worker("flight/details", { id: row.fr24Id }, STEP_TIMEOUT_MS)
@@ -157,7 +214,12 @@ async function flightGatesRoute(query: Query): Promise<Fr24Result<LookupRoutes["
   }
   // Neither board could be READ: that is a failure, not "no gate yet".
   const failure = [departures, arrivals].find((b) => b && !b.ok && b.status !== 404)
-  if (failure && !failure.ok && !departures?.ok && !arrivals?.ok) return { ok: false, status: 502, error: failure.error }
+  if (failure && !failure.ok && !departures?.ok && !arrivals?.ok) {
+    // The trackers' boards could not be read — the airport's record may
+    // still have answered for a Singapore end.
+    const [atDep, atArr] = await changiPending
+    if (!atDep && !atArr) return { ok: false, status: 502, error: failure.error }
+  }
   return answer(null, null, "none", list.source)
 }
 

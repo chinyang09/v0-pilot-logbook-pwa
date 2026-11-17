@@ -1,0 +1,219 @@
+ 
+<html>
+  <head>
+    <title>Flight Enquiry By Flight</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+    <link rel="stylesheet" href='/icargo/css/cms.css' type="text/css">
+  </head>
+  <body onload="self.focus();initTip();firstFocus();" bgcolor="#FFFFFF" text="#000000" topMargin="0px">
+<table width="769" align="center" border="0" cellspacing="0" cellpadding="0">
+  <tr>
+    <td><img src='../images/bannerIcargonet.jpg' width="769" border="0" usemap="#bannerHomeMap"> <map name="bannerHomeMap"><area shape="RECT" coords="-16,-1,37,16" href="/cgs/index.jsp"></map></td>
+  </tr>
+</table>
+<table width="769" align="center" cellspacing="0" cellpadding="0" border="0">
+  <tr>
+    <td>
+    <table width="100%" border="0" cellspacing="0" cellpadding="0">
+      <tr>
+        <td width="92%" height="19" valign="center">
+          <!-- #BeginEditable "appbar" -->
+          <!-- #EndEditable -->
+        </td>
+        <td width="1%" height="15">&nbsp;</td>
+        <td width="7%" valign="bottom" height="19">
+          <div align="center"></div>
+        </td>
+      </tr>
+      <tr>
+        <td colspan="3">
+          <!-- #BeginEditable "appbody" -->
+          <br>
+<p class="bdTitle">Flight Enquiry Details</p>
+<table width="100%" border="0" class="crtMainBckGrd">
+  <tr>
+    <td>
+  <table width="100%" border="0" class="crtInnerBckGrd">
+<form name="flightEnquiryForm" method="post" action="/icargo/do/searchFlight">
+  <input type="hidden" name="action" value="submit">
+  <input type="hidden" name="option" value="SearchCarrier">
+    <tr>
+      <td class="crtCaption" width="20%">Flight Type
+      </td>
+      <td class="crtCellText" width="30%">
+            <select></select>
+        *
+      </td>
+      <td class="crtCaption" width="20%">Date</td>
+      <td class="crtCellText" width="30%">
+         <select></select>
+<select></select>
+<select></select>
+      *
+      </td>
+    </tr>
+    <tr>
+      <td class="crtCaption" width="20%">Carrier
+      </td>
+      <td class="crtCellText" colspan="2">
+            <select></select>
+      </td>
+      <td width="30%" class="crtCellText"> 
+		&nbsp;
+      </td>
+    </tr>
+        <tr>
+      <td class="crtCaption" width="20%">Origin/Dest/Port
+      </td>
+      <td class="crtCellText" colspan="2">
+            <select></select>
+      </td>
+      <td width="30%" class="crtCellText"> 
+		&nbsp;
+      </td>
+    </tr>
+    <tr>
+      <td class="crtCaption" width="20%">Flight Handled By
+      </td>
+      <td class="crtCellText" colspan="2">
+            <select></select>
+      </td>
+      <td width="30%" class="crtCellText"> 
+              <div align="right">
+                <input type="hidden" name="imgaction" value=""><input type="image" name="gobutton" src="../images/new_go.gif" align="absmiddle" border="0" value="Go" onclick="disableImage(this, this.form); this.form.submit();">
+              </div>
+      </td>
+    </tr>
+    </form>
+  </table>    
+   </td>
+  </tr>
+  <tr>
+    <td>
+      <table width="100%" border="0" class="crtInnerBckGrd">
+<form name="flightEnquiryForm" method="post" action="/icargo/do/searchFlight">
+  <input type="hidden" name="action" value="submit">
+  <input type="hidden" name="option" value="SearchFlight">
+    <tr>
+      <td class="crtCaption" width="20%">Flight No
+      </td>
+      <td class="crtCellText" width="30%">
+         <input type="text" name="flightNo1" maxlength="3" size="3" value="TR" onkeyup="findFirstHelp1('flightEnquiryForm[0]','flightNo','B','Flight', this.form);" class="crtCellMan">
+         <input type="text" name="flightNo2" maxlength="5" size="5" value="288" onkeyup="findFirstHelp1('flightEnquiryForm[0]','flightNo','B','Flight', this.form);" class="crtCellMan">
+        *
+      </td>
+      <td class="crtCaption" width="20%">Date</td>
+      <td class="crtCellText" width="25%">
+         <select></select>
+<select></select>
+<select></select>
+      *
+      </td>
+      <td width="5%" class="crtCellText"> 
+              <div align="right">
+                <input type="hidden" name="imgaction" value=""><input type="image" name="gobutton" src="../images/new_go.gif" align="absmiddle" border="0" value="Go" onclick="disableImage(this, this.form); this.form.submit();">
+              </div>
+      </td>
+    </tr>
+</form>
+  </table>
+    </td>
+  </tr>
+</table>
+<form name="flightEnquiryForm" method="post" action="/icargo/do/searchFlight">
+<table width="50%" border="0" class="bdHdrBckGrd">
+  <tr> 
+    <td width="40%" class="bdCaption">Flight No</td>
+    <td width="60%" class="bdCellText">TR 288</td>
+  </tr>
+  <tr> 
+    <td class="bdCaption">Date</td>
+    <td class="bdCellText">17 Nov 2026</td>
+  </tr>
+</table>      
+<p class="bdSubTitle">Departure</p>
+<table width="100%" border="0" class="bdBckGrd">
+  <tr> 
+    <td width="20%" class="bdCaption">Status</td>
+    <td width="30%" class="bdCellText">DP</td>
+      <td width="20%" class="bdCaption">Corr. Arrival Flight</td>
+    <td width="30%" class="bdCellText">TR 733</td>
+  </tr>
+  <tr> 
+    <td class="bdCaption">Scheduled Date/ Time</td>
+    <td class="bdCellText">17 Nov 2026 / 10:25</td>
+    <td class="bdCaption">Terminal</td>
+    <td class="bdCellText">1</td>
+  </tr>
+  <tr> 
+           <td class="bdCaption">Estimated Date/ Time</td>
+           <td class="bdCellText">17 Nov 2026 / 10:25</td>
+    <td class="bdCaption">Frequency</td>
+    <td class="bdCellText">-------</td>
+  </tr>
+  <tr> 
+           <td class="bdCaption">Actual Date/Time</td>
+           <td class="bdCellText">17 Nov 2026 / 10:44</td>
+           <td class="bdCaption">Valid Date</td>
+           <td class="bdCellText">17 Nov 2026 - 17 Nov 2026</td>
+  </tr>
+  <tr>   
+        <td class="bdCaption">Destination</td>
+    <td class="bdCellText">DPS</td>
+    <td class="bdCaption">Registration</td>
+    <td class="bdCellText">9VTNG</td>
+  </tr>
+  <tr> 
+    <td class="bdCaption">Port</td>
+    <td class="bdCellText"></td>
+    <td class="bdCaption">Aircraft Type</td>
+    <td class="bdCellText">A20N</td>
+  </tr>
+  <tr> 
+    <td class="bdCaption">Scheduled Gate</td>
+    <td class="bdCellText"></td>
+    <td class="bdCaption">Current Gate</td>
+    <td class="bdCellText">C16</td>
+  </tr>
+  <tr> 
+    <td class="bdCaption">Scheduled Stand</td>
+    <td class="bdCellText"></td>
+    <td class="bdCaption">Current Stand</td>
+    <td class="bdCellText">C16</td>
+  </tr>
+  <tr> 
+    <td class="bdCaption">Belt</td>
+    <td class="bdCellText"></td>
+    <td class="bdCaption">&nbsp;</td>
+    <td class="bdCellText">&nbsp;</td>
+  </tr>
+</table>
+<p>&nbsp;</p>
+  <table width="10%" align="center">
+    <tr>
+      <td>
+         <input type="hidden" name="btnaction" value=""><input type="submit" name="action" accesskey="C" value="(C)lose" onclick="return setAction(this, this.form, '');" class="btCaption">
+      </td>
+    </tr>
+  </table>
+  <p>&nbsp;</p>
+</form>
+      <table width="769" border="0" cellspacing="0" cellpadding="0">
+        <br>
+        <tr>
+          <td><img src="../images/footerBar.gif" width="769" height="16"></td>
+        </tr>
+        <tr>
+          <td height="55" bgcolor="#738dc5"></td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+          <!-- #EndEditable -->
+        </td>
+      </tr>
+    </table>
+    <div id="tipDiv" style="position:absolute; visibility:hidden; z-index:100"></div>
+  </body>
+</html>

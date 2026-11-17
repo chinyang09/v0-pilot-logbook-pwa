@@ -7,6 +7,8 @@
  * every source answered, 502 when one could not be asked.
  */
 
+import { readFileSync } from "node:fs"
+import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { isCompositeRoute, runCompositeRoute } from "../composite"
 
@@ -226,6 +228,25 @@ describe("flight/suggest and flight/gates", () => {
     const answer = await runCompositeRoute("flight/gates", { number: "TR288", date: "2026-10-30" })
     expect(answer).toMatchObject({ ok: true, data: { source: "live", departure: { gate: "D40" }, arrival: { gate: "8" } } })
     expect(calls.some((c) => c.startsWith("/airport/schedule"))).toBe(false)
+  })
+
+  it("takes a Singapore end from Changi's own record — gate, stand, aeroplane and inbound — over the boards", async () => {
+    const changiPage = readFileSync(path.join(__dirname, "fixtures/changi/tr288-departure-17nov.html"), "utf8")
+    answers["icargo/do/searchFlight"] = () => new Response(changiPage, { status: 200 })
+    answers["airport/schedule:departures"] = () => page([flight({ origin: end("", "", { gate: "D41", terminal: "1" }) })])
+    answers.flight = () => page([flight({ registration: "" })])
+    const answer = await runCompositeRoute("flight/gates", { number: "TR288", date: "2026-10-30" })
+    expect(answer).toMatchObject({
+      ok: true,
+      data: {
+        source: "airport",
+        departure: { airport: "SIN", gate: "C16", stand: "C16" },
+        flight: { registration: "9V-TNG" },
+        inboundFlight: "TR733",
+      },
+    })
+    // Asked by the Singapore date of the scheduled departure.
+    expect(calls).toContain("/icargo/do/searchFlight")
   })
 
   it("is an answer with no gate when none is published — and a failure when no board could be read", async () => {

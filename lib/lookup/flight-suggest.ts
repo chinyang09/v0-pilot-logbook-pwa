@@ -49,14 +49,26 @@ export interface GateInfo {
   airport: string
   gate: string
   terminal: string
+  /** The parking stand — only the airport's own record carries it. */
+  stand?: string
 }
 
 export interface FlightGates {
   flight: FlightSuggestion
   departure: GateInfo
   arrival: GateInfo & { baggage: string }
-  /** Where the gates came from: the tracked flight, the airport boards, or nowhere yet. */
-  source: "live" | "board" | "none"
+  /**
+   * Where the gates came from: the airport's own record (Changi, for a SIN
+   * end), the tracked flight, the airport boards, or nowhere yet.
+   */
+  source: "airport" | "live" | "board" | "none"
+  /**
+   * The rotation as the airport has it (Changi, for a SIN end): the flight
+   * this departure's aeroplane arrives on, and the one this arrival's goes on
+   * to. "" where unknown.
+   */
+  inboundFlight?: string
+  onwardFlight?: string
 }
 
 /** `TR0288`, `tr 288` and `TR288` are one flight number. */
