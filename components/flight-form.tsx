@@ -37,6 +37,7 @@ import { CACHE_KEYS } from "@/hooks/data";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { TimePicker } from "@/components/time-picker";
+import { flightFieldLabel } from "@/lib/utils/field-labels";
 import { DatePicker } from "@/components/date-picker";
 import type { FlightLog, AdditionalCrew, Approach, FlightSignature } from "@/lib/db";
 import { type SignatureCrewMember } from "@/components/signature-canvas";
@@ -444,17 +445,43 @@ function pressableRow(onActivate: () => void, name: string) {
  * column inside it claims its own taps, and its hit area grows into the row's
  * padding so the target is the full row height without moving anything.
  */
-function clockColumn(onActivate: () => void, name: string) {
+function clockColumn(onActivate: () => void, name: string, open: boolean) {
   return {
     ...pressableRow(onActivate, name),
     onClick: (e: React.MouseEvent) => {
       e.stopPropagation();
       onActivate();
     },
-    className:
-      "relative flex flex-col items-end rounded-md after:absolute after:-inset-x-1.5 after:-inset-y-3.5 after:content-[''] focus-visible:outline-2 focus-visible:outline-ring",
+    "data-open": open || undefined,
+    className: cn(
+      CLOCK_COLUMN,
+      "after:absolute after:-inset-x-2 after:-inset-y-3.5 after:content-[''] focus-visible:outline-2 focus-visible:outline-ring",
+      // The column a tap landed on LIGHTS — on the press and for as long as
+      // its picker is open — so a tap on UTC meant for Local (or the other
+      // way) is seen before a wheel is turned. Both columns used to look the
+      // same whichever had been tapped.
+      "transition-colors active:bg-primary/10 data-[open]:bg-primary/12 data-[open]:ring-1 data-[open]:ring-primary/60",
+    ),
   };
 }
+
+/**
+ * The two clock columns share ONE box: a fixed width, so the columns line up
+ * down the section whatever they hold, and NOW (which takes the local
+ * column's place on an empty row) is exactly the size of what it replaces.
+ */
+const CLOCK_COLUMN = "relative flex w-[4.25rem] flex-col items-center rounded-lg px-1 py-0.5";
+
+/** The picker names the row it was opened from ("Out"), as the row does. */
+const TIME_ROW_LABEL: Record<string, string> = {
+  reportTime: "Report",
+  scheduledOut: "Scheduled Out",
+  scheduledIn: "Scheduled In",
+  outTime: "Out",
+  offTime: "Off",
+  onTime: "On",
+  inTime: "In",
+};
 
 // Time row with UTC and Local display. Either clock can be edited: the UTC
 // column (and the rest of the row) opens the picker in UTC, the local column
@@ -471,6 +498,7 @@ function TimeRow({
   clockSeparator = "colon",
   derivedValue,
   zoneKnown = true,
+  openFrame = null,
 }: {
   label: string;
   utcValue: string;
@@ -497,6 +525,8 @@ function TimeRow({
    * looking like a blank the pilot has to fill.
    */
   derivedValue?: string;
+  /** This row's picker is open, in that clock: its column stays lit. */
+  openFrame?: "utc" | "local" | null;
 }) {
   const tzLabel = zoneKnown ? formatTimezoneOffset(timezoneOffset) : "Local";
   const hasValue = isValidHHMM(utcValue);
@@ -505,8 +535,17 @@ function TimeRow({
   // like the UTC) rather than NOW — the Report row read "20:55 UTC | NOW"
   // under rows that each carried both clocks.
   const localValue = utcToLocal(hasValue ? utcValue : hasDerived ? derivedValue! : "", timezoneOffset);
+  // NOW sits OVER the local column while the row is empty (the owner's
+  // choice): the row keeps its height and its two columns, and the picker's
+  // UTC | Local switch is how an empty row is started from local time.
+  const nowInPlace = showNow && !hasValue && !hasDerived;
+  // A stamp lights both columns for a moment, so it is plain WHICH row took
+  // the time — four rows of clocks, and a NOW tapped on the wrong one looked
+  // exactly like one tapped on the right one.
+  const [stamped, setStamped] = useState(0);
 
   const shown = hasValue ? utcValue : hasDerived ? derivedValue! : "not set";
+  const valueClass = cn("text-lg leading-7 tabular-nums", hasValue ? "text-foreground" : "text-muted-foreground");
   return (
     // The WHOLE row opens the picker — it was only the time column, so a tap
     // on "Out" itself did nothing.
@@ -515,17 +554,20 @@ function TimeRow({
     // announced and focused twice (axe nested-interactive). The UTC column is
     // the same action from a keyboard.
     <div
-      className="flex items-center justify-between py-3.5 px-4 row-divider cursor-pointer"
+      className="flex items-center justify-between py-3 px-4 row-divider cursor-pointer"
       onClick={() => onTap("utc")}
     >
       <span className="text-foreground">{label}</span>
-      <div className="flex items-center gap-3">
-        <div {...clockColumn(() => onTap("utc"), `${label}, ${shown} UTC`)}>
-          <span
-            className={`text-lg ${
-              hasValue ? "text-foreground" : "text-muted-foreground"
-            }`}
-          >
+      {/* The two clocks sit apart, a rule between them: side by side at a
+          12px gap they read as one figure and a thumb meant for one landed on
+          the other (the owner). */}
+      <div className="flex items-center gap-2.5">
+        <div
+          key={`u${stamped}`}
+          {...clockColumn(() => onTap("utc"), `${label}, ${shown} UTC`, openFrame === "utc")}
+          {...(stamped ? { "data-stamped": "" } : {})}
+        >
+          <span className={valueClass}>
             {hasValue
               ? formatClockDisplay(utcValue, clockSeparator)
               : hasDerived
@@ -534,43 +576,45 @@ function TimeRow({
           </span>
           <span className="text-xs text-muted-foreground">UTC</span>
         </div>
-        {/* BOTH clocks, always — the local column used to appear only once
-            the UTC one had a value, so an empty row showed one blank and the
-            pilot could not start from the local time (the owner asked for
-            both even when empty). Tapping either opens the picker in that
-            clock. */}
-        <div
-          {...clockColumn(
-            () => onTap("local"),
-            `${label}, ${hasValue || hasDerived ? localValue : "not set"} ${tzLabel}`
-          )}
-        >
-          <span
-            className={`text-lg ${
-              hasValue ? "text-foreground" : "text-muted-foreground"
-            }`}
+        <div className="h-8 w-px bg-border" aria-hidden />
+        {nowInPlace ? (
+          <div className={CLOCK_COLUMN}>
+            <Button
+              variant={nextUp ? "default" : "outline"}
+              size="sm"
+              aria-label={nextUp ? `${label} now, next` : `${label} now`}
+              className={cn(
+                "relative h-7 w-full px-0 text-xs font-semibold control-surface-inset after:absolute after:-inset-y-1.5 after:inset-x-0 after:content-['']",
+                !nextUp && "text-primary",
+              )}
+              onClick={(e) => {
+                e.stopPropagation();
+                setStamped((n) => n + 1);
+                onNow?.();
+              }}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              NOW
+            </Button>
+            <span className="text-xs text-muted-foreground">{tzLabel}</span>
+          </div>
+        ) : (
+          <div
+            key={`l${stamped}`}
+            {...clockColumn(
+              () => onTap("local"),
+              `${label}, ${hasValue || hasDerived ? localValue : "not set"} ${tzLabel}`,
+              openFrame === "local",
+            )}
+            {...(stamped ? { "data-stamped": "" } : {})}
           >
-            {hasValue || hasDerived
-              ? formatClockDisplay(localValue, clockSeparator)
-              : formatClockDisplay("--:--", clockSeparator, "--:--")}
-          </span>
-          <span className="text-xs text-muted-foreground">{tzLabel}</span>
-        </div>
-        {/* NOW follows the clocks while the row is empty. */}
-        {showNow && !hasValue && !hasDerived && (
-          <Button
-            variant={nextUp ? "default" : "outline"}
-            size="sm"
-            aria-label={nextUp ? `${label} now, next` : `${label} now`}
-            className={cn("h-9 min-w-11 px-2 text-xs control-surface-inset", !nextUp && "text-primary")}
-            onClick={(e) => {
-              e.stopPropagation();
-              onNow?.();
-            }}
-            onKeyDown={(e) => e.stopPropagation()}
-          >
-            NOW
-          </Button>
+            <span className={valueClass}>
+              {hasValue || hasDerived
+                ? formatClockDisplay(localValue, clockSeparator)
+                : formatClockDisplay("--:--", clockSeparator, "--:--")}
+            </span>
+            <span className="text-xs text-muted-foreground">{tzLabel}</span>
+          </div>
         )}
       </div>
     </div>
@@ -2339,6 +2383,7 @@ function FlightFormImpl({
               timezoneOffset={depTimezone}
               zoneKnown={!!formData.departureIcao}
               onTap={(frame) => openTimePicker("reportTime", frame)}
+              openFrame={activeTimePicker === "reportTime" ? timePickerFrame : null}
               onNow={() => setNowTime("reportTime")}
               showNow={canStampNow}
               clockSeparator={clockSeparator}
@@ -2352,6 +2397,7 @@ function FlightFormImpl({
               timezoneOffset={depTimezone}
               zoneKnown={!!formData.departureIcao}
               onTap={(frame) => openTimePicker("scheduledOut", frame)}
+              openFrame={activeTimePicker === "scheduledOut" ? timePickerFrame : null}
               onNow={() => setNowTime("scheduledOut")}
               // A schedule is published, not stamped: NOW is for the times
               // that happen (report, OOOI), and five of them down an empty
@@ -2368,6 +2414,7 @@ function FlightFormImpl({
               timezoneOffset={arrTimezone}
               zoneKnown={!!formData.arrivalIcao}
               onTap={(frame) => openTimePicker("scheduledIn", frame)}
+              openFrame={activeTimePicker === "scheduledIn" ? timePickerFrame : null}
               onNow={() => setNowTime("scheduledIn")}
               // A schedule is published, not stamped: NOW is for the times
               // that happen (report, OOOI), and five of them down an empty
@@ -2384,6 +2431,7 @@ function FlightFormImpl({
               timezoneOffset={depTimezone}
               zoneKnown={!!formData.departureIcao}
               onTap={(frame) => openTimePicker("outTime", frame)}
+              openFrame={activeTimePicker === "outTime" ? timePickerFrame : null}
               onNow={() => setNowTime("outTime")}
               showNow={canStampNow}
               nextUp={nextStamp === "outTime"}
@@ -2398,6 +2446,7 @@ function FlightFormImpl({
               timezoneOffset={depTimezone}
               zoneKnown={!!formData.departureIcao}
               onTap={(frame) => openTimePicker("offTime", frame)}
+              openFrame={activeTimePicker === "offTime" ? timePickerFrame : null}
               onNow={() => setNowTime("offTime")}
               showNow={canStampNow}
               nextUp={nextStamp === "offTime"}
@@ -2412,6 +2461,7 @@ function FlightFormImpl({
               timezoneOffset={arrTimezone}
               zoneKnown={!!formData.arrivalIcao}
               onTap={(frame) => openTimePicker("onTime", frame)}
+              openFrame={activeTimePicker === "onTime" ? timePickerFrame : null}
               onNow={() => setNowTime("onTime")}
               showNow={canStampNow}
               nextUp={nextStamp === "onTime"}
@@ -2426,6 +2476,7 @@ function FlightFormImpl({
               timezoneOffset={arrTimezone}
               zoneKnown={!!formData.arrivalIcao}
               onTap={(frame) => openTimePicker("inTime", frame)}
+              openFrame={activeTimePicker === "inTime" ? timePickerFrame : null}
               onNow={() => setNowTime("inTime")}
               showNow={canStampNow}
               nextUp={nextStamp === "inTime"}
@@ -2976,14 +3027,16 @@ function FlightFormImpl({
       {/* Time Picker Modal */}
       {activeTimePicker && (
         <TimePicker
-          key={`${activeTimePicker}:${timePickerFrame}`}
+          key={activeTimePicker}
           isOpen={!!activeTimePicker}
           initialTime={formData[activeTimePicker as keyof FlightLog] as string}
           onSelect={handleTimeSelect}
           onClose={() => setActiveTimePicker(null)}
+          label={TIME_ROW_LABEL[activeTimePicker] ?? flightFieldLabel(activeTimePicker)}
           timezoneOffset={getTimePickerTimezone()}
           duration={isBlockFollowingField(activeTimePicker)}
           frame={timePickerFrame}
+          onFrameChange={setTimePickerFrame}
         />
       )}
 

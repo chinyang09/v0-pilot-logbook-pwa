@@ -75,6 +75,13 @@ export interface Placement {
      * showed the button through it.
      */
     hide?: HTMLElement
+    /**
+     * The control's own FILL when it has one (the calendar's Duties, lit while
+     * duties show): the growing surface starts in that colour and turns into
+     * the menu's face as it widens, so the control changes colour WITH the
+     * menu instead of a lit button becoming plain glass on the first frame.
+     */
+    fill?: string
   }
 }
 
@@ -97,11 +104,15 @@ export type Box = Pick<DOMRect, "left" | "top" | "width" | "height" | "right" | 
  * (the owner: "not lined up") — and hides only the button. A control in
  * anything taller than a bar (the calendar's Duties) is its own box.
  */
-export function controlBox(el: HTMLElement): { rect: Box; hide: HTMLElement } {
+export function controlBox(el: HTMLElement): { rect: Box; hide: HTMLElement; fill?: string } {
   const r = el.getBoundingClientRect()
   const glass = el.closest<HTMLElement>(".GlassContainer")
   const g = glass?.getBoundingClientRect()
-  if (!glass || !g || g.height > 56) return { rect: r, hide: el }
+  // Read in the TAP (never mid-commit): a lit control's fill, which the
+  // growing menu starts in.
+  const bg = getComputedStyle(el).backgroundColor
+  const fill = bg && !/^(transparent|rgba\(0, 0, 0, 0\))$/.test(bg) && !bg.endsWith(" / 0)") ? bg : undefined
+  if (!glass || !g || g.height > 56) return { rect: r, hide: el, fill }
   if (g.width <= r.width + 8) return { rect: g, hide: glass }
   const pad = Math.max(0, (g.height - r.height) / 2)
   const left = r.left - pad
@@ -109,21 +120,39 @@ export function controlBox(el: HTMLElement): { rect: Box; hide: HTMLElement } {
   return {
     rect: { left, top: g.top, width, height: g.height, right: left + width, bottom: g.top + g.height },
     hide: el,
+    fill,
   }
+}
+
+/**
+ * The horizontal room a menu may take: the PANEL its control belongs to.
+ * Beside a detail panel, a menu from the main panel's calendar ran across the
+ * divider into the detail (the owner: "respect the confines of each
+ * section"). A control over neither panel — a phone, or the header strip
+ * over the sidebar — has the whole viewport.
+ */
+function regionFor(rect: Box): { left: number; right: number } {
+  const vw = window.innerWidth
+  const cx = rect.left + rect.width / 2
+  for (const sel of [".split-main", ".split-detail"]) {
+    const r = document.querySelector<HTMLElement>(sel)?.getBoundingClientRect()
+    if (r && r.width > 0 && r.width < vw - 1 && cx >= r.left && cx <= r.right) return { left: r.left, right: r.right }
+  }
+  return { left: 0, right: vw }
 }
 
 
 /** Where the menu goes for a control at `rect` — read in the tap, never mid-commit. */
 function place(rect: DOMRect, count: number, align: "start" | "end"): Placement {
-  const vw = window.innerWidth
+  const region = regionFor(rect)
   const vh = window.innerHeight
   const want = count * ROW_H + 12
   const below = vh - rect.bottom - GAP - MARGIN
   const above = rect.top - GAP - MARGIN
   const down = below >= Math.min(want, 240) || below >= above
-  const width = Math.min(MAX_W, Math.max(MIN_W, Math.min(rect.width, MAX_W)), vw - MARGIN * 2)
+  const width = Math.min(MAX_W, Math.max(MIN_W, Math.min(rect.width, MAX_W)), region.right - region.left - MARGIN * 2)
   const rawLeft = align === "end" ? rect.right - width : rect.left
-  const left = Math.min(Math.max(MARGIN, rawLeft), vw - MARGIN - width)
+  const left = Math.min(Math.max(region.left + MARGIN, rawLeft), region.right - MARGIN - width)
   return {
     left,
     width,
@@ -146,9 +175,10 @@ export function placeOver(
   rect: Box,
   estimatedHeight: number,
   width = MIN_W,
-  hide?: HTMLElement
+  hide?: HTMLElement,
+  fill?: string
 ): Placement {
-  const vw = window.innerWidth
+  const { left: lo, right: hi } = regionFor(rect)
   const vh = window.innerHeight
   // The corner is the one on the control's side of the screen: a control in
   // the left half grows rightward from its top-left, one in the right half
@@ -156,20 +186,20 @@ export function placeOver(
   // other way, so it never slides off its control to stay on screen. Only a
   // menu wider than the room on both sides is clamped (the scale still starts
   // from the control's corner, `ox`).
-  let w = Math.min(width, vw - MARGIN * 2)
-  const prefer: "start" | "end" = rect.left + rect.width / 2 < vw / 2 ? "start" : "end"
+  let w = Math.min(width, hi - lo - MARGIN * 2)
+  const prefer: "start" | "end" = rect.left + rect.width / 2 < (lo + hi) / 2 ? "start" : "end"
   // Fits neither way (the bell's 288px notes on a phone): NARROW it to the
   // room on the control's own side, down to MIN_W, rather than clamping it
   // across the screen — clamped, its corner left the control and it spread
   // both ways out of the middle of the bar.
-  const room = prefer === "start" ? vw - MARGIN - rect.left : rect.right - MARGIN
-  if (rect.left + w > vw - MARGIN && rect.right - w < MARGIN && room >= MIN_W) w = room
-  const fitsStart = rect.left + w <= vw - MARGIN
-  const fitsEnd = rect.right - w >= MARGIN
+  const room = prefer === "start" ? hi - MARGIN - rect.left : rect.right - MARGIN - lo
+  if (rect.left + w > hi - MARGIN && rect.right - w < lo + MARGIN && room >= MIN_W) w = room
+  const fitsStart = rect.left + w <= hi - MARGIN
+  const fitsEnd = rect.right - w >= lo + MARGIN
   const align: "start" | "end" =
     prefer === "start" ? (fitsStart || !fitsEnd ? "start" : "end") : fitsEnd || !fitsStart ? "end" : "start"
   const rawLeft = align === "end" ? rect.right - w : rect.left
-  const left = Math.min(Math.max(MARGIN, rawLeft), vw - MARGIN - w)
+  const left = Math.min(Math.max(lo + MARGIN, rawLeft), hi - MARGIN - w)
   const maxHeight = Math.max(ROW_H * 2, vh - rect.top - MARGIN)
   // The control's box inside the menu's, as an inset clip: what is left
   // showing at the start is the control's own shape, its own corner radius
@@ -193,6 +223,7 @@ export function placeOver(
       box: { left: l, top: 0, width: rect.width, height: rect.height },
       radius,
       hide,
+      fill,
     },
   }
 }
@@ -308,7 +339,21 @@ export const MorphSurface = forwardRef<
         className={cn("menu-surface relative overflow-y-auto overscroll-contain shadow-none", className)}
         style={{ maxHeight: placement.maxHeight, borderRadius: from.radius }}
       >
+        {from.fill && (
+          // The lit control's colour over the whole face, fading to the menu
+          // as the clip widens — and back as it closes, so the menu lands
+          // as the lit button again.
+          <motion.div
+            aria-hidden
+            className="pointer-events-none absolute inset-0"
+            style={{ background: from.fill }}
+            initial={{ opacity: 1 }}
+            animate={{ opacity: 0, transition: { duration: 0.24, ease: MORPH_EASE } }}
+            exit={{ opacity: 1, transition: { duration: 0.16, ease: MORPH_EASE } }}
+          />
+        )}
         <motion.div
+          className="relative"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1, transition: { duration: 0.14, delay: 0.1 } }}
           exit={{ opacity: 0, transition: { duration: 0.06 } }}
@@ -379,8 +424,8 @@ export function ChoicePicker<T extends string>({
     const el = triggerRef.current
     if (!el || disabled) return
     if (morph) {
-      const { rect, hide } = controlBox(el)
-      setPlacement(placeOver(rect, menuHeight(options.length), undefined, hide))
+      const { rect, hide, fill } = controlBox(el)
+      setPlacement(placeOver(rect, menuHeight(options.length), undefined, hide, fill))
     } else {
       setPlacement(place(el.getBoundingClientRect(), options.length + 1, align))
     }

@@ -8,6 +8,7 @@ import { MODAL_SCRIM } from "@/components/ui/chrome-overlays"
 import { WHEEL_FILL, wheelClassNames } from "@/components/ui/wheel-styles"
 import { useBackDismiss } from "@/hooks/use-back-dismiss"
 import { useDialogFocus } from "@/hooks/use-dialog-focus"
+import { SegmentedTabs } from "@/components/ui/segmented-tabs"
 import { cn } from "@/lib/utils"
 import { formatTimezoneOffset, getCurrentTimeUTC, isValidHHMM, localToUTC, utcToLocal } from "@/lib/utils/time"
 
@@ -28,6 +29,8 @@ interface TimePickerProps {
    * each one is checked against the other while it is being set.
    */
   frame?: "utc" | "local"
+  /** The pilot switched clocks inside the picker (the UTC | Local tabs). */
+  onFrameChange?: (frame: "utc" | "local") => void
 }
 
 function parseClock(hhmm: string): { hours: number; minutes: number } {
@@ -61,8 +64,15 @@ export function TimePicker({
   label,
   timezoneOffset = 0,
   duration = false,
-  frame = "utc",
+  frame: initialFrame = "utc",
+  onFrameChange,
 }: TimePickerProps) {
+  // The clock the wheels show is switchable INSIDE the picker: on an empty
+  // row NOW stands where the local column would be, so this is how an empty
+  // row is started from local time — and the switch says, in the largest
+  // type on the sheet, which clock is being set (a tap on UTC meant for
+  // Local used to be noticed only once the wheels had been turned).
+  const [frame, setFrame] = useState<"utc" | "local">(initialFrame)
   const local = frame === "local" && !duration
   // Seeded once per open — the sheet mounts each time it opens (and the form
   // keys it on the field and frame), so a sync landing underneath an open
@@ -111,7 +121,24 @@ export function TimePicker({
   const otherClock = local
     ? { label: "UTC", value: localToUTC(shown, timezoneOffset) }
     : { label: "Local", value: utcToLocal(shown, timezoneOffset) }
-  const frameLabel = duration ? null : local ? `Local ${formatTimezoneOffset(timezoneOffset)}` : "UTC"
+  const zoneLabel = formatTimezoneOffset(timezoneOffset)
+  // With no offset the two clocks are one, and a switch between them would
+  // be a choice that changes nothing.
+  const switchable = !duration && timezoneOffset !== 0
+
+  const switchFrame = useCallback(
+    (next: "utc" | "local") => {
+      if (next === frame) return
+      // The wheels keep the INSTANT: 14:30 UTC becomes 22:30 at UTC+8.
+      const utc = frame === "local" ? localToUTC(shown, timezoneOffset) : shown
+      const moved = parseClock(next === "local" ? utcToLocal(utc, timezoneOffset) : utc)
+      setHours(moved.hours)
+      setMinutes(moved.minutes)
+      setFrame(next)
+      onFrameChange?.(next)
+    },
+    [frame, shown, timezoneOffset, onFrameChange],
+  )
 
   // Focus goes IN to the first wheel (they take the arrow keys), Tab stays
   // inside, and closing hands it back to the row that opened the picker.
@@ -154,24 +181,9 @@ export function TimePicker({
           </button>
 
           <div className="flex flex-col items-center">
-            {(label || frameLabel) && (
-              <span className="text-xs text-muted-foreground mb-1">
-                {[label, frameLabel].filter(Boolean).join(" · ")}
-              </span>
-            )}
-            {!duration && (
-              <button
-                type="button"
-                onClick={handleSetNow}
-                className="text-sm font-medium text-primary active:opacity-70 relative after:absolute after:-inset-3 after:content-['']"
-              >
-                NOW
-              </button>
-            )}
-            {!duration && timezoneOffset !== 0 && (
-              <span className="text-xs text-muted-foreground mt-0.5 tabular-nums">
-                {otherClock.label}: {otherClock.value}
-              </span>
+            {label && <span className="text-sm font-semibold text-foreground">{label}</span>}
+            {!duration && !switchable && (
+              <span className="text-xs text-muted-foreground">UTC</span>
             )}
           </div>
 
@@ -184,6 +196,34 @@ export function TimePicker({
           </button>
         </div>
 
+        {!duration && (
+          <div className={cn("flex items-center gap-3 px-4 pt-3", switchable ? "justify-between" : "justify-center")}>
+            {switchable ? (
+              <SegmentedTabs
+                className="flex-1"
+                tabs={[
+                  { value: "utc", label: "UTC" },
+                  { value: "local", label: `Local ${zoneLabel}` },
+                ]}
+                value={frame}
+                onChange={switchFrame}
+              />
+            ) : null}
+            <button
+              type="button"
+              onClick={handleSetNow}
+              className="h-9 rounded-full px-4 text-sm font-semibold text-primary control-surface"
+            >
+              Now
+            </button>
+          </div>
+        )}
+        {switchable && (
+          <p className="px-4 pt-2 text-center text-xs text-muted-foreground tabular-nums">
+            = {otherClock.value} {local ? "UTC" : `Local ${zoneLabel}`}
+          </p>
+        )}
+
         {/* Wheel Picker */}
         <div className="relative px-8 py-4">
           {/* Highlight bar */}
@@ -191,6 +231,13 @@ export function TimePicker({
             className={`pointer-events-none absolute left-8 right-8 top-1/2 z-0 -translate-y-1/2 rounded-lg ${WHEEL_FILL}`}
             style={{ height: ITEM_HEIGHT }}
           />
+          {/* The clock being set, ON the selected row, where the eye is while
+              the wheels turn. */}
+          {!duration && (
+            <span className="pointer-events-none absolute right-10 top-1/2 z-10 -translate-y-1/2 text-[11px] font-semibold uppercase tracking-wide text-primary">
+              {local ? "LT" : "UTC"}
+            </span>
+          )}
 
           {/* Colon separator */}
           <div
