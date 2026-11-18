@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import { gzipSync } from "node:zlib"
 import { readFileSync } from "node:fs"
 import path from "node:path"
-import { getWeather, REFRESH_MS, type WeatherKind, type WeatherStore } from "../server"
+import { FRESH_MS, getWeather, REFRESH_MS, type WeatherKind, type WeatherStore } from "../server"
 
 const sample = (f: string) => readFileSync(path.join(__dirname, "fixtures", f), "utf8")
 // Pad the samples past the "is this the cache file" floor with filler stations.
@@ -81,5 +81,17 @@ describe("the weather cache, refreshed on demand", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2)
     expect(w.metar.WSSS.raw).toMatch(/^METAR WSSS/)
     expect(w.stale).toBe(false)
+  })
+
+  it("a Refresh pulls a snapshot over two minutes old, not one newer", async () => {
+    const { store, locks } = memoryStore()
+    const fetchImpl = okFetch()
+    await getWeather(["WSSS"], { store, fetchImpl, now: t0 })
+    locks.clear()
+    const recent = await getWeather(["WSSS"], { store, fetchImpl, now: t0 + FRESH_MS - 1, fresh: true })
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    expect(recent.checkedAt).toBe(t0 + FRESH_MS - 1)
+    await getWeather(["WSSS"], { store, fetchImpl, now: t0 + FRESH_MS + 1, fresh: true })
+    expect(fetchImpl).toHaveBeenCalledTimes(4)
   })
 })

@@ -32,6 +32,12 @@ export const WEATHER_SOURCE = "https://aviationweather.gov/data/cache/"
 const FILE: Record<WeatherKind, string> = { metar: "metars.cache.xml.gz", taf: "tafs.cache.xml.gz" }
 /** METARs come half-hourly or hourly, TAFs six-hourly with amendments: ten minutes is fresh. */
 export const REFRESH_MS = 10 * 60_000
+/**
+ * How old a snapshot may be when the pilot asks for FRESH weather (Refresh):
+ * the source rewrites its files every minute, so a snapshot two minutes old is
+ * as new as asking again would get — and a refresh tapped twice stays one pull.
+ */
+export const FRESH_MS = 2 * 60_000
 /** Long enough for one pull; short enough that a crashed refresh frees itself. */
 const LOCK_MS = 60_000
 /** Fewer stations than this is not the cache file — an error page, a truncated download. */
@@ -105,12 +111,18 @@ const pick = <T>(all: Record<string, T>, ids: string[]) => {
  */
 export async function getWeather(
   ids: string[],
-  { store, fetchImpl = fetch, now = Date.now() }: { store: WeatherStore; fetchImpl?: typeof fetch; now?: number },
+  {
+    store,
+    fetchImpl = fetch,
+    now = Date.now(),
+    fresh = false,
+  }: { store: WeatherStore; fetchImpl?: typeof fetch; now?: number; fresh?: boolean },
 ): Promise<WeatherAnswer> {
   let stale = false
+  const maxAge = fresh ? FRESH_MS : REFRESH_MS
   const answer = async <K extends WeatherKind>(kind: K) => {
     const snap = await store.read(kind, ids)
-    if (snap && now - snap.fetchedAt <= REFRESH_MS) return snap
+    if (snap && now - snap.fetchedAt <= maxAge) return snap
     if (!(await store.lock(kind, now))) {
       // Another request is pulling it; this one answers from what there is.
       if (!snap || now - snap.fetchedAt > 2 * REFRESH_MS) stale = true
@@ -131,6 +143,7 @@ export async function getWeather(
     metar: metar?.stations ?? {},
     taf: taf?.stations ?? {},
     fetchedAt: { metar: metar?.fetchedAt ?? 0, taf: taf?.fetchedAt ?? 0 },
+    checkedAt: now,
     stale,
   }
 }
