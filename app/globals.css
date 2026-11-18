@@ -1616,6 +1616,13 @@ textarea:focus-within {
   pointer-events: none;
 }
 
+/* Once a field HAS focus it takes the finger itself, so a tap places the caret
+   and a hold selects — without this the caret stayed wherever focus() put it. */
+[data-swipe-row] input:focus,
+[data-swipe-row] textarea:focus {
+  pointer-events: auto;
+}
+
 /* iOS: a long-press on a nav <a> pops Safari's link preview/callout, which
    fought the drag-lens hold-and-slide. Suppress it on every nav link. */
 [data-nav-link] {

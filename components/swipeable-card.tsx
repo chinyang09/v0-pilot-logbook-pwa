@@ -568,9 +568,18 @@ export function SwipeableCard({
     }
     // No explicit handler: focus a blended inline input/textarea inside the row
     // (its pointer events are disabled so the swipe can start over it).
-    contentRef.current
-      ?.querySelector<HTMLElement>("input, textarea")
-      ?.focus()
+    // It opens with the caret at the END — the field's own pointer events are
+    // off until it has focus, so a caret left at the start (where focus()
+    // puts it in a textarea) could not be moved to delete what is there.
+    const field = contentRef.current?.querySelector<HTMLInputElement | HTMLTextAreaElement>("input, textarea")
+    if (!field || document.activeElement === field) return
+    field.focus()
+    try {
+      const end = field.value.length
+      field.setSelectionRange(end, end)
+    } catch {
+      // Some input types (number, date) have no selection to set.
+    }
   }, [closeOthers, onClick])
 
   // Per-button stagger windows (in x space). The trailing button reveals first.
