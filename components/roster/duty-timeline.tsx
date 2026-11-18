@@ -30,6 +30,8 @@
 import { formatDayAt } from "@/lib/utils/date"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { AlertTriangle, ChevronRight, Minus, Plus, X } from "lucide-react"
+import { currencyFindings, currencyLapses } from "@/lib/utils/roster/currency-lapses"
+import type { Currency } from "@/types/entities/roster.types"
 import { cn } from "@/lib/utils"
 import { FormSection } from "@/components/ui/form-section"
 import { ReadOnlyRow } from "@/components/ui/settings-row"
@@ -185,6 +187,8 @@ function createPointerStore(initial: number) {
 }
 type PointerStore = ReturnType<typeof createPointerStore>
 
+const NO_CURRENCIES: readonly Currency[] = []
+
 function usePointer(store: PointerStore): number {
   return useSyncExternalStore(store.subscribe, store.get, store.get)
 }
@@ -195,12 +199,15 @@ export function DutyTimeline({
   forecast,
   scenario = null,
   onClearScenario,
+  currencies = NO_CURRENCIES,
 }: {
   blocks: DutyBlock[]
   limits: FTLLimits
   forecast?: ForecastResult
   scenario?: TimelineScenario | null
   onClearScenario?: () => void
+  /** The pilot's documents: each lapse is a marker, and a duty flown on one is a finding. */
+  currencies?: readonly Currency[]
 }) {
   const blocks = scenario?.blocks ?? logged
   const removed = useMemo(() => scenario?.removed ?? [], [scenario])
@@ -633,8 +640,11 @@ export function DutyTimeline({
       if (f.atMs < nowMs - 28 * DAY) continue
       rows.push({ key: `${f.rule}${f.atMs}`, atMs: f.atMs, severity: f.severity, text: f.label, source: `Para ${f.rule}` })
     }
+    // The documents: a duty that flies on an expired one, else one about to lapse.
+    for (const f of currencyFindings(currencies, scenario?.blocks ?? blocks, nowMs)) rows.push(f)
     return rows.sort((a, b) => a.atMs - b.atMs).slice(0, 6)
-  }, [exceedances, daysOffState, nowMs, duration])
+  }, [exceedances, daysOffState, nowMs, duration, currencies, scenario, blocks])
+  const lapses = useMemo(() => currencyLapses(currencies), [currencies])
   /** A breach row switches to its limit's tab; every row brings its date to the pointer. */
   const openFinding = (f: { atMs: number; series?: RollingKind }) => {
     if (f.series) setSeries(f.series)
@@ -789,6 +799,21 @@ export function DutyTimeline({
                     {l.text}
                   </span>
                 ))}
+
+                {/* Each document's lapse — 00:00 SGT after its last valid day. */}
+                {lapses
+                  .filter((l) => l.lapseMs > drawFrom && l.lapseMs < drawTo)
+                  .map((l) => (
+                    <div
+                      key={l.id}
+                      className="pointer-events-none absolute bottom-0 border-l-2 border-status-warning/70"
+                      style={{ left: xOf(l.lapseMs), top: AXIS_H }}
+                    >
+                      <span className="absolute left-1 top-4 max-w-28 truncate rounded bg-status-warning/90 px-1 text-[9px] font-semibold uppercase leading-[12px] text-background">
+                        {l.name} exp
+                      </span>
+                    </div>
+                  ))}
 
                 {/* Now — between what has happened and what is scheduled. */}
                 {nowMs > drawFrom && nowMs < drawTo && (

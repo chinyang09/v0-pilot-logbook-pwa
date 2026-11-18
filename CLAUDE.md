@@ -4502,6 +4502,14 @@ period and where it is focused", so they are ONE scroller on ONE time axis:
   PIC's 2:00 (para 3(2), the local night satisfied where required), its rule,
   and the days off it holds. A simulator or positioning duty is named ("SIM",
   "POS" → Simulator / Positioning) and reads "Not a flight duty period".
+- **The pilot's documents are on the same axis** (`lib/utils/roster/currency-lapses.ts`,
+  the owner, Nov 2026). A currency's `expiryDate` is its LAST VALID DAY, so it
+  lapses at 00:00 SGT the day after (`lapseOf`), drawn as an amber marker
+  ("MEDICAL EXP"). In the findings list, the first duty that FLIES on or after
+  a lapse is a violation ("TR438 after Medical expires"); otherwise a lapse
+  inside its own warning window is a caution. A simulator session or a ground
+  duty never counts — it may be the renewal itself — and a standby only flies
+  once called out.
 - **The rest after the LAST duty is drawn too** (`DutyBlock.restAfter`, the
   owner's feedback). Every other rest is the `restBefore` of the duty that
   ends it, so after the last one the chart drew nothing. It commences an hour
