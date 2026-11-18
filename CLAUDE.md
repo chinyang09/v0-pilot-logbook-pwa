@@ -4434,9 +4434,14 @@ period and where it is focused", so they are ONE scroller on ONE time axis:
   Ground duties count zero, standby its `countedDutyMinutes`.
 - **Zoom is continuous** — a pinch follows the fingers' spread and holds the
   time under them (so it pans too), ctrl-wheel on a trackpad, − / + for a
-  keyboard; 3 hours to 180 days. There are no 24h / 7d / 28d presets. Gridlines
-  run the FULL height at the finest step that leaves 42px for a label (hours
-  under a day, dates beyond; midnights stronger), dates as "4 Nov" (`formatDayAt`, no weekday or year).
+  keyboard; 3 hours out to the WHOLE logbook to now (at least 180 days, at
+  most 30 years — the owner: "see the entire history till present"; it was
+  capped at 180 days). There are no 24h / 7d / 28d presets. Gridlines run the
+  FULL height at the finest step that leaves room for its label (`gridStep`):
+  hours as "08" in 10px with 30px between them (room for a date centred between two) (":00" on every line said
+  nothing and cost the finer steps — the owner), then days as "4 Nov"
+  (`formatDayAt`, no weekday or year) with 42px, then calendar MONTHS as
+  "Nov 26" once a fortnight is too tight; midnights and months stronger.
 - **Duty and FDP are drawn apart.** The duty bar runs sign-on → sign-off; the
   FDP inside it, darker, runs sign-on → the last on-blocks (`fdpEndMs`); what is
   left after it is the post-flight half hour, duty but not FDP. The flying sits
