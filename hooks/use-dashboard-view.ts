@@ -7,7 +7,7 @@ import { useSyncExternalStore } from "react"
  *
  * | | Answers |
  * |---|---|
- * | `legal` | Am I current, what must I do, where am I in my duty |
+ * | `flight` | Am I fine, where am I in my duty, what is my next duty like |
  * | `summary` | What have I flown, and how does it add up |
  *
  * They are two different questions asked at two different times — one before a
@@ -24,10 +24,10 @@ import { useSyncExternalStore } from "react"
  * subscribe callback.
  */
 
-export type DashboardView = "legal" | "summary"
+export type DashboardView = "flight" | "summary"
 
 const STORAGE_KEY = "ooo:dashboard-view"
-const DEFAULT_VIEW: DashboardView = "legal"
+const DEFAULT_VIEW: DashboardView = "flight"
 
 let view: DashboardView = DEFAULT_VIEW
 let hydrated = false
@@ -42,8 +42,10 @@ function hydrate(): void {
   hydrated = true
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY)
-    if ((stored === "legal" || stored === "summary") && stored !== view) {
-      view = stored
+    // "legal" is the flight page's old name: a device that chose it keeps it.
+    const read: DashboardView | null = stored === "summary" ? "summary" : stored === "flight" || stored === "legal" ? "flight" : null
+    if (read && read !== view) {
+      view = read
       emit()
     }
   } catch {
@@ -85,6 +87,6 @@ export function useDashboardView(): DashboardView {
 }
 
 export const DASHBOARD_VIEWS: ReadonlyArray<{ value: DashboardView; label: string }> = [
-  { value: "legal", label: "Legal" },
+  { value: "flight", label: "Flight" },
   { value: "summary", label: "Summary" },
 ]

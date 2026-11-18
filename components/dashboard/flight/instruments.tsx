@@ -1,65 +1,30 @@
 "use client"
 
-import { setChainDuty } from "@/hooks/use-chain-duty"
+/**
+ * The flight dashboard's INSTRUMENTS — the pieces its widgets are drawn with:
+ * the annunciator, the duty clock (a scale in time with three captions under
+ * it), the sector chain, the requirement colours and the limit bar.
+ *
+ * They came from the legal page, which they made up, and they keep its rules:
+ * every state carries its own icon (never colour alone); the status ramp means
+ * met / close / not met and nothing else; a bar's tone is STATED by its
+ * caller, never derived from how full it is; the FDP maximum is the duty's
+ * own Reg 14 figure, never a default.
+ */
+
 import { formatDayAt } from "@/lib/utils/date"
 import * as React from "react"
-import Link from "next/link"
-import { usePathname } from "next/navigation"
-import { Check, TriangleAlert, OctagonAlert, ArrowUpRight, Info, RefreshCw } from "lucide-react"
+import { Check, TriangleAlert, OctagonAlert, Info } from "lucide-react"
 
-import { usePilotStatus } from "@/hooks/data/use-pilot-status"
-import { usePageActive } from "@/hooks/use-page-active"
-import { useFlights } from "@/hooks/data/use-flights"
-import { useDayKey } from "@/hooks/use-day-key"
-import { ninetyDayRecency } from "@/lib/utils/dashboard-aggregate"
 import { formatDutyClock, formatRestSpan, type SectorLeg } from "@/lib/utils/dashboard/duty-status"
 import { ANNUNCIATOR_WORD, type AnnunciatorState } from "@/lib/utils/dashboard/pilot-status"
 import type { PilotStatus } from "@/lib/utils/dashboard/pilot-status"
 import type { Requirement, RequirementState } from "@/lib/utils/dashboard/legality"
 import { formatInstant } from "@/lib/utils/tz-format"
-import { usePreferences } from "@/components/providers/preferences-provider"
 import type { DisplayPreferences } from "@/types/db/stores.types"
-import { Skeleton } from "@/components/ui/skeleton"
-import { useDetailPanel } from "@/hooks/use-detail-panel"
-import { useIsDesktop } from "@/hooks/use-is-desktop"
-import { RequirementDetailPanel } from "./requirement-detail-panel"
-import { DutyFlightsPanel } from "./duty-flights-panel"
-import { useDutyLookups } from "@/hooks/use-duty-lookups"
-import { describeDuty, type DutyInfo } from "@/lib/utils/dashboard/duty-line"
 import { cn } from "@/lib/utils"
 
-/**
- * The legal dashboard — one screen, no scroll, read like an instrument.
- *
- * Four bands, in the order a pilot asks: what is my state and what must I do
- * (the annunciator), where am I in my duty day (the timeline and the sector
- * chain), am I qualified (currency), and how much have I used (limits).
- *
- * **ONE CONTINUOUS SURFACE, not a stack of cards.** Six glass cards with their
- * own borders, radii and 12px margins spend roughly 120px of a phone's height
- * on separation alone, which is the difference between this fitting and not.
- *
- * **Nothing here navigates by default.** A cell opens its DETAIL in the detail
- * panel (the owner's main / detail rule) — beside the page on a tablet, the
- * overlay on a phone, with the dashboard still underneath. It used to unfold
- * under the grid, inside the one surface that has to fit a phone's height.
- * The deep link is in the panel, a deliberate second step.
- *
- * **Currency and limits are separate bands, and that is not cosmetic.** A
- * currency is measured in DAYS and expires; a limit is measured in HOURS and
- * refills. Sorting them into one grid by urgency put a document expiry between
- * two duty-hour rows and split the takeoff and landing halves of one question
- * across the grid — which is exactly the "jumbled" complaint. Now each band
- * holds one kind of thing, and within the duty band the rolling limits are
- * gone entirely: they were printed twice.
- *
- * They also take the SHAPE their content asks for. A currency is a name and a
- * number of days, so the band is a grid of small cells read at a glance; a
- * limit is a fraction of something, so it stays a bar with its figure on it.
- * Forcing one form on both is what the separation exists to avoid.
- */
-
-const STATE_ICON: Record<RequirementState, React.ComponentType<{ className?: string }>> = {
+export const STATE_ICON: Record<RequirementState, React.ComponentType<{ className?: string }>> = {
   ok: Check,
   caution: TriangleAlert,
   fail: OctagonAlert,
@@ -75,7 +40,7 @@ const STATE_ICON: Record<RequirementState, React.ComponentType<{ className?: str
  * decorative move on the page and it is doing a real job: the panel takes on
  * the mood of its own state before a single word has been read.
  */
-const TONE: Record<
+export const TONE: Record<
   AnnunciatorState,
   { text: string; wash: string; glow: string; icon: React.ComponentType<{ className?: string }> }
 > = {
@@ -107,7 +72,7 @@ const TONE: Record<
   },
 }
 
-const REQ_TONE: Record<RequirementState, { icon: string; fill: string; track: string }> = {
+export const REQ_TONE: Record<RequirementState, { icon: string; fill: string; track: string }> = {
   ok: { icon: "text-chart-2", fill: "bg-chart-2", track: "bg-chart-2/15" },
   caution: { icon: "text-status-warning", fill: "bg-chart-4", track: "bg-chart-4/15" },
   fail: { icon: "text-destructive", fill: "bg-destructive", track: "bg-destructive/15" },
@@ -131,7 +96,7 @@ const REQ_TONE: Record<RequirementState, { icon: string; fill: string; track: st
  * when the time agrees. The attribute does NOT inherit, so it goes on each
  * text-bearing node rather than a wrapper.
  */
-function useTick(active: boolean): number {
+export function useTick(active: boolean): number {
   const [now, setNow] = React.useState(() => Date.now())
   React.useEffect(() => {
     if (!active) return
@@ -157,188 +122,6 @@ function useTick(active: boolean): number {
   return now
 }
 
-export function LegalDashboard({ className }: { className?: string }) {
-  const isActive = usePageActive("/")
-  const now = useTick(isActive)
-  const { preferences } = usePreferences()
-
-  // Recency on its own — not the whole period aggregate, which built a totals
-  // breakdown and a detail row for every flight ever logged to read this one
-  // figure. Keyed on the day too: recency is measured against TODAY.
-  const { flights, isLoading: aggLoading } = useFlights()
-  const dayKey = useDayKey()
-  const recency = React.useMemo(
-    () => ninetyDayRecency(flights),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- dayKey is the "now" input
-    [flights, dayKey],
-  )
-  const { status, isLoading: statusLoading } = usePilotStatus(
-    recency,
-    now,
-    preferences?.display,
-  )
-
-  // A requirement opens in the detail panel as `req:<id>`. The id is held,
-  // not the requirement, so the model rebuilding every minute refreshes the
-  // open panel rather than closing it; a requirement that disappears clears it.
-  const { selectedId, setSelectedId, setDetailContent } = useDetailPanel()
-  const isDesktop = useIsDesktop()
-  const openReqId = selectedId?.startsWith("req:") ? selectedId.slice(4) : null
-  const openRequirement = openReqId
-    ? status.legality.requirements.find((r) => r.id === openReqId) ?? null
-    : null
-  // The sector chain opens its duty's flights — gates, the inbound aeroplane —
-  // as `duty:<start ms>`, so the one-screen page gains no row for them.
-  // `duty:<ms>#wx` is the same duty opened from the header's Weather button,
-  // which leads with the weather.
-  const openDutyMs = selectedId?.startsWith("duty:") ? Number(selectedId.slice(5).split("#")[0]) : null
-  const openDutyWeather = !!selectedId?.startsWith("duty:") && selectedId.endsWith("#wx")
-  const onDashboard = usePathname() === "/"
-  React.useEffect(() => {
-    // Keep-alive: a hidden dashboard must not write the panel another page
-    // owns (the pathname moves a commit before the active-route store does).
-    if (!isActive || !onDashboard) return
-    if (openDutyMs !== null && Number.isFinite(openDutyMs)) {
-      setDetailContent(<DutyFlightsPanel key={openDutyMs} atMs={openDutyMs} weatherFirst={openDutyWeather} />)
-      return
-    }
-    if (!openReqId) return
-    setDetailContent(
-      openRequirement ? <RequirementDetailPanel key={openRequirement.id} requirement={openRequirement} /> : null,
-    )
-  }, [isActive, onDashboard, openReqId, openRequirement, openDutyMs, openDutyWeather, setDetailContent])
-  // Beside the page (a tablet), the detail panel is not left saying "Select a
-  // requirement" next to a page that already knows which one matters: with
-  // nothing chosen it opens the most pressing currency cell — flagged first,
-  // else the nearest expiry. Programmatic (`explicit: false`), as Settings
-  // fills its panel: no `?selected=`, so narrowing the window to a phone does
-  // not raise the overlay over the dashboard.
-  const loading = aggLoading || statusLoading
-  const defaultReqId = React.useMemo(() => {
-    const cells = status.legality.requirements.filter((r) => r.group === "currency" && r.id !== "doc-rest")
-    const flagged = cells
-      .filter((r) => r.urgency !== undefined)
-      .sort((a, b) => (b.urgency ?? 0) - (a.urgency ?? 0))[0]
-    const nearest = cells
-      .filter((r) => r.daysUntil !== undefined)
-      .sort((a, b) => (a.daysUntil ?? 0) - (b.daysUntil ?? 0))[0]
-    return (flagged ?? nearest ?? cells[0])?.id ?? null
-  }, [status.legality.requirements])
-  React.useEffect(() => {
-    if (!isDesktop || !isActive || !onDashboard || loading) return
-    if (selectedId || !defaultReqId) return
-    setSelectedId(`req:${defaultReqId}`, { explicit: false })
-  }, [isDesktop, isActive, onDashboard, loading, selectedId, defaultReqId, setSelectedId])
-  // The duty the chain draws — this one on duty, else the next — with its
-  // gates and inbound aeroplane asked by themselves once it is close enough
-  // for either to be published, and only while the page is on screen.
-  const dutyAtMs =
-    status.duty.phase === "on_duty" && status.duty.active ? status.duty.active.startMs : status.duty.next?.reportMs ?? null
-  // The header's Weather button opens the duty the chain draws.
-  React.useEffect(() => {
-    if (isActive) setChainDuty(dutyAtMs)
-  }, [isActive, dutyAtMs])
-  const dutyClose = dutyAtMs !== null && dutyAtMs >= now - DUTY_LOOKUP_WINDOW_MS && dutyAtMs <= now + DUTY_LOOKUP_WINDOW_MS
-  const duty = useDutyLookups(dutyClose ? dutyAtMs : null, { active: isActive })
-  const dutyInfo = React.useMemo(
-    () => (dutyClose && duty.legs.length > 0 ? describeDuty(duty.legs, duty.lookups, duty.loading, duty.refresh, preferences?.display) : undefined),
-    [dutyClose, duty.legs, duty.lookups, duty.loading, duty.refresh, preferences?.display],
-  )
-  const openRequirementCell = React.useCallback((id: string) => setSelectedId(`req:${id}`), [setSelectedId])
-  const openDuty = React.useCallback((atMs: number) => setSelectedId(`duty:${atMs}`), [setSelectedId])
-
-  if (loading) {
-    return <Skeleton className={cn("h-full min-h-[24rem] rounded-3xl", className)} />
-  }
-
-  return (
-    <LegalDashboardView
-      status={status}
-      now={now}
-      display={preferences?.display}
-      // Lit only where the panel BESIDE the page shows it.
-      openRequirementId={isDesktop ? openReqId : null}
-      onOpenRequirement={openRequirementCell}
-      onOpenDuty={openDuty}
-      dutyInfo={dutyInfo}
-      className={className}
-    />
-  )
-}
-
-/** How far either side of now a duty's gates and aeroplane are worth asking about. */
-const DUTY_LOOKUP_WINDOW_MS = 18 * 3600_000
-
-/** The presentational half — pure props, so it renders without the database. */
-export function LegalDashboardView({
-  status,
-  now,
-  display,
-  openRequirementId = null,
-  onOpenRequirement,
-  onOpenDuty,
-  dutyInfo,
-  className,
-}: {
-  status: PilotStatus
-  now: number
-  /**
-   * The app's display settings. Every point in time on this page goes through
-   * them — Zulu or local, 12 or 24 hour, colon or bare — so the page cannot
-   * disagree with the rest of the app about what time it is.
-   */
-  display?: DisplayPreferences
-  /** The requirement shown in the detail panel beside the page. */
-  openRequirementId?: string | null
-  /** Open a requirement's detail. Without it the cells are not buttons. */
-  onOpenRequirement?: (id: string) => void
-  /** Open the duty the sector chain draws (its start, ms). Without it the chain is not a button. */
-  onOpenDuty?: (atMs: number) => void
-  /** The chain's duty's gates and inbound aeroplane, when it is close enough to ask. */
-  dutyInfo?: DutyInfo
-  className?: string
-}) {
-  const tone = TONE[status.state]
-
-  const currency = status.legality.requirements.filter((r) => r.group === "currency")
-  const limits = status.legality.requirements.filter((r) => r.group === "limits")
-
-  return (
-    <div
-      className={cn(
-        // `max-h-full`, NOT `h-full`: stretching the surface to the viewport
-        // makes one section absorb every spare pixel, which on a tall phone
-        // left ~200px of empty grid below the last row.
-        "@container relative flex max-h-full flex-col overflow-hidden rounded-3xl border border-border bg-card",
-        className,
-      )}
-    >
-      {/* The state's mood, bled into the top of the surface. Pointer-events
-          none and behind everything — it is atmosphere, not a control. */}
-      <div
-        className={cn(
-          "pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b to-transparent",
-          tone.glow,
-        )}
-        aria-hidden="true"
-      />
-
-      {/* Scrolls only as a LAST RESORT. Everything fits on a phone held
-          upright (measured: 360×780 and up), so this never moves there — but a
-          phone turned sideways gets the split layout at ~390px tall, and with
-          `overflow-hidden` alone the currency band was squeezed to nothing and
-          the limits band was clipped off the bottom: a pilot checking legality
-          sideways could see neither. */}
-      <div className="relative flex min-h-0 flex-col divide-y divide-border/40 overflow-y-auto overscroll-contain scrollbar-hide">
-        <Annunciator status={status} />
-        <DutyBand status={status} now={now} display={display} onOpenDuty={onOpenDuty} dutyInfo={dutyInfo} />
-        <CurrencyBand requirements={currency} openId={openRequirementId} onOpen={onOpenRequirement} />
-        <LimitsBand requirements={limits} />
-      </div>
-    </div>
-  )
-}
-
 /* ── Master annunciator ──────────────────────────────────────────────────── */
 
 /**
@@ -353,12 +136,12 @@ export function LegalDashboardView({
  * is nothing to work backwards from — and the duty band below draws it. A
  * countdown on top of both was the same number three times.
  */
-function Annunciator({ status }: { status: PilotStatus }) {
+export function Annunciator({ status }: { status: PilotStatus }) {
   const tone = TONE[status.state]
   const StateIcon = tone.icon
 
   return (
-    <div className="px-4 pb-3 pt-1">
+    <div>
       <div className="flex items-center gap-2">
         <StateIcon className={cn("h-3.5 w-3.5 shrink-0", tone.text)} aria-hidden="true" />
         <span
@@ -374,7 +157,7 @@ function Annunciator({ status }: { status: PilotStatus }) {
       {/* The imperative — what to DO. The most valuable line on the screen, and
           the one a data-oriented dashboard never prints. */}
       <p
-        className="mt-1.5 text-[26px] font-semibold leading-[1.1] tracking-tight text-foreground"
+        className="mt-1 text-[22px] font-semibold leading-[1.1] tracking-tight text-foreground"
         suppressHydrationWarning
       >
         {status.nextAction.headline}
@@ -435,7 +218,7 @@ function Annunciator({ status }: { status: PilotStatus }) {
  * it amber would teach the reader that the colour means the same thing there as
  * it does on a requirement cell. `idle` is "there is no limit to draw".
  */
-const RAMP = {
+export const RAMP = {
   ok: { fill: "bg-chart-2", text: "text-chart-2" },
   caution: { fill: "bg-chart-4", text: "text-chart-4" },
   fail: { fill: "bg-destructive", text: "text-destructive" },
@@ -443,7 +226,7 @@ const RAMP = {
   idle: { fill: "bg-muted-foreground/40", text: "text-muted-foreground" },
 } as const
 
-type Ramp = keyof typeof RAMP
+export type Ramp = keyof typeof RAMP
 
 /** One slot of the scale beneath the timeline. */
 interface Slot {
@@ -480,18 +263,14 @@ interface Slot {
  * that produced it is printed beside it. With no computed maximum the band says
  * so rather than inventing one; a default is a number somebody might fly to.
  */
-function DutyBand({
+export function DutyBand({
   status,
   now,
   display,
-  onOpenDuty,
-  dutyInfo,
 }: {
   status: PilotStatus
   now: number
   display?: DisplayPreferences
-  onOpenDuty?: (atMs: number) => void
-  dutyInfo?: DutyInfo
 }) {
   const { phase, active, lastDuty, next, rest, standby } = status.duty
 
@@ -714,7 +493,7 @@ function DutyBand({
   })()
 
   return (
-    <section className="px-4 py-2.5" aria-label="Duty">
+    <section aria-label="Duty">
       <div className="flex items-baseline justify-between gap-2">
         <p className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
           {view.state}
@@ -750,46 +529,6 @@ function DutyBand({
         </p>
       )}
 
-      {/* The sector chain. A duty is up to four legs across several airports,
-          and "where am I in the pattern" is what the old recent-flights list
-          could never answer — it showed history, not this duty. On duty it is
-          THIS duty's progress; otherwise it is the NEXT duty's shape, which is
-          what the footnote above it has just named. */}
-      <SectorChain
-        legs={view.legs}
-        nextRoute={view.nextRoute}
-        legGates={dutyInfo?.legGates}
-        // The chain draws THIS duty on duty and the NEXT one otherwise, so
-        // that is the duty a tap opens.
-        onOpen={(() => {
-          const atMs = onDuty ? active.startMs : next?.reportMs
-          return onOpenDuty && atMs != null ? () => onOpenDuty(atMs) : undefined
-        })()}
-      />
-
-      {/* The aeroplane for the next leg to fly, and the refresh for it and the
-          gates — asked by themselves, never stored, so a later gate is a tap
-          away. Only while the duty is close enough to ask about. */}
-      {dutyInfo && (
-        <div className="mt-2 flex items-center gap-2">
-          <p
-            title={dutyInfo.line}
-            className="min-w-0 flex-1 truncate text-[11px] leading-tight text-muted-foreground"
-            suppressHydrationWarning
-          >
-            {dutyInfo.line}
-          </p>
-          <button
-            type="button"
-            onClick={dutyInfo.onRefresh}
-            disabled={dutyInfo.loading}
-            aria-label="Refresh gates and aircraft"
-            className="relative shrink-0 rounded-full p-0.5 text-muted-foreground after:absolute after:-inset-3 after:content-[''] focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-60"
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5", dutyInfo.loading && "animate-spin")} />
-          </button>
-        </div>
-      )}
     </section>
   )
 }
@@ -806,7 +545,7 @@ function DutyBand({
  * The tone is STATED by the caller, never derived from how full the bar is: a
  * nearly-full FDP bar is a warning and a nearly-full REST bar is good news.
  */
-function Timeline({
+export function Timeline({
   fromMs,
   toMs,
   nowMs,
@@ -865,7 +604,7 @@ function Timeline({
  * spreadsheet rather than of an instrument — and it left no room for the bar to
  * be wide enough to read.
  */
-function Scale({ slots }: { slots: Slot[] }) {
+export function Scale({ slots }: { slots: Slot[] }) {
   return (
     <div className="mt-1.5 flex items-start gap-2">
       {slots.map((slot, i) => (
@@ -903,16 +642,19 @@ function Scale({ slots }: { slots: Slot[] }) {
  * come. The airport codes sit under the dots, so a four-sector day reads as a
  * pattern rather than as a route string nobody can locate themselves in.
  */
-function SectorChain({
+export function SectorChain({
   legs,
   nextRoute,
   legGates,
+  times,
   onOpen,
 }: {
   legs: SectorLeg[]
   nextRoute?: string
   /** Each leg's gates in order; drawn under the stops when they line up with the chain. */
   legGates?: { dep: string; arr: string }[]
+  /** A clock under each stop — the departure from the first, the arrival at the rest. */
+  times?: string[]
   onOpen?: () => void
 }) {
   const stops = React.useMemo(() => {
@@ -947,7 +689,7 @@ function SectorChain({
         ? { type: "button" as const, onClick: onOpen, "aria-label": "Gates and aircraft for this duty" }
         : {})}
       className={cn(
-        "mt-3 flex w-full items-start",
+        "flex w-full items-start",
         onOpen &&
           "relative rounded-md text-left after:absolute after:-inset-y-2 after:inset-x-0 after:content-[''] focus-visible:outline-2 focus-visible:outline-ring",
       )}
@@ -982,6 +724,11 @@ function SectorChain({
             >
               {stop.code}
             </span>
+            {times && times.length === stops.length && (
+              <span className="text-[10px] leading-none tabular-nums text-muted-foreground" suppressHydrationWarning>
+                {times[i] || "–"}
+              </span>
+            )}
             {gates && (
               <span className="text-[10px] font-semibold leading-none tabular-nums text-foreground" suppressHydrationWarning>
                 {gates[i] || "–"}
@@ -994,111 +741,7 @@ function SectorChain({
   )
 }
 
-/* ── Currency ────────────────────────────────────────────────────────────── */
-
-/**
- * Everything measured in DAYS — recency and documents, nearest expiry first.
- *
- * It is a GRID of cells, not a column of rows. Each currency is one small fact
- * of the same kind — a name and a number of days — so a set is what they are,
- * and a set laid out two-up reads as one glance rather than as a list with an
- * implied sequence. It is also half the height, which matters: this is the one
- * band that absorbs the squeeze (`flexible`), so every row it does not spend is
- * headroom on a short phone.
- *
- * Sorted most-pressing-first with no headings, so **the top-left cell is always
- * the thing closest to stopping the pilot**. Headings would cost four rules and
- * ~56px to impose an order nobody is reading for.
- *
- * Recency is ONE cell, not two: takeoffs and landings are two halves of one
- * question, and as separate urgency-sorted cells they did not even end up next
- * to each other. Opening the cell shows both counts.
- */
-function CurrencyBand({
-  requirements,
-  openId,
-  onOpen,
-}: {
-  requirements: Requirement[]
-  openId: string | null
-  onOpen?: (id: string) => void
-}) {
-  const ordered = React.useMemo(
-    () => [...requirements].sort((a, b) => (a.daysUntil ?? 9e9) - (b.daysUntil ?? 9e9)),
-    [requirements],
-  )
-
-  return (
-    <Band label="Currency" requirements={ordered} flexible>
-      {/* Nothing to show only happens before anything has been logged or
-          added: say where the documents go rather than draw an empty band. */}
-      {ordered.length === 0 && (
-        <Link
-          href="/currencies"
-          className="flex items-center justify-between gap-2 rounded-lg bg-muted/50 px-3 py-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <span>Track your medical, licence and checks</span>
-          <ArrowUpRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        </Link>
-      )}
-      <div className="grid grid-cols-2 gap-1.5 @[26rem]:grid-cols-3 @[44rem]:grid-cols-4">
-        {ordered.map((r) => (
-          <CurrencyCell
-            key={r.id}
-            requirement={r}
-            open={r.id === openId}
-            onOpen={onOpen}
-          />
-        ))}
-      </div>
-    </Band>
-  )
-}
-
 /* ── Limits ──────────────────────────────────────────────────────────────── */
-
-/**
- * Everything measured in HOURS, paired by what it limits.
- *
- * Duty over its two windows, then flight over its two — which is how the
- * regulation is written and how a pilot holds it. Four independent rows sorted
- * by urgency scattered the pairs and was most of why this read as jumbled.
- */
-function LimitsBand({ requirements }: { requirements: Requirement[] }) {
-  const byId = React.useMemo(
-    () => new Map(requirements.map((r) => [r.id, r])),
-    [requirements],
-  )
-  const pairs: Array<{ label: string; rows: Requirement[] }> = [
-    {
-      label: "Duty",
-      rows: [byId.get("duty-14"), byId.get("duty-28")].filter(Boolean) as Requirement[],
-    },
-    {
-      label: "Flight",
-      rows: [byId.get("flight-28"), byId.get("flight-365")].filter(Boolean) as Requirement[],
-    },
-  ]
-
-  return (
-    <Band label="Limits" requirements={requirements}>
-      <div className="space-y-1.5">
-        {pairs.map((pair) => (
-          <div key={pair.label} className="flex items-start gap-3">
-            <span className="w-10 shrink-0 pt-[3px] text-[11px] font-medium text-muted-foreground">
-              {pair.label}
-            </span>
-            <div className="min-w-0 flex-1 space-y-1">
-              {pair.rows.map((r) => (
-                <LimitRow key={r.id} requirement={r} />
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </Band>
-  )
-}
 
 /**
  * How much of the limit is gone, read straight off the bar.
@@ -1123,7 +766,7 @@ const LABEL_FITS_INSIDE = 0.28
  */
 const LIMIT_WITH_ROOM = { fill: "bg-muted-foreground", track: "bg-muted" }
 
-function LimitRow({ requirement }: { requirement: Requirement }) {
+export function LimitRow({ requirement }: { requirement: Requirement }) {
   const tone = requirement.state === "ok" ? { ...REQ_TONE.ok, ...LIMIT_WITH_ROOM } : REQ_TONE[requirement.state]
   const Icon = STATE_ICON[requirement.state]
   // "Duty 14d" → "14d": the pair's label already says which measure it is.
@@ -1171,137 +814,3 @@ function LimitRow({ requirement }: { requirement: Requirement }) {
   )
 }
 
-/* ── Shared band chrome ──────────────────────────────────────────────────── */
-
-function Band({
-  label,
-  requirements,
-  children,
-  flexible,
-}: {
-  label: string
-  requirements: Requirement[]
-  children: React.ReactNode
-  /** The band that absorbs a squeeze and scrolls inside itself. Exactly one. */
-  flexible?: boolean
-}) {
-  const fail = requirements.filter((r) => r.state === "fail").length
-  const caution = requirements.filter((r) => r.state === "caution").length
-
-  return (
-    <section
-      className={cn(
-        "px-4 py-2.5",
-        // It absorbs the squeeze, but never below its first row of cells — at
-        // min-h-0 it collapsed to its label on a short screen and every
-        // currency vanished behind a hidden scrollbar.
-        flexible && "min-h-[6.5rem] flex-1 overflow-y-auto scrollbar-hide",
-        // On a SHORT screen (a phone held sideways) the whole surface scrolls
-        // instead, so this band takes its full height rather than being a
-        // second scroller nested inside the first.
-        flexible && "[@media(max-height:500px)]:flex-none [@media(max-height:500px)]:overflow-visible",
-      )}
-      aria-label={label}
-    >
-      <div className="mb-1.5 flex items-center justify-between gap-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-          {label}
-        </p>
-        <span className="flex items-center gap-2 text-[10px] tabular-nums">
-          {fail > 0 && (
-            <span className="inline-flex items-center gap-0.5 font-semibold text-destructive">
-              <OctagonAlert className="h-2.5 w-2.5" aria-hidden="true" />
-              {fail}
-            </span>
-          )}
-          {caution > 0 && (
-            <span className="inline-flex items-center gap-0.5 font-semibold text-chart-4">
-              <TriangleAlert className="h-2.5 w-2.5" aria-hidden="true" />
-              {caution}
-            </span>
-          )}
-          {/* A tick says "everything here is met" — an empty band has
-              nothing to have met. */}
-          {fail === 0 && caution === 0 && requirements.length > 0 && (
-            <Check className="h-3 w-3 text-chart-2" aria-hidden="true" />
-          )}
-        </span>
-      </div>
-      {children}
-    </section>
-  )
-}
-
-/**
- * One currency, as a cell.
- *
- * The figure sits above its caption, which is the duty band's `Scale`
- * vocabulary — the two bands are then reading the same way, a number over the
- * word for what it is, rather than each inventing its own arrangement.
- *
- * **Only a FLAGGED cell is tinted.** The status ramp means met / close / not
- * met, and tinting the met ones green as well would paint the whole band and
- * leave the one thing that needs attention with nothing to stand out against.
- * Colour is never the only carrier either: every state ships its own icon.
- */
-function CurrencyCell({
-  requirement,
-  open,
-  onOpen,
-}: {
-  requirement: Requirement
-  /** Its detail is in the panel beside the page. */
-  open: boolean
-  onOpen?: (id: string) => void
-}) {
-  const { label, state, value, progress, detail } = requirement
-  const tone = REQ_TONE[state]
-  const Icon = STATE_ICON[state]
-  const hasDetail = !!onOpen && (detail?.length ?? 0) > 0
-  const flagged = state !== "ok"
-
-  return (
-    <button
-      type="button"
-      onClick={() => onOpen?.(requirement.id)}
-      aria-current={open || undefined}
-      disabled={!hasDetail}
-      className={cn(
-        "flex min-w-0 flex-col rounded-lg px-2 py-1.5 text-left transition-colors",
-        flagged ? tone.track : "bg-muted/40",
-        hasDetail && !open && "hover:brightness-110",
-        open && "ring-1 ring-inset ring-foreground/25",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-      )}
-    >
-      <span className="flex min-w-0 items-center gap-1">
-        <Icon className={cn("h-3 w-3 shrink-0", tone.icon)} aria-hidden="true" />
-        <span
-          className={cn(
-            "min-w-0 truncate text-sm font-semibold leading-tight tabular-nums",
-            flagged ? tone.icon : "text-foreground",
-          )}
-        >
-          {value}
-        </span>
-      </span>
-
-      <span className="mt-0.5 block truncate text-[9px] font-medium uppercase leading-tight tracking-wider text-muted-foreground">
-        {label}
-      </span>
-
-      {/* A meter only where it says something. An `ok` document sits at nearly
-          zero against its warning window, so its bar is an empty track beside a
-          day count that already answered the question — four of those is noise.
-          `mt-auto` keeps the metered and un-metered cells the same height. */}
-      {flagged && progress !== undefined && (
-        <span className="mt-auto block h-[3px] w-full overflow-hidden rounded-full bg-foreground/10">
-          <span
-            className={cn("block h-full rounded-full", tone.fill)}
-            style={{ width: `${Math.min(100, Math.max(0, progress * 100))}%` }}
-          />
-        </span>
-      )}
-    </button>
-  )
-}

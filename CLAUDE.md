@@ -682,7 +682,7 @@ one looks it up in full like a typed code.
 | where the aeroplane is (`aircraft/whereabouts`, `lib/lookup/aircraft-whereabouts.ts`) | the registration's list: the last flight it DEPARTS on before `at` (our departure, or now) — landed / airborne / not yet left — and the one after; the inbound's ARRIVAL gate from the live flight, else the arrivals board | the duty band's line under the chain for the NEXT LEG STILL TO FLY (`inboundLeg` — on duty a later leg can be another tail; legs in FLOWN order, `sortFlights` is newest first), the duty panel, and the aircraft panel's **Now** section (on a tap); "9V-NCA · Landed 03:00Z · 30m ago · TR289 from DPS" — the inbound's arrival gate is said only while the leg's OWN departure gate is not yet published (it is drawn under the stop, and in the panel's Gates row; saying it twice was the owner's report), and then it comes first so a cut-short line keeps it; never stored; a departure within 20 min of `at` is our own flight pushing back, not the inbound |
 | the missing sector (`seedDerivedLeg`, `seedFromNextFlight`) | what the aeroplane flies after the leg a Next Leg / Return was made from (`aircraft/whereabouts` at that leg's arrival) | fills the new leg's blanks — number, far end, scheduled times — only when that flight leaves from this leg's departure airport; may move the DERIVED leg's date a day on (an overnight return), only while it records no times |
 | the pilot's airline (`useAirlineCode`: Settings › Logging › Airline, `logging_airline`, else the SELF card's company through the airline list) | the airline list (`lib/airlines/airlines.ts`, `/airlines`, kept 30 days in localStorage) | an EMPTY Flight # starts with it on focus (`DraftInput`'s `prefill`, committed only once something is typed — clearing it leaves the field empty; not on a simulator). A LETTER typed first replaces it and a digit is added to it (`afterPrefill`), so typing "TR288" out of habit or pasting it is not "TRTR288"; Lookup prefixes a digits-only number (`withAirlinePrefix`); By fleet starts with it. A crew card's company field lists airlines as it is typed and a pick writes the standard name |
-| gates from the dashboard | the duty band's sector chain | the chain still opens `duty:<start ms>` (`DutyFlightsPanel`: each leg's Gates, the next leg's Inbound, Open flight) on the SAME cache as the band (`lookup:duty:` key), so either refreshes both. Measured at 360×780 with gates and the inbound line: no page scroll |
+| gates from the dashboard | the flight page's This / Next Duty tile | gates under each stop and the inbound line; the tile opens each leg's Gates, the Inbound and Open Flight on the SAME cache (`lookup:duty:` key), so either refreshes both |
 | the import cross-check (`aircraft-cross-check.ts`) | `flight/suggest` per touched flight, a week back to a day ahead, ≤ 24, nearest today first | a flight logged on another aeroplane than that day's SCHEDULED one gets an `aircraft_mismatch` NOTE (`aircraft-check:<flight>`, once; resolves itself when they agree) — never a change |
 
 The flight number's list, the boards and the per-airport timetable all reach
@@ -717,8 +717,9 @@ minute and sends heavy users to those files:
 | stored | ONE snapshot per kind in MongoDB `weatherCache` (`_id: "metar"` / `"taf"`): every station's raw report and its times, ~650KB each, REPLACED whole. The whole world, not the pilot's airports — a later feature (alternates, en-route) wants stations nobody asked for, and it costs one document |
 | refreshed | ON DEMAND (`getWeather`): a request that finds a snapshot older than `REFRESH_MS` (10 min) pulls that file — at most two upstream requests per ten minutes, none while nobody looks — after winning a one-minute lock (`lock:metar`); every other request answers from the snapshot. A pull that fails, or that reads fewer than 200 stations (an error page), keeps the old snapshot and the answer says `stale` |
 | read | only the asked stations, by PROJECTION (`stations.WSSS`) — a few hundred bytes, never the document |
-| route | `GET /api/lookup/weather?ids=WSSS,VTCC` — NODE (MongoDB, zlib), a static segment beside the pool, behind a sign-in; up to 24 ids; browser keeps it 2 minutes. Callers use `lookup.weather` |
-| shown | the dashboard's duty panel (`DutyWeather`, the chain's `duty:<ms>` panel): each airport the duty touches, in the order flown — the METAR raw with its time, age and category, the TAF raw broken at TEMPO / BECMG / FM / PROB (`tafLines`) — asked when the panel opens (`useAirportWeather`), Refresh to ask again. The legal page's header carries a Weather button (tools group) that opens the same panel weather-first (`duty:<ms>#wx`; the chain's duty is published by `setChainDuty`) |
+| route | `GET /api/lookup/weather?ids=WSSS,VTCC[&fresh=1]` — NODE (MongoDB, zlib), a static segment beside the pool, behind a sign-in; up to 24 ids; `no-store` (SWR dedupes). `fresh=1` is the pilot's Refresh: a snapshot over `FRESH_MS` (2 min) is pulled again — it used to revalidate into the browser's 2-minute cache, so Refresh did nothing and said nothing (the owner's report). Callers use `lookup.weather` |
+| shown | the flight page's Weather tile and its detail (`flight/weather.tsx`): each airport the duty touches, asked while the page is up and the duty within 30h, again every 10 minutes; Refresh says "Getting the latest…", then "Checked 16:52Z · reports as of 5m ago" (or that it failed, and what is shown) |
+| read | `lib/weather/brief.ts` (tested on the real fixtures): the TAF split into periods (base, FM, BECMG, TEMPO, PROB30/40, PROB TEMPO), each change group laid OVER what prevails; FAA categories; hazards (TS, CB, FZ, FG, heavy / frozen precipitation, SQ, FC, VA, DS, TCU, gust or wind ≥ 25kt, LIFR visibility / ceiling). Each airport's window is the duty's time there ± 1 hour — departure the actual OUT else the schedule; arrival the actual IN, else OUT + the PLANNED block once off blocks (the owner's rule), else the schedule (`legTimes`). The periods touching a window are LIT and say which leg ("TR275 arr"), amber when they bring a hazard or IFR; the METAR is read for its body only (not its trend) |
 
 NOT a Cloudflare Worker: a free Worker has 10ms of CPU, and unzipping and
 reading 9MB of XML takes ~80ms. NOT a Vercel cron: the free plan runs one a
@@ -1202,20 +1203,66 @@ it was being asked two questions that want opposite layouts:
 
 | | Answers | Shape |
 |---|---|---|
-| **Legal** (default) | am I current, what must I do, where am I in my duty | ONE SCREEN, NO SCROLL |
+| **Flight** (default; was "Legal") | am I fine, where am I in my duty, what is this or the next duty like | ONE SCREEN, NO SCROLL on a phone |
 | **Summary** | what have I flown and how does it add up | period-scoped, scrolls |
 
 Serving both from one layout is what turns a dashboard into a spreadsheet. A
 pilot about to report wants an instrument they can read in two seconds; a pilot
 reviewing a month wants depth and is happy to scroll for it. They get different
-containers: the legal page is laid out TO the available height
+containers: the flight page is laid out TO the available height
 (`px-panel pt-chrome pb-chrome` on a full-height flex column), the summary page
 is an ordinary `PageContainer`.
 
 `useDashboardView` is a MODULE STORE read through `useSyncExternalStore` — the
 same shape as `useDBReady`/`useIsDesktop` — persisted to `localStorage` and
 hydrated inside `subscribe` (which React calls in an effect), so there is no
-setState-in-effect and no first render with the wrong page.
+setState-in-effect and no first render with the wrong page. A stored "legal"
+reads as "flight".
+
+#### The Flight page — widgets in the order a pilot's day runs (Nov 2026)
+
+The owner's rework of the legal page: "a smart dashboard that provides a great
+overview in a chronological sense". `components/dashboard/flight-dashboard.tsx`
+builds ONE model a minute (`FlightBrief`, `flight/model.ts`) and draws it as
+tiles (`flight/widget.tsx`, faces in `flight/faces.tsx`, bodies in
+`flight/details.tsx`):
+
+| Tile | Glance | Opens into |
+|---|---|---|
+| Status | the annunciator (state, imperative, governing / Also) | the next action, every flagged requirement with its remedy |
+| Duty | the duty clock: FDP against its Reg 14 maximum on duty; rest against the next report off duty; a standby's window | the figures behind it, latest on-blocks, rest rule, next duty's FDP, the duties Coming Up |
+| This / Next Duty | flight numbers, the sector chain with each stop's time and gate, the aeroplane, the inbound line | each leg: schedule, actual, expected in, aircraft, Gates; the inbound; Open Flight |
+| Weather | each airport's worst category over the duty's times there, the first hazard | the processed METAR / TAF (below) with Refresh |
+| Crew | who is on it and when last flown together ("First flight") | each member: last flight together, how many, open them or that flight |
+| Last There | when last flown INTO each destination (not the origin) | last arrival, arrivals in 12 months and in the logbook, local time now, arriving by day or night |
+| Currency | the three most pressing, with the tally | every currency, each a disclosure with its detail and remedy |
+| Limits | the four rolling limits as small bars | each limit's detail; Open FDP |
+
+- **A phone: tiles GROW into a sheet** (`WidgetSheet`) — the context preview's
+  morph: laid out once at its resting size, it travels from the tile and a
+  clip that starts as the tile's exact box and corners opens over it; a copy
+  of the tile's face covers the box on the first frame and on the close (it
+  returns at once on the close, or the detail shows through it). Scrim, close
+  button, Escape and back close it; a link out of it runs as the close's
+  follow-up (`close(then)`). The tile is hidden while its sheet is up.
+- **A tablet / desktop: main + detail** — a tile opens its body in the detail
+  panel (`w:<id>`, ringed tile), and with nothing chosen the panel opens the
+  duty's flights (`explicit: false`). "Open Flight" opens the flight in the
+  dashboard's own panel (a flight id), as the summary rows do.
+- **Fit:** measured at 390×844, 360×780 and 1180×820: the grid is 625px with
+  nothing to scroll. Every face is one line per fact, truncated, so a tile does
+  not change height as answers land; a tile that ADDS a line has to be
+  re-measured at 360×780.
+- **The duty is the one in progress, else the next** (`dutyFlights` from its
+  report). Gates and the aeroplane are asked within 18h of it, the weather
+  within 30h (a TAF's reach), only while the page is on screen.
+- **"Last" is before THIS duty** (`flight-brief.ts`, tested): on the second
+  sector the first one today is not the last time with the captain, and a
+  sector still to fly is not the last visit. Positioning and simulators count
+  as neither.
+- The legal page's instruments live on in `flight/instruments.tsx`, and every
+  rule written about them below still holds there — the annunciator, the duty
+  band's phases, the status ramp, "the FDP maximum is never hardcoded".
 
 **The period controls belong to the summary page only.** The calendar button and
 the period are meaningless on the legal page, so they are not rendered there at
@@ -2724,7 +2771,10 @@ re-renders).
   end of a drag and closes an open row instead of navigating. On a clean tap with
   no `onClick`, the card focuses a blended inline `input`/`textarea` inside it
   (those inputs are `pointer-events:none` via the `[data-swipe-row] input` rule,
-  so a swipe can start over them).
+  so a swipe can start over them) with the caret at the END — and once focused
+  the field takes pointers again (`:focus`), so a tap moves the caret and a
+  hold selects. `focus()` left a textarea's caret at the start, where nothing
+  could move it, so remarks could not be deleted (the owner's report).
 - **Multi-card:** opening/tapping one card closes others via the
   `swipe-card-close-others` window event.
 - **No full-swipe:** there is intentionally **no** "swipe past N% to auto-trigger
@@ -5135,7 +5185,7 @@ When making changes, be aware of these high-impact files:
 
 **Dashboard (two pages, one toggle):**
 - `hooks/use-dashboard-view.ts` — which page is showing; a module store, persisted, hydrated in `subscribe`
-- `components/dashboard/legal-dashboard.tsx` — page 1: one screen, no scroll, one continuous surface
+- `components/dashboard/flight-dashboard.tsx` — page 1: the flight page's model and tiles; `flight/` holds the widget + sheet, faces, details, weather and the instruments
 - `lib/utils/dashboard/pilot-status.ts` — the annunciator, the governing constraint and the NEXT ACTION
 - `lib/utils/dashboard/duty-status.ts` — duty phase + the per-duty FDP maximum (read, never invented)
 - `lib/utils/dashboard/legality.ts` — the requirement model (currency vs limits); the verdict is the worst requirement
@@ -5504,6 +5554,8 @@ When making changes, be aware of these high-impact files:
 - Do not put rest back in the currency band — it is a property of the duty just flown, not a standing qualification, and a live countdown among expiry dates reads as a different kind of thing. It lives in the duty band, and the annunciator has to fold it into the verdict itself since it is no longer one of the requirements
 - Do not print the rolling limits in the duty band as well as the limits band — that was the duplication the rework removed. The duty band carries FDP and flight time for THIS duty only
 - Do not derive the duty band's bar colour from how full it is — state the tone. A nearly-full FDP bar is a warning and a nearly-full REST bar is good news; deriving it painted a fully-rested pilot amber. And do not put a standby's window on the status ramp: how full it is is a magnitude, not a verdict (`RAMP.info`)
+- Do not give a flight-page tile a line that wraps or appears only sometimes — one truncated line per fact, or the one-screen phone layout moves as answers land; and do not open a tile's detail on a phone anywhere but its own sheet, grown out of the tile
+- Do not read a TAF without the duty's times — highlight the periods within an hour of each leg's time at that airport (`stationWindows`), and lay a change group over what prevails rather than reading it alone
 - Do not put the duty band's ring back. The off-duty question is a COMPARISON of two instants on one axis — when the rest becomes legal, and when the next duty reports — and an arc has nowhere to put the second one. It is a timeline with the report as a CARET and the rest still owed as a red band, so a duty rostered inside the rest period is visible before a word is read
 - Do not let the annunciator's second line repeat its headline — when the headline is the governing requirement's own remedy, the line is `status.also` (the NEXT flagged requirement, "+N More"), never "Tightest <the same requirement> <its figure>". And do not paint a limit bar green: a limit with room is neutral, colour arrives with caution or fail
 - Do not stand every hour category in the flight form's TIME section — the ones the flight holds and the seat's role time lead (`leadsTimeSection`), the rest wait behind "More Categories". Never fold a category that holds a figure, and never hide a row conditionally elsewhere in the form to save space (the empty Scheduled rows stay): a row that is sometimes absent is a row to hunt for

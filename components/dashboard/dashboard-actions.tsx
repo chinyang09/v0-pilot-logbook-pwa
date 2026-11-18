@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Calendar, CloudSun, SlidersHorizontal } from "lucide-react"
+import { Calendar, SlidersHorizontal } from "lucide-react"
 
 import { GlassButtonGroup, GlassGroupButton } from "@/components/ui/glass-icon-button"
 import {
@@ -17,8 +17,6 @@ import {
 import { AlertsDropdown } from "./alerts-dropdown"
 import { ChoicePicker, type MenuOption } from "@/components/ui/option-menu"
 import { cn } from "@/lib/utils"
-import { useChainDuty } from "@/hooks/use-chain-duty"
-import { useDetailPanel } from "@/hooks/use-detail-panel"
 
 const PERIOD_HINTS: Record<DashboardPreset, string> = {
   "7d": "Last 7 days",
@@ -38,7 +36,7 @@ const PERIOD_OPTIONS: Array<MenuOption<string>> = PERIOD_PRESETS.map((p) => ({
  * The view toggle is ALWAYS present — it is how the two pages are reached, so
  * it cannot be behind anything. Everything else is scoped to the page it
  * belongs to: the calendar and the period pills only mean something on the
- * summary page, and carrying them onto the legal page would put two controls
+ * summary page, and carrying them onto the flight page would put two controls
  * with no effect beside a screen that is meant to be read in two seconds.
  *
  * That scoping is also what keeps the action bar narrow enough. The left action
@@ -55,8 +53,6 @@ export function DashboardActions() {
     setShowCalendar,
   } = useDashboardPeriod()
   const view = useDashboardView()
-  const chainDuty = useChainDuty()
-  const { selectedId, setSelectedId } = useDetailPanel()
 
   const activePreset: DashboardPreset | null =
     period.kind === "preset" ? period.preset : null
@@ -66,7 +62,7 @@ export function DashboardActions() {
   return (
     <>
       <GlassButtonGroup>
-        {/* The two pages. A segmented pair rather than an icon: "Legal" and
+        {/* The two pages. A segmented pair rather than an icon: "Flight" and
             "Summary" are not things an icon says, and getting this wrong costs
             a tap plus a re-read of a whole screen. */}
         <div role="tablist" aria-label="Dashboard view" className="flex items-center gap-0.5">
@@ -138,17 +134,6 @@ export function DashboardActions() {
       )}
 
       <GlassButtonGroup>
-        {/* The METARs and TAFs for the duty the chain draws — on demand, in
-            the same panel a tap on the chain opens. */}
-        {view === "legal" && chainDuty !== null && (
-          <GlassGroupButton
-            ariaLabel="Weather for this duty"
-            active={selectedId === `duty:${chainDuty}#wx`}
-            onClick={() => setSelectedId(`duty:${chainDuty}#wx`)}
-          >
-            <CloudSun className="h-5 w-5" />
-          </GlassGroupButton>
-        )}
         <AlertsDropdown />
       </GlassButtonGroup>
     </>
