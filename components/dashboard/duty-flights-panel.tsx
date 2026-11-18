@@ -21,6 +21,7 @@ import { usePreferences } from "@/components/providers/preferences-provider"
 import { getAirportDisplayCode } from "@/lib/utils/airport-display"
 import { inboundLeg } from "@/lib/utils/dashboard/duty-flights"
 import { DutyWeather } from "@/components/dashboard/duty-weather"
+import { formatDay } from "@/lib/utils/date"
 
 /** Whether a leg's departure gate is published — and so shown in its Gates row. */
 function departureGateShown(lookups: DutyLookups, flightId: string): boolean {
@@ -38,7 +39,7 @@ export function DutyFlightsPanel({ atMs, weatherFirst = false }: { atMs: number;
   const inboundFlight = inboundLeg(legs)
 
   return (
-    <ReadingPanel title={`Duty · ${day}`}>
+    <ReadingPanel title={`Duty · ${formatDay(day)}`}>
       {legs.length === 0 ? (
         <FormSection>
           <p className="px-4 py-3.5 text-sm text-muted-foreground">
