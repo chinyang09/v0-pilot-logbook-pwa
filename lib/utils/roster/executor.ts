@@ -394,7 +394,8 @@ function buildUpdatePatch(op: AcceptableOperation): Partial<FlightLog> {
   }
   const patch: Partial<FlightLog> = {};
   for (const change of op.changes) {
-    assignFieldValue(patch, change.field, change.to);
+    if (change.value !== undefined) (patch as Record<string, unknown>)[change.field] = change.value;
+    else assignFieldValue(patch, change.field, change.to);
   }
   return patch;
 }

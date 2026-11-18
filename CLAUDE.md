@@ -1139,9 +1139,13 @@ one in the picker (which used to save the card and assign nobody). An eCrew
 schedule import seats the COMMANDER ("CPT - PIC - …", `commander`) as PIC and
 this pilot in their own seat, and lists every other CPT/FO as a relief pilot
 on a CREATED flight (`deriveSectorCrew`). Taking the first CPT and FO blindly
-dropped a second-listed first officer from their own flight. A re-import does
-not add relief pilots to an EXISTING flight yet: the review modal's diff is a
-string, and a list needs its own presentation.
+dropped a second-listed first officer from their own flight. A re-import ADDS the relief pilots
+an EXISTING flight lacks (`mergeReliefCrew` — by crew-card id, else by name;
+never one already in a seat, never removing anyone): the owner's 18 Nov TR696
+was logged before the report listed its SO, and the seats were all a re-import
+compared. The diff is an `additionalCrew` change whose `to` is the list as the
+review reads it ("Joe Chin Jia Hao (Relief Pilot)") and whose `value` is the
+list the executor writes (`FieldDiff.value`).
 
 ### Entry Type (flight, simulator, positioning)
 

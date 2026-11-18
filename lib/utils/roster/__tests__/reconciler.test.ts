@@ -1147,3 +1147,47 @@ describe("reconcileRoster — a sector logged as positioning", () => {
     expect(fields).not.toContain("dayTakeoffs");
   });
 });
+
+describe("reconcileRoster — relief pilots on an EXISTING flight", () => {
+  // The owner's 18 Nov 26 TR696: the flight was logged before the report
+  // listed its SO. A re-import diffed the two seats only, so the SO never
+  // reached it. A relief pilot is added; nobody on the flight is removed.
+  const currentUser = { id: "me", crewId: "9766" };
+  const crew = [
+    { role: "CPT", crewId: "2599", name: "Woon Kok Heng, Benson", personnelId: "p-cpt", commander: true },
+    { role: "FO", crewId: "9766", name: "Lim Chin Yang", personnelId: "me" },
+    { role: "SO", crewId: "10563", name: "Joe Chin Jia Hao", personnelId: "p-so" },
+  ];
+  const sector = () => makeSector({ crew } as unknown as Parameters<typeof makeSector>[0]);
+  const seated = { picName: "Woon Kok Heng, Benson", picId: "p-cpt", sicName: "Self", sicId: "me" };
+  const reconcile = (flight: FlightLog) =>
+    reconcileRoster({
+      sectors: [sector()],
+      existingFlights: [flight],
+      csvDateRange: { start: "2026-04-01", end: "2026-04-30" },
+      currentUser,
+    });
+  const crewChange = (ops: ReturnType<typeof reconcile>) => {
+    const op = ops[0];
+    if (!("changes" in op)) return undefined;
+    return op.changes.find((c) => c.field === "additionalCrew");
+  };
+
+  it("adds the SO, as a relief pilot", () => {
+    const ops = reconcile(makeFlight(seated));
+    const change = crewChange(ops)!;
+    expect(change.to).toBe("Joe Chin Jia Hao (Relief Pilot)");
+    expect(change.value).toEqual([{ id: "p-so", name: "Joe Chin Jia Hao", role: "Relief Pilot" }]);
+  });
+
+  it("keeps whoever the pilot already put on the flight", () => {
+    const observer = { name: "A Checker", role: "Observer" as const };
+    const change = crewChange(reconcile(makeFlight({ ...seated, additionalCrew: [observer] })))!;
+    expect(change.value).toEqual([observer, { id: "p-so", name: "Joe Chin Jia Hao", role: "Relief Pilot" }]);
+  });
+
+  it("raises nothing once the SO is aboard, by id or by name", () => {
+    expect(crewChange(reconcile(makeFlight({ ...seated, additionalCrew: [{ name: "JOE CHIN JIA HAO", role: "Relief Pilot" }] })))).toBeUndefined();
+    expect(crewChange(reconcile(makeFlight({ ...seated, additionalCrew: [{ id: "p-so", name: "Joe C.", role: "Relief Pilot" }] })))).toBeUndefined();
+  });
+});
