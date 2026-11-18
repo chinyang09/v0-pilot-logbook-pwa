@@ -3,6 +3,7 @@
 import { useMemo, useState, useEffect } from "react"
 import { useFlights } from "./use-flights"
 import { useScheduleEntries } from "./use-schedule"
+import { useDayKey } from "@/hooks/use-day-key"
 import { useDBReady } from "./use-db"
 import type { DutyPeriod } from "@/types/entities/roster.types"
 import { runFDPPipeline } from "@/lib/utils/roster/fdp-pipeline"
@@ -192,10 +193,15 @@ export function useFDPData() {
     return () => { cancelled = true }
   }, [dbReady, depIatasKey])
 
+  // The rolling limits and the forecast are "as of today" — whole UTC days —
+  // so the pipeline re-runs when the date turns, not only when the data
+  // changes: left open overnight, the limits kept yesterday's windows.
+  const dayKey = useDayKey()
   const result = useMemo(() => {
     if (!dbReady) return EMPTY_RESULT
     return computeFDPResult(flights, scheduleEntries, airportTimezones)
-  }, [dbReady, flights, scheduleEntries, airportTimezones])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dayKey is the clock, read inside via Date.now()
+  }, [dbReady, flights, scheduleEntries, airportTimezones, dayKey])
 
   // NOTE: we deliberately do NOT keep a separate `liveRestUntilLegal` state
   // here anymore. The previous implementation stored `result.restUntilLegal`

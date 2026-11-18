@@ -126,6 +126,14 @@ export default function FeedbackPage() {
     }
   }, [userId, load])
 
+  // Back online, the list comes back by itself — the outbox host sends what
+  // was waiting, and this reads what the server now holds.
+  useEffect(() => {
+    const onOnline = () => void load()
+    window.addEventListener("online", onOnline)
+    return () => window.removeEventListener("online", onOnline)
+  }, [load])
+
   const selected = useMemo(
     () => items?.find((i) => i.id === selectedId) ?? waiting.find((d) => d.id === selectedId) ?? null,
     [items, waiting, selectedId],
@@ -196,7 +204,22 @@ export default function FeedbackPage() {
       <div className="px-panel pt-4 space-y-4">
         {items === null && <Skeleton className="h-40 w-full rounded-xl" />}
 
-        {loadError && <p className="px-1 text-sm text-muted-foreground">{loadError}</p>}
+        {loadError && (sent.length > 0 || waiting.length > 0) && (
+          <p className="px-1 text-sm text-muted-foreground">{loadError}</p>
+        )}
+
+        {loadError && sent.length === 0 && waiting.length === 0 && (
+          <EmptyState
+            icon={CloudOff}
+            title="Reports Unavailable"
+            description={loadError}
+            action={
+              <Button variant="outline" size="sm" onClick={() => void load()}>
+                Try Again
+              </Button>
+            }
+          />
+        )}
 
         {items !== null && sent.length === 0 && waiting.length === 0 && !loadError && (
           <EmptyState
