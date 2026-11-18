@@ -466,7 +466,7 @@ export default function AircraftPage() {
       setDetailContent(
         <PanelMessage
           title={`${selectedAircraftReg.toUpperCase()} Not Found`}
-          description="It is not in this device's aircraft list. Add it with the + button."
+          description="Not on this device. Add it with +."
         />
       )
     } else {

@@ -100,7 +100,7 @@ export function LogbookDutyPanel({ selection }: { selection: string }) {
     return (
       <PanelMessage
         title="Duty not found"
-        description="It may have been deleted, or not synced to this device yet."
+        description="Deleted, or not synced to this device yet."
       />
     );
   }

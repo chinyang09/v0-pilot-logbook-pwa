@@ -68,9 +68,9 @@ export function FlightFace({ brief }: { brief: FlightBrief }) {
   if (duty.atMs === null) {
     return (
       <>
-        <WidgetLabel>Next Duty</WidgetLabel>
-        <p className="text-sm font-medium text-foreground">No duty rostered</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">Add flights or import your roster to see it here.</p>
+        <WidgetLabel>Next</WidgetLabel>
+        <p className="text-sm font-medium text-muted-foreground">Nothing rostered</p>
+
       </>
     )
   }
@@ -87,7 +87,7 @@ export function FlightFace({ brief }: { brief: FlightBrief }) {
     <>
       <WidgetLabel right={reg ? <span className="text-[11px] font-semibold tabular-nums text-foreground">{reg}</span> : undefined}>
         <span suppressHydrationWarning>
-          {duty.current ? "This Duty" : "Next Duty"} · {day(duty.atMs)}
+          {duty.current ? "Now" : "Next"} · {day(duty.atMs)}
         </span>
       </WidgetLabel>
       {numbers.length > 0 && (
@@ -111,14 +111,14 @@ export function CrewFace({ brief }: { brief: FlightBrief }) {
     <>
       <WidgetLabel>Crew</WidgetLabel>
       {crew.length === 0 ? (
-        <p className="text-xs leading-snug text-muted-foreground">{duty.legs.length ? "Not on the flights yet" : "—"}</p>
+        <p className="text-xs leading-snug text-muted-foreground">—</p>
       ) : (
         <ul className="space-y-0.5">
           {crew.slice(0, 3).map((m) => (
             <li key={m.personId ?? m.name} className="text-xs leading-tight">
               <span className="block truncate font-medium text-foreground">{shortName(m.name)}</span>
               <span className="block truncate text-[10px] text-muted-foreground">
-                {m.last ? `Flew ${shortDay(m.last.date)}` : "First flight"}
+                {m.last ? shortDay(m.last.date) : "New"}
               </span>
             </li>
           ))}
@@ -195,7 +195,7 @@ export function CurrencyFace({ brief, rows = 3 }: { brief: FlightBrief; rows?: n
     <>
       <WidgetLabel right={<Tally requirements={reqs} />}>Currency</WidgetLabel>
       {reqs.length === 0 ? (
-        <p className="text-xs leading-snug text-muted-foreground">Add your medical, licence and checks</p>
+        <p className="text-xs leading-snug text-muted-foreground">None tracked</p>
       ) : (
         <ul className="space-y-1">
           {reqs.slice(0, rows).map((r) => {

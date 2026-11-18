@@ -11,8 +11,8 @@
  * own (VFR green, MVFR blue, IFR red, LIFR magenta), not the status ramp.
  */
 
-import { CloudSun, RefreshCw, TriangleAlert } from "lucide-react"
-import { FormSection } from "@/components/ui/form-section"
+import type * as React from "react"
+import { TriangleAlert } from "lucide-react"
 import { ageText } from "@/lib/weather/format"
 import { categoryOf, hazardLine, hazardsOf, type FlightCategory, type StationBrief, type StationWindow } from "@/lib/weather/brief"
 import { cn } from "@/lib/utils"
@@ -75,7 +75,26 @@ export function WeatherFace({ weather, code }: { weather: WeatherState; code: (i
   )
 }
 
-export function WeatherDetail({
+/** A hazard as a chip — "TS", "TEMPO CB". */
+function Chip({ children, tone }: { children: React.ReactNode; tone: "warn" | "muted" | FlightCategory }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-5 items-center rounded-md px-1.5 text-[11px] font-semibold tabular-nums",
+        tone === "warn" ? "bg-chart-4/15 text-status-warning" : tone === "muted" ? "bg-muted text-muted-foreground" : cn("bg-muted", CATEGORY_TEXT[tone]),
+      )}
+    >
+      {children}
+    </span>
+  )
+}
+
+/**
+ * Each airport as the duty meets it: its category and hazards as chips, the
+ * METAR, and ONLY the TAF periods that cover the duty's time there — each with
+ * the leg it covers. The rest of the TAF is not the pilot's question here.
+ */
+export function WeatherBody({
   weather,
   code,
   clock,
@@ -88,118 +107,65 @@ export function WeatherDetail({
 }) {
   const { briefs } = weather
   const status = weather.refreshing
-    ? "Getting the latest…"
+    ? "Updating…"
     : weather.refreshFailed
-      ? `Couldn't refresh — showing what was checked at ${weather.checkedAt ? clock(weather.checkedAt) : "—"}`
+      ? "Couldn't update"
       : weather.failed
-        ? "Weather unavailable — check your connection and try again."
+        ? "Unavailable"
         : weather.checkedAt
-          ? `Checked ${clock(weather.checkedAt)}${weather.sourceAt ? ` · reports as of ${ageText(weather.sourceAt, now)}` : ""}${weather.stale ? " · the source did not answer" : ""}`
+          ? `Checked ${clock(weather.checkedAt)}${weather.stale ? " · source down" : ""}`
           : weather.loading
             ? "Checking…"
-            : "Not checked yet"
-
+            : null
+  if (!weather.asked) {
+    return <p className="py-1 text-[13px] text-muted-foreground">{briefs.length ? "Checked within 30h of the duty" : "No duty ahead"}</p>
+  }
   return (
-    <>
-      <div className="flex items-center gap-2 px-1">
-        <p className="min-w-0 flex-1 text-xs leading-snug text-muted-foreground" role="status" aria-live="polite" suppressHydrationWarning>
+    <div className="space-y-2.5">
+      {briefs.map((b) => {
+        const lit = b.taf ? b.taf.periods.map((p, i) => ({ p, i, covers: b.touchedBy.get(i) })).filter((x) => x.covers) : []
+        return (
+          <div key={b.station} className="space-y-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="mr-0.5 text-[15px] font-semibold text-foreground">{code(b.station)}</span>
+              {b.worst && <Chip tone={b.worst}>{b.worst}</Chip>}
+              {hazardLine(b.hazards)
+                .split(" · ")
+                .filter(Boolean)
+                .map((h) => (
+                  <Chip key={h} tone="warn">
+                    {h}
+                  </Chip>
+                ))}
+              {b.metar && (
+                <span className="ml-auto text-xs tabular-nums text-muted-foreground" suppressHydrationWarning>
+                  {ageText(b.metar.at, now)}
+                </span>
+              )}
+            </div>
+            {b.metar && <p className="break-words text-[12px] leading-snug text-muted-foreground tabular-nums">{b.metar.raw.replace(/^METAR /, "")}</p>}
+            {lit.map(({ p, i, covers }) => {
+              const own = p.kind === "base" || p.kind === "FM" ? p.conditions : p.stated
+              const cat = categoryOf(p.conditions)
+              const flagged = hazardsOf(own).length > 0 || cat === "IFR" || cat === "LIFR"
+              return (
+                <div key={i} className={cn("rounded-md px-2 py-1", flagged ? "bg-chart-4/15" : "bg-primary/10")}>
+                  <p className="break-words text-[12px] leading-snug text-foreground tabular-nums">{p.text.replace(/^TAF (AMD |COR )?/, "")}</p>
+                  <p className={cn("text-[10px] font-semibold uppercase tracking-wide", flagged ? "text-status-warning" : "text-primary")}>
+                    {covers!.map((w: StationWindow) => `${w.label} ${w.role === "dep" ? "dep" : "arr"} ${clock(w.atMs)}`).join(" · ")}
+                  </p>
+                </div>
+              )
+            })}
+            {!b.taf && <p className="text-[12px] text-muted-foreground">No TAF</p>}
+          </div>
+        )
+      })}
+      {status && (
+        <p className="text-[11px] text-muted-foreground" role="status" aria-live="polite" suppressHydrationWarning>
           {status}
         </p>
-        <button
-          type="button"
-          onClick={weather.refresh}
-          disabled={weather.refreshing}
-          className="control-surface flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium disabled:opacity-60"
-        >
-          <RefreshCw className={cn("h-3.5 w-3.5", weather.refreshing && "animate-spin")} aria-hidden />
-          Refresh
-        </button>
-      </div>
-
-      {briefs.length === 0 && (
-        <FormSection>
-          <p className="px-4 py-3.5 text-sm text-muted-foreground">No duty ahead to check the weather for.</p>
-        </FormSection>
       )}
-
-      {briefs.map((b) => (
-        <FormSection key={b.station} title={[code(b.station), b.worst].filter(Boolean).join(" · ")}>
-          {/* When the duty is there, and what that time brings. */}
-          {b.windows.length > 0 && (
-            <div className="row-divider relative space-y-1 px-4 py-3">
-              {b.windows.map((w, i) => {
-                const brief = b.briefs.find((x) => x.window === w)?.brief
-                return (
-                  <p key={i} className="flex items-baseline gap-2 text-[13px] leading-snug">
-                    <span className="w-24 shrink-0 text-muted-foreground tabular-nums">
-                      {w.role === "dep" ? "Dep" : "Arr"} {clock(w.atMs)}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="text-muted-foreground">{w.label}</span>
-                      {brief?.worst && <span className={cn("ml-1.5 font-semibold", CATEGORY_TEXT[brief.worst])}>{brief.worst}</span>}
-                      {brief && brief.hazards.length > 0 && (
-                        <span className="ml-1.5 font-semibold text-status-warning">{hazardText(brief.hazards)}</span>
-                      )}
-                      {!brief && <span className="ml-1.5 text-muted-foreground">{b.taf ? "outside the TAF" : "no TAF"}</span>}
-                    </span>
-                  </p>
-                )
-              })}
-            </div>
-          )}
-
-          {b.metar ? (
-            <div className="row-divider relative space-y-1 px-4 py-3">
-              <p className="flex items-baseline justify-between gap-2 text-xs text-muted-foreground tabular-nums" suppressHydrationWarning>
-                <span className="font-semibold uppercase tracking-wide">METAR</span>
-                <span>
-                  {clock(b.metar.at)} · {ageText(b.metar.at, now)}
-                  {b.metar.category && <span className={cn("ml-1.5 font-semibold", CATEGORY_TEXT[b.metar.category])}>{b.metar.category}</span>}
-                </span>
-              </p>
-              <p className="break-words text-[13px] leading-snug text-foreground tabular-nums">{b.metar.raw}</p>
-              {b.metar.hazards.length > 0 && <p className="text-xs font-semibold text-status-warning">{hazardText(b.metar.hazards)}</p>}
-            </div>
-          ) : (
-            <p className="row-divider relative px-4 py-3 text-xs text-muted-foreground">No METAR</p>
-          )}
-
-          {b.taf ? (
-            <div className="relative space-y-0.5 px-2 py-2">
-              <p className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">TAF</p>
-              {b.taf.periods.map((p, i) => {
-                const covers = b.touchedBy.get(i)
-                const own = p.kind === "base" || p.kind === "FM" ? p.conditions : p.stated
-                const cat = categoryOf(p.conditions)
-                const flagged = !!covers && (hazardsOf(own).length > 0 || cat === "IFR" || cat === "LIFR")
-                return (
-                  <div
-                    key={i}
-                    className={cn(
-                      "rounded-lg px-2 py-1 text-[13px] leading-snug tabular-nums",
-                      i > 0 && "pl-5",
-                      covers ? (flagged ? "bg-chart-4/15 text-foreground" : "bg-primary/10 text-foreground") : "text-muted-foreground",
-                    )}
-                  >
-                    <p className="break-words">{p.text}</p>
-                    {covers && (
-                      <p className={cn("mt-0.5 text-[11px] font-semibold", flagged ? "text-status-warning" : "text-primary")}>
-                        {covers.map((w: StationWindow) => `${w.label} ${w.role === "dep" ? "dep" : "arr"}`).join(", ")}
-                      </p>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          ) : (
-            <p className="px-4 py-3 text-xs text-muted-foreground">No TAF</p>
-          )}
-        </FormSection>
-      ))}
-      <p className="flex items-center gap-1.5 px-1 text-[11px] leading-snug text-muted-foreground">
-        <CloudSun className="h-3.5 w-3.5 shrink-0" aria-hidden />
-        Lit: the TAF periods within an hour of the duty&apos;s time at that airport — actual off-blocks plus the planned block once a leg has left.
-      </p>
-    </>
+    </div>
   )
 }
