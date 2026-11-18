@@ -2101,7 +2101,21 @@ export function earliestLegalRestEnd(
   restStartMs: number,
   precedingDutyMinutes: number,
   circadianRule: "4a" | "4b" | null,
-): { legalAtMs: number; requiredRestMinutes: number; rule: RestPeriodInfo["rule"] } {
+): {
+  legalAtMs: number
+  requiredRestMinutes: number
+  rule: RestPeriodInfo["rule"]
+  /**
+   * The rule's own minimum — 10h with a local night, 12h without, or the
+   * floor — which is what a pilot checks a rest against. `requiredRestMinutes`
+   * can be longer: with a night, the rest is not legal until the night is in,
+   * and 10:04Z + 10h is still before 06:00 SGT (the owner read "Min 11:56" as
+   * the rule miscounting; it was the wait for the night).
+   */
+  minimumMinutes: number
+  /** The minimum is met only once the rest holds a local night. */
+  withNight: boolean
+} {
   let floorMinutes = 0
   let floorRule: RestPeriodInfo["rule"] | null = null
   /** 3(1)(d) and para 4 both require the rest to INCLUDE a local night. */
@@ -2163,6 +2177,7 @@ export function earliestLegalRestEnd(
   // pass. Reporting the bare minimum there tells a pilot they are legal before
   // they are.
   const requiredRestMinutes = Math.round((legalAtMs - restStartMs) / 60_000)
+  const minimumMinutes = Math.max(hasLocalNight ? 10 * 60 : 12 * 60, floorMinutes)
   const rule: RestPeriodInfo["rule"] =
     floorRule && floorMinutes >= (hasLocalNight ? 10 * 60 : 12 * 60)
       ? floorRule
@@ -2170,15 +2185,18 @@ export function earliestLegalRestEnd(
         ? "3a"
         : "3b"
 
-  return { legalAtMs, requiredRestMinutes, rule }
+  return { legalAtMs, requiredRestMinutes, rule, minimumMinutes, withNight: hasLocalNight }
 }
 
 export interface RestUntilLegalResult {
   isLegalNow: boolean
   restNeededMinutes: number    // 0 if legal
   restElapsedMinutes: number   // since last debrief
-  requiredRestMinutes: number  // total required by regulation
+  requiredRestMinutes: number  // rest start → legal, the night's wait included
   rule: RestPeriodInfo["rule"]
+  /** The rule's own minimum ("10:00 + night", "12:00") — see `earliestLegalRestEnd`. */
+  minimumMinutes: number
+  withNight: boolean
   lastDutyDate: string
   lastDebriefTime: string
   lastDutyMinutes: number
@@ -2283,7 +2301,11 @@ export function calculateRestUntilLegal(
     nextDP?.circadian?.disruptive ?? false
   )
 
-  const { legalAtMs, requiredRestMinutes, rule } = earliestLegalRestEnd(restStartMs, precedingDutyMinutes, circadianRule)
+  const { legalAtMs, requiredRestMinutes, rule, minimumMinutes, withNight } = earliestLegalRestEnd(
+    restStartMs,
+    precedingDutyMinutes,
+    circadianRule,
+  )
 
   const restNeededMinutes = Math.max(0, Math.round((legalAtMs - now.getTime()) / 60_000))
   const legalAtUtc = new Date(legalAtMs).toISOString()
@@ -2294,6 +2316,8 @@ export function calculateRestUntilLegal(
     restElapsedMinutes,
     requiredRestMinutes,
     rule,
+    minimumMinutes,
+    withNight,
     lastDutyDate: lastDP.date,
     lastDebriefTime: lastDP.debriefTime,
     lastDutyMinutes: lastDP.dutyMinutes,

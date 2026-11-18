@@ -233,6 +233,9 @@ export interface RestState {
   isLegalNow: boolean
   elapsedMinutes: number
   requiredMinutes: number
+  /** The rule's own minimum, and whether it holds only with a local night ("10:00 + night"). */
+  minimumMinutes?: number
+  withNight?: boolean
   /** ISO instant the pilot becomes legal. Only meaningful while not legal. */
   legalAtUtc: string
 }
@@ -281,6 +284,8 @@ export interface NextDuty {
   restAvailableMinutes: number
   /** What that rest has to be, for THIS duty. 0 when unknown. */
   restRequiredMinutes: number
+  /** That requirement as its rule reads ("10:00 + night", "12:00"), "" when unknown. */
+  restMinimum: string
 }
 
 /**
@@ -655,7 +660,23 @@ function toNextDuty(
       ? Math.max(0, Math.round((reportMs - restStartMs) / 60_000))
       : 0,
     restRequiredMinutes: rest?.requiredMinutes ?? 0,
+    restMinimum: rest ? restMinimumText(rest) : "",
   }
+}
+
+/**
+ * A rest requirement as its RULE reads — "10:00 + night", "12:00", "24:00 +
+ * night" — not as the span to the instant it is met. Those differ whenever the
+ * wait is for the local night: rest from 10:04Z needs 10 hours AND a night,
+ * which is not in until 06:00 SGT (22:00Z), so the span is 11:56 — and "Min
+ * 11:56" read as the rule miscounting (the owner's report, 18 Nov 26).
+ */
+export function restMinimumText(
+  rest: Pick<RestState, "requiredMinutes" | "minimumMinutes" | "withNight">,
+  clock: (min: number) => string = formatDutyClock,
+): string {
+  if (rest.minimumMinutes === undefined) return clock(rest.requiredMinutes)
+  return `${clock(rest.minimumMinutes)}${rest.withNight ? " + night" : ""}`
 }
 
 /** "5:42" — an elapsed/remaining clock. Hours are not padded; minutes are. */
