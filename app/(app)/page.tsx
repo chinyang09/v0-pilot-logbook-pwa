@@ -19,7 +19,7 @@ import { whenIdle } from "@/lib/utils/idle"
 import { useDashboardView } from "@/hooks/use-dashboard-view"
 import { DashboardActions } from "@/components/dashboard/dashboard-actions"
 import { DashboardCalendarPanel, DashboardCalendarSpacer } from "@/components/dashboard/dashboard-calendar-panel"
-import { LegalDashboard } from "@/components/dashboard/legal-dashboard"
+import { FlightDashboard } from "@/components/dashboard/flight-dashboard"
 import { SummaryDashboard } from "@/components/dashboard/summary-dashboard"
 
 const refreshAllDataWhenIdle = () => whenIdle(() => void refreshAllData())
@@ -29,11 +29,11 @@ const refreshAllDataWhenIdle = () => whenIdle(() => void refreshAllData())
  *
  * | | Answers | Shape |
  * |---|---|---|
- * | **Legal** | am I current, what must I do, where am I in my duty | one screen, no scroll |
+ * | **Flight** | am I fine, where am I in my duty, and what is my next duty like — legality, the flights, gates, weather, crew | one screen, no scroll, on a phone |
  * | **Summary** | what have I flown and how does it add up | period-scoped, scrolls |
  *
  * They get DIFFERENT containers, and that is the point of splitting them. The
- * legal page is laid out to the available height and fills it — it is read like
+ * flight page is laid out to the available height and fills it — it is read like
  * an instrument, in a couple of seconds, and a pilot should never have to
  * scroll to find out whether they are legal. The summary page is an ordinary
  * scrolling page, because reviewing a month is a different activity with no
@@ -57,9 +57,9 @@ export default function Dashboard() {
   const dashboardActions = useMemo(() => <DashboardActions />, [])
   useRegisterMainActions(dashboardActions, isActive)
 
-  // MAIN / DETAIL: a summary flight row opens the FLIGHT in the detail panel;
-  // a legal-page requirement (`req:<id>`) is written by the legal page itself,
-  // which holds the model it comes from. This effect owns everything else —
+  // MAIN / DETAIL: a flight opens in the detail panel (a summary row, or an
+  // "Open Flight" on the flight page); a flight-page widget (`w:<id>`) is
+  // written by that page itself, which holds the model it comes from. This effect owns everything else —
   // including clearing the panel, since the dashboard now has one.
   const { selectedId, setSelectedId, setDetailContent } = useDetailPanel()
   const isDesktop = useIsDesktop()
@@ -70,9 +70,9 @@ export default function Dashboard() {
   useEffect(() => {
     // Keep-alive: a hidden dashboard must not write the panel another page owns.
     if (!isActive || !onDashboard) return
-    // `req:` and `duty:` are the legal page's own.
-    if (selectedId?.startsWith("req:") || selectedId?.startsWith("duty:")) {
-      if (view !== "legal") setDetailContent(null)
+    // `w:` is the flight page's own.
+    if (selectedId?.startsWith("w:")) {
+      if (view !== "flight") setDetailContent(null)
       return
     }
     setDetailContent(
@@ -101,7 +101,7 @@ export default function Dashboard() {
     return null
   }
 
-  if (view === "legal") {
+  if (view === "flight") {
     // Laid out to the height rather than scrolled into: the chrome offsets are
     // padding on a full-height flex column, and the panel takes what is left.
     //
@@ -111,7 +111,7 @@ export default function Dashboard() {
     // the one word the page exists to say — sat under the header's veil.
     return (
       <div className="flex h-full min-h-0 flex-col px-panel pt-[calc(var(--chrome-top)+var(--content-top-gap))] pb-chrome">
-        <LegalDashboard className="min-h-0" />
+        <FlightDashboard className="min-h-0" />
       </div>
     )
   }

@@ -30,6 +30,8 @@ export interface WeatherAnswer {
   taf: Record<string, TafReport>
   /** When each cache was last pulled from the source, ms (0 = never). */
   fetchedAt: { metar: number; taf: number }
+  /** When the server answered, ms — what "Checked 14:32Z" says. */
+  checkedAt: number
   /** True when a refresh was due but could not run (the source was down, or another request holds it). */
   stale: boolean
 }

@@ -74,11 +74,14 @@ const keyOf = (f: CrewFlight) => `${f.date} ${f.outTime || f.scheduledOut || ""}
  * with are absent. `today` is the UTC date ("YYYY-MM-DD") a flight must be on
  * or after to be the NEXT one.
  */
-export function crewFlyingHistory(
-  flights: readonly CrewFlight[],
+/**
+ * Which crew card a seat on a flight names: its id when that card exists,
+ * else the card whose name matches (`isSamePersonName`). "Self" and a blank
+ * are nobody; the pilot's own card is never one.
+ */
+export function crewCardResolver(
   personnel: readonly Pick<Personnel, "id" | "name" | "isMe">[],
-  today: string,
-): Map<string, CrewHistory> {
+): (id: string | undefined, name: string | undefined) => string | null {
   const cards = personnel.filter((p) => !p.isMe && p.name)
   const ids = new Set(cards.map((p) => p.id))
   const byName = new Map<string, string>()
@@ -87,7 +90,7 @@ export function crewFlyingHistory(
     if (key && !byName.has(key)) byName.set(key, p.id)
   }
   const nameCache = new Map<string, string | null>()
-  const cardFor = (id: string | undefined, name: string | undefined): string | null => {
+  return (id: string | undefined, name: string | undefined): string | null => {
     if (id && ids.has(id)) return id
     if (!name || name === "Self") return null
     const key = normalize(name)
@@ -99,6 +102,14 @@ export function crewFlyingHistory(
     nameCache.set(key, found)
     return found
   }
+}
+
+export function crewFlyingHistory(
+  flights: readonly CrewFlight[],
+  personnel: readonly Pick<Personnel, "id" | "name" | "isMe">[],
+  today: string,
+): Map<string, CrewHistory> {
+  const cardFor = crewCardResolver(personnel)
 
   const out = new Map<string, CrewHistory>()
   const entry = (id: string) => {

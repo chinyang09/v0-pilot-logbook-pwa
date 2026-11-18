@@ -1,7 +1,7 @@
 /**
  * METAR and TAF for a handful of stations — NODE (MongoDB, zlib).
  *
- * GET /api/lookup/weather?ids=WSSS,VTCC
+ * GET /api/lookup/weather?ids=WSSS,VTCC[&fresh=1]
  *
  * Answered from the weather cache (`lib/weather/server.ts`): one snapshot of
  * every station's reports, pulled from aviationweather.gov's cache files on
@@ -21,9 +21,13 @@ export async function GET(request: Request) {
   if (session === undefined) return NextResponse.json({ ok: false, error: "Session store unavailable" }, { status: 503 })
   if (!session) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 })
 
+  const params = new URL(request.url).searchParams
+  // `fresh=1` is the pilot's Refresh: a snapshot over two minutes old is
+  // pulled again, and nothing in between (the browser's cache) answers it.
+  const fresh = params.get("fresh") === "1"
   const ids = [
     ...new Set(
-      (new URL(request.url).searchParams.get("ids") ?? "")
+      (params.get("ids") ?? "")
         .split(",")
         .map((s) => s.trim().toUpperCase())
         .filter(isStationId),
@@ -32,12 +36,11 @@ export async function GET(request: Request) {
   if (ids.length === 0) return NextResponse.json({ ok: false, error: "Give station ids" }, { status: 400 })
 
   try {
-    const data = await getWeather(ids, { store: mongoWeatherStore(await getDB()) })
-    return NextResponse.json(
-      { ok: true, data },
-      // Two minutes in the browser: a refresh tapped twice is one request.
-      { headers: { "cache-control": "private, max-age=120" } },
-    )
+    const data = await getWeather(ids, { store: mongoWeatherStore(await getDB()), fresh })
+    // Never kept by the browser: a Refresh answered from its HTTP cache was
+    // the same weather again with nothing saying so (the owner's report).
+    // SWR's dedupe already keeps a repeated ask from reaching the server.
+    return NextResponse.json({ ok: true, data }, { headers: { "cache-control": "no-store" } })
   } catch (e) {
     console.error("[Weather] lookup failed:", e)
     return NextResponse.json({ ok: false, error: "Weather unavailable" }, { status: 503 })

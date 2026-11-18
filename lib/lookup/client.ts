@@ -83,10 +83,13 @@ const airlineQuery = (code: string): { iata: string } | { icao: string } => {
 }
 
 /** METAR and TAF for stations (ICAO), from the weather cache — `/api/lookup/weather`, Node. */
-async function weatherGet(ids: string[], signal?: AbortSignal): Promise<Fr24Result<WeatherAnswer>> {
+async function weatherGet(ids: string[], opts: { fresh?: boolean; signal?: AbortSignal } = {}): Promise<Fr24Result<WeatherAnswer>> {
   try {
     const q = encodeURIComponent([...new Set(ids.map((i) => i.toUpperCase()))].join(","))
-    const response = await fetch(`/api/lookup/weather?ids=${q}`, { signal: withTimeout(signal) })
+    const response = await fetch(`/api/lookup/weather?ids=${q}${opts.fresh ? "&fresh=1" : ""}`, {
+      signal: withTimeout(opts.signal),
+      cache: "no-store",
+    })
     return readEnvelope<WeatherAnswer>(response.status, await response.json().catch(() => null))
   } catch (err) {
     return { ok: false, status: 0, error: (err as Error).message }
