@@ -3546,8 +3546,22 @@ or not.
   and moved every field up.
 - **The outbox is per account.** A report is never sent under another
   account than the one that wrote it.
-- **Reading them.** `feedback` holds one document per report, newest
-  `createdAt` first under the `{status, createdAt}` index.
+- **A report is a CONVERSATION, not a one-shot** (the owner, Nov 2026:
+  "it just stays open"). `messages` holds the pilot's follow-ups, the
+  replies (`from: "team"`) and every status change (`event`), oldest first;
+  the panel shows the status with one line of what it means
+  (`FEEDBACK_STATUS_MEANING`), the conversation, a Follow-Up field and Mark
+  Done / Reopen (`PATCH /api/feedback`, `actOnFeedback` — online only). A
+  follow-up on a Done or Won't Do report REOPENS it: "still broken in the next
+  build" is the commonest follow-up. A follow-up carries the device's id, so a
+  retried send adds it once. The list sorts by last activity and says
+  "Replied" while a reply waits on the pilot (`hasUnansweredReply`).
+- **Reading them, and answering.** `feedback` holds one document per report.
+  `lib/feedback/stored.ts` (`itemOf`) is the one reading of a document,
+  tolerant of a hand-written reply and the legacy single `response` (read as
+  a team reply). To answer: `$push` a `messages` entry `{ id, from: "team",
+  text, at }` and set `updatedAt` (and `status` to `planned` / `done` /
+  `wontfix` with an `event` entry saying so).
 
 ### Settings are the USER's; only the look is the device's (`lib/settings/user-settings.ts`)
 
@@ -3803,7 +3817,7 @@ Notable route groups:
 | `/api/account/totp/reveal` | POST | Yes (passkey step-up) | Reveal the TOTP seed + otpauth URI to re-add an authenticator |
 | `/api/account/callsign` | PUT | Yes (passkey step-up **or** TOTP) | Change callsign |
 | `/api/account/sessions` | GET/DELETE | Yes | List sessions (with device `userAgent`); revoke one (incl. current) or all |
-| `/api/feedback` | GET/POST | Yes | In-app feedback: POST files a report (idempotent on the device's id), GET lists the pilot's own |
+| `/api/feedback` | GET/POST/PATCH | Yes | In-app feedback: POST files a report (idempotent on the device's id), GET lists the pilot's own, PATCH adds a follow-up or marks done / reopens |
 
 ### Console Logging
 
@@ -4819,7 +4833,7 @@ other user collection.
 | `airportSubmissions` | User-submitted airports with enrichment status |
 | `sessions` | User sessions with TTL |
 | `deletions` | Tombstones (TTL 30d) for propagating deletes across devices |
-| `feedback` | In-app bug / feature / tweak reports: `{userId, callsign, id, kind, area, title, details, context{route, build, userAgent, viewport, standalone, online}, writtenAt, status, createdAt, response?}`. The app writes `status: "open"` only; triage (`planned` / `done` / `wontfix`, a `response`) is done on the collection and shows on the pilot's report |
+| `feedback` | In-app bug / feature / tweak reports: `{userId, callsign, id, kind, area, title, details, context{route, build, userAgent, viewport, standalone, online}, writtenAt, status, createdAt, updatedAt, messages[{id, from: "pilot"\|"team", text, at, event?}], response? (legacy)}`. The pilot writes follow-ups and done / reopen; triage (`planned` / `wontfix`, replies) is written on the collection and shows in the report's conversation |
 | `flights`, `aircraft`, `personnel`, etc. | Synced user data collections |
 
 **Indexes:** `lib/mongodb/client.ts` runs an idempotent, best-effort

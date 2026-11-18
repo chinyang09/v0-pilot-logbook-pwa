@@ -30,7 +30,9 @@ import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { showToast } from "@/lib/utils/undo-toast"
 import { formatStamp } from "@/lib/utils/date"
 import { cn } from "@/lib/utils"
+import { ActionRow, ActionStack } from "@/components/ui/action-row"
 import {
+  actOnFeedback,
   captureContext,
   fetchFeedback,
   flushOutbox,
@@ -45,7 +47,10 @@ import {
   FEEDBACK_KINDS,
   FEEDBACK_LIMITS,
   FEEDBACK_STATUS_LABEL,
+  FEEDBACK_STATUS_MEANING,
   feedbackProblem,
+  hasUnansweredReply,
+  isClosedStatus,
   type FeedbackArea,
   type FeedbackDraft,
   type FeedbackItem,
@@ -134,6 +139,11 @@ export default function FeedbackPage() {
     return () => window.removeEventListener("online", onOnline)
   }, [load])
 
+  // A follow-up or a status change answers with the report as it now stands.
+  const replaceItem = useCallback((next: FeedbackItem) => {
+    setItems((prev) => (prev ? prev.map((i) => (i.id === next.id ? next : i)) : prev))
+  }, [])
+
   const selected = useMemo(
     () => items?.find((i) => i.id === selectedId) ?? waiting.find((d) => d.id === selectedId) ?? null,
     [items, waiting, selectedId],
@@ -150,8 +160,10 @@ export default function FeedbackPage() {
       setDetailContent(<PanelLoading />)
       return
     }
-    setDetailContent(selected ? <FeedbackDetail key={selected.id} report={selected} /> : null)
-  }, [selectedId, selected, items, setDetailContent])
+    setDetailContent(
+      selected ? <FeedbackDetail key={selected.id} report={selected} onUpdated={replaceItem} /> : null,
+    )
+  }, [selectedId, selected, items, setDetailContent, replaceItem])
 
   useEffect(() => {
     syncDetailPanel()
@@ -197,7 +209,8 @@ export default function FeedbackPage() {
   useRegisterMainActions(actions, true)
 
   const open = useCallback((id: string) => setSelectedId(id), [setSelectedId])
-  const sent = items ?? []
+  // What happened last leads: a reply or a reopened report comes to the top.
+  const sent = useMemo(() => [...(items ?? [])].sort((a, b) => b.updatedAt - a.updatedAt), [items])
 
   return (
     <PageContainer title="Feedback">
@@ -267,7 +280,8 @@ const FeedbackRow = memo(function FeedbackRow({
   onOpen: (id: string) => void
 }) {
   const Icon = KIND_ICON[report.kind] ?? Bug
-  const status = "status" in report ? FEEDBACK_STATUS_LABEL[report.status] : "Not sent yet"
+  const replied = "messages" in report && hasUnansweredReply(report)
+  const status = "status" in report ? (replied ? "Replied" : FEEDBACK_STATUS_LABEL[report.status]) : "Not sent yet"
   return (
     <button
       type="button"
@@ -287,7 +301,7 @@ const FeedbackRow = memo(function FeedbackRow({
       <span
         className={cn(
           "shrink-0 text-xs",
-          waiting ? "inline-flex items-center gap-1 text-status-warning" : "text-muted-foreground",
+          waiting ? "inline-flex items-center gap-1 text-status-warning" : replied ? "font-medium text-primary" : "text-muted-foreground",
         )}
       >
         {waiting && <CloudOff className="h-3.5 w-3.5" aria-hidden />}
@@ -297,24 +311,121 @@ const FeedbackRow = memo(function FeedbackRow({
   )
 })
 
-function FeedbackDetail({ report }: { report: FeedbackDraft | FeedbackItem }) {
-  const status = "status" in report ? FEEDBACK_STATUS_LABEL[report.status] : "Waiting to send"
+function FeedbackDetail({
+  report,
+  onUpdated,
+}: {
+  report: FeedbackDraft | FeedbackItem
+  onUpdated: (item: FeedbackItem) => void
+}) {
+  const sentItem = "status" in report ? report : null
+  const [followUp, setFollowUp] = useState("")
+  const [busy, setBusy] = useState<null | "message" | "complete" | "reopen">(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const act = async (kind: "message" | "complete" | "reopen") => {
+    if (!sentItem || busy) return
+    setBusy(kind)
+    setError(null)
+    try {
+      const item = await actOnFeedback(
+        sentItem.id,
+        kind === "message" ? { action: "message", messageId: newFeedbackId(), text: followUp.trim() } : { action: kind },
+      )
+      if (kind === "message") setFollowUp("")
+      onUpdated(item)
+      showToast(kind === "message" ? "Follow-up sent" : kind === "complete" ? "Marked done" : "Reopened")
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't save that. Try again.")
+    } finally {
+      setBusy(null)
+    }
+  }
+
   return (
     <ReadingPanel title={report.title} description={`${FEEDBACK_KIND_LABEL[report.kind]} · ${report.area}`}>
-      <FormSection title="Report">
-        <ReadOnlyRow label="Status" value={status} />
+      <FormSection title="Status">
+        <ReadOnlyRow label="Status" value={sentItem ? FEEDBACK_STATUS_LABEL[sentItem.status] : "Waiting to send"} />
+        <p className="row-divider relative px-4 py-3 text-sm text-muted-foreground">
+          {sentItem
+            ? FEEDBACK_STATUS_MEANING[sentItem.status]
+            : "Saved on this device. It sends once you're online."}
+        </p>
         <ReadOnlyRow label="Written" value={formatStamp(report.writtenAt)} />
+        {sentItem && sentItem.updatedAt > sentItem.createdAt + 60_000 && (
+          <ReadOnlyRow label="Last Activity" value={formatStamp(sentItem.updatedAt)} />
+        )}
       </FormSection>
+
       {report.details && (
         <FormSection title="Details">
           <p className="whitespace-pre-wrap break-words px-4 py-3.5 text-[15px] text-foreground">{report.details}</p>
         </FormSection>
       )}
-      {"response" in report && report.response && (
-        <FormSection title="Reply">
-          <p className="whitespace-pre-wrap break-words px-4 py-3.5 text-[15px] text-foreground">{report.response}</p>
+
+      {sentItem && sentItem.messages.length > 0 && (
+        <FormSection title="Conversation">
+          {sentItem.messages.map((m) =>
+            m.event ? (
+              <p key={m.id} className="row-divider relative px-4 py-2.5 text-xs text-muted-foreground">
+                {m.from === "pilot" ? "You" : "Updated"}: {m.text} · {formatStamp(m.at)}
+              </p>
+            ) : (
+              <div key={m.id} className="row-divider relative px-4 py-3">
+                <p className={cn("text-xs font-medium", m.from === "team" ? "text-primary" : "text-muted-foreground")}>
+                  {m.from === "team" ? "Reply" : "You"} · {formatStamp(m.at)}
+                </p>
+                <p className="mt-1 whitespace-pre-wrap break-words text-[15px] text-foreground">{m.text}</p>
+              </div>
+            ),
+          )}
         </FormSection>
       )}
+
+      {sentItem && (
+        <>
+          <FormSection title="Follow-Up">
+            <DetailsField
+              value={followUp}
+              onChange={setFollowUp}
+              label="Follow-up"
+              placeholder={
+                isClosedStatus(sentItem.status)
+                  ? "Still happening, or something to add? Sending this reopens it."
+                  : "More detail, or what changed since."
+              }
+              rows={3}
+            />
+          </FormSection>
+          {error && (
+            <p role="alert" className="px-1 text-sm text-destructive">
+              {error}
+            </p>
+          )}
+          <ActionStack>
+            <ActionRow
+              label={busy === "message" ? "Sending…" : "Send Follow-Up"}
+              primary
+              disabled={!followUp.trim() || busy !== null}
+              onClick={() => void act("message")}
+            />
+            {isClosedStatus(sentItem.status) ? (
+              <ActionRow
+                label={busy === "reopen" ? "Reopening…" : "Reopen"}
+                disabled={busy !== null}
+                onClick={() => void act("reopen")}
+              />
+            ) : (
+              <ActionRow
+                label={busy === "complete" ? "Saving…" : "Mark Done"}
+                disabled={busy !== null}
+                onClick={() => void act("complete")}
+              />
+            )}
+          </ActionStack>
+        </>
+      )}
+
       <FormSection title="Captured">
         <ReadOnlyRow label="Page" value={report.context.route} />
         <ReadOnlyRow label="Build" value={report.context.build} />
@@ -421,17 +532,29 @@ function NewFeedbackPanel({
  * written, sized by a hidden copy in the same grid cell (the flight form's
  * remarks rule: no `scrollHeight` read per key).
  */
-function DetailsField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function DetailsField({
+  value,
+  onChange,
+  label = "Details",
+  placeholder = "What happened, and what you expected — or what you'd like instead.",
+  rows = 5,
+}: {
+  value: string
+  onChange: (v: string) => void
+  label?: string
+  placeholder?: string
+  rows?: number
+}) {
   const text = "block w-full text-base leading-snug [grid-area:1/1] whitespace-pre-wrap break-words"
   return (
     <div className="grid px-4 py-3.5">
-      <div aria-hidden className={cn(text, "invisible min-h-[5lh]")}>
+      <div aria-hidden className={cn(text, "invisible", rows >= 5 ? "min-h-[5lh]" : "min-h-[3lh]")}>
         {value + " "}
       </div>
       <textarea
-        aria-label="Details"
-        placeholder="What happened, and what you expected — or what you'd like instead."
-        rows={5}
+        aria-label={label}
+        placeholder={placeholder}
+        rows={rows}
         maxLength={FEEDBACK_LIMITS.details}
         value={value}
         onChange={(e) => onChange(e.target.value)}
