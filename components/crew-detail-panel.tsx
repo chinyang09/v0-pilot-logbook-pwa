@@ -4,6 +4,7 @@ import { DetailFormPanel } from "@/components/ui/detail-form-panel"
 import { PanelMessage } from "@/components/ui/page-loading"
 import { useCrewForm } from "@/hooks/use-crew-form"
 import { CrewFormBody } from "@/components/crew-form-body"
+import { CrewFlyingTogether } from "@/components/crew-flying-together"
 import type { Personnel } from "@/types/entities/crew.types"
 
 interface CrewDetailPanelProps {
@@ -57,6 +58,12 @@ export function CrewDetailPanel({ crewId, isNew = false, onUpdated, onCancelNew 
       // puts the card back the way it is stored.
       onCancel={isNew ? (onCancelNew ?? (() => {})) : form.resetForm}
     >
+      {/* What a pilot opens a crew card for, ahead of the fields to edit. */}
+      {!isNew && crew && !crew.isMe && (
+        <div className="mb-4">
+          <CrewFlyingTogether crewId={crew.id} />
+        </div>
+      )}
       <CrewFormBody
         formData={formData}
         existingSelfId={form.existingSelfId}

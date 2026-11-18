@@ -13,6 +13,7 @@ export { useAircraft } from "./use-aircraft"
 export { useReferenceAircraft } from "./use-reference-aircraft"
 export { useAirports, useAirportDatabase, useAirportByIcao, useAirportSeedProgress, prefetchAirports } from "./use-airports"
 export { usePersonnel } from "./use-crew"
+export { useCrewHistory } from "./use-crew-history"
 
 // Roster hooks
 export { useScheduleEntries, useScheduleEntriesByDateRange } from "./use-schedule"
