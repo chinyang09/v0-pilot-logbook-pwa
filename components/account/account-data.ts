@@ -84,12 +84,12 @@ export function useAccountProfile() {
 
 export function useAccountSessions() {
   const userId = useAuth().user?.userId
-  const { data, isLoading, mutate } = useSWR<{ sessions: SessionData[] }>(
+  const { data, isLoading, error, mutate } = useSWR<{ sessions: SessionData[] }>(
     userId ? ([SESSIONS_KEY, userId] as const) : null,
     fetchJson,
     OPTIONS
   )
-  return { sessions: data?.sessions ?? NO_SESSIONS, isLoading, refresh: mutate }
+  return { sessions: data?.sessions ?? NO_SESSIONS, isLoading, failed: !data && !!error, refresh: mutate }
 }
 
 /** Pick an icon that roughly matches the device class parsed from the UA. */

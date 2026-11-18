@@ -246,8 +246,7 @@
   }
   html {
     background-color: var(--background);
-    /* Pinch-zoom is allowed (the viewport no longer forbids it); this keeps a
-       quick double-tap from zooming the app while a pilot taps through it. */
+    /* No double-tap zoom either (the viewport forbids pinch). */
     touch-action: manipulation;
   }
   body {
@@ -446,9 +445,20 @@ button,
 *::after {
   -webkit-user-select: none;
   user-select: none;
+  /* A native app does not flash a grey box where a finger lands (Android), or
+     offer to save, copy or open what is held (iOS's callout). The controls
+     carry their own pressed states. */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
 }
 
-/* Re-enable selection for text content and inputs */
+/* An image or a link is not something to drag off the page. */
+img,
+a {
+  -webkit-user-drag: none;
+}
+
+/* Re-enable selection (and iOS's text callout) for text content and inputs */
 input,
 textarea,
 [contenteditable="true"],
@@ -457,6 +467,7 @@ code,
 [data-selectable] {
   -webkit-user-select: auto;
   user-select: auto;
+  -webkit-touch-callout: default;
 }
 
 /* Scroll containment to prevent scroll chaining on iOS */

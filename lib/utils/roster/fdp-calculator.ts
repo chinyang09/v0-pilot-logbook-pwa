@@ -2207,19 +2207,30 @@ export function calculateRestUntilLegal(
       // Counting it here would restart the countdown from the end of a period
       // the crew member spent at home.
       if (isRestingStandby(dp)) return false
-      // Compute debrief timestamp to check if it's in the past
-      let dDate = dp.date
-      const rMin = hhmmToMinutes(dp.reportTime)
-      const dMin = hhmmToMinutes(dp.debriefTime)
-      if (dMin < rMin) {
-        const d = new Date(dDate + "T00:00:00Z")
-        d.setUTCDate(d.getUTCDate() + 1)
-        dDate = d.toISOString().split("T")[0]
+      // The duty is the one rested FROM once it is over — at its debrief, or
+      // already at its last on-blocks when every sector has flown. Waiting for
+      // the debrief left the half hour of post-flight checks counting rest
+      // from the duty BEFORE, while the dashboard already read "Duty
+      // complete" (41 hours of rest on a turnaround just flown). A part-flown
+      // duty's FDP end is the PLAN's, so only its debrief will do.
+      const atOf = (hhmm: string) => {
+        let dDate = dp.date
+        if (hhmmToMinutes(hhmm) < hhmmToMinutes(dp.reportTime)) {
+          const d = new Date(dDate + "T00:00:00Z")
+          d.setUTCDate(d.getUTCDate() + 1)
+          dDate = d.toISOString().split("T")[0]
+        }
+        return new Date(`${dDate}T${hhmm}:00Z`).getTime()
       }
-      const ts = new Date(`${dDate}T${dp.debriefTime}:00Z`)
-      return ts.getTime() <= now.getTime()
+      const over =
+        !dp.partFlown && dp.fdpEndTime && /^\d{1,2}:\d{2}$/.test(dp.fdpEndTime)
+          ? atOf(dp.fdpEndTime)
+          : atOf(dp.debriefTime)
+      return over <= now.getTime()
     })
-    .sort((a, b) => a.date.localeCompare(b.date))
+    // Two duties can share a date (a 00:00Z report and a 22:55Z one), so the
+    // report time breaks the tie — the LAST duty is the one rested from.
+    .sort((a, b) => a.date.localeCompare(b.date) || hhmmToMinutes(a.reportTime) - hhmmToMinutes(b.reportTime))
 
   if (completedDPs.length === 0) return null
 

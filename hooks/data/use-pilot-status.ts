@@ -10,6 +10,7 @@ import { isUnloggedPast } from "@/lib/utils/logbook-now"
 import { buildLegalityModel } from "@/lib/utils/dashboard/legality"
 import { deriveDutyStatus } from "@/lib/utils/dashboard/duty-status"
 import { buildPilotStatus, type PilotStatus } from "@/lib/utils/dashboard/pilot-status"
+import { calculateRestUntilLegal } from "@/lib/utils/roster/fdp-calculator"
 import { formatInstant } from "@/lib/utils/tz-format"
 import type { NinetyDayCurrency } from "@/lib/utils/dashboard-aggregate"
 import type { DisplayPreferences } from "@/types/db/stores.types"
@@ -39,7 +40,6 @@ export function usePilotStatus(
 ): { status: PilotStatus; isLoading: boolean } {
   const {
     capacity,
-    restUntilLegal,
     forecast,
     allDutyPeriods,
     scheduleDutyPeriods,
@@ -126,18 +126,24 @@ export function usePilotStatus(
 
   // Rest belongs to the DUTY state, not the currency grid — it is a property
   // of the duty just flown rather than a standing qualification.
-  const rest = useMemo(
-    () =>
-      restUntilLegal
-        ? {
-            isLegalNow: restUntilLegal.isLegalNow,
-            elapsedMinutes: restUntilLegal.restElapsedMinutes,
-            requiredMinutes: restUntilLegal.requiredRestMinutes,
-            legalAtUtc: restUntilLegal.legalAtUtc,
-          }
-        : null,
-    [restUntilLegal],
-  )
+  //
+  // Worked out at THIS clock, not taken from the pipeline's result. That
+  // result is cached until the logbook changes, and its rest was computed at
+  // whatever minute it ran: a pilot who stamped IN at 08:34 (debrief 09:04)
+  // had it computed before the debrief, so for the rest of the day the panel
+  // counted rest from the duty BEFORE — the owner's report, 18 Nov 26, and
+  // the FDP page (which reads the duties themselves) disagreed with it.
+  const rest = useMemo(() => {
+    const r = calculateRestUntilLegal(allDutyPeriods, new Date(nowMinute * 60_000))
+    return r
+      ? {
+          isLegalNow: r.isLegalNow,
+          elapsedMinutes: r.restElapsedMinutes,
+          requiredMinutes: r.requiredRestMinutes,
+          legalAtUtc: r.legalAtUtc,
+        }
+      : null
+  }, [allDutyPeriods, nowMinute])
 
   // The two halves are memoised SEPARATELY. They share only the clock, and
   // the duty half is the expensive one (a pass over every duty window): as one

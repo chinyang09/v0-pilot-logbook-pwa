@@ -42,7 +42,7 @@ const isStandalone = () =>
 export default function AccountPage() {
   const { user, logout } = useAuth()
   const { profile } = useAccountProfile()
-  const { sessions, isLoading: sessionsLoading } = useAccountSessions()
+  const { sessions, isLoading: sessionsLoading, failed: sessionsFailed } = useAccountSessions()
   const { selectedId, setSelectedId, setDetailContent } = useDetailPanel()
   const isDesktop = useIsDesktop()
   const installed = useSyncExternalStore(noSubscribe, isStandalone, () => true)
@@ -147,7 +147,9 @@ export default function AccountPage() {
     sessions: {
       label: "Active Sessions",
       icon: MonitorSmartphone,
-      summary: sessionsLoading && sessions.length === 0 ? "" : `${sessions.length} signed in`,
+      // Never "0 signed in": this device is one of them, so an empty list is
+      // a read that failed (offline, the server down), not a fact.
+      summary: sessions.length > 0 ? `${sessions.length} signed in` : sessionsFailed && !sessionsLoading ? "Unavailable" : "",
     },
     install: { label: "Install App", icon: Download, summary: "Home screen, works offline" },
   }

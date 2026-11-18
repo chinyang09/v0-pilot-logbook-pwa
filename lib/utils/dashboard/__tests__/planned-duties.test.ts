@@ -551,11 +551,16 @@ describe("upcomingPlannedDuties — the duties ahead, from the flight rows", () 
     ])
   })
 
-  it("leaves out a part-flown duty — the one in progress — and one already reported for", () => {
+  it("leaves out a part-flown duty — completed in the pipeline instead — and one whose planned end has passed", () => {
     const morning = Date.parse("2026-08-14T01:00:00Z")
     expect(upcomingPlannedDuties([flown, scheduled], morning)).toEqual([])
     const unflownToday = flight({ id: "tr140", outTime: "", inTime: "", scheduledOut: "14:00", scheduledIn: "16:00", blockTime: "" })
     expect(upcomingPlannedDuties([unflownToday], now)).toHaveLength(1)
-    expect(upcomingPlannedDuties([unflownToday], Date.parse("2026-08-14T13:30:00Z"))).toEqual([])
+    // Reported for, nothing logged yet: the duty in progress, still ahead of
+    // the record — the FDP page dropped it and read "Rest" beside a dashboard
+    // reading ON DUTY.
+    expect(upcomingPlannedDuties([unflownToday], Date.parse("2026-08-14T13:30:00Z"))).toHaveLength(1)
+    // Past its planned end with nothing logged: a gap, not a duty ahead.
+    expect(upcomingPlannedDuties([unflownToday], Date.parse("2026-08-14T17:00:00Z"))).toEqual([])
   })
 })

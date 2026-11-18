@@ -1325,7 +1325,11 @@ every duty's first hour — the pilot has reported and nothing has landed yet.
 
 **The duties AHEAD join the pipeline from the flight rows**
 (`upcomingPlannedDuties`): every planned duty none of whose sectors has flown
-and whose report is still to come, marked `isFuture`. Rostered flights are
+and whose planned END is still to come, marked `isFuture` — a duty already
+reported for with nothing logged yet is one of them (every duty's first
+hours: with the REPORT as the cut-off, the FDP page dropped the duty in
+progress and read "Rest · Next Duty 24 Nov" beside a dashboard reading ON
+DUTY). Rostered flights are
 scheduled LOGBOOK rows (`scheduleEntries` holds non-flight duties only), and
 the pipeline builds duties from flown flights, so nothing past today reached
 it: the FDP page read "Next · None scheduled" over a week of rostered
@@ -3147,11 +3151,19 @@ identical:
 **Accessibility is measured, not assumed** — axe-core over every route plus an
 open flight, both themes (Nov 2026: zero violations). What it took:
 
-- **Pinch-zoom is allowed** (WCAG 1.4.4) — the viewport no longer sets
-  `maximumScale: 1` / `userScalable: false`. Every text field is ≥16px on a
-  phone so iOS never zooms on focus, `<html>` carries `touch-action:
-  manipulation` so a double-tap does not zoom, and the FDP chart keeps its own
-  pinch (`touch-action: pan-x pan-y`).
+- **The page does NOT zoom — the owner's call (Nov 2026)**, over WCAG
+  1.4.4, so the PWA behaves like a native app: the viewport sets
+  `maximumScale: 1` / `userScalable: false` (Chrome honours it) and
+  `NativeFeel` (`components/native-feel.tsx`) cancels WebKit's
+  `gesturestart`, which iOS needs because it ignores the viewport. Text
+  fields stay ≥16px on a phone, `<html>` keeps `touch-action: manipulation`
+  (no double-tap zoom), and the FDP timeline keeps its OWN pinch. In the same
+  pass: no tap highlight, no iOS callout and no image/link drag anywhere
+  (`*` in globals.css; text fields and `data-selectable` get the callout back),
+  and no long-press menu on TOUCH outside a field (`NativeFeel`) — a mouse
+  keeps its right-click. The cost, said to the owner: text can no longer be
+  enlarged by pinching; Android's "force enable zoom" accessibility setting
+  still overrides it.
 - **Red text is not red fill** — `text-destructive` reads `--destructive-text`
   (4.5:1 on a card and on the red-tinted notices); `--destructive` is the fill
   under a light label. The pending badge sits on `--status-pending-fill`.
@@ -3810,7 +3822,17 @@ Debug logs use prefixed format: `[v0]`, `[Auth]`, `[SW]`, `[UserDB]`, `[Sync]`, 
   → `computeFDPResult`): the dashboard isn't keep-alive, so its `useMemo` dies on
   every navigation — the module cache (content key + 5-min time bucket) makes
   re-mounts a cache hit. Keep heavy computation + the cache write in that plain
-  module function, not in the hook (render purity)
+  module function, not in the hook (render purity).
+  **Anything "as of now" in that result is as of when it RAN**, and it runs
+  again only when the data changes — so the dashboard does not read
+  `restUntilLegal` from it: `usePilotStatus` calls `calculateRestUntilLegal`
+  at its own minute clock. Cached, a pilot who stamped IN before the duty's
+  debrief had rest counted from the duty BEFORE for the rest of the day (the
+  owner's 18 Nov 26 report). A new "now" figure on the dashboard is computed
+  there too, never read off the cached result. And a duty becomes the one rested FROM at its
+  last ON-BLOCKS once every sector has flown (`partFlown` duties wait for the
+  debrief): waiting for the debrief left the post-flight half hour reading
+  "Duty complete" over 41 hours of rest from the duty before
 - **Fonts**: **Inter is the single app typeface** (sans + numbers), loaded via a
   Google Fonts `<link>` in `app/layout.tsx`; `--font-sans` and `--font-mono` both
   point to Inter. There is intentionally **no `font-mono`** in the app — use
@@ -5624,7 +5646,7 @@ When making changes, be aware of these high-impact files:
 - Do not put a segmented choice back as a pair of filled rectangles — it is `SegmentedTabs` (the action surface, a sliding indicator, `h-9` segments), as in the import dialogs, the Quick Check and the custom palette's vividness and depth (`components/ui/segmented-tabs.tsx`). And measure its segments from ONE ResizeObserver: reading `offsetLeft` in a ref callback that is rebuilt on every selection forced a layout per tap and attached a new observer to every segment each time, never disconnecting the old ones
 - Do not animate a spacer's `height` to push content — it lays out and repaints everything after it every frame. Push with `useFlipPush` (one layout, a compositor transform)
 - Do not tell the layers apart with shadows and rims — ground, card and control are generated tones (`--background` / `--card` / `--control`), each a visible step from the one under it; a rim and a shadow belong only to a surface that floats. Do not put `bg-card/70` or a `shadow-sm` on a card
-- Do not forbid zoom in the viewport, and do not give a text field less than 16px on a phone (iOS zooms on focus once zoom is allowed). Do not read `--destructive` as text — `text-destructive` is `--destructive-text`. Do not nest a focusable control inside a `role="button"` row; make the row a plain tap target and an inner element the keyboard target
+- Do not let the page zoom again (the owner's call, Nov 2026: `userScalable: false` + `NativeFeel`'s `gesturestart`), and do not give a text field less than 16px on a phone (iOS zooms on focus regardless). Do not read `--destructive` as text — `text-destructive` is `--destructive-text`. Do not nest a focusable control inside a `role="button"` row; make the row a plain tap target and an inner element the keyboard target
 - Do not put an action back on the card surface (`bg-secondary`, `bg-card`, `bg-muted`) or give it a rectangle's corners — a thing you press is a CAPSULE or circle on `.control-surface`, a thing you read is a rounded rectangle. On the card surface the context preview's action row read as more card. And do not use the REAL glass (`GlassContainer`) for an action that sits over a scrim, a row or a panel: the painted surface is the same look with no `backdrop-filter`, and these pop in on exactly the frames a readback would cost most
 - Do not put a sync button or cloud back in the tab bar — it cost every phone a tab's width. Sync state is the bar's edge (`NavSyncRim`), the sidebar button's badge (`SyncBadge`) and the sidebar strip's words (`SyncStatus`)
 - Do not fire a swipe action on the CLICK alone — the click straight after a swipe is lost on device (Delete took two taps). Actions fire on the lift (`fireOnPointerUp`, default on), and only for a press that started on the button
