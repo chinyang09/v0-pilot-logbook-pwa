@@ -705,6 +705,26 @@ Plain http, no CORS: only the door (Edge) asks it. Node's fetch in this
 container does not use the proxy, so a live check from here is curl; the
 parser is pinned on saved real pages.
 
+**METAR and TAF come from aviationweather.gov's CACHE FILES, refreshed on
+demand** (`lib/weather/`, Nov 2026 — the owner: on demand, inside free
+limits, structured for a later feature). The source rewrites
+`metars.cache.xml.gz` and `tafs.cache.xml.gz` (every current report in the
+world, ~350KB gzipped each) once a minute; its API allows 100 requests a
+minute and sends heavy users to those files:
+
+| | Rule |
+|---|---|
+| stored | ONE snapshot per kind in MongoDB `weatherCache` (`_id: "metar"` / `"taf"`): every station's raw report and its times, ~650KB each, REPLACED whole. The whole world, not the pilot's airports — a later feature (alternates, en-route) wants stations nobody asked for, and it costs one document |
+| refreshed | ON DEMAND (`getWeather`): a request that finds a snapshot older than `REFRESH_MS` (10 min) pulls that file — at most two upstream requests per ten minutes, none while nobody looks — after winning a one-minute lock (`lock:metar`); every other request answers from the snapshot. A pull that fails, or that reads fewer than 200 stations (an error page), keeps the old snapshot and the answer says `stale` |
+| read | only the asked stations, by PROJECTION (`stations.WSSS`) — a few hundred bytes, never the document |
+| route | `GET /api/lookup/weather?ids=WSSS,VTCC` — NODE (MongoDB, zlib), a static segment beside the pool, behind a sign-in; up to 24 ids; browser keeps it 2 minutes. Callers use `lookup.weather` |
+| shown | the dashboard's duty panel (`DutyWeather`, the chain's `duty:<ms>` panel): each airport the duty touches, in the order flown — the METAR raw with its time, age and category, the TAF raw broken at TEMPO / BECMG / FM / PROB (`tafLines`) — asked when the panel opens (`useAirportWeather`), Refresh to ask again. The legal page's header carries a Weather button (tools group) that opens the same panel weather-first (`duty:<ms>#wx`; the chain's duty is published by `setChainDuty`) |
+
+NOT a Cloudflare Worker: a free Worker has 10ms of CPU, and unzipping and
+reading 9MB of XML takes ~80ms. NOT a Vercel cron: the free plan runs one a
+day. Parsing both full files takes ~40ms each (`parse.ts`, pinned on real
+entries in `lib/weather/__tests__/fixtures/`).
+
 **An IATA code is not an airport for all time** (`lib/airports/code-changes.ts`).
 VTZ moved from Visakhapatnam's old airport (VOVZ) to Bhogapuram (VOVI) at 00:01
 IST on 17 Aug 2026, and the company reports name airports by IATA only, so the
@@ -3807,6 +3827,7 @@ Notable route groups:
 | `/api/lookup/flight/gates?number=&date=` | GET | Yes | That flight's gates, terminals and belt — the tracked flight, else the airport boards; "" until published |
 | `/api/lookup/airline/{fleet,routes,routes/from}?iata=` | GET | Yes | The Worker's airline routes passed through: fleet by type, every airport pair, one airport's destinations with flight numbers |
 | `/api/lookup-test/<route>` | GET | No (OFF in production unless `LOOKUP_TEST_ROUTE=1`; a preview is behind Vercel's deployment protection) | The operator's test door, EDGE: every `/api/lookup` route without the sign-in, plus the Worker's `/probe` (`probe?explore=1`) run from where the APP runs — never `/raw` |
+| `/api/lookup/weather?ids=` | GET | Yes | METAR and TAF for up to 24 stations from the weather cache (MongoDB snapshot, refreshed on demand from aviationweather.gov's cache files) — Node |
 | `/api/lookup/pool/aircraft` | POST | No | The shared aircraft pool — enriched submissions, MongoDB (Node) |
 | `/api/lookup/pool/airport` | POST | No | The shared airport pool — enriched submissions, MongoDB (Node) |
 | `/api/submissions/aircraft` | POST | Yes | Submit custom aircraft for enrichment |
@@ -4847,6 +4868,7 @@ other user collection.
 | `sessions` | User sessions with TTL |
 | `deletions` | Tombstones (TTL 30d) for propagating deletes across devices |
 | `feedback` | In-app bug / feature / tweak reports: `{userId, callsign, id, kind, area, title, details, context{route, build, userAgent, viewport, standalone, online}, writtenAt, status, createdAt, updatedAt, messages[{id, from: "pilot"\|"team", text, at, event?}], response? (legacy)}`. The pilot writes follow-ups and done / reopen; triage (`planned` / `wontfix`, replies) is written on the collection and shows in the report's conversation |
+| `weatherCache` | `{_id: "metar" \| "taf", fetchedAt, stations: {ICAO: report}}` — the whole world's current reports, replaced on demand at most every 10 minutes; `lock:<kind>` rows hold a refresh |
 | `flights`, `aircraft`, `personnel`, etc. | Synced user data collections |
 
 **Indexes:** `lib/mongodb/client.ts` runs an idempotent, best-effort
@@ -5396,6 +5418,7 @@ When making changes, be aware of these high-impact files:
 - Do not reintroduce per-file registration normalizers — use the canonical `normalizeRegistration` in `lib/utils/string.ts` on both client and server
 - Do not resolve an IATA code without the flight's DATE where one is known — a code can move between airports (`IATA_REASSIGNMENTS`; VTZ went from VOVZ to VOVI on 17 Aug 2026), and the undated lookup took whichever row came first. Pass the instant to `getAirportByIata`, or pick from the enrichment map with `pickAirportAt`; resolve a stored flight by its ICAO first. And never correct a SIGNED or LOCKED flight's airport automatically — note it in Discrepancies
 - Do not take a UTC offset at "now" for a flight — `getAirportTimeInfo(tz, at)` at the flight's instant. A whole-career import read with today's offset is an hour out on every flight in the other half of the year
+- Do not ask aviationweather.gov per station, on a timer, or from the browser — weather is the two cache files, pulled on demand by the one request that wins the lock, into one snapshot per kind (`lib/weather/server.ts`). Read a snapshot by projection, never whole; and do not move it to a free Worker (10ms of CPU) or a free-plan cron (daily)
 - Do not re-add a bulk CDN aircraft download — the aircraft DB is populated from FR24, custom entries, and the MongoDB enriched pool only
 - Do not remove `"use client"` directives — server/client boundary is intentionally designed
 - Do not commit `.env` files or MongoDB credentials

@@ -2,8 +2,8 @@
 
 /**
  * The duty the legal page's sector chain draws, in the DETAIL panel: each of
- * its flights with its gates, and where the aeroplane for the next leg to fly
- * is.
+ * its flights with its gates, where the aeroplane for the next leg to fly is,
+ * and the weather at every airport it touches (`DutyWeather`).
  * The same answer the duty band shows (`useDutyLookups`, one cache); a tap on
  * either row asks again. Nothing is stored.
  */
@@ -20,6 +20,7 @@ import { useDutyLookups, type DutyLookups } from "@/hooks/use-duty-lookups"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { getAirportDisplayCode } from "@/lib/utils/airport-display"
 import { inboundLeg } from "@/lib/utils/dashboard/duty-flights"
+import { DutyWeather } from "@/components/dashboard/duty-weather"
 
 /** Whether a leg's departure gate is published — and so shown in its Gates row. */
 function departureGateShown(lookups: DutyLookups, flightId: string): boolean {
@@ -27,7 +28,7 @@ function departureGateShown(lookups: DutyLookups, flightId: string): boolean {
   return g?.status === "done" && !!g.gates.departure.gate
 }
 
-export function DutyFlightsPanel({ atMs }: { atMs: number }) {
+export function DutyFlightsPanel({ atMs, weatherFirst = false }: { atMs: number; weatherFirst?: boolean }) {
   const { preferences } = usePreferences()
   const pref = preferences.display.airportIdentifier
   const separator = preferences.display.clockSeparator
@@ -46,6 +47,7 @@ export function DutyFlightsPanel({ atMs }: { atMs: number }) {
         </FormSection>
       ) : (
         <>
+          {weatherFirst && <DutyWeather legs={legs} />}
           {inboundFlight && (
             <FormSection title={`Aircraft · ${inboundFlight.aircraftReg} · before ${inboundFlight.flightNumber || "departure"}`}>
               <CheckRow
@@ -80,6 +82,7 @@ export function DutyFlightsPanel({ atMs }: { atMs: number }) {
               </div>
             )
           })}
+          {!weatherFirst && <DutyWeather legs={legs} />}
         </>
       )}
     </ReadingPanel>
