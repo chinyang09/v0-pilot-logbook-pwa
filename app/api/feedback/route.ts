@@ -80,7 +80,9 @@ export async function GET() {
   const db = await getDB()
   const rows = await db
     .collection("feedback")
-    .find({ userId: session.userId })
+    // A report the pilot removed from their list stays in the collection for
+    // whoever works through it; the list is theirs to keep short.
+    .find({ userId: session.userId, removedAt: null })
     .sort({ createdAt: -1 })
     .limit(200)
     .toArray()
@@ -100,7 +102,10 @@ export async function PATCH(request: Request) {
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null
   const id = str(body?.id, 64)
   const action = body?.action
-  if (!/^[A-Za-z0-9_-]{8,64}$/.test(id) || (action !== "message" && action !== "complete" && action !== "reopen")) {
+  if (
+    !/^[A-Za-z0-9_-]{8,64}$/.test(id) ||
+    !["message", "complete", "reopen", "remove", "restore"].includes(action as string)
+  ) {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 })
   }
 
@@ -112,7 +117,9 @@ export async function PATCH(request: Request) {
   const status = FEEDBACK_STATUSES.includes(doc.status as FeedbackStatus) ? (doc.status as FeedbackStatus) : "open"
   const now = new Date()
 
-  if (action === "message") {
+  if (action === "remove" || action === "restore") {
+    await feedback.updateOne(filter, { $set: { removedAt: action === "remove" ? now : null } })
+  } else if (action === "message") {
     const messageId = str(body?.messageId, 64)
     const text = str(body?.text, FEEDBACK_LIMITS.message + 1).trim()
     if (!/^[A-Za-z0-9_-]{8,64}$/.test(messageId) || !text || text.length > FEEDBACK_LIMITS.message) {

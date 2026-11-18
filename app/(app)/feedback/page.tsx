@@ -13,7 +13,8 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
-import { Bug, Lightbulb, MessageSquarePlus, Plus, SlidersHorizontal, CloudOff } from "lucide-react"
+import { Bug, ChevronDown, Lightbulb, MessageSquarePlus, Plus, SlidersHorizontal, CloudOff, Trash2 } from "lucide-react"
+import { SwipeableCard } from "@/components/swipeable-card"
 import { PageContainer } from "@/components/page-container"
 import { GlassIconButton } from "@/components/ui/glass-icon-button"
 import { Button } from "@/components/ui/button"
@@ -27,7 +28,7 @@ import { useAuth } from "@/components/providers/auth-provider"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
-import { showToast } from "@/lib/utils/undo-toast"
+import { showToast, showUndoToast } from "@/lib/utils/undo-toast"
 import { formatStamp } from "@/lib/utils/date"
 import { cn } from "@/lib/utils"
 import { ActionRow, ActionStack } from "@/components/ui/action-row"
@@ -150,6 +151,8 @@ export default function FeedbackPage() {
   )
 
   const creatingRef = useRef<false | { sel: string | null }>(false)
+  // The panel is built before `remove` (below) is defined; it reaches it through this.
+  const removeRef = useRef<(item: FeedbackItem) => void>(() => {})
 
   const syncDetailPanel = useCallback(() => {
     if (creatingRef.current) {
@@ -161,7 +164,7 @@ export default function FeedbackPage() {
       return
     }
     setDetailContent(
-      selected ? <FeedbackDetail key={selected.id} report={selected} onUpdated={replaceItem} /> : null,
+      selected ? <FeedbackDetail key={selected.id} report={selected} onUpdated={replaceItem} onRemove={(i) => removeRef.current(i)} /> : null,
     )
   }, [selectedId, selected, items, setDetailContent, replaceItem])
 
@@ -211,6 +214,35 @@ export default function FeedbackPage() {
   const open = useCallback((id: string) => setSelectedId(id), [setSelectedId])
   // What happened last leads: a reply or a reopened report comes to the top.
   const sent = useMemo(() => [...(items ?? [])].sort((a, b) => b.updatedAt - a.updatedAt), [items])
+  // Done and Won't Do fold away under one row: the list is what is still
+  // being worked on (the owner: done reports "stay indefinitely" and bloat it).
+  const active = useMemo(() => sent.filter((i) => !isClosedStatus(i.status)), [sent])
+  const closed = useMemo(() => sent.filter((i) => isClosedStatus(i.status)), [sent])
+  const [showClosed, setShowClosed] = useState(false)
+
+  // Removing takes a report off the pilot's list (the server keeps it for
+  // whoever works through it), with an Undo — the app's one-tap delete.
+  const remove = useCallback(
+    (report: FeedbackItem) => {
+      setItems((prev) => (prev ? prev.filter((i) => i.id !== report.id) : prev))
+      if (selectedId === report.id) setSelectedId(null)
+      actOnFeedback(report.id, { action: "remove" })
+        .then(() =>
+          showUndoToast(`"${report.title}" removed`, async () => {
+            await actOnFeedback(report.id, { action: "restore" })
+            await load()
+          }),
+        )
+        .catch((e: Error) => {
+          setItems((prev) => (prev && !prev.some((i) => i.id === report.id) ? [...prev, report] : prev))
+          showToast(e.message)
+        })
+    },
+    [load, selectedId, setSelectedId],
+  )
+  useEffect(() => {
+    removeRef.current = remove
+  }, [remove])
 
   return (
     <PageContainer title="Feedback">
@@ -238,7 +270,7 @@ export default function FeedbackPage() {
           <EmptyState
             icon={MessageSquarePlus}
             title="Nothing Reported Yet"
-            description="Found a bug, or want something changed? Write it down here, on the go."
+            description="Bugs, ideas and tweaks — written as you meet them."
             action={
               <Button variant="outline" size="sm" onClick={openNew}>
                 <Plus className="h-4 w-4" />
@@ -256,11 +288,30 @@ export default function FeedbackPage() {
           </FormSection>
         )}
 
-        {sent.length > 0 && (
-          <FormSection title={`Sent · ${sent.length}`}>
-            {sent.map((d) => (
-              <FeedbackRow key={d.id} report={d} selected={isDesktop && d.id === selectedId} onOpen={open} />
+        {active.length > 0 && (
+          <FormSection title={`Open · ${active.length}`}>
+            {active.map((d) => (
+              <FeedbackRow key={d.id} report={d} selected={isDesktop && d.id === selectedId} onOpen={open} onRemove={remove} />
             ))}
+          </FormSection>
+        )}
+
+        {closed.length > 0 && (
+          <FormSection>
+            <button
+              type="button"
+              aria-expanded={showClosed}
+              onClick={() => setShowClosed((v) => !v)}
+              className="row-divider relative flex w-full items-center gap-3 px-4 py-3 text-left"
+            >
+              <span className="flex-1 text-[15px] text-foreground">Done</span>
+              <span className="text-sm tabular-nums text-muted-foreground">{closed.length}</span>
+              <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", showClosed && "rotate-180")} aria-hidden />
+            </button>
+            {showClosed &&
+              closed.map((d) => (
+                <FeedbackRow key={d.id} report={d} selected={isDesktop && d.id === selectedId} onOpen={open} onRemove={remove} />
+              ))}
           </FormSection>
         )}
       </div>
@@ -273,21 +324,35 @@ const FeedbackRow = memo(function FeedbackRow({
   waiting = false,
   selected,
   onOpen,
+  onRemove,
 }: {
   report: FeedbackDraft | FeedbackItem
   waiting?: boolean
   selected: boolean
   onOpen: (id: string) => void
+  /** A sent report swipes away (`remove`); one still waiting to send does not. */
+  onRemove?: (report: FeedbackItem) => void
 }) {
   const Icon = KIND_ICON[report.kind] ?? Bug
   const replied = "messages" in report && hasUnansweredReply(report)
-  const status = "status" in report ? (replied ? "Replied" : FEEDBACK_STATUS_LABEL[report.status]) : "Not sent yet"
-  return (
+  // The section already says Open or Done; the row says only what it does not.
+  const status =
+    "status" in report
+      ? replied
+        ? "Replied"
+        : report.status === "open" || report.status === "done"
+          ? ""
+          : FEEDBACK_STATUS_LABEL[report.status]
+      : "Not sent yet"
+  const swipes = !!onRemove && "status" in report
+  const row = (
     <button
       type="button"
       onClick={() => onOpen(report.id)}
       className={cn(
-        "row-divider relative flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors",
+        // In a swipe row the divider is the row's (`separated`).
+        !swipes && "row-divider",
+        "relative flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors",
         selected && "bg-primary/10",
       )}
     >
@@ -309,14 +374,34 @@ const FeedbackRow = memo(function FeedbackRow({
       </span>
     </button>
   )
+  if (!swipes) return row
+  return (
+    <SwipeableCard
+      id={`feedback-${report.id}`}
+      variant="row"
+      separated
+      actions={[
+        {
+          icon: <Trash2 className="h-5 w-5" />,
+          ariaLabel: "Remove from the list",
+          variant: "destructive",
+          onClick: () => onRemove(report),
+        },
+      ]}
+    >
+      {row}
+    </SwipeableCard>
+  )
 })
 
 function FeedbackDetail({
   report,
   onUpdated,
+  onRemove,
 }: {
   report: FeedbackDraft | FeedbackItem
   onUpdated: (item: FeedbackItem) => void
+  onRemove: (item: FeedbackItem) => void
 }) {
   const sentItem = "status" in report ? report : null
   const [followUp, setFollowUp] = useState("")
@@ -422,16 +507,18 @@ function FeedbackDetail({
                 onClick={() => void act("complete")}
               />
             )}
+            <ActionRow label="Remove From List" destructive disabled={busy !== null} onClick={() => onRemove(sentItem)} />
           </ActionStack>
         </>
       )}
 
-      <FormSection title="Captured">
-        <ReadOnlyRow label="Page" value={report.context.route} />
-        <ReadOnlyRow label="Build" value={report.context.build} />
-        <ReadOnlyRow label="Screen" value={report.context.viewport} />
-        <ReadOnlyRow label="Installed App" value={report.context.standalone ? "Yes" : "No"} />
-      </FormSection>
+      {/* What reproduces it, on one line — four rows of it was the longest
+          part of a report that says one thing. */}
+      <p className="px-1 text-xs text-muted-foreground">
+        {[report.context.route, report.context.build && `build ${report.context.build.slice(0, 7)}`, report.context.viewport, report.context.standalone ? "installed" : "browser"]
+          .filter(Boolean)
+          .join(" · ")}
+      </p>
     </ReadingPanel>
   )
 }

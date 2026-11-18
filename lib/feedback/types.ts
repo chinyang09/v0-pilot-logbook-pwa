@@ -112,6 +112,9 @@ export type FeedbackAction =
   | { action: "message"; messageId: string; text: string }
   | { action: "complete" }
   | { action: "reopen" }
+  /** Off the pilot's list (kept on the server, so the work it asked for is not lost); `restore` undoes it. */
+  | { action: "remove" }
+  | { action: "restore" }
 
 /** Did the team say something after the pilot last did? */
 export function hasUnansweredReply(item: Pick<FeedbackItem, "messages">): boolean {
