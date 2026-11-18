@@ -30,6 +30,8 @@
 import { formatDayAt } from "@/lib/utils/date"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { AlertTriangle, ChevronRight, Minus, Plus, X } from "lucide-react"
+import { currencyFindings, currencyLapses } from "@/lib/utils/roster/currency-lapses"
+import type { Currency } from "@/types/entities/roster.types"
 import { cn } from "@/lib/utils"
 import { FormSection } from "@/components/ui/form-section"
 import { ReadOnlyRow } from "@/components/ui/settings-row"
@@ -51,7 +53,13 @@ const YEAR = 365 * DAY
 /** How much time the view spans, and the bounds of a zoom. */
 const DEFAULT_SPAN = 7 * DAY
 const MIN_SPAN = 3 * HOUR
+/**
+ * The furthest out a zoom goes is the WHOLE logbook to now (the owner, Nov
+ * 2026: "see the entire history till present"), never less than this, never
+ * more than `MAX_SPAN_CAP`.
+ */
 const MAX_SPAN = 180 * DAY
+const MAX_SPAN_CAP = 30 * YEAR
 
 /** Geometry, px — the date header, the rolling chart, then the duty deck. */
 const AXIS_H = 22
@@ -71,8 +79,9 @@ const HIT_MIN = 28
 /** Labels are 11px semibold tabular figures; this is a character's width. */
 const CHAR_PX = 6.6
 const LABEL_GAP = 6
-/** The fewest pixels between two labelled gridlines. */
+/** The fewest pixels between two labelled gridlines: a date ("4 Nov"), and an hour ("08" — narrower, smaller). */
 const TICK_MIN_PX = 42
+const TICK_HOUR_MIN_PX = 30
 
 /** How far the axis runs past the logbook (and now), either way. */
 const AXIS_PAD = 3 * YEAR
@@ -160,10 +169,44 @@ function dayStarts(from: number, to: number, zulu: boolean): number[] {
 /** A day's number — consecutive across the axis (a midnight is within 14h of a UTC one). */
 const dayNumber = (dayStart: number) => Math.round(dayStart / DAY)
 
-/** The gridline step: the finest that leaves room for a label. */
-const STEPS_H = [1, 2, 3, 6, 12, 24, 48, 24 * 7, 24 * 14, 24 * 28]
-function gridStepHours(pxPerMs: number): number {
-  return STEPS_H.find((h) => h * HOUR * pxPerMs >= TICK_MIN_PX) ?? STEPS_H[STEPS_H.length - 1]
+/**
+ * The gridline step: the finest that leaves room for its label — hours (a
+ * two-figure label, so they can sit closer), then days, then calendar MONTHS
+ * once a fortnight is too tight (a whole career on a phone).
+ */
+const STEPS_H = [1, 2, 3, 6, 12]
+const STEPS_D = [1, 2, 7, 14]
+const STEPS_M = [1, 2, 3, 6, 12, 24, 60, 120]
+type GridStep = { unit: "h" | "d" | "m"; n: number }
+function gridStep(pxPerMs: number): GridStep {
+  const h = STEPS_H.find((x) => x * HOUR * pxPerMs >= TICK_HOUR_MIN_PX)
+  if (h) return { unit: "h", n: h }
+  const d = STEPS_D.find((x) => x * DAY * pxPerMs >= TICK_MIN_PX)
+  if (d) return { unit: "d", n: d }
+  const m = STEPS_M.find((x) => x * 30.44 * DAY * pxPerMs >= TICK_MIN_PX)
+  return { unit: "m", n: m ?? STEPS_M[STEPS_M.length - 1] }
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+/** The first of each month from `from` to `to`, every `n`th by its number since year 0, in the display clock. */
+function monthStarts(from: number, to: number, zulu: boolean, n: number): { ms: number; label: string }[] {
+  const out: { ms: number; label: string }[] = []
+  const f = new Date(from)
+  let y = zulu ? f.getUTCFullYear() : f.getFullYear()
+  let m = zulu ? f.getUTCMonth() : f.getMonth()
+  for (;;) {
+    const ms = zulu ? Date.UTC(y, m, 1) : new Date(y, m, 1).getTime()
+    if (ms > to) break
+    if (ms >= from && (y * 12 + m) % n === 0) {
+      // "Nov 26" — the app's day, less the day; January carries the year's turn.
+      out.push({ ms, label: `${MONTHS[m]} ${String(y % 100).padStart(2, "0")}` })
+    }
+    if (++m === 12) {
+      m = 0
+      y++
+    }
+  }
+  return out
 }
 
 /** A tiny store for the pointer's instant: the readouts follow it, the chart does not re-render for it. */
@@ -185,6 +228,8 @@ function createPointerStore(initial: number) {
 }
 type PointerStore = ReturnType<typeof createPointerStore>
 
+const NO_CURRENCIES: readonly Currency[] = []
+
 function usePointer(store: PointerStore): number {
   return useSyncExternalStore(store.subscribe, store.get, store.get)
 }
@@ -195,12 +240,15 @@ export function DutyTimeline({
   forecast,
   scenario = null,
   onClearScenario,
+  currencies = NO_CURRENCIES,
 }: {
   blocks: DutyBlock[]
   limits: FTLLimits
   forecast?: ForecastResult
   scenario?: TimelineScenario | null
   onClearScenario?: () => void
+  /** The pilot's documents: each lapse is a marker, and a duty flown on one is a finding. */
+  currencies?: readonly Currency[]
 }) {
   const blocks = scenario?.blocks ?? logged
   const removed = useMemo(() => scenario?.removed ?? [], [scenario])
@@ -222,15 +270,16 @@ export function DutyTimeline({
     (min: number) => formatHHMMDisplay(minutesToHHMM(Math.max(0, Math.round(min))), display.timeFormat === "12h" ? "24h" : display.timeFormat),
     [display.timeFormat],
   )
-  const sep = display.clockSeparator === "none" ? "" : ":"
   const fmt = useMemo(() => {
     const hr = tzFormatter(zone, { hour: "2-digit", hourCycle: "h23" }, "hh")
     return {
       // "4 Nov" — the app's day (`formatDay`), less weekday and year.
       dayMonth: (ms: number) => formatDayAt(ms, zone, { weekday: false, year: false }),
-      hour: (ms: number) => `${hr.format(new Date(ms))}${sep}00`,
+      // "08" — the hour alone: ":00" on every line said nothing and cost the
+      // room a finer step needs (the owner, Nov 2026).
+      hour: (ms: number) => hr.format(new Date(ms)),
     }
-  }, [zone, sep])
+  }, [zone])
 
   const views: RollingView[] = useMemo(
     () => [
@@ -258,6 +307,12 @@ export function DutyTimeline({
   const [pointer] = useState(() => createPointerStore(Math.floor(nowMs / MIN) * MIN))
 
   const pxPerMs = width > 0 ? width / span : 0
+  // Out to the whole logbook: from the first duty to now, with a margin.
+  const maxSpan = useMemo(() => {
+    let first = nowMs
+    for (const b of blocks) if (b.startMs < first) first = b.startMs
+    return Math.min(MAX_SPAN_CAP, Math.max(MAX_SPAN, nowMs - first + 30 * DAY))
+  }, [blocks, nowMs])
 
   // The axis runs years past the logbook either way — as good as endless to
   // scroll, while only what is near the view is ever drawn. At the finest
@@ -354,21 +409,21 @@ export function DutyTimeline({
   const zoomTo = useCallback(
     (next: number, x?: number, heldMs?: number) => {
       const el = scrollerRef.current
-      const clamped = Math.min(MAX_SPAN, Math.max(MIN_SPAN, next))
+      const clamped = Math.min(maxSpan, Math.max(MIN_SPAN, next))
       if (el && pxPerMs > 0) {
         const at = x ?? width / 2
         anchorRef.current = { ms: heldMs ?? rangeStart + (el.scrollLeft + at) / pxPerMs, x: at }
       }
       setSpan(clamped)
     },
-    [pxPerMs, rangeStart, width],
+    [pxPerMs, rangeStart, width, maxSpan],
   )
   // Read by the native gesture listeners. Written in the LAYOUT phase, beside
   // the scroll it pairs with — a passive effect left a frame in which the
   // new scrollLeft met the old scale, and a pinch held the wrong time still.
-  const latest = useRef({ span, zoomTo, scrollToTime, pxPerMs, rangeStart })
+  const latest = useRef({ span, zoomTo, scrollToTime, pxPerMs, rangeStart, maxSpan })
   useLayoutEffect(() => {
-    latest.current = { span, zoomTo, scrollToTime, pxPerMs, rangeStart }
+    latest.current = { span, zoomTo, scrollToTime, pxPerMs, rangeStart, maxSpan }
   })
 
   // A new what-if is shown where it changed the roster — once per what-if,
@@ -429,7 +484,7 @@ export function DutyTimeline({
       const x = e.clientX - el.getBoundingClientRect().left
       const now = performance.now()
       const going = wheel && now - wheel.at < 250 ? wheel : null
-      const span = Math.min(MAX_SPAN, Math.max(MIN_SPAN, (going?.span ?? latest.current.span) * Math.exp(e.deltaY * WHEEL_ZOOM)))
+      const span = Math.min(latest.current.maxSpan, Math.max(MIN_SPAN, (going?.span ?? latest.current.span) * Math.exp(e.deltaY * WHEEL_ZOOM)))
       wheel = { span, ms: going?.ms ?? msAt(x), at: now }
       queue({ span, x, ms: wheel.ms })
     }
@@ -472,17 +527,22 @@ export function DutyTimeline({
   // day or more labels dates.
   const axis = useMemo(() => {
     if (pxPerMs === 0) return { lines: [] as { ms: number; midnight: boolean; label: string }[], bands: [] as number[] }
-    const stepH = gridStepHours(pxPerMs)
-    const days = dayStarts(Math.max(drawFrom, rangeStart), Math.min(drawTo, rangeEnd), zulu)
+    const step = gridStep(pxPerMs)
+    const from = Math.max(drawFrom, rangeStart)
+    const to = Math.min(drawTo, rangeEnd)
     const lines: { ms: number; midnight: boolean; label: string }[] = []
-    if (stepH < 24) {
+    if (step.unit === "m") {
+      for (const m of monthStarts(from, to, zulu, step.n)) lines.push({ ms: m.ms, midnight: true, label: m.label })
+      return { lines, bands: [] as number[] }
+    }
+    const days = dayStarts(from, to, zulu)
+    if (step.unit === "h") {
       for (const d of days) {
         lines.push({ ms: d, midnight: true, label: fmt.dayMonth(d) })
-        for (let h = stepH; h < 24; h += stepH) lines.push({ ms: d + h * HOUR, midnight: false, label: fmt.hour(d + h * HOUR) })
+        for (let h = step.n; h < 24; h += step.n) lines.push({ ms: d + h * HOUR, midnight: false, label: fmt.hour(d + h * HOUR) })
       }
     } else {
-      const every = stepH / 24
-      for (const d of days) if (dayNumber(d) % every === 0) lines.push({ ms: d, midnight: true, label: fmt.dayMonth(d) })
+      for (const d of days) if (dayNumber(d) % step.n === 0) lines.push({ ms: d, midnight: true, label: fmt.dayMonth(d) })
     }
     const bands = DAY * pxPerMs >= 6 ? days.filter((d) => dayNumber(d) % 2 === 1) : []
     return { lines, bands }
@@ -633,8 +693,11 @@ export function DutyTimeline({
       if (f.atMs < nowMs - 28 * DAY) continue
       rows.push({ key: `${f.rule}${f.atMs}`, atMs: f.atMs, severity: f.severity, text: f.label, source: `Para ${f.rule}` })
     }
+    // The documents: a duty that flies on an expired one, else one about to lapse.
+    for (const f of currencyFindings(currencies, scenario?.blocks ?? blocks, nowMs)) rows.push(f)
     return rows.sort((a, b) => a.atMs - b.atMs).slice(0, 6)
-  }, [exceedances, daysOffState, nowMs, duration])
+  }, [exceedances, daysOffState, nowMs, duration, currencies, scenario, blocks])
+  const lapses = useMemo(() => currencyLapses(currencies), [currencies])
   /** A breach row switches to its limit's tab; every row brings its date to the pointer. */
   const openFinding = (f: { atMs: number; series?: RollingKind }) => {
     if (f.series) setSeries(f.series)
@@ -704,8 +767,8 @@ export function DutyTimeline({
                   >
                     <span
                       className={cn(
-                        "absolute left-0 -translate-x-1/2 whitespace-nowrap text-[11px] leading-[14px] tabular-nums",
-                        l.midnight ? "font-semibold text-foreground" : "text-muted-foreground",
+                        "absolute left-0 -translate-x-1/2 whitespace-nowrap leading-[14px] tabular-nums",
+                        l.midnight ? "text-[11px] font-semibold text-foreground" : "text-[10px] text-muted-foreground",
                       )}
                       style={{ top: -(AXIS_H - 8) }}
                     >
@@ -789,6 +852,21 @@ export function DutyTimeline({
                     {l.text}
                   </span>
                 ))}
+
+                {/* Each document's lapse — 00:00 SGT after its last valid day. */}
+                {lapses
+                  .filter((l) => l.lapseMs > drawFrom && l.lapseMs < drawTo)
+                  .map((l) => (
+                    <div
+                      key={l.id}
+                      className="pointer-events-none absolute bottom-0 border-l-2 border-status-warning/70"
+                      style={{ left: xOf(l.lapseMs), top: AXIS_H }}
+                    >
+                      <span className="absolute left-1 top-4 max-w-28 truncate rounded bg-status-warning/90 px-1 text-[9px] font-semibold uppercase leading-[12px] text-background">
+                        {l.name} exp
+                      </span>
+                    </div>
+                  ))}
 
                 {/* Now — between what has happened and what is scheduled. */}
                 {nowMs > drawFrom && nowMs < drawTo && (

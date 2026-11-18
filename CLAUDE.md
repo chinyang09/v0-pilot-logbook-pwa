@@ -705,6 +705,26 @@ Plain http, no CORS: only the door (Edge) asks it. Node's fetch in this
 container does not use the proxy, so a live check from here is curl; the
 parser is pinned on saved real pages.
 
+**METAR and TAF come from aviationweather.gov's CACHE FILES, refreshed on
+demand** (`lib/weather/`, Nov 2026 — the owner: on demand, inside free
+limits, structured for a later feature). The source rewrites
+`metars.cache.xml.gz` and `tafs.cache.xml.gz` (every current report in the
+world, ~350KB gzipped each) once a minute; its API allows 100 requests a
+minute and sends heavy users to those files:
+
+| | Rule |
+|---|---|
+| stored | ONE snapshot per kind in MongoDB `weatherCache` (`_id: "metar"` / `"taf"`): every station's raw report and its times, ~650KB each, REPLACED whole. The whole world, not the pilot's airports — a later feature (alternates, en-route) wants stations nobody asked for, and it costs one document |
+| refreshed | ON DEMAND (`getWeather`): a request that finds a snapshot older than `REFRESH_MS` (10 min) pulls that file — at most two upstream requests per ten minutes, none while nobody looks — after winning a one-minute lock (`lock:metar`); every other request answers from the snapshot. A pull that fails, or that reads fewer than 200 stations (an error page), keeps the old snapshot and the answer says `stale` |
+| read | only the asked stations, by PROJECTION (`stations.WSSS`) — a few hundred bytes, never the document |
+| route | `GET /api/lookup/weather?ids=WSSS,VTCC` — NODE (MongoDB, zlib), a static segment beside the pool, behind a sign-in; up to 24 ids; browser keeps it 2 minutes. Callers use `lookup.weather` |
+| shown | the dashboard's duty panel (`DutyWeather`, the chain's `duty:<ms>` panel): each airport the duty touches, in the order flown — the METAR raw with its time, age and category, the TAF raw broken at TEMPO / BECMG / FM / PROB (`tafLines`) — asked when the panel opens (`useAirportWeather`), Refresh to ask again. The legal page's header carries a Weather button (tools group) that opens the same panel weather-first (`duty:<ms>#wx`; the chain's duty is published by `setChainDuty`) |
+
+NOT a Cloudflare Worker: a free Worker has 10ms of CPU, and unzipping and
+reading 9MB of XML takes ~80ms. NOT a Vercel cron: the free plan runs one a
+day. Parsing both full files takes ~40ms each (`parse.ts`, pinned on real
+entries in `lib/weather/__tests__/fixtures/`).
+
 **An IATA code is not an airport for all time** (`lib/airports/code-changes.ts`).
 VTZ moved from Visakhapatnam's old airport (VOVZ) to Bhogapuram (VOVI) at 00:01
 IST on 17 Aug 2026, and the company reports name airports by IATA only, so the
@@ -1139,9 +1159,13 @@ one in the picker (which used to save the card and assign nobody). An eCrew
 schedule import seats the COMMANDER ("CPT - PIC - …", `commander`) as PIC and
 this pilot in their own seat, and lists every other CPT/FO as a relief pilot
 on a CREATED flight (`deriveSectorCrew`). Taking the first CPT and FO blindly
-dropped a second-listed first officer from their own flight. A re-import does
-not add relief pilots to an EXISTING flight yet: the review modal's diff is a
-string, and a list needs its own presentation.
+dropped a second-listed first officer from their own flight. A re-import ADDS the relief pilots
+an EXISTING flight lacks (`mergeReliefCrew` — by crew-card id, else by name;
+never one already in a seat, never removing anyone): the owner's 18 Nov TR696
+was logged before the report listed its SO, and the seats were all a re-import
+compared. The diff is an `additionalCrew` change whose `to` is the list as the
+review reads it ("Joe Chin Jia Hao (Relief Pilot)") and whose `value` is the
+list the executor writes (`FieldDiff.value`).
 
 ### Entry Type (flight, simulator, positioning)
 
@@ -3542,8 +3566,22 @@ or not.
   and moved every field up.
 - **The outbox is per account.** A report is never sent under another
   account than the one that wrote it.
-- **Reading them.** `feedback` holds one document per report, newest
-  `createdAt` first under the `{status, createdAt}` index.
+- **A report is a CONVERSATION, not a one-shot** (the owner, Nov 2026:
+  "it just stays open"). `messages` holds the pilot's follow-ups, the
+  replies (`from: "team"`) and every status change (`event`), oldest first;
+  the panel shows the status with one line of what it means
+  (`FEEDBACK_STATUS_MEANING`), the conversation, a Follow-Up field and Mark
+  Done / Reopen (`PATCH /api/feedback`, `actOnFeedback` — online only). A
+  follow-up on a Done or Won't Do report REOPENS it: "still broken in the next
+  build" is the commonest follow-up. A follow-up carries the device's id, so a
+  retried send adds it once. The list sorts by last activity and says
+  "Replied" while a reply waits on the pilot (`hasUnansweredReply`).
+- **Reading them, and answering.** `feedback` holds one document per report.
+  `lib/feedback/stored.ts` (`itemOf`) is the one reading of a document,
+  tolerant of a hand-written reply and the legacy single `response` (read as
+  a team reply). To answer: `$push` a `messages` entry `{ id, from: "team",
+  text, at }` and set `updatedAt` (and `status` to `planned` / `done` /
+  `wontfix` with an `event` entry saying so).
 
 ### Settings are the USER's; only the look is the device's (`lib/settings/user-settings.ts`)
 
@@ -3789,6 +3827,7 @@ Notable route groups:
 | `/api/lookup/flight/gates?number=&date=` | GET | Yes | That flight's gates, terminals and belt — the tracked flight, else the airport boards; "" until published |
 | `/api/lookup/airline/{fleet,routes,routes/from}?iata=` | GET | Yes | The Worker's airline routes passed through: fleet by type, every airport pair, one airport's destinations with flight numbers |
 | `/api/lookup-test/<route>` | GET | No (OFF in production unless `LOOKUP_TEST_ROUTE=1`; a preview is behind Vercel's deployment protection) | The operator's test door, EDGE: every `/api/lookup` route without the sign-in, plus the Worker's `/probe` (`probe?explore=1`) run from where the APP runs — never `/raw` |
+| `/api/lookup/weather?ids=` | GET | Yes | METAR and TAF for up to 24 stations from the weather cache (MongoDB snapshot, refreshed on demand from aviationweather.gov's cache files) — Node |
 | `/api/lookup/pool/aircraft` | POST | No | The shared aircraft pool — enriched submissions, MongoDB (Node) |
 | `/api/lookup/pool/airport` | POST | No | The shared airport pool — enriched submissions, MongoDB (Node) |
 | `/api/submissions/aircraft` | POST | Yes | Submit custom aircraft for enrichment |
@@ -3799,7 +3838,7 @@ Notable route groups:
 | `/api/account/totp/reveal` | POST | Yes (passkey step-up) | Reveal the TOTP seed + otpauth URI to re-add an authenticator |
 | `/api/account/callsign` | PUT | Yes (passkey step-up **or** TOTP) | Change callsign |
 | `/api/account/sessions` | GET/DELETE | Yes | List sessions (with device `userAgent`); revoke one (incl. current) or all |
-| `/api/feedback` | GET/POST | Yes | In-app feedback: POST files a report (idempotent on the device's id), GET lists the pilot's own |
+| `/api/feedback` | GET/POST/PATCH | Yes | In-app feedback: POST files a report (idempotent on the device's id), GET lists the pilot's own, PATCH adds a follow-up or marks done / reopens |
 
 ### Console Logging
 
@@ -4416,9 +4455,14 @@ period and where it is focused", so they are ONE scroller on ONE time axis:
   Ground duties count zero, standby its `countedDutyMinutes`.
 - **Zoom is continuous** — a pinch follows the fingers' spread and holds the
   time under them (so it pans too), ctrl-wheel on a trackpad, − / + for a
-  keyboard; 3 hours to 180 days. There are no 24h / 7d / 28d presets. Gridlines
-  run the FULL height at the finest step that leaves 42px for a label (hours
-  under a day, dates beyond; midnights stronger), dates as "4 Nov" (`formatDayAt`, no weekday or year).
+  keyboard; 3 hours out to the WHOLE logbook to now (at least 180 days, at
+  most 30 years — the owner: "see the entire history till present"; it was
+  capped at 180 days). There are no 24h / 7d / 28d presets. Gridlines run the
+  FULL height at the finest step that leaves room for its label (`gridStep`):
+  hours as "08" in 10px with 30px between them (room for a date centred between two) (":00" on every line said
+  nothing and cost the finer steps — the owner), then days as "4 Nov"
+  (`formatDayAt`, no weekday or year) with 42px, then calendar MONTHS as
+  "Nov 26" once a fortnight is too tight; midnights and months stronger.
 - **Duty and FDP are drawn apart.** The duty bar runs sign-on → sign-off; the
   FDP inside it, darker, runs sign-on → the last on-blocks (`fdpEndMs`); what is
   left after it is the post-flight half hour, duty but not FDP. The flying sits
@@ -4484,6 +4528,14 @@ period and where it is focused", so they are ONE scroller on ONE time axis:
   PIC's 2:00 (para 3(2), the local night satisfied where required), its rule,
   and the days off it holds. A simulator or positioning duty is named ("SIM",
   "POS" → Simulator / Positioning) and reads "Not a flight duty period".
+- **The pilot's documents are on the same axis** (`lib/utils/roster/currency-lapses.ts`,
+  the owner, Nov 2026). A currency's `expiryDate` is its LAST VALID DAY, so it
+  lapses at 00:00 SGT the day after (`lapseOf`), drawn as an amber marker
+  ("MEDICAL EXP"). In the findings list, the first duty that FLIES on or after
+  a lapse is a violation ("TR438 after Medical expires"); otherwise a lapse
+  inside its own warning window is a caution. A simulator session or a ground
+  duty never counts — it may be the renewal itself — and a standby only flies
+  once called out.
 - **The rest after the LAST duty is drawn too** (`DutyBlock.restAfter`, the
   owner's feedback). Every other rest is the `restBefore` of the duty that
   ends it, so after the last one the chart drew nothing. It commences an hour
@@ -4815,7 +4867,8 @@ other user collection.
 | `airportSubmissions` | User-submitted airports with enrichment status |
 | `sessions` | User sessions with TTL |
 | `deletions` | Tombstones (TTL 30d) for propagating deletes across devices |
-| `feedback` | In-app bug / feature / tweak reports: `{userId, callsign, id, kind, area, title, details, context{route, build, userAgent, viewport, standalone, online}, writtenAt, status, createdAt, response?}`. The app writes `status: "open"` only; triage (`planned` / `done` / `wontfix`, a `response`) is done on the collection and shows on the pilot's report |
+| `feedback` | In-app bug / feature / tweak reports: `{userId, callsign, id, kind, area, title, details, context{route, build, userAgent, viewport, standalone, online}, writtenAt, status, createdAt, updatedAt, messages[{id, from: "pilot"\|"team", text, at, event?}], response? (legacy)}`. The pilot writes follow-ups and done / reopen; triage (`planned` / `wontfix`, replies) is written on the collection and shows in the report's conversation |
+| `weatherCache` | `{_id: "metar" \| "taf", fetchedAt, stations: {ICAO: report}}` — the whole world's current reports, replaced on demand at most every 10 minutes; `lock:<kind>` rows hold a refresh |
 | `flights`, `aircraft`, `personnel`, etc. | Synced user data collections |
 
 **Indexes:** `lib/mongodb/client.ts` runs an idempotent, best-effort
@@ -5365,6 +5418,7 @@ When making changes, be aware of these high-impact files:
 - Do not reintroduce per-file registration normalizers — use the canonical `normalizeRegistration` in `lib/utils/string.ts` on both client and server
 - Do not resolve an IATA code without the flight's DATE where one is known — a code can move between airports (`IATA_REASSIGNMENTS`; VTZ went from VOVZ to VOVI on 17 Aug 2026), and the undated lookup took whichever row came first. Pass the instant to `getAirportByIata`, or pick from the enrichment map with `pickAirportAt`; resolve a stored flight by its ICAO first. And never correct a SIGNED or LOCKED flight's airport automatically — note it in Discrepancies
 - Do not take a UTC offset at "now" for a flight — `getAirportTimeInfo(tz, at)` at the flight's instant. A whole-career import read with today's offset is an hour out on every flight in the other half of the year
+- Do not ask aviationweather.gov per station, on a timer, or from the browser — weather is the two cache files, pulled on demand by the one request that wins the lock, into one snapshot per kind (`lib/weather/server.ts`). Read a snapshot by projection, never whole; and do not move it to a free Worker (10ms of CPU) or a free-plan cron (daily)
 - Do not re-add a bulk CDN aircraft download — the aircraft DB is populated from FR24, custom entries, and the MongoDB enriched pool only
 - Do not remove `"use client"` directives — server/client boundary is intentionally designed
 - Do not commit `.env` files or MongoDB credentials

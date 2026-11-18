@@ -1,5 +1,6 @@
 "use client"
 
+import { setChainDuty } from "@/hooks/use-chain-duty"
 import { formatDayAt } from "@/lib/utils/date"
 import * as React from "react"
 import Link from "next/link"
@@ -188,21 +189,24 @@ export function LegalDashboard({ className }: { className?: string }) {
     : null
   // The sector chain opens its duty's flights — gates, the inbound aeroplane —
   // as `duty:<start ms>`, so the one-screen page gains no row for them.
-  const openDutyMs = selectedId?.startsWith("duty:") ? Number(selectedId.slice(5)) : null
+  // `duty:<ms>#wx` is the same duty opened from the header's Weather button,
+  // which leads with the weather.
+  const openDutyMs = selectedId?.startsWith("duty:") ? Number(selectedId.slice(5).split("#")[0]) : null
+  const openDutyWeather = !!selectedId?.startsWith("duty:") && selectedId.endsWith("#wx")
   const onDashboard = usePathname() === "/"
   React.useEffect(() => {
     // Keep-alive: a hidden dashboard must not write the panel another page
     // owns (the pathname moves a commit before the active-route store does).
     if (!isActive || !onDashboard) return
     if (openDutyMs !== null && Number.isFinite(openDutyMs)) {
-      setDetailContent(<DutyFlightsPanel key={openDutyMs} atMs={openDutyMs} />)
+      setDetailContent(<DutyFlightsPanel key={openDutyMs} atMs={openDutyMs} weatherFirst={openDutyWeather} />)
       return
     }
     if (!openReqId) return
     setDetailContent(
       openRequirement ? <RequirementDetailPanel key={openRequirement.id} requirement={openRequirement} /> : null,
     )
-  }, [isActive, onDashboard, openReqId, openRequirement, openDutyMs, setDetailContent])
+  }, [isActive, onDashboard, openReqId, openRequirement, openDutyMs, openDutyWeather, setDetailContent])
   // Beside the page (a tablet), the detail panel is not left saying "Select a
   // requirement" next to a page that already knows which one matters: with
   // nothing chosen it opens the most pressing currency cell — flagged first,
@@ -230,6 +234,10 @@ export function LegalDashboard({ className }: { className?: string }) {
   // for either to be published, and only while the page is on screen.
   const dutyAtMs =
     status.duty.phase === "on_duty" && status.duty.active ? status.duty.active.startMs : status.duty.next?.reportMs ?? null
+  // The header's Weather button opens the duty the chain draws.
+  React.useEffect(() => {
+    if (isActive) setChainDuty(dutyAtMs)
+  }, [isActive, dutyAtMs])
   const dutyClose = dutyAtMs !== null && dutyAtMs >= now - DUTY_LOOKUP_WINDOW_MS && dutyAtMs <= now + DUTY_LOOKUP_WINDOW_MS
   const duty = useDutyLookups(dutyClose ? dutyAtMs : null, { active: isActive })
   const dutyInfo = React.useMemo(

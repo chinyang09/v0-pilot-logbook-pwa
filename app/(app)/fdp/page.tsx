@@ -21,6 +21,7 @@ import { DutyTimeline, type TimelineScenario } from "@/components/roster/duty-ti
 import { buildDutyTimeline } from "@/lib/utils/roster/duty-timeline"
 import { useFlights } from "@/hooks/data/use-flights"
 import { useScheduleEntries } from "@/hooks/data/use-schedule"
+import { useCurrencies } from "@/hooks/data/use-currencies"
 import { QuickCheckPanel } from "@/components/roster/quick-check-panel"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useMainPanelFullWidth } from "@/lib/layout/panel-mode"
@@ -82,6 +83,7 @@ export default function FDPPage() {
   // name, and the roster for the ground duties the pipeline does not count.
   const { flights } = useFlights()
   const { scheduleEntries } = useScheduleEntries()
+  const { currencies } = useCurrencies()
   const flightsById = useMemo(() => new Map(flights.map((f) => [f.id, f])), [flights])
   const dutyBlocks = useMemo(
     () => buildDutyTimeline(allDutyPeriods, flightsById, scheduleEntries),
@@ -214,6 +216,7 @@ export default function FDPPage() {
               forecast={forecast}
               scenario={timelineScenario}
               onClearScenario={() => setScenarioResult(null)}
+              currencies={currencies}
             />
           </ChartErrorBoundary>
         ) : !isLoading ? (

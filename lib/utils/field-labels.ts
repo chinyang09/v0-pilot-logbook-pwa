@@ -36,6 +36,7 @@ const FIELD_LABELS: Record<string, string> = {
   nightLandings: "Night Landings",
   picName: "PIC",
   sicName: "SIC",
+  additionalCrew: "Other Crew",
   remarks: "Remarks",
 }
 

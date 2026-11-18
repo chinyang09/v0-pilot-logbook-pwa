@@ -18,6 +18,7 @@
 import { readEnvelope, setQuery } from "@/lib/fr24/envelope"
 import type { Fr24Result } from "@/lib/fr24/types"
 import type { EnrichedAirport, LookupRoute, LookupRoutes, PooledAircraft } from "./types"
+import type { WeatherAnswer } from "@/lib/weather/types"
 
 const CLIENT_TIMEOUT_MS = 15000
 
@@ -81,7 +82,20 @@ const airlineQuery = (code: string): { iata: string } | { icao: string } => {
   return c.length === 3 ? { icao: c } : { iata: c }
 }
 
+/** METAR and TAF for stations (ICAO), from the weather cache — `/api/lookup/weather`, Node. */
+async function weatherGet(ids: string[], signal?: AbortSignal): Promise<Fr24Result<WeatherAnswer>> {
+  try {
+    const q = encodeURIComponent([...new Set(ids.map((i) => i.toUpperCase()))].join(","))
+    const response = await fetch(`/api/lookup/weather?ids=${q}`, { signal: withTimeout(signal) })
+    return readEnvelope<WeatherAnswer>(response.status, await response.json().catch(() => null))
+  } catch (err) {
+    return { ok: false, status: 0, error: (err as Error).message }
+  }
+}
+
 export const lookup = {
+  /** METAR and TAF for up to 24 stations (ICAO). */
+  weather: weatherGet,
   /**
    * Every aircraft the text could be, each marked `exact`, exact first. Only an
    * exact one may be taken without the pilot choosing it.

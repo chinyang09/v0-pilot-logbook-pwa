@@ -163,6 +163,12 @@ export interface FieldDiff {
    * different" without burying the user in prose.
    */
   companyValue?: string;
+  /**
+   * The structured value to WRITE, for a field whose `to` is only its display
+   * form — a crew list reads "Joe Chin Jia Hao (Relief Pilot)" in the review,
+   * and is written as the list itself.
+   */
+  value?: unknown;
 }
 
 /**
@@ -344,6 +350,38 @@ export interface SectorCrewAssignment {
    * does not diff the list yet.
    */
   additionalCrew: AdditionalCrew[];
+}
+
+/** "Joe Chin Jia Hao (Relief Pilot), …" — a crew list as the review reads it. */
+export function describeCrewList(list: readonly AdditionalCrew[]): string {
+  return list.map((c) => `${c.name} (${c.role})`).join(", ");
+}
+
+/**
+ * The flight's additional crew with every relief pilot the report lists that
+ * it lacks added — or null when there is nothing to add. A member is the same
+ * person by crew-card id, else by name (`isSamePersonName`); one already in a
+ * SEAT is not added again as a relief pilot.
+ */
+export function mergeReliefCrew(
+  flight: Pick<FlightLog, "additionalCrew" | "picId" | "picName" | "sicId" | "sicName">,
+  incoming: readonly AdditionalCrew[]
+): AdditionalCrew[] | null {
+  const existing = flight.additionalCrew ?? [];
+  const aboard = [
+    ...existing,
+    { id: flight.picId || undefined, name: flight.picName || "" },
+    { id: flight.sicId || undefined, name: flight.sicName || "" },
+  ];
+  const known = (c: AdditionalCrew) =>
+    aboard.some(
+      (a) =>
+        (c.id && a.id && c.id === a.id) ||
+        (a.name && c.name && isSamePersonName(a.name, c.name)) ||
+        (c.name === "Self" && a.name === "Self")
+    );
+  const added = incoming.filter((c) => c.name && !known(c));
+  return added.length > 0 ? [...existing, ...added] : null;
 }
 
 /**
@@ -1036,6 +1074,23 @@ function diffSectorVsFlight(
     incomingCrew.sicId || "",
     changes
   );
+
+  // The pilots beyond the two seats — an SO, a second first officer. A
+  // re-import used to diff the seats only, so a relief pilot the report
+  // lists never reached a flight that already existed (the owner's 18 Nov
+  // TR696/697 with its SO). It is ADDITIVE: a member the report lists and
+  // the flight lacks is added; nobody already on the flight is removed.
+  if ("additionalCrew" in incomingCrew) {
+    const merged = mergeReliefCrew(flight, incomingCrew.additionalCrew)
+    if (merged) {
+      changes.push({
+        field: "additionalCrew",
+        from: describeCrewList(flight.additionalCrew ?? []),
+        to: describeCrewList(merged),
+        value: merged,
+      })
+    }
+  }
 
   // A sector the pilot logged as POSITIONING was not flown by them: nothing
   // the report says about who flew it, the role or the landings applies (a

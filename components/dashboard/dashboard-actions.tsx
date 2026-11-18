@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Calendar, SlidersHorizontal } from "lucide-react"
+import { Calendar, CloudSun, SlidersHorizontal } from "lucide-react"
 
 import { GlassButtonGroup, GlassGroupButton } from "@/components/ui/glass-icon-button"
 import {
@@ -17,6 +17,8 @@ import {
 import { AlertsDropdown } from "./alerts-dropdown"
 import { ChoicePicker, type MenuOption } from "@/components/ui/option-menu"
 import { cn } from "@/lib/utils"
+import { useChainDuty } from "@/hooks/use-chain-duty"
+import { useDetailPanel } from "@/hooks/use-detail-panel"
 
 const PERIOD_HINTS: Record<DashboardPreset, string> = {
   "7d": "Last 7 days",
@@ -53,6 +55,8 @@ export function DashboardActions() {
     setShowCalendar,
   } = useDashboardPeriod()
   const view = useDashboardView()
+  const chainDuty = useChainDuty()
+  const { selectedId, setSelectedId } = useDetailPanel()
 
   const activePreset: DashboardPreset | null =
     period.kind === "preset" ? period.preset : null
@@ -134,6 +138,17 @@ export function DashboardActions() {
       )}
 
       <GlassButtonGroup>
+        {/* The METARs and TAFs for the duty the chain draws — on demand, in
+            the same panel a tap on the chain opens. */}
+        {view === "legal" && chainDuty !== null && (
+          <GlassGroupButton
+            ariaLabel="Weather for this duty"
+            active={selectedId === `duty:${chainDuty}#wx`}
+            onClick={() => setSelectedId(`duty:${chainDuty}#wx`)}
+          >
+            <CloudSun className="h-5 w-5" />
+          </GlassGroupButton>
+        )}
         <AlertsDropdown />
       </GlassButtonGroup>
     </>

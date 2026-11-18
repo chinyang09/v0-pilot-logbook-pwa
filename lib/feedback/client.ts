@@ -8,7 +8,7 @@
  * is never sent under another account than the one that wrote it.
  */
 
-import type { FeedbackContext, FeedbackDraft, FeedbackItem } from "./types"
+import type { FeedbackAction, FeedbackContext, FeedbackDraft, FeedbackItem } from "./types"
 
 const KEY = (userId: string) => `oooi:feedback-outbox:${userId}`
 
@@ -121,4 +121,29 @@ export async function fetchFeedback(): Promise<FeedbackItem[]> {
   if (!res.ok) throw new Error(`Feedback answered ${res.status}`)
   const body = (await res.json()) as { items?: FeedbackItem[] }
   return body.items ?? []
+}
+
+/**
+ * The pilot's side of a report's conversation — a follow-up, done, reopen.
+ * Online only: it answers with the report as the server now holds it, which
+ * is what the panel shows. Throws with a sentence the panel can print.
+ */
+export async function actOnFeedback(id: string, act: FeedbackAction): Promise<FeedbackItem> {
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
+    throw new Error("You're offline — try again once you're online.")
+  }
+  let res: Response
+  try {
+    res = await fetch("/api/feedback", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, ...act }),
+      signal: AbortSignal.timeout(15_000),
+    })
+  } catch {
+    throw new Error("Couldn't reach the server. Try again.")
+  }
+  const body = (await res.json().catch(() => null)) as { item?: FeedbackItem; error?: string } | null
+  if (!res.ok || !body?.item) throw new Error(body?.error || "Couldn't save that. Try again.")
+  return body.item
 }

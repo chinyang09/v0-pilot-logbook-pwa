@@ -8,7 +8,8 @@ import { useCalibratedRowHeight, useRemeasureOnCalibration } from "@/hooks/use-c
 import { PageContainer } from "@/components/page-container";
 import { useDebounce } from "@/hooks/use-debounce";
 import { Button } from "@/components/ui/button";
-import { usePersonnel, useFlights } from "@/hooks/data";
+import { usePersonnel, useFlights, useCrewHistory } from "@/hooks/data";
+import { formatDay } from "@/lib/utils/date";
 import { assignCrewToFlight, deletePersonnel, restorePersonnel, updatePersonnel, type Personnel } from "@/lib/db";
 import { showUndoToast } from "@/lib/utils/undo-toast";
 import { syncService } from "@/lib/sync";
@@ -51,8 +52,11 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
   isRecent = false,
   isFavorite = false,
   onToggleFavorite,
+  lastFlown,
 }: {
   crew: CrewCardItem;
+  /** The date ("YYYY-MM-DD") last flown together — a string, so the memo holds. */
+  lastFlown?: string;
   /**
    * Given the crew member, so the page can pass ONE stable handler for every
    * card. An inline `() => handleCrewSelect(crew)` per row gives each card new
@@ -69,6 +73,8 @@ const SwipeableCrewCard = memo(function SwipeableCrewCard({
 }) {
   const displayName = crew.isMe ? "Self" : crew.name;
   const secondaryParts: string[] = [];
+  // When we last flew together leads: it is what a pilot looks a name up for.
+  if (lastFlown) secondaryParts.push(`Flew ${formatDay(lastFlown, { weekday: false })}`);
   if (crew.organization) secondaryParts.push(crew.organization);
   if (crew.crewId) secondaryParts.push(crew.crewId);
   if (crew.roles && crew.roles.length > 0) secondaryParts.push(crew.roles.join(", "));
@@ -178,6 +184,7 @@ export default function CrewPage() {
 
   const { personnel, isLoading } = usePersonnel();
   const { flights } = useFlights();
+  const crewHistory = useCrewHistory();
   const [searchQuery, setSearchQuery] = useState("");
   const [desktopSearchOpen, setDesktopSearchOpen] = useState(false);
   const debouncedSearchQuery = useDebounce(searchQuery, 150);
@@ -636,6 +643,7 @@ export default function CrewPage() {
                         <SwipeableCrewCard
                           key={crew.id}
                           crew={crew}
+                          lastFlown={crewHistory.get(crew.id)?.last?.date}
                           onSelect={handleCrewSelect}
                           onDelete={performDelete}
                           isSelectMode={!!fieldType}
@@ -659,6 +667,7 @@ export default function CrewPage() {
                           <SwipeableCrewCard
                             key={crew.id}
                             crew={crew}
+                            lastFlown={crewHistory.get(crew.id)?.last?.date}
                             onSelect={handleCrewSelect}
                             onDelete={performDelete}
                             isSelectMode={!!fieldType}
@@ -683,6 +692,7 @@ export default function CrewPage() {
                         <SwipeableCrewCard
                           key={`recent-${crew.id}`}
                           crew={crew}
+                          lastFlown={crewHistory.get(crew.id)?.last?.date}
                           onSelect={handleCrewSelect}
                           onDelete={performDelete}
                           isSelectMode={!!fieldType}
@@ -770,6 +780,7 @@ export default function CrewPage() {
                       <div className="pt-1">
                         <SwipeableCrewCard
                           crew={crew}
+                          lastFlown={crewHistory.get(crew.id)?.last?.date}
                           onSelect={handleCrewSelect}
                           onDelete={performDelete}
                           isSelectMode={!!fieldType}
