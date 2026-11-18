@@ -153,3 +153,38 @@ describe("the dashboard while the last leg is late and not yet on blocks", () =>
     expect(s.phase).not.toBe("on_duty")
   })
 })
+
+describe("the rest after a duty is read at the clock, not when the pipeline ran", () => {
+  // The owner's 18 Nov 26: TR696/697 WSSS–VTCC–WSSS, IN stamped 08:34Z
+  // (debrief 09:04Z), TR274 reporting 22:55Z. The pipeline's result is cached
+  // until the logbook changes, and it last ran at 08:43 — before the debrief.
+  const r = (o: Partial<FlightLog> & { id: string }) => row({ date: "2026-11-18", ...o })
+  const day = [
+    r({ id: "536", date: "2026-11-16", departureIcao: "WSSS", arrivalIcao: "VVTS", arrivalTimezone: 7, reportTime: "21:50", scheduledOut: "22:50", scheduledIn: "01:05", outTime: "22:58", inTime: "01:01", blockTime: "02:03" }),
+    r({ id: "537", date: "2026-11-17", departureIcao: "VVTS", arrivalIcao: "WSSS", departureTimezone: 7, scheduledOut: "02:05", scheduledIn: "04:10", outTime: "02:02", inTime: "03:59", blockTime: "01:57" }),
+    r({ id: "696", departureIcao: "WSSS", arrivalIcao: "VTCC", arrivalTimezone: 7, reportTime: "00:00", scheduledOut: "01:00", scheduledIn: "04:05", outTime: "01:05", inTime: "04:06", blockTime: "03:01" }),
+    r({ id: "697", departureIcao: "VTCC", arrivalIcao: "WSSS", departureTimezone: 7, scheduledOut: "05:05", scheduledIn: "08:20", outTime: "05:13", inTime: "08:34", blockTime: "03:21" }),
+    r({ id: "274", departureIcao: "WSSS", arrivalIcao: "WIII", arrivalTimezone: 7, reportTime: "22:55", scheduledOut: "23:55", scheduledIn: "01:50" }),
+  ]
+  const result = runFDPPipeline(day, [], new Map(), Date.parse("2026-11-18T08:43:00Z"))
+
+  it("before the last on-blocks, rest still counts from the duty before", async () => {
+    const { calculateRestUntilLegal } = await import("../fdp-calculator")
+    expect(calculateRestUntilLegal(result.allDutyPeriods, new Date("2026-11-18T08:30:00Z"))!.lastDutyDate).toBe("2026-11-16")
+  })
+
+  it("from the last on-blocks — not the debrief half an hour later — it counts from the duty just flown", async () => {
+    const { calculateRestUntilLegal } = await import("../fdp-calculator")
+    const rest = calculateRestUntilLegal(result.allDutyPeriods, new Date("2026-11-18T08:43:00Z"))!
+    expect(rest.lastDutyDate).toBe("2026-11-18")
+    expect(rest.restElapsedMinutes).toBe(0)
+  })
+
+  it("read at 10:00 from the same duties, it counts from the duty just flown", async () => {
+    const { calculateRestUntilLegal } = await import("../fdp-calculator")
+    const rest = calculateRestUntilLegal(result.allDutyPeriods, new Date("2026-11-18T10:00:00Z"))!
+    expect(rest.lastDutyDate).toBe("2026-11-18")
+    expect(rest.lastDebriefTime).toBe("09:04")
+    expect(rest.legalAtUtc).toBe("2026-11-18T22:00:00.000Z")
+  })
+})

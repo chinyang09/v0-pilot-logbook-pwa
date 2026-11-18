@@ -18,7 +18,7 @@ export function UndoToastHost() {
   const [busy, setBusy] = useState(false)
 
   const undo = async () => {
-    if (!toast || busy) return
+    if (!toast?.undo || busy) return
     setBusy(true)
     try {
       await toast.undo()
@@ -45,9 +45,10 @@ export function UndoToastHost() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 8 }}
             transition={{ duration: 0.18, ease: "easeOut" }}
-            className="pointer-events-auto flex h-11 max-w-full items-center gap-1 rounded-full border border-border bg-card pl-4 pr-1 text-sm shadow-lg"
+            className={`pointer-events-auto flex h-11 max-w-full items-center gap-1 rounded-full border border-border bg-card pl-4 text-sm shadow-lg ${toast.undo ? "pr-1" : "pr-4"}`}
           >
             <span className="min-w-0 truncate">{toast.message}</span>
+            {toast.undo && (
             <button
               type="button"
               onClick={undo}
@@ -56,6 +57,7 @@ export function UndoToastHost() {
             >
               Undo
             </button>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

@@ -605,7 +605,7 @@ function PasskeysSection() {
 
 function SessionsSection() {
   const { logout } = useAuth()
-  const { sessions, isLoading, refresh } = useAccountSessions()
+  const { sessions, isLoading, failed, refresh } = useAccountSessions()
   const [revokingToken, setRevokingToken] = useState<string | null>(null)
 
   const handleRevokeSession = async (session: SessionData) => {
@@ -692,7 +692,9 @@ function SessionsSection() {
             )
           })}
           {!isLoading && sessions.length === 0 && (
-            <p className="text-sm text-muted-foreground px-4 py-2">No active sessions found.</p>
+            <p className="text-sm text-muted-foreground px-4 py-2">
+              {failed ? "Couldn't load your sessions. Check your connection." : "No active sessions found."}
+            </p>
           )}
         </div>
       </FormSection>

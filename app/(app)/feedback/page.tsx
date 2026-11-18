@@ -27,7 +27,7 @@ import { useAuth } from "@/components/providers/auth-provider"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
-import { appAlert } from "@/lib/utils/app-alert"
+import { showToast } from "@/lib/utils/undo-toast"
 import { formatStamp } from "@/lib/utils/date"
 import { cn } from "@/lib/utils"
 import {
@@ -126,6 +126,14 @@ export default function FeedbackPage() {
     }
   }, [userId, load])
 
+  // Back online, the list comes back by itself — the outbox host sends what
+  // was waiting, and this reads what the server now holds.
+  useEffect(() => {
+    const onOnline = () => void load()
+    window.addEventListener("online", onOnline)
+    return () => window.removeEventListener("online", onOnline)
+  }, [load])
+
   const selected = useMemo(
     () => items?.find((i) => i.id === selectedId) ?? waiting.find((d) => d.id === selectedId) ?? null,
     [items, waiting, selectedId],
@@ -165,12 +173,13 @@ export default function FeedbackPage() {
         onSent={async (id, outcome) => {
           creatingRef.current = false
           if (outcome === "sent") await load()
-          setSelectedId(id)
-          void appAlert(
-            outcome === "sent"
-              ? { title: "Thanks — Report Sent", message: "It is on the list to be worked through." }
-              : { title: "Saved to Send", message: "You are offline. It sends by itself once you are back online." },
-          )
+          // A phone goes back to the list, where the report now leads; a
+          // tablet shows it beside the list. A dialog to acknowledge here put
+          // its own history entry over the overlay's, and Back then landed on
+          // an empty "Select …" pane before it reached the list.
+          if (isDesktop) setSelectedId(id)
+          else setSelectedId(null)
+          showToast(outcome === "sent" ? "Report sent" : "Saved · sends once you're online")
         }}
       />,
     )
@@ -195,7 +204,22 @@ export default function FeedbackPage() {
       <div className="px-panel pt-4 space-y-4">
         {items === null && <Skeleton className="h-40 w-full rounded-xl" />}
 
-        {loadError && <p className="px-1 text-sm text-muted-foreground">{loadError}</p>}
+        {loadError && (sent.length > 0 || waiting.length > 0) && (
+          <p className="px-1 text-sm text-muted-foreground">{loadError}</p>
+        )}
+
+        {loadError && sent.length === 0 && waiting.length === 0 && (
+          <EmptyState
+            icon={CloudOff}
+            title="Reports Unavailable"
+            description={loadError}
+            action={
+              <Button variant="outline" size="sm" onClick={() => void load()}>
+                Try Again
+              </Button>
+            }
+          />
+        )}
 
         {items !== null && sent.length === 0 && waiting.length === 0 && !loadError && (
           <EmptyState

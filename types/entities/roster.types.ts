@@ -355,6 +355,12 @@ export interface DutyPeriod {
    * debrief overstates it by that half hour.
    */
   fdpEndTime?: string
+  /**
+   * A logbook duty with a sector still to fly, carrying the PLAN's shape
+   * (`completePartFlownDuties`) — so its `fdpEndTime` is a scheduled time, not
+   * an on-blocks that has happened.
+   */
+  partFlown?: boolean
   departureTimezoneOffset?: number        // UTC offset of departure airport
   /**
    * UTC offset of the ARRIVAL airport of the last sector — i.e. where the crew

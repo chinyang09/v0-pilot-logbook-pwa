@@ -1,6 +1,7 @@
 import type React from "react"
 import type { Metadata, Viewport } from "next"
 import { ServiceWorkerRegister } from "@/components/service-worker-register"
+import { NativeFeel } from "@/components/native-feel"
 import { SyncProvider } from "@/components/providers/sync-provider"
 import { AuthProvider } from "@/components/providers/auth-provider"
 import { ThemeProvider } from "@/components/providers/theme-provider"
@@ -38,11 +39,13 @@ export const viewport: Viewport = {
   colorScheme: "dark light",
   width: "device-width",
   initialScale: 1,
-  // Pinch-zoom stays ON (WCAG 1.4.4): a pilot who needs larger text must be
-  // able to get it. Every text field is 16px or more on a phone, so iOS has
-  // no reason to zoom on focus, and `touch-action: manipulation` on <html>
-  // (globals.css) keeps double-tap from zooming. The FDP chart takes its own
-  // pinch (`touch-action: pan-x pan-y` on its surface).
+  // No page zoom — the owner's call (Nov 2026): the PWA should behave like a
+  // native app, and a native app does not pinch-zoom its whole screen. Chrome
+  // honours these; WebKit ignores them, so `NativeFeel` cancels its pinch
+  // gesture. Text fields stay 16px or more on a phone so iOS never zooms on
+  // focus either. The FDP timeline keeps its OWN pinch (pointer events).
+  maximumScale: 1,
+  userScalable: false,
   viewportFit: "cover",
 }
 
@@ -74,6 +77,7 @@ export default function RootLayout({
       <body className="bg-background font-sans antialiased">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
           <ServiceWorkerRegister />
+          <NativeFeel />
           <OCRModelsPreloader />
           <AuthProvider>
             <SyncProvider>{children}</SyncProvider>

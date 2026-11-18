@@ -122,6 +122,24 @@ export interface DutyBlock {
    * standby or ground duty (rest runs through an un-called standby).
    */
   restBefore: RestBefore | null
+  /**
+   * The rest AFTER this duty, where no flight duty follows it — the last one
+   * on the roster. Open-ended: it commences an hour after sign-off and runs
+   * on, with the minimum para 3 asks after this duty marked inside it. Every
+   * other rest is the `restBefore` of the duty that ends it, so without this
+   * the chart drew nothing at all after the last duty (the owner's report).
+   */
+  restAfter: OpenRest | null
+}
+
+/** A rest no duty has ended yet. */
+export interface OpenRest {
+  signOffMs: number
+  startMs: number
+  requiredMinutes: number
+  /** When the rest becomes enough for any duty para 3 alone governs. */
+  minimumEndMs: number
+  rule: RestPeriodInfo["rule"]
 }
 
 export interface RestBefore {
@@ -277,6 +295,7 @@ function groundBlock(e: ScheduleEntry, today: string): DutyBlock | null {
     showMax: false,
     scenario: false,
     restBefore: null,
+    restAfter: null,
   }
 }
 
@@ -360,6 +379,7 @@ export function buildDutyTimeline(
       showMax: max > 0 && (dp.isFuture || scenario),
       scenario,
       restBefore: null,
+    restAfter: null,
     })
   }
 
@@ -415,6 +435,20 @@ export function buildDutyTimeline(
     }
     previous = b
   }
+  // After the last flight duty, the rest it starts — para 3's minimum after
+  // that duty. Para 4 asks for more only before a disruptive duty AHEAD, and
+  // there is none.
+  if (previous) {
+    const startMs = previous.endMs + REST_STARTS_AFTER_DUTY_MIN * MIN
+    const legal = earliestLegalRestEnd(startMs, Math.round((previous.endMs - previous.startMs) / MIN), null)
+    previous.restAfter = {
+      signOffMs: previous.endMs,
+      startMs,
+      requiredMinutes: legal.requiredRestMinutes,
+      minimumEndMs: legal.legalAtMs,
+      rule: legal.rule,
+    }
+  }
   return blocks
 }
 
@@ -432,9 +466,9 @@ export type PointerState =
     }
   | {
       kind: "rest"
-      /** The duty the rest is before. */
-      block: DutyBlock
-      rest: RestBefore
+      /** The duty the rest is before — null after the last duty. */
+      block: DutyBlock | null
+      rest: RestBefore | OpenRest
       /** Rest counted so far — negative in the hour after sign-off, before it commences. */
       minutes: number
     }
@@ -480,6 +514,12 @@ export function pointerState(blocks: readonly DutyBlock[], t: number): PointerSt
   if (next?.restBefore) {
     const rest = next.restBefore
     return { kind: "rest", block: next, rest, minutes: Math.floor((t - rest.startMs) / MIN) }
+  }
+  // Past the last flight duty, in the rest it started.
+  const last = [...blocks].reverse().find((b) => b.restAfter)
+  if (last?.restAfter && t >= last.restAfter.signOffMs && !blocks.some((b) => b.startMs > t)) {
+    const rest = last.restAfter
+    return { kind: "rest", block: null, rest, minutes: Math.floor((t - rest.startMs) / MIN) }
   }
   return { kind: "off", next: blocks.find((b) => b.startMs > t) ?? null }
 }

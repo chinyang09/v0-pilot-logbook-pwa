@@ -787,6 +787,9 @@ function ToggleRow({
   );
 }
 
+/** A flight created this recently is being filled in, from the top. */
+const FRESH_FLIGHT_MS = 60_000;
+
 interface FlightFormProps {
   onFlightAdded: (flight: FlightLog) => void;
   onClose: () => void;
@@ -1692,10 +1695,15 @@ function FlightFormImpl({
   // restored when the form re-mounts — switching out of the logbook section and
   // back, or returning from a picker on mobile. Kept current on every scroll so the
   // latest position is already saved by the time the form unmounts.
-  // Saved WITH the flight it belongs to. Saved bare, the offset was restored
-  // into whichever flight mounted next — open a different flight after
-  // scrolling one and it opened at the Landings section, not at its date.
+  // The depth CARRIES from one flight to the next (the owner, Nov 2026: "allows
+  // easy comparison between flights" — every flight opening at its top meant
+  // scrolling back down to the same section each time). Only a flight just
+  // CREATED — a new one, a Next Leg, a Return — starts at its top, because the
+  // form is filled from the top (`freshFlight`).
   const scrollFlightId = resolvedFlight?.id || flightIdProp || "";
+  // Read inside the effects below — "now" is not render-time state.
+  const createdAt = resolvedFlight?.createdAt;
+  const isFreshFlight = () => !!createdAt && Date.now() - createdAt < FRESH_FLIGHT_MS;
   const writeScroll = useCallback(() => {
     if (scrollContainerRef.current && scrollFlightId) {
       sessionStorage.setItem(
@@ -1760,10 +1768,10 @@ function FlightFormImpl({
     // full height; otherwise the saved offset would clamp to a short page.
     if (!cachedFlight && !liveFlight) return;
     didRestoreScrollRef.current = true;
+    if (isFreshFlight()) return;
     const saved = sessionStorage.getItem(SCROLL_STORAGE_KEY);
     if (!saved) return;
-    const [savedId, savedTop] = saved.split("|");
-    if (savedId !== scrollFlightId) return;
+    const savedTop = saved.split("|")[1];
     const scrollVal = Number(savedTop);
     if (Number.isFinite(scrollVal) && scrollVal > 0) {
       el.scrollTop = scrollVal;
@@ -1774,14 +1782,16 @@ function FlightFormImpl({
   }, [liveFlight]);
 
   // A different flight under a mounted form (desktop keeps the form up while
-  // the list selection moves) starts at its top, not at the depth the last
-  // one was read to. The FIRST id is left to the restore above.
+  // the list selection moves) stays at the depth the last one was read to —
+  // the comparison the owner asked for — unless it was just created.
   const shownFlightIdRef = useRef(scrollFlightId);
   useLayoutEffect(() => {
     if (shownFlightIdRef.current === scrollFlightId) return;
     const switched = shownFlightIdRef.current !== "";
     shownFlightIdRef.current = scrollFlightId;
-    if (switched && scrollContainerRef.current) scrollContainerRef.current.scrollTop = 0;
+    if (switched && isFreshFlight() && scrollContainerRef.current) scrollContainerRef.current.scrollTop = 0;
+    // `isFreshFlight` reads the flight being switched TO.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollFlightId]);
 
   // Force-save current form data before navigating away (bypasses debounce)

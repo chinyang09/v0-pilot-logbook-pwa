@@ -3,7 +3,7 @@
  * sectors inside — and the summary of whatever range is in view.
  */
 import { describe, expect, it } from "vitest"
-import { buildDutyTimeline } from "../duty-timeline"
+import { buildDutyTimeline, pointerState } from "../duty-timeline"
 import { SCENARIO_DUTY_PREFIX } from "../fdp-calculator"
 import type { DutyPeriod, ScheduleEntry } from "@/types/entities/roster.types"
 import type { FlightLog } from "@/types/entities/flight.types"
@@ -264,5 +264,30 @@ describe("ground duties", () => {
     expect(g.dutyMinutes).toBe(240)
     expect(g.restBefore).toBeNull()
     expect(blocks[2].restBefore?.previousId).toBe("d1")
+  })
+})
+
+// The owner's report: "the chart does not track rest after the very last
+// duty". Every other rest is the restBefore of the duty that ends it.
+describe("the rest after the last duty", () => {
+  it("opens an hour after sign-off, with para 3's minimum after that duty, and only on the last", () => {
+    const blocks = buildDutyTimeline([duty({ id: "a" }), duty({ id: "b", date: "2026-11-05" })], new Map())
+    expect(blocks[0].restAfter).toBeNull()
+    const rest = blocks[1].restAfter!
+    expect(rest.signOffMs).toBe(at("2026-11-05T09:30:00Z"))
+    expect(rest.startMs).toBe(at("2026-11-05T10:30:00Z"))
+    // Commencing 18:30 SGT after an 8:30 duty: the local night completes at
+    // 06:00 SGT, 11:30 in — legal there, before the 12 hours without one.
+    expect(rest.minimumEndMs).toBe(at("2026-11-05T22:00:00Z"))
+    expect(rest.rule).toBe("3a")
+  })
+
+  it("is where the pointer is once that duty has ended, with no duty ahead", () => {
+    const blocks = buildDutyTimeline([duty({ id: "a" })], new Map())
+    const s = pointerState(blocks, at("2026-11-03T20:30:00Z"))
+    expect(s.kind).toBe("rest")
+    if (s.kind !== "rest") return
+    expect(s.block).toBeNull()
+    expect(s.minutes).toBe(10 * 60)
   })
 })

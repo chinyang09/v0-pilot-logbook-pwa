@@ -70,8 +70,13 @@ export function buildPlannedDuties(flights: FlightLog[]): DutyPeriod[] {
 
 /**
  * The duties still AHEAD, from the flight rows: every planned duty none of
- * whose sectors has flown yet and whose report is after `nowMs`, marked
- * `isFuture`.
+ * whose sectors has flown yet and whose planned END is after `nowMs`, marked
+ * `isFuture` — so a duty already REPORTED for, with nothing logged yet, is
+ * one of them. That is every duty's first hours: a pilot logs a sector once
+ * it has flown, and while the report was the cut-off the FDP page dropped the
+ * duty in progress altogether — "Rest 6d 16h, Next Duty 24 Nov" beside a
+ * dashboard reading ON DUTY. Past its planned end with nothing logged it is a
+ * gap (`isUnloggedPast`), not a duty ahead.
  *
  * Rostered FLIGHTS live in the logbook as scheduled rows, not in
  * `scheduleEntries` (which holds standby, ground, leave and off only), and the
@@ -95,7 +100,7 @@ export function upcomingPlannedDuties(
   for (const dp of planned) {
     if (dp.flightIds.some((id) => flown.has(id))) continue
     const reportMs = Date.parse(`${dp.date}T${dp.reportTime}:00Z`)
-    if (!Number.isFinite(reportMs) || reportMs <= nowMs) continue
+    if (!Number.isFinite(reportMs) || reportMs + dp.dutyMinutes * 60_000 <= nowMs) continue
     ahead.push({ ...dp, isFuture: true })
   }
   return ahead
@@ -159,6 +164,7 @@ export function completePartFlownDuties(
       id: dp.id,
       source: dp.source,
       isFuture: false,
+      partFlown: true,
       flightMinutes: pieces.reduce((sum, p) => sum + (p.flightMinutes || 0), 0),
     })
   }

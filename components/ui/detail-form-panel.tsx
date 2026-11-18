@@ -87,18 +87,22 @@ export function DetailFormPanel({
           <h2 ref={titleRef} className="px-1 text-xl font-semibold">
             {title}
           </h2>
-          {description && <p className="-mt-3 px-1 text-sm text-muted-foreground">{description}</p>}
+          {/* ONE line under the title: an error, else why Save is not
+              available, else the description. A status that came and went
+              as its own line moved the whole form while the pilot typed
+              (the owner's report on New Report: "Give it a title" vanished
+              with the first letter and the fields jumped up). In the
+              description's place it swaps text instead. */}
           {error ? (
-            <p className="px-1 text-sm text-destructive" role="alert">
+            <p className="-mt-3 px-1 text-sm text-destructive" role="alert">
               {error}
             </p>
+          ) : dirty && status ? (
+            <p className="-mt-3 px-1 text-sm text-muted-foreground" role="status">
+              {status}
+            </p>
           ) : (
-            dirty &&
-            status && (
-              <p className="px-1 text-sm text-muted-foreground" role="status">
-                {status}
-              </p>
-            )
+            description && <p className="-mt-3 px-1 text-sm text-muted-foreground">{description}</p>
           )}
           {children}
         </div>
