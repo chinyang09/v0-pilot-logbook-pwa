@@ -40,7 +40,7 @@ export function CrewDetailPanel({ crewId, isNew = false, onUpdated, onCancelNew 
     return (
       <PanelMessage
         title="Crew Member Not Found"
-        description="It may have been deleted on another device, or not synced to this one yet."
+        description="Deleted, or not synced to this device yet."
       />
     )
   }

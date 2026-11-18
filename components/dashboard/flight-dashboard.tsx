@@ -49,8 +49,9 @@ import { cn } from "@/lib/utils"
 import { useTick } from "./flight/instruments"
 import { CrewFace, CurrencyFace, DestinationFace, DutyFace, FlightFace, LimitsFace, StatusFace } from "./flight/faces"
 import { WeatherFace, type WeatherState } from "./flight/weather"
-import { WIDGET_TITLE, WidgetDetail } from "./flight/details"
-import { Widget, WidgetSheet, type WidgetAnchor, type WidgetId } from "./flight/widget"
+import { WIDGET_TITLE, useWidgetCtx, widgetContent } from "./flight/details"
+import { Widget, WidgetCard, WidgetLabel, WidgetSheet, type WidgetAnchor, type WidgetId } from "./flight/widget"
+import { ActionRow, ActionStack } from "@/components/ui/action-row"
 import type { FlightBrief } from "./flight/model"
 
 /** How far either side of now a duty's gates and aeroplane are worth asking about. */
@@ -81,6 +82,28 @@ function useAirportsByIcao(icaos: readonly string[]): Map<string, Airport> {
     }
   }, [key, revision])
   return found?.key === key ? found.map : NO_AIRPORTS
+}
+
+/** What a tile shows — the face its card keeps as a header. */
+function faceOf(id: WidgetId, brief: FlightBrief): React.ReactNode {
+  switch (id) {
+    case "status":
+      return <StatusFace brief={brief} />
+    case "duty":
+      return <DutyFace brief={brief} />
+    case "flight":
+      return <FlightFace brief={brief} />
+    case "weather":
+      return <WeatherFace weather={brief.weather} code={brief.code} />
+    case "crew":
+      return <CrewFace brief={brief} />
+    case "destination":
+      return <DestinationFace brief={brief} />
+    case "currency":
+      return <CurrencyFace brief={brief} />
+    case "limits":
+      return <LimitsFace brief={brief} />
+  }
 }
 
 export function FlightDashboard({ className }: { className?: string }) {
@@ -217,15 +240,25 @@ export function FlightDashboard({ className }: { className?: string }) {
     },
     [isDesktop, setSelectedId],
   )
-  // The panel beside the page shows the widget it was asked for.
+  const ctx = useWidgetCtx()
+  // The panel beside the page shows the widget it was asked for: the same
+  // card the phone lifts, its actions as capsules under it.
   React.useEffect(() => {
-    if (!isActive || !onDashboard || !panelWidget) return
+    if (!isActive || !onDashboard || !panelWidget || !WIDGET_TITLE[panelWidget]) return
+    const { body, actions, header } = widgetContent(panelWidget, brief, ctx)
     setDetailContent(
-      <ReadingPanel key={panelWidget} title={WIDGET_TITLE[panelWidget] ?? "Detail"}>
-        <WidgetDetail id={panelWidget} brief={brief} onNavigate={(go) => go()} />
+      <ReadingPanel key={panelWidget} title={WIDGET_TITLE[panelWidget]}>
+        <WidgetCard face={header === "face" ? faceOf(panelWidget, brief) : null} body={body} />
+        {actions.length > 0 && (
+          <ActionStack>
+            {actions.map((a) => (
+              <ActionRow key={a.id} label={a.label} icon={a.icon} disabled={a.busy} onClick={a.run} />
+            ))}
+          </ActionStack>
+        )}
       </ReadingPanel>,
     )
-  }, [isActive, onDashboard, panelWidget, brief, setDetailContent])
+  }, [isActive, onDashboard, panelWidget, brief, ctx, setDetailContent])
 
   // Beside the page, the panel is never left saying "Select…": with nothing
   // chosen it opens the duty's flights, else the currency list.
@@ -252,48 +285,38 @@ export function FlightDashboard({ className }: { className?: string }) {
       {face}
     </Widget>
   )
-  const faceOf = (id: WidgetId): React.ReactNode => {
-    switch (id) {
-      case "status":
-        return <StatusFace brief={brief} />
-      case "duty":
-        return <DutyFace brief={brief} />
-      case "flight":
-        return <FlightFace brief={brief} />
-      case "weather":
-        return <WeatherFace weather={weather} code={brief.code} />
-      case "crew":
-        return <CrewFace brief={brief} />
-      case "destination":
-        return <DestinationFace brief={brief} />
-      case "currency":
-        return <CurrencyFace brief={brief} />
-      case "limits":
-        return <LimitsFace brief={brief} />
-    }
-  }
-
   return (
     <div className={cn("@container flex max-h-full min-h-0 flex-col", className)}>
       {/* Scrolls only as a LAST RESORT: every tile fits a phone held upright
           (measured: 360×780 and up). Held sideways it is ~390px tall, and the
           tiles scroll rather than being squeezed out of sight. */}
       <div className="grid min-h-0 grid-cols-6 content-start gap-2 overflow-y-auto overscroll-contain scrollbar-hide @[44rem]:grid-cols-12">
-        {tile("status", faceOf("status"), "col-span-6")}
-        {tile("duty", faceOf("duty"), "col-span-6")}
-        {tile("flight", faceOf("flight"), "col-span-6 @[44rem]:col-span-12")}
-        {tile("weather", faceOf("weather"), "col-span-2 @[44rem]:col-span-4")}
-        {tile("crew", faceOf("crew"), "col-span-2 @[44rem]:col-span-4")}
-        {tile("destination", faceOf("destination"), "col-span-2 @[44rem]:col-span-4")}
-        {tile("currency", faceOf("currency"), "col-span-3 @[44rem]:col-span-6")}
-        {tile("limits", faceOf("limits"), "col-span-3 @[44rem]:col-span-6")}
+        {tile("status", faceOf("status", brief), "col-span-6")}
+        {tile("duty", faceOf("duty", brief), "col-span-6")}
+        {tile("flight", faceOf("flight", brief), "col-span-6 @[44rem]:col-span-12")}
+        {tile("weather", faceOf("weather", brief), "col-span-2 @[44rem]:col-span-4")}
+        {tile("crew", faceOf("crew", brief), "col-span-2 @[44rem]:col-span-4")}
+        {tile("destination", faceOf("destination", brief), "col-span-2 @[44rem]:col-span-4")}
+        {tile("currency", faceOf("currency", brief), "col-span-3 @[44rem]:col-span-6")}
+        {tile("limits", faceOf("limits", brief), "col-span-3 @[44rem]:col-span-6")}
       </div>
 
-      {sheet && (
-        <WidgetSheet anchor={sheet.anchor} title={WIDGET_TITLE[sheet.id]} face={faceOf(sheet.id)} onClose={() => setSheet(null)}>
-          {(close) => <WidgetDetail id={sheet.id} brief={brief} onNavigate={(go) => close(go)} />}
-        </WidgetSheet>
-      )}
+      {sheet &&
+        (() => {
+          const { body, actions, header } = widgetContent(sheet.id, brief, ctx)
+          const face = faceOf(sheet.id, brief)
+          return (
+            <WidgetSheet
+              anchor={sheet.anchor}
+              title={WIDGET_TITLE[sheet.id]}
+              face={face}
+              header={header === "face" ? face : <WidgetLabel>{WIDGET_TITLE[sheet.id]}</WidgetLabel>}
+              body={body}
+              actions={actions}
+              onClose={() => setSheet(null)}
+            />
+          )
+        })()}
     </div>
   )
 }

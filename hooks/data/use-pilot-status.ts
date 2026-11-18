@@ -140,6 +140,8 @@ export function usePilotStatus(
           isLegalNow: r.isLegalNow,
           elapsedMinutes: r.restElapsedMinutes,
           requiredMinutes: r.requiredRestMinutes,
+          minimumMinutes: r.minimumMinutes,
+          withNight: r.withNight,
           legalAtUtc: r.legalAtUtc,
         }
       : null

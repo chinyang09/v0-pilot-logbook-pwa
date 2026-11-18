@@ -42,7 +42,21 @@ import { formatHHMMDisplay, minutesToHHMM } from "@/lib/utils/time"
 import { pointerState, REST_RULE_LABEL, type DutyBlock, type OpenRest, type RestBefore } from "@/lib/utils/roster/duty-timeline"
 import { createRollingIndex, rollingAt, rollingSeries, type RollingIndex, type RollingKind } from "@/lib/utils/roster/rolling-at"
 import { analyseDaysOff } from "@/lib/utils/roster/days-off"
-import { formatRestSpan, LONG_REST_MIN } from "@/lib/utils/dashboard/duty-status"
+import { formatRestSpan, LONG_REST_MIN, restMinimumText } from "@/lib/utils/dashboard/duty-status"
+
+/**
+ * A rest's minimum as its rule reads ("10:00 + night", "12:00") — never the
+ * span to the night's completion ("11:56"), which read as a miscount.
+ */
+function minimumOf(
+  r: { requiredMinutes: number | null; minimumMinutes?: number; withNight?: boolean },
+  clock: (min: number) => string,
+  short = false,
+): string {
+  if (r.requiredMinutes == null) return ""
+  if (r.minimumMinutes === undefined) return clock(r.requiredMinutes)
+  return short ? clock(r.minimumMinutes) : restMinimumText({ requiredMinutes: r.requiredMinutes, minimumMinutes: r.minimumMinutes, withNight: r.withNight }, clock)
+}
 import type { ForecastResult, FTLLimits } from "@/types/entities/roster.types"
 
 const MIN = 60_000
@@ -646,7 +660,7 @@ export function DutyTimeline({
           r.minutes >= LONG_REST_MIN
             ? formatRestSpan(r.minutes, duration)
             : r.requiredMinutes != null
-              ? `${duration(r.minutes)}/${duration(r.requiredMinutes)}`
+              ? `${duration(r.minutes)}/${minimumOf(r, duration, true)}`
               : duration(r.minutes)
         if (fits(xOf(b.startMs) - xOf(r.startMs), text)) rest.push({ key: `r${b.id}`, y: REST_LABEL_Y, x: (xOf(r.startMs) + xOf(b.startMs)) / 2, text, tone: r.status === "short" ? "over" : null, onBar: false })
       }
@@ -1082,6 +1096,7 @@ function stateCells(
   }
   if (s.kind === "rest") {
     const req = s.rest.requiredMinutes
+    const min = minimumOf(s.rest, duration)
     // Past 100 hours "x:xx/xx:xx" no longer fits a third of a phone's row
     // ("477:23/11…"), so a long rest reads in days and hours and its minimum
     // moves up into the caption.
@@ -1090,8 +1105,8 @@ function stateCells(
       s.minutes < 0
         ? { caption: "Rest", value: `In ${duration(-s.minutes)}`, muted: true }
         : long
-          ? { caption: req != null ? `Rest · Min ${duration(req)}` : "Rest", value: formatRestSpan(s.minutes), over: "status" in s.rest && s.rest.status === "short" }
-          : { caption: "Rest", value: req != null ? `${duration(s.minutes)}/${duration(req)}` : duration(s.minutes), over: "status" in s.rest && s.rest.status === "short" }
+          ? { caption: req != null ? `Rest · Min ${min}` : "Rest", value: formatRestSpan(s.minutes), over: "status" in s.rest && s.rest.status === "short" }
+          : { caption: req != null ? `Rest · Min ${min}` : "Rest", value: duration(s.minutes), over: "status" in s.rest && s.rest.status === "short" }
     return [...ahead(s.block), rest]
   }
   return [...ahead(s.next), { ...none, caption: "Rest" }]
@@ -1364,7 +1379,7 @@ function OpenRestBar({
         type="button"
         onClick={onSelect}
         aria-pressed={selected}
-        aria-label={`Rest after the last duty, minimum ${duration(rest.requiredMinutes)}`}
+        aria-label={`Rest after the last duty, minimum ${minimumOf(rest, duration)}`}
         className="absolute"
         style={{ left: h.left, width: h.width, top: REST_Y, height: REST_LABEL_Y + LABEL_H - REST_Y }}
       >
@@ -1417,7 +1432,7 @@ function OpenRestDetail({
       />
       <div className="overflow-hidden rounded-xl border bg-card">
         {sofar > 0 && <ReadOnlyRow label="Rest So Far" value={formatRestSpan(sofar, duration)} />}
-        <ReadOnlyRow label="Minimum" value={duration(rest.requiredMinutes)} />
+        <ReadOnlyRow label="Minimum" value={minimumOf(rest, duration)} />
         <ReadOnlyRow label="Legal From" value={clock(rest.minimumEndMs)} />
         <ReadOnlyRow label="Rule" value={REST_RULE_LABEL[rest.rule]} />
         <ReadOnlyRow label="Signed Off" value={clock(rest.signOffMs)} />
@@ -1468,7 +1483,7 @@ function RestBar({
         type="button"
         onClick={onSelect}
         aria-pressed={selected}
-        aria-label={`Rest ${duration(rest.minutes)}${rest.requiredMinutes != null ? `, minimum ${duration(rest.requiredMinutes)}` : ""}${short ? ", short" : ""}`}
+        aria-label={`Rest ${duration(rest.minutes)}${rest.requiredMinutes != null ? `, minimum ${minimumOf(rest, duration)}` : ""}${short ? ", short" : ""}`}
         className="absolute"
         style={{ left: h.left, width: h.width, top: REST_Y, height: REST_LABEL_Y + LABEL_H - REST_Y }}
       >
@@ -1592,7 +1607,7 @@ function DutyDetail({
         {rest && (
           <VerdictRow
             label="Rest Before"
-            value={rest.requiredMinutes ? `${formatRestSpan(rest.minutes, duration)} of ${duration(rest.requiredMinutes)} required` : formatRestSpan(rest.minutes, duration)}
+            value={rest.requiredMinutes ? `${formatRestSpan(rest.minutes, duration)} · min ${minimumOf(rest, duration)}` : formatRestSpan(rest.minutes, duration)}
             tone={rest.status === "short" ? "over" : rest.status === "tight" ? "near" : null}
           />
         )}
@@ -1676,8 +1691,8 @@ function RestDetail({
       />
       <div className="overflow-hidden rounded-xl border bg-card">
         <VerdictRow label="Rest" value={formatRestSpan(rest.minutes, duration)} tone={short ? "over" : rest.status === "tight" ? "near" : null} />
-        {rest.requiredMinutes != null && <ReadOnlyRow label="Minimum" value={duration(rest.requiredMinutes)} />}
-        {rest.minimumEndMs != null && <ReadOnlyRow label="Minimum Until" value={clock(rest.minimumEndMs)} />}
+        {rest.requiredMinutes != null && <ReadOnlyRow label="Minimum" value={minimumOf(rest, duration)} />}
+        {rest.minimumEndMs != null && <ReadOnlyRow label="Legal From" value={clock(rest.minimumEndMs)} />}
         {rest.rule && <ReadOnlyRow label="Rule" value={REST_RULE_LABEL[rest.rule]} />}
         {rest.includesLocalNight != null && <ReadOnlyRow label="Local Night (SGT)" value={rest.includesLocalNight ? "Included" : "Not included"} />}
         {short && owed != null && owed > 0 && <VerdictRow label="Short By" value={duration(owed)} tone="over" />}

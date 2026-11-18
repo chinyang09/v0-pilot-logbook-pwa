@@ -69,7 +69,7 @@ export function AirportDetailPanel({ icao, onBack, onToggleFavorite }: AirportDe
     return (
       <PanelMessage
         title={`${icao.toUpperCase()} Not Found`}
-        description="It is not in this device's airport list. Add it with the + button."
+        description="Not on this device. Add it with +."
       />
     )
   }

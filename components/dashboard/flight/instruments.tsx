@@ -16,7 +16,7 @@ import { formatDayAt } from "@/lib/utils/date"
 import * as React from "react"
 import { Check, TriangleAlert, OctagonAlert, Info } from "lucide-react"
 
-import { formatDutyClock, formatRestSpan, type SectorLeg } from "@/lib/utils/dashboard/duty-status"
+import { formatDutyClock, formatRestSpan, restMinimumText, type SectorLeg } from "@/lib/utils/dashboard/duty-status"
 import { ANNUNCIATOR_WORD, type AnnunciatorState } from "@/lib/utils/dashboard/pilot-status"
 import type { PilotStatus } from "@/lib/utils/dashboard/pilot-status"
 import type { Requirement, RequirementState } from "@/lib/utils/dashboard/legality"
@@ -413,7 +413,7 @@ export function DutyBand({
             value: formatRestSpan(next.restAvailableMinutes),
             label: short
               ? `Short ${formatDutyClock(next.restShortfallMinutes)}`
-              : `Min ${formatDutyClock(next.restRequiredMinutes)}`,
+              : `Min ${next.restMinimum || formatDutyClock(next.restRequiredMinutes)}`,
             tone: short ? "fail" : undefined,
           },
           {
@@ -464,7 +464,7 @@ export function DutyBand({
           },
           {
             value: formatRestSpan(rest.elapsedMinutes),
-            label: `Min ${formatDutyClock(rest.requiredMinutes)}`,
+            label: `Min ${restMinimumText(rest)}`,
             live: true,
           },
           {

@@ -137,6 +137,9 @@ export interface OpenRest {
   signOffMs: number
   startMs: number
   requiredMinutes: number
+  /** The rule's minimum and whether it needs a night — "10:00 + night" (`restMinimumText`). */
+  minimumMinutes: number
+  withNight: boolean
   /** When the rest becomes enough for any duty para 3 alone governs. */
   minimumEndMs: number
   rule: RestPeriodInfo["rule"]
@@ -149,6 +152,9 @@ export interface RestBefore {
   startMs: number
   minutes: number
   requiredMinutes: number | null
+  /** The rule's minimum and whether it needs a night, when known. */
+  minimumMinutes?: number
+  withNight?: boolean
   /** When the required rest would have been complete, null when unknown. */
   minimumEndMs: number | null
   compliant: boolean | null
@@ -417,7 +423,13 @@ export function buildDutyTimeline(
       const earliest = rp
         ? typeof rp.precedingDutyMinutes === "number"
           ? earliestLegalRestEnd(startMs, rp.precedingDutyMinutes, rp.rule === "4a" || rp.rule === "4b" ? rp.rule : null)
-          : { legalAtMs: startMs + rp.requiredRestMinutes * MIN, requiredRestMinutes: rp.requiredRestMinutes, rule: rp.rule ?? null }
+          : {
+              legalAtMs: startMs + rp.requiredRestMinutes * MIN,
+              requiredRestMinutes: rp.requiredRestMinutes,
+              rule: rp.rule ?? null,
+              minimumMinutes: undefined,
+              withNight: undefined,
+            }
         : null
       const requiredMinutes = earliest ? earliest.requiredRestMinutes : null
       b.restBefore = {
@@ -425,6 +437,8 @@ export function buildDutyTimeline(
         startMs,
         minutes,
         requiredMinutes,
+        minimumMinutes: earliest?.minimumMinutes,
+        withNight: earliest?.withNight,
         minimumEndMs: earliest ? earliest.legalAtMs : null,
         compliant,
         status: restStatus(minutes, requiredMinutes, compliant),
@@ -445,6 +459,8 @@ export function buildDutyTimeline(
       signOffMs: previous.endMs,
       startMs,
       requiredMinutes: legal.requiredRestMinutes,
+      minimumMinutes: legal.minimumMinutes,
+      withNight: legal.withNight,
       minimumEndMs: legal.legalAtMs,
       rule: legal.rule,
     }

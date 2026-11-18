@@ -1227,28 +1227,41 @@ builds ONE model a minute (`FlightBrief`, `flight/model.ts`) and draws it as
 tiles (`flight/widget.tsx`, faces in `flight/faces.tsx`, bodies in
 `flight/details.tsx`):
 
-| Tile | Glance | Opens into |
-|---|---|---|
-| Status | the annunciator (state, imperative, governing / Also) | the next action, every flagged requirement with its remedy |
-| Duty | the duty clock: FDP against its Reg 14 maximum on duty; rest against the next report off duty; a standby's window | the figures behind it, latest on-blocks, rest rule, next duty's FDP, the duties Coming Up |
-| This / Next Duty | flight numbers, the sector chain with each stop's time and gate, the aeroplane, the inbound line | each leg: schedule, actual, expected in, aircraft, Gates; the inbound; Open Flight |
-| Weather | each airport's worst category over the duty's times there, the first hazard | the processed METAR / TAF (below) with Refresh |
-| Crew | who is on it and when last flown together ("First flight") | each member: last flight together, how many, open them or that flight |
-| Last There | when last flown INTO each destination (not the origin) | last arrival, arrivals in 12 months and in the logbook, local time now, arriving by day or night |
-| Currency | the three most pressing, with the tally | every currency, each a disclosure with its detail and remedy |
-| Limits | the four rolling limits as small bars | each limit's detail; Open FDP |
+| Tile | Glance | Its card adds | Circles |
+|---|---|---|---|
+| Status | the annunciator (state, imperative, governing / Also) | only the flagged requirements the face does not name — none, no body | Currency, FDP |
+| Duty | the duty clock | a figure grid (Legal From, Minimum "10:00 + night", Report, Next FDP — or FDP, Latest On-Blocks, Table, Flight on duty) and the duties after, a line each | FDP |
+| This / Next Duty | flight numbers, the chain with each stop's time and gate, the aeroplane, the inbound line | a row per leg — times, gates, tail; a tap opens it | each leg's flight, Refresh |
+| Weather | each airport's worst category and first hazard | per airport: category and hazard CHIPS, the METAR, and ONLY the TAF periods over the duty's times there, each with its leg | Refresh |
+| Crew | who, and the day last flown together ("New") | a row each: initials, name, role · flights together, the day; a tap opens their card | Crew |
+| Last There | the day last flown INTO each destination (not the origin) | a row each: the day, arrivals this year, local time now, a sun or moon for the arrival | — |
+| Currency | the three most pressing, with the tally | every currency as a figure-over-name cell, tinted only when flagged | Currency |
+| Limits | the four rolling limits as small bars | the hours LEFT in each, or "Breach ahead" | FDP |
 
-- **A phone: tiles GROW into a sheet** (`WidgetSheet`) — the context preview's
-  morph: laid out once at its resting size, it travels from the tile and a
-  clip that starts as the tile's exact box and corners opens over it; a copy
-  of the tile's face covers the box on the first frame and on the close (it
-  returns at once on the close, or the detail shows through it). Scrim, close
-  button, Escape and back close it; a link out of it runs as the close's
-  follow-up (`close(then)`). The tile is hidden while its sheet is up.
-- **A tablet / desktop: main + detail** — a tile opens its body in the detail
-  panel (`w:<id>`, ringed tile), and with nothing chosen the panel opens the
-  duty's flights (`explicit: false`). "Open Flight" opens the flight in the
+**The card IS the tile, lifted — the flight card's context preview** (the
+owner, Nov 2026: the first sheet — a title bar, a close button, grouped
+sections and disclosures — read as "even more words", and most of it was not
+useful). It keeps the tile's face as its header, lays what the tile had no
+room for under a hairline (`details.tsx`: figures in a grid, one-line rows,
+chips — never a sentence, a heading or a disclosure; nothing the face already
+says), and puts what can be DONE in the preview's circles beneath it
+(`WidgetAction`, `actionTileClass`). A narrow tile whose body says all its
+face did and more (crew, last there, currency, weather) leads with its LABEL
+instead (`header: "label"`), so no name appears twice.
+
+- **A phone: the tile LIFTS** (`WidgetSheet`) — laid out once at its resting
+  size, it travels from the tile and a clip that starts as the tile's exact box
+  and corners opens over it. A full-width tile keeps its width, so its face is
+  the first frame to the pixel; a narrow tile's face copy covers its box on the
+  first frame and on the close. Scrim, Escape and back close it; an action runs
+  as the close's follow-up (Refresh stays open). No title bar, no close button.
+- **A tablet / desktop: main + detail** — a tile opens the same card in the
+  detail panel (`w:<id>`, ringed tile; `WidgetCard`, its circles as capsules,
+  no label under the panel's own title), and with nothing chosen the panel
+  opens the duty's flights (`explicit: false`). A flight opens in the
   dashboard's own panel (a flight id), as the summary rows do.
+- Measured at 4× on the owner's logbook: a card opens in one task of 54–77ms;
+  an idle dashboard runs nothing.
 - **Fit:** measured at 390×844, 360×780 and 1180×820: the grid is 625px with
   nothing to scroll. Every face is one line per fact, truncated, so a tile does
   not change height as answers land; a tile that ADDS a line has to be
@@ -1492,6 +1505,15 @@ to last on-blocks, against its own Reg 14 maximum. Measured to the DEBRIEF it
 would carry para 7(2)'s 30 minutes of post-flight checks and overstate the very
 figure the maximum is compared against, so `DutyPeriod.fdpEndTime` records the
 last on-blocks and `plannedFdpMinutes` is measured to it.
+
+**A rest's minimum is said as its RULE — "10:00 + night", "12:00" — never as
+the span to the instant it is met** (`restMinimumText`, from
+`earliestLegalRestEnd`'s `minimumMinutes` / `withNight`). They differ whenever
+the wait is for the local night: rest from 10:04Z needs 10 hours AND a night,
+which is not in until 06:00 SGT (22:00Z), so the span is 11:56. Printed as
+"Min 11:56" the owner read it as the rule taking 4 minutes off 12 hours (18 Nov
+26). The dashboard's duty band and card, and the FDP page's state row, rest
+labels and details all say the rule; Legal From says when.
 
 **Rest is worked BACKWARDS from the next duty.** "Legal from 04:36" on its own
 says little: what a rest period has to be depends on the duty AHEAD as much as
@@ -3632,6 +3654,13 @@ or not.
   a team reply). To answer: `$push` a `messages` entry `{ id, from: "team",
   text, at }` and set `updatedAt` (and `status` to `planned` / `done` /
   `wontfix` with an `event` entry saying so).
+- **The list is what is still being worked on.** Open (and Planned) lead;
+  Done and Won't Do fold under ONE "Done · n" row. Any sent report swipes
+  away — or "Remove From List" in its panel — with an Undo: PATCH `remove`
+  sets `removedAt` and GET leaves it out; the document stays for whoever works
+  through the collection (`restore` is the Undo). The owner: done reports
+  "stay indefinitely" and bloat the list. A row says only what its section
+  does not (Replied, Planned, Won't Do — never "Open" under Open).
 
 ### Settings are the USER's; only the look is the device's (`lib/settings/user-settings.ts`)
 
@@ -5554,6 +5583,8 @@ When making changes, be aware of these high-impact files:
 - Do not put rest back in the currency band — it is a property of the duty just flown, not a standing qualification, and a live countdown among expiry dates reads as a different kind of thing. It lives in the duty band, and the annunciator has to fold it into the verdict itself since it is no longer one of the requirements
 - Do not print the rolling limits in the duty band as well as the limits band — that was the duplication the rework removed. The duty band carries FDP and flight time for THIS duty only
 - Do not derive the duty band's bar colour from how full it is — state the tone. A nearly-full FDP bar is a warning and a nearly-full REST bar is good news; deriving it painted a fully-rested pilot amber. And do not put a standby's window on the status ramp: how full it is is a magnitude, not a verdict (`RAMP.info`)
+- Do not print a rest's span to legality as its minimum — "Min 11:56" read as a miscount; it is "10:00 + night" (`restMinimumText`), with Legal From saying when
+- Do not give a flight-page card a title bar, a close button, sections or a disclosure, or say in it what its face says — it is the tile lifted (the flight card's preview): face, a hairline, figures and one-line rows, circles beneath
 - Do not give a flight-page tile a line that wraps or appears only sometimes — one truncated line per fact, or the one-screen phone layout moves as answers land; and do not open a tile's detail on a phone anywhere but its own sheet, grown out of the tile
 - Do not read a TAF without the duty's times — highlight the periods within an hour of each leg's time at that airport (`stationWindows`), and lay a change group over what prevails rather than reading it alone
 - Do not put the duty band's ring back. The off-duty question is a COMPARISON of two instants on one axis — when the rest becomes legal, and when the next duty reports — and an arc has nowhere to put the second one. It is a timeline with the report as a CARET and the rest still owed as a red band, so a duty rostered inside the rest period is visible before a word is read
