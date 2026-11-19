@@ -38,6 +38,7 @@ import { ninetyDayRecency } from "@/lib/utils/dashboard-aggregate"
 import { dutyFlights } from "@/lib/utils/dashboard/duty-flights"
 import { describeDuty } from "@/lib/utils/dashboard/duty-line"
 import { dutyWindow } from "@/lib/utils/dashboard/duty-status"
+import { fdpMinutesOf } from "@/lib/utils/roster/fdp-calculator"
 import { crewOnDuty, destinationVisits, dutyStations, legTimes } from "@/lib/utils/dashboard/flight-brief"
 import { briefStations, stationWindows } from "@/lib/weather/brief"
 import { getAirportDisplayCode } from "@/lib/utils/airport-display"
@@ -47,19 +48,31 @@ import { getAirportByIcao, getAirportsRevision } from "@/lib/db/stores/reference
 import type { Airport } from "@/types/entities/airport.types"
 import { cn } from "@/lib/utils"
 import { useTick } from "./flight/instruments"
-import { CrewFace, CurrencyFace, DestinationFace, DutyFace, FlightFace, LimitsFace, StatusFace } from "./flight/faces"
+import { CrewFace, CurrencyFace, DestinationFace, DutyFace, DutyStepper, FlightFace, LimitsFace, limitsOf } from "./flight/faces"
 import { WeatherFace, type WeatherState } from "./flight/weather"
 import { WIDGET_TITLE, useWidgetCtx, widgetContent } from "./flight/details"
 import { Widget, WidgetCard, WidgetLabel, WidgetSheet, type WidgetAnchor, type WidgetId } from "./flight/widget"
 import { ActionRow, ActionStack } from "@/components/ui/action-row"
-import type { FlightBrief } from "./flight/model"
+import type { DutyChoice, FlightBrief } from "./flight/model"
+import type { DutyPeriod } from "@/types/entities/roster.types"
+import type { RequirementState } from "@/lib/utils/dashboard/legality"
 
 /** How far either side of now a duty's gates and aeroplane are worth asking about. */
 const LOOKUP_WINDOW_MS = 18 * 3600_000
 /** How far ahead a TAF reaches: past this the weather is not worth asking. */
 const WEATHER_AHEAD_MS = 30 * 3600_000
-/** Duties listed under "Coming Up". */
-const UPCOMING = 5
+/** How many duties ahead the flight card can step to. */
+const CHOICES = 14
+
+/** A duty with flying in it — what the flight card can be about. */
+const hasFlying = (dp: DutyPeriod) => !dp.dutyKind || dp.dutyKind === "flight" || dp.dutyKind === "positioning"
+
+/** The worst state among some requirements — a card's tint. */
+function worstOf(states: RequirementState[]): RequirementState | null {
+  if (states.includes("fail")) return "fail"
+  if (states.includes("caution") || states.includes("unknown")) return "caution"
+  return null
+}
 
 const NO_AIRPORTS = new Map<string, Airport>()
 
@@ -87,8 +100,6 @@ function useAirportsByIcao(icaos: readonly string[]): Map<string, Airport> {
 /** What a tile shows — the face its card keeps as a header. */
 function faceOf(id: WidgetId, brief: FlightBrief): React.ReactNode {
   switch (id) {
-    case "status":
-      return <StatusFace brief={brief} />
     case "duty":
       return <DutyFace brief={brief} />
     case "flight":
@@ -107,7 +118,10 @@ function faceOf(id: WidgetId, brief: FlightBrief): React.ReactNode {
 }
 
 export function FlightDashboard({ className }: { className?: string }) {
-  const isActive = usePageActive("/")
+  // Which duty the page is about: null is the default (in progress, else
+  // next). Coming back to the page goes back to it.
+  const [chosenAt, setChosenAt] = React.useState<number | null>(null)
+  const isActive = usePageActive("/", () => setChosenAt(null))
   const now = useTick(isActive)
   const { preferences } = usePreferences()
   const display = preferences?.display
@@ -123,8 +137,46 @@ export function FlightDashboard({ className }: { className?: string }) {
   const { status, isLoading: statusLoading } = usePilotStatus(recency, now, display)
 
   /* ── The duty the page is about ──────────────────────────────────────── */
-  const current = status.duty.phase === "on_duty" && status.duty.active !== null
-  const dutyAtMs = current ? status.duty.active!.startMs : (status.duty.next?.reportMs ?? null)
+  const onDuty = status.duty.phase === "on_duty" && status.duty.active !== null
+  const defaultAt = onDuty ? status.duty.active!.startMs : (status.duty.next?.reportMs ?? null)
+  const defaultId = onDuty ? status.duty.active!.id : (status.duty.next?.id ?? null)
+  const choices: DutyChoice[] = React.useMemo(() => {
+    const byId = defaultId ? allDutyPeriods.find((dp) => dp.id === defaultId) ?? null : null
+    const after = defaultAt ?? now
+    const later = allDutyPeriods
+      .filter(hasFlying)
+      .map((dp) => ({ period: dp, atMs: dutyWindow(dp)?.startMs ?? NaN }))
+      .filter((c) => Number.isFinite(c.atMs) && c.atMs > after + 60_000)
+      .sort((a, b) => a.atMs - b.atMs)
+    const list = defaultAt !== null ? [{ atMs: defaultAt, period: byId }, ...later] : later
+    return list.slice(0, CHOICES)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `now` matters only with nothing ahead; the list moves on as duties do
+  }, [allDutyPeriods, defaultAt, defaultId, defaultAt === null ? now : 0])
+  const found = chosenAt === null ? 0 : choices.findIndex((c) => c.atMs === chosenAt)
+  const index = Math.max(0, found)
+  const choice = choices[index] ?? null
+  const current = onDuty && index === 0
+  const dutyAtMs = choice?.atMs ?? null
+  const step = React.useCallback(
+    (delta: number) => {
+      const next = choices[Math.min(choices.length - 1, Math.max(0, index + delta))]
+      setChosenAt(next && next !== choices[0] ? next.atMs : null)
+    },
+    [choices, index],
+  )
+  const selectDuty = React.useCallback(
+    (atMs: number) => setChosenAt(choices[0]?.atMs === atMs ? null : atMs),
+    [choices],
+  )
+  const fdp = React.useMemo(() => {
+    if (current || !choice) return null
+    if (index === 0 && status.duty.next) {
+      const n = status.duty.next
+      return n.plannedFdpMinutes > 0 ? { planned: n.plannedFdpMinutes, max: n.maxFdpMinutes } : null
+    }
+    const dp = choice.period
+    return dp && dp.maxFdpMinutes > 0 ? { planned: fdpMinutesOf(dp), max: dp.maxFdpMinutes } : null
+  }, [current, choice, index, status.duty.next])
   const legs = React.useMemo(() => (dutyAtMs === null ? [] : dutyFlights(flights, dutyAtMs)), [flights, dutyAtMs])
   const times = React.useMemo(() => legs.map(legTimes), [legs])
   const lookupsClose = dutyAtMs !== null && Math.abs(dutyAtMs - now) <= LOOKUP_WINDOW_MS
@@ -173,17 +225,6 @@ export function FlightDashboard({ className }: { className?: string }) {
     [stationBriefs, weatherClose, stations.length, wx.loading, wx.refreshing, wx.failed, wx.refreshFailed, wx.weather, wx.refresh],
   )
 
-  /* ── What comes after ────────────────────────────────────────────────── */
-  const upcoming = React.useMemo(() => {
-    const after = dutyAtMs ?? now
-    return allDutyPeriods
-      .map((dp) => ({ dp, w: dutyWindow(dp) }))
-      .filter((x) => x.w && x.w.startMs > after + 60_000)
-      .sort((a, b) => a.w!.startMs - b.w!.startMs)
-      .slice(0, UPCOMING)
-      .map((x) => x.dp)
-  }, [allDutyPeriods, dutyAtMs, now])
-
   /* ── Formatting ──────────────────────────────────────────────────────── */
   const zone = React.useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, [])
   const pref = display?.airportIdentifier
@@ -204,6 +245,11 @@ export function FlightDashboard({ className }: { className?: string }) {
       duty: {
         atMs: dutyAtMs,
         current,
+        choices,
+        index,
+        period: choice?.period ?? null,
+        fdp,
+        restBefore: index > 0 ? (choice?.period?.restBefore ?? null) : null,
         legs,
         times,
         lookups: lookupsClose ? lookups.lookups : null,
@@ -215,14 +261,13 @@ export function FlightDashboard({ className }: { className?: string }) {
       destinations,
       airports,
       weather,
-      upcoming,
       code: (icao: string, iata?: string) =>
         getAirportDisplayCode(icao, iata || iataOf.get((icao || "").toUpperCase()), pref) || icao,
       clock: (ms: number) => formatInstant(ms, display, zone),
       day: (ms: number) =>
         formatDayAt(ms, display?.useZuluTime === false ? zone : "UTC", { year: false }),
     }),
-    [status, now, display, dutyAtMs, current, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, crew, destinations, airports, weather, upcoming, iataOf, pref, zone],
+    [status, now, display, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, crew, destinations, airports, weather, iataOf, pref, zone],
   )
 
   /* ── Opening a widget ────────────────────────────────────────────────── */
@@ -240,7 +285,8 @@ export function FlightDashboard({ className }: { className?: string }) {
     },
     [isDesktop, setSelectedId],
   )
-  const ctx = useWidgetCtx()
+  const nav = useWidgetCtx()
+  const ctx = React.useMemo(() => ({ ...nav, selectDuty }), [nav, selectDuty])
   // The panel beside the page shows the widget it was asked for: the same
   // card the phone lifts, its actions as capsules under it.
   React.useEffect(() => {
@@ -265,14 +311,19 @@ export function FlightDashboard({ className }: { className?: string }) {
   const loading = flightsLoading || statusLoading
   React.useEffect(() => {
     if (!isDesktop || !isActive || !onDashboard || loading || selectedId) return
-    setSelectedId(dutyAtMs !== null ? "w:flight" : "w:currency", { explicit: false })
+    setSelectedId(dutyAtMs !== null ? "w:flight" : "w:duty", { explicit: false })
   }, [isDesktop, isActive, onDashboard, loading, selectedId, dutyAtMs, setSelectedId])
 
   if (loading) {
     return <Skeleton className={cn("h-full min-h-[24rem] rounded-3xl", className)} />
   }
 
-  const tile = (id: WidgetId, face: React.ReactNode, cls?: string) => (
+  const reqs = status.legality.requirements
+  const tint = {
+    currency: worstOf(reqs.filter((r) => r.group === "currency").map((r) => r.state)),
+    limits: worstOf(limitsOf(brief).map((r) => r.state)),
+  } as Partial<Record<WidgetId, RequirementState | null>>
+  const tile = (id: WidgetId, face: React.ReactNode, cls?: string, controls?: React.ReactNode) => (
     <Widget
       key={id}
       id={id}
@@ -280,6 +331,8 @@ export function FlightDashboard({ className }: { className?: string }) {
       open={isDesktop && panelWidget === id}
       hidden={sheet?.id === id}
       onOpen={open}
+      tone={tint[id] ?? null}
+      controls={controls}
       className={cls}
     >
       {face}
@@ -291,9 +344,13 @@ export function FlightDashboard({ className }: { className?: string }) {
           (measured: 360×780 and up). Held sideways it is ~390px tall, and the
           tiles scroll rather than being squeezed out of sight. */}
       <div className="grid min-h-0 grid-cols-6 content-start gap-2 overflow-y-auto overscroll-contain scrollbar-hide @[44rem]:grid-cols-12">
-        {tile("status", faceOf("status", brief), "col-span-6")}
-        {tile("duty", faceOf("duty", brief), "col-span-6")}
-        {tile("flight", faceOf("flight", brief), "col-span-6 @[44rem]:col-span-12")}
+        {tile("duty", faceOf("duty", brief), "col-span-6 @[44rem]:col-span-12")}
+        {tile(
+          "flight",
+          faceOf("flight", brief),
+          "col-span-6 @[44rem]:col-span-12",
+          <DutyStepper index={index} count={choices.length} onStep={step} />,
+        )}
         {tile("weather", faceOf("weather", brief), "col-span-2 @[44rem]:col-span-4")}
         {tile("crew", faceOf("crew", brief), "col-span-2 @[44rem]:col-span-4")}
         {tile("destination", faceOf("destination", brief), "col-span-2 @[44rem]:col-span-4")}

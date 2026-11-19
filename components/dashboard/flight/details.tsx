@@ -12,9 +12,11 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { Moon, Plane, RefreshCw, ShieldCheck, Sun, Timer, Users } from "lucide-react"
+import { Moon, Plane, PlaneLanding, RefreshCw, ShieldCheck, Sun, Timer, Users } from "lucide-react"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
-import { dutyWindow, formatDutyClock, formatRestSpan, restMinimumText } from "@/lib/utils/dashboard/duty-status"
+import { dutyWindow, formatDutyClock, formatRestSpan } from "@/lib/utils/dashboard/duty-status"
+import { gateLabel } from "@/lib/utils/dashboard/duty-line"
+import { whereaboutsLines } from "@/lib/lookup/aircraft-whereabouts"
 import type { Requirement } from "@/lib/utils/dashboard/legality"
 import { isNight } from "@/lib/utils/night-time"
 import { hasCoordinates } from "@/lib/utils/flight-calculations"
@@ -27,8 +29,7 @@ import type { FlightBrief } from "./model"
 import type { WidgetAction, WidgetId } from "./widget"
 
 export const WIDGET_TITLE: Record<WidgetId, string> = {
-  status: "Status",
-  duty: "Duty",
+  duty: "Duty & Rest",
   flight: "Flights",
   weather: "Weather",
   crew: "Crew",
@@ -110,6 +111,8 @@ function Initials({ name }: { name: string }) {
 export interface WidgetCtx {
   openFlight: (id: string) => void
   go: (href: string) => void
+  /** Make the dashboard about the duty reporting at `atMs`. */
+  selectDuty?: (atMs: number) => void
 }
 
 /**
@@ -132,27 +135,16 @@ export function widgetContent(
 } {
   const fdp: WidgetAction = { id: "fdp", label: "FDP", icon: <Timer className="h-5 w-5" />, run: () => ctx.go("/fdp") }
   switch (id) {
-    case "status":
-      return {
-        header: "face",
-        body: hasMoreFlagged(brief) ? <StatusBody brief={brief} /> : null,
-        actions: [{ id: "cur", label: "Currency", icon: <ShieldCheck className="h-5 w-5" />, run: () => ctx.go("/currencies") }, fdp],
-      }
     case "duty":
-      return { header: "face", body: <DutyBody brief={brief} />, actions: [fdp] }
+      return { header: "face", body: hasDutyBody(brief) ? <DutyBody brief={brief} /> : null, actions: [fdp] }
     case "flight": {
       const legs = brief.duty.legs
       return {
         header: "face",
-        body: legs.length ? <FlightBody brief={brief} openFlight={ctx.openFlight} /> : null,
+        body: legs.length || brief.duty.choices.length > 1 ? <FlightBody brief={brief} ctx={ctx} /> : null,
+        // Each leg opens from its own row; the one thing to DO is ask again.
         actions: [
-          ...legs.slice(0, 3).map((l) => ({
-            id: l.id,
-            label: l.flightNumber || "Flight",
-            icon: <Plane className="h-5 w-5" />,
-            run: () => ctx.openFlight(l.id),
-          })),
-          ...(legs.length
+          ...(legs.length && brief.duty.lookups
             ? [
                 {
                   id: "refresh",
@@ -208,145 +200,142 @@ export function widgetContent(
 }
 
 /** The navigation every body needs, bound to the app's router and panel. */
-export function useWidgetCtx(): WidgetCtx {
+export function useWidgetCtx(): Omit<WidgetCtx, "selectDuty"> {
   const router = useRouter()
   const { setSelectedId } = useDetailPanel()
   return React.useMemo(() => ({ openFlight: (id) => setSelectedId(id), go: (href) => router.push(href) }), [router, setSelectedId])
 }
 
-function hasMoreFlagged(brief: FlightBrief): boolean {
-  const named = new Set([brief.status.governing?.id, brief.status.also[0]?.id].filter(Boolean))
-  return brief.status.legality.requirements.some((r) => r.state !== "ok" && !named.has(r.id))
+/** Anything the duty card's face does not already say. */
+function hasDutyBody(brief: FlightBrief): boolean {
+  const { phase, active, rest, lastDuty } = brief.status.duty
+  if (phase === "on_duty" && active) return active.maxFdpMinutes > 0
+  return !!rest || !!lastDuty
 }
 
-/** Everything flagged the face does not already name, worst first. */
-function StatusBody({ brief }: { brief: FlightBrief }) {
-  // The face already names the governing requirement and the first "Also".
-  const named = new Set([brief.status.governing?.id, brief.status.also[0]?.id].filter(Boolean))
-  const flagged = brief.status.legality.requirements
-    .filter((r) => r.state !== "ok" && !named.has(r.id))
-    .sort((a, b) => (b.urgency ?? 0) - (a.urgency ?? 0))
-  if (flagged.length === 0) return null
-  return (
-    <div className="space-y-0.5">
-      {flagged.map((r) => (
-        <ReqLine key={r.id} requirement={r} />
-      ))}
-    </div>
-  )
-}
-
-function ReqLine({ requirement: r }: { requirement: Requirement | null }) {
-  if (!r) {
-    const Icon = STATE_ICON.ok
+/**
+ * What the duty card's face has no room for — never a figure it already
+ * shows. On duty: the latest the last leg may block in, and when the duty
+ * ends. Off duty: how long rested so far, and the duty rested from.
+ */
+function DutyBody({ brief }: { brief: FlightBrief }) {
+  const { status, clock, day } = brief
+  const { active, rest, lastDuty } = status.duty
+  if (status.duty.phase === "on_duty" && active) {
+    if (active.maxFdpMinutes <= 0) return null
+    const fdpOpenMs = active.startMs - (active.fdpElapsedMinutes - active.elapsedMinutes) * 60_000
     return (
-      <p className="flex items-center gap-2 py-1 text-[14px] text-foreground">
-        <Icon className={cn("h-4 w-4", REQ_TONE.ok.icon)} aria-hidden /> All met
-      </p>
+      <Grid>
+        <Fig label="Latest On-Blocks" value={clock(fdpOpenMs + active.maxFdpMinutes * 60_000)} />
+        <Fig label="Off Duty" value={clock(active.debriefMs)} />
+      </Grid>
     )
   }
-  const Icon = STATE_ICON[r.state]
   return (
-    <p className="flex items-center gap-2 py-1 text-[14px]">
-      <Icon className={cn("h-4 w-4 shrink-0", REQ_TONE[r.state].icon)} aria-hidden />
-      <span className="min-w-0 flex-1 truncate text-foreground">{r.label}</span>
-      <span className={cn("shrink-0 font-semibold tabular-nums", REQ_TONE[r.state].icon)}>{r.value}</span>
-    </p>
+    <Grid>
+      {rest && <Fig label="Rested" value={formatRestSpan(rest.elapsedMinutes)} />}
+      {lastDuty && (
+        <Fig label={`Last Duty · ${day(lastDuty.debriefMs)}`} value={lastDuty.route || formatDutyClock(lastDuty.elapsedMinutes)} />
+      )}
+    </Grid>
   )
 }
 
-/** The figures behind the duty clock, then what comes after it. */
-function DutyBody({ brief }: { brief: FlightBrief }) {
-  const { status, clock, day, upcoming } = brief
-  const { active, next, rest } = status.duty
-  const onDuty = status.duty.phase === "on_duty" && active
+/**
+ * The chosen duty: its figures (what its face does not say), each leg a row a
+ * tap opens, the aeroplane coming in, and the duties to choose from.
+ */
+function FlightBody({ brief, ctx }: { brief: FlightBrief; ctx: WidgetCtx }) {
+  const { duty, code, clock, day } = brief
+  const w = duty.period ? dutyWindow(duty.period) : null
+  const inbound = duty.lookups?.inbound
+  const lines =
+    inbound?.status === "done" ? whereaboutsLines(inbound.whereabouts, brief.now, brief.display?.clockSeparator) : null
   return (
-    <>
-      <Grid>
-        {onDuty && active ? (
-          active.maxFdpMinutes > 0 ? (
-            <>
-              <Fig label="FDP" value={`${formatDutyClock(active.fdpElapsedMinutes)} / ${formatDutyClock(active.maxFdpMinutes)}`} tone={active.exceeded ? "over" : undefined} />
-              <Fig
-                label="Latest On-Blocks"
-                value={clock(active.startMs - (active.fdpElapsedMinutes - active.elapsedMinutes) * 60_000 + active.maxFdpMinutes * 60_000)}
-              />
-              <Fig label="Table" value={[active.fdpTable, `${active.sectorCount} sector${active.sectorCount === 1 ? "" : "s"}`].filter(Boolean).join(" · ")} />
-              <Fig label="Flight" value={formatDutyClock(active.flightMinutes)} />
-            </>
-          ) : (
-            <Fig label="FDP" value={active.notFdp ? `${active.notFdp} — none` : "—"} />
-          )
-        ) : (
-          <>
-            {rest && <Fig label="Legal From" value={rest.isLegalNow ? "Now" : clock(Date.parse(rest.legalAtUtc))} tone={rest.isLegalNow ? "ok" : undefined} />}
-            {rest && <Fig label="Minimum" value={restMinimumText(rest)} />}
-            {next && <Fig label="Report" value={clock(next.reportMs)} />}
-            {next && next.plannedFdpMinutes > 0 && (
-              <Fig
-                label="Next FDP"
-                value={next.maxFdpMinutes > 0 ? `${formatDutyClock(next.plannedFdpMinutes)} / ${formatDutyClock(next.maxFdpMinutes)}` : formatDutyClock(next.plannedFdpMinutes)}
-                tone={next.maxFdpMinutes > 0 && next.plannedFdpMinutes > next.maxFdpMinutes ? "over" : undefined}
-              />
-            )}
-          </>
-        )}
-      </Grid>
-      {upcoming.length > 0 && (
-        <div className="mt-2 border-t border-border/70 pt-1.5">
-          {upcoming.slice(0, 4).map((dp) => {
-            const w = dutyWindow(dp)
+    <div>
+      {w && (
+        <Grid>
+          {/* The next duty's report is the duty card's; a later one's is new here. */}
+          {w && duty.index > 0 && <Fig label="Report" value={clock(w.startMs)} />}
+          {w && <Fig label="Off Duty" value={clock(w.endMs)} />}
+          {duty.period?.fdpTableUsed && duty.fdp && duty.fdp.max > 0 && (
+            <Fig label="FDP Table" value={duty.period.fdpTableUsed} />
+          )}
+        </Grid>
+      )}
+      {duty.legs.length > 0 && (
+        <div className={cn(w && "mt-1.5 border-t border-border/70 pt-1")}>
+          {duty.legs.map((f, i) => {
+            const g = duty.lookups?.gates[f.id]
+            const done = g?.status === "done" ? g.gates : null
+            const dep = done ? gateLabel(done.departure.gate, done.departure.terminal, done.departure.stand) : ""
+            const arr = done ? gateLabel(done.arrival.gate, done.arrival.terminal, done.arrival.stand) : ""
             return (
-              <p key={dp.id} className="flex items-baseline gap-2 py-1 text-[13px]" suppressHydrationWarning>
-                <span className="w-24 shrink-0 text-muted-foreground">{w ? day(w.startMs) : dp.date}</span>
-                <span className="min-w-0 flex-1 truncate text-foreground">{dp.route || dp.dutyKind || "Duty"}</span>
-                <span className="shrink-0 tabular-nums text-muted-foreground">{w ? clock(w.startMs) : ""}</span>
-              </p>
+              <TapRow
+                key={f.id}
+                onClick={() => ctx.openFlight(f.id)}
+                lead={<Plane className={cn("h-4 w-4 shrink-0", f.inTime ? "text-chart-2" : "text-muted-foreground")} aria-hidden />}
+                title={
+                  <>
+                    {f.flightNumber || "Flight"}{" "}
+                    <span className="font-normal text-muted-foreground">
+                      {code(f.departureIcao, f.departureIata)} → {code(f.arrivalIcao, f.arrivalIata)}
+                    </span>
+                  </>
+                }
+                sub={
+                  [
+                    dep || arr ? `Gate ${dep || "–"} → ${arr || "–"}` : null,
+                    // The airport names the flight the aeroplane comes in on.
+                    done?.inboundFlight ? `Inbound ${done.inboundFlight}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || undefined
+                }
+                // The times are on the chain above; the row adds the tail.
+                right={f.aircraftReg || undefined}
+              />
+            )
+          })}
+          {lines && (
+            // The aeroplane coming in: which flight, its STD, where it is,
+            // and the gate it arrives at — the gate means little apart from
+            // the flight it belongs to.
+            <TapRow
+              lead={<PlaneLanding className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />}
+              title={
+                <>
+                  {lines.flight} <span className="font-normal text-muted-foreground">{duty.lookups?.inboundRegistration}</span>
+                </>
+              }
+              sub={[lines.std, lines.primary].filter(Boolean).join(" · ")}
+              right={lines.gate || undefined}
+            />
+          )}
+        </div>
+      )}
+      {duty.choices.length > 1 && ctx.selectDuty && (
+        <div className="mt-1.5 border-t border-border/70 pt-1">
+          {duty.choices.slice(0, 6).map((c, i) => {
+            const chosen = i === duty.index
+            return (
+              <TapRow
+                key={c.atMs}
+                onClick={chosen ? undefined : () => ctx.selectDuty!(c.atMs)}
+                lead={
+                  <span
+                    aria-hidden
+                    className={cn("h-2 w-2 shrink-0 rounded-full", chosen ? "bg-primary" : "border border-muted-foreground/60")}
+                  />
+                }
+                title={<span className={cn(!chosen && "font-normal")}>{day(c.atMs)}</span>}
+                sub={c.period?.route || undefined}
+                right={clock(c.atMs)}
+              />
             )
           })}
         </div>
       )}
-      {!onDuty && rest && !next && (
-        <p className="mt-1 text-xs text-muted-foreground" suppressHydrationWarning>
-          {formatRestSpan(rest.elapsedMinutes)} rested
-        </p>
-      )}
-    </>
-  )
-}
-
-/** Each leg on a line — when, gates, aeroplane — a tap opens it. */
-function FlightBody({ brief, openFlight }: { brief: FlightBrief; openFlight: (id: string) => void }) {
-  const { duty, code, clock } = brief
-  return (
-    <div>
-      {duty.legs.map((f, i) => {
-        const t = duty.times[i]
-        const g = duty.lookups?.gates[f.id]
-        const gates = g?.status === "done" ? [g.gates.departure.gate, g.gates.arrival.gate] : null
-        return (
-          <TapRow
-            key={f.id}
-            onClick={() => openFlight(f.id)}
-            lead={<Plane className={cn("h-4 w-4 shrink-0", f.inTime ? "text-chart-2" : "text-muted-foreground")} aria-hidden />}
-            title={
-              <>
-                {f.flightNumber || "Flight"}{" "}
-                <span className="font-normal text-muted-foreground">
-                  {code(f.departureIcao, f.departureIata)} → {code(f.arrivalIcao, f.arrivalIata)}
-                </span>
-              </>
-            }
-            sub={[gates && (gates[0] || gates[1]) ? `Gate ${gates[0] || "–"} → ${gates[1] || "–"}` : null, f.aircraftReg].filter(Boolean).join(" · ") || undefined}
-            right={
-              t && t.departMs !== null
-                ? `${clock(t.departMs)}${t.arriveMs !== null ? `–${clock(t.arriveMs)}` : ""}`
-                : undefined
-            }
-          />
-        )
-      })}
-
     </div>
   )
 }

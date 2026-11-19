@@ -17,7 +17,7 @@ import * as React from "react"
 import { Check, TriangleAlert, OctagonAlert, Info } from "lucide-react"
 
 import { formatDutyClock, formatRestSpan, restMinimumText, type SectorLeg } from "@/lib/utils/dashboard/duty-status"
-import { ANNUNCIATOR_WORD, type AnnunciatorState } from "@/lib/utils/dashboard/pilot-status"
+import type { AnnunciatorState } from "@/lib/utils/dashboard/pilot-status"
 import type { PilotStatus } from "@/lib/utils/dashboard/pilot-status"
 import type { Requirement, RequirementState } from "@/lib/utils/dashboard/legality"
 import { formatInstant } from "@/lib/utils/tz-format"
@@ -124,89 +124,6 @@ export function useTick(active: boolean): number {
 
 /* ── Master annunciator ──────────────────────────────────────────────────── */
 
-/**
- * State, imperative, governing constraint. Three lines, and the hero is the
- * IMPERATIVE — never a bare figure.
- *
- * It used to print a raw rest countdown here whenever rest was outstanding,
- * which is the thing the owner called out: "legal from gives earliest window
- * for accepting a duty however without context". `nextAction.headline` already
- * carries the contextual form of the same fact — "Rest short by 3:00" when a
- * rostered duty reports inside the rest period, "Rest until 04:36" when there
- * is nothing to work backwards from — and the duty band below draws it. A
- * countdown on top of both was the same number three times.
- */
-export function Annunciator({ status }: { status: PilotStatus }) {
-  const tone = TONE[status.state]
-  const StateIcon = tone.icon
-
-  return (
-    <div>
-      <div className="flex items-center gap-2">
-        <StateIcon className={cn("h-3.5 w-3.5 shrink-0", tone.text)} aria-hidden="true" />
-        <span
-          className={cn(
-            "text-[11px] font-bold uppercase leading-none tracking-[0.16em]",
-            tone.text,
-          )}
-        >
-          {ANNUNCIATOR_WORD[status.state]}
-        </span>
-      </div>
-
-      {/* The imperative — what to DO. The most valuable line on the screen, and
-          the one a data-oriented dashboard never prints. */}
-      <p
-        className="mt-1 text-[22px] font-semibold leading-[1.1] tracking-tight text-foreground"
-        suppressHydrationWarning
-      >
-        {status.nextAction.headline}
-      </p>
-
-      {/* The tightest constraint — never "12 / 12 current". When nothing is
-          flagged this is the nearest EXPIRY, not the fullest rolling limit: a
-          limit refills, so 41% of a 12-month allowance is not "tight". */}
-      {/* With nothing logged there is no constraint to name — a rolling limit
-          at 0 / 90h is not "tight" — so the line explains the first step. */}
-      {status.state === "getting_started" ? (
-        <p className="mt-1 text-xs leading-tight text-muted-foreground">
-          {status.nextAction.detail}
-        </p>
-      ) : status.also.length > 0 ? (
-        // The headline IS the governing requirement's remedy, so naming it
-        // again here would be the same fact a third time (its cell is the
-        // second). The line goes to the NEXT problem instead, which otherwise
-        // showed only as a cell to be found.
-        <p className="mt-1 truncate text-xs leading-tight text-muted-foreground">
-          Also{" "}
-          <span className="font-medium text-foreground/80 tabular-nums">
-            {status.also[0].action ?? `${status.also[0].label} ${status.also[0].value}`}
-          </span>
-          {status.also.length > 1 && (
-            <>
-              <span className="mx-1 text-muted-foreground/40">·</span>
-              <span className="tabular-nums">+{status.also.length - 1} More</span>
-            </>
-          )}
-        </p>
-      ) : status.governing && status.nextAction.headline === status.governing.action ? (
-        // One problem, and the headline has said it: the line names WHICH
-        // requirement, without repeating its figure.
-        <p className="mt-1 text-xs leading-tight text-muted-foreground">{status.governing.label}</p>
-      ) : status.governing && (
-        <p className="mt-1 text-xs leading-tight text-muted-foreground">
-          <span className="text-muted-foreground">Tightest</span>{" "}
-          {status.governing.label}
-          <span className="mx-1 text-muted-foreground/40">·</span>
-          <span className="font-medium text-foreground/80 tabular-nums">
-            {status.governing.value}
-          </span>
-        </p>
-      )}
-    </div>
-  )
-}
-
 /* ── Duty ────────────────────────────────────────────────────────────────── */
 
 /**
@@ -305,7 +222,6 @@ export function DutyBand({
     chipTone?: Ramp
     bar: { fromMs: number; toMs: number; tone: Ramp; caretMs?: number; deficitFromMs?: number } | null
     scale: Slot[]
-    footnote?: { text: string; tone?: Ramp }
     legs: SectorLeg[]
     nextRoute?: string
   } => {
@@ -320,7 +236,7 @@ export function DutyBand({
       const fraction = hasFdp ? active.fdpElapsedMinutes / active.maxFdpMinutes : 0
 
       return {
-        state: "On duty",
+        state: "On Duty",
         chip: hasFdp
           ? [
               active.fdpTable && `Table ${active.fdpTable}`,
@@ -345,7 +261,7 @@ export function DutyBand({
           { value: formatDutyClock(active.flightMinutes), label: "Flight" },
           {
             value: hasFdp ? formatDutyClock(left) : "—",
-            label: active.exceeded ? "FDP exceeded" : "FDP left",
+            label: active.exceeded ? "FDP Over" : "FDP Left",
             live: true,
             tone: active.exceeded ? "fail" : undefined,
           },
@@ -358,9 +274,11 @@ export function DutyBand({
     if (onStandby) {
       const left = Math.max(0, standby.remainingMinutes)
       return {
-        state: standby.code,
-        chip: standby.activated ? "Activated" : "Not called",
-        chipTone: standby.activated ? "info" : undefined,
+        state: "Standby",
+        // An un-called standby is rest, so the rest clock keeps running
+        // beneath it — "if they ring now, am I legal" has to be answerable.
+        chip: rest ? (rest.isLegalNow ? "Rested" : `Rest to ${clockAt(Date.parse(rest.legalAtUtc))}`) : undefined,
+        chipTone: rest ? (rest.isLegalNow ? "ok" : "caution") : undefined,
         // The standby's OWN window. It is a magnitude, not a verdict, so it is
         // never on the status ramp — see `RAMP`.
         bar: { fromMs: standby.startMs, toMs: standby.endMs, tone: "info" },
@@ -369,16 +287,6 @@ export function DutyBand({
           { value: formatDutyClock(left), label: "Left", live: true },
           { value: clockAt(standby.endMs), label: "Until" },
         ],
-        // An un-called standby is rest, so the rest clock keeps running
-        // beneath it — "if they ring now, am I legal" has to be answerable.
-        footnote: rest
-          ? rest.isLegalNow
-            ? { text: "Rested — legal now", tone: "ok" }
-            : {
-                text: `Rest to ${clockAt(Date.parse(rest.legalAtUtc))}`,
-                tone: "caution",
-              }
-          : undefined,
         legs: [],
         nextRoute: next?.route,
       }
@@ -393,8 +301,7 @@ export function DutyBand({
       const short = next.legalAtReport === false
 
       return {
-        state: phase === "post_duty" ? "Duty complete" : "Off duty",
-        chip: lastDuty?.route ? `Last ${lastDuty.route}` : undefined,
+        state: phase === "post_duty" ? "Duty Complete" : "Off Duty",
         bar: {
           fromMs: restStartMs,
           toMs: Math.max(next.reportMs, legalAtMs),
@@ -411,9 +318,8 @@ export function DutyBand({
           },
           {
             value: formatRestSpan(next.restAvailableMinutes),
-            label: short
-              ? `Short ${formatDutyClock(next.restShortfallMinutes)}`
-              : `Min ${next.restMinimum || formatDutyClock(next.restRequiredMinutes)}`,
+            // The shortfall is the card's headline; the caption keeps the rule.
+            label: `Min ${next.restMinimum || formatDutyClock(next.restRequiredMinutes)}`,
             tone: short ? "fail" : undefined,
           },
           {
@@ -421,22 +327,6 @@ export function DutyBand({
             label: `Report ${dayAt(next.reportMs)}`,
           },
         ],
-        // What that duty ASKS of you — its FLIGHT duty period, report to last
-        // on-blocks, against its own Reg 14 maximum. A report time says when to
-        // turn up; this says what turning up commits you to.
-        footnote:
-          next.plannedFdpMinutes > 0
-            ? {
-                text:
-                  next.maxFdpMinutes > 0
-                    ? `Next duty · FDP ${formatDutyClock(next.plannedFdpMinutes)} of ${formatDutyClock(next.maxFdpMinutes)}`
-                    : `Next duty · FDP ${formatDutyClock(next.plannedFdpMinutes)}, no limit computed`,
-                tone:
-                  next.maxFdpMinutes > 0 && next.plannedFdpMinutes > next.maxFdpMinutes
-                    ? "fail"
-                    : undefined,
-              }
-            : { text: "Next duty" },
         legs: [],
         nextRoute: next.route,
       }
@@ -450,8 +340,7 @@ export function DutyBand({
       const restStartMs = now - rest.elapsedMinutes * 60_000
       const legalAtMs = Date.parse(rest.legalAtUtc)
       return {
-        state: phase === "post_duty" ? "Duty complete" : "Off duty",
-        chip: lastDuty?.route ? `Last ${lastDuty.route}` : undefined,
+        state: phase === "post_duty" ? "Duty Complete" : "Off Duty",
         bar: {
           fromMs: restStartMs,
           toMs: Number.isFinite(legalAtMs) && legalAtMs > restStartMs ? legalAtMs : now,
@@ -467,35 +356,32 @@ export function DutyBand({
             label: `Min ${restMinimumText(rest)}`,
             live: true,
           },
-          {
-            value: rest.isLegalNow ? "Now" : clockAt(legalAtMs),
-            label: "Legal From",
-            tone: rest.isLegalNow ? "ok" : undefined,
-          },
+          // Legal now is the headline; "Legal From · Now" under it said it twice.
+          ...(rest.isLegalNow ? [] : [{ value: clockAt(legalAtMs), label: "Legal From" }]),
         ],
-        footnote: { text: "No duty rostered", tone: "idle" },
         legs: [],
       }
     }
 
     /* ── Nothing known ───────────────────────────────────────────────────── */
     return {
-      state: "Off duty",
-      chip: lastDuty?.route ? `Last ${lastDuty.route}` : undefined,
+      state: "Off Duty",
       bar: null,
       scale: lastDuty
         ? [{ value: clockAt(lastDuty.debriefMs), label: "Last Duty Ended" }]
         : [],
-      footnote: { text: "No duty rostered", tone: "idle" },
       legs: [],
       nextRoute: next?.route,
     }
   })()
 
+  const tone = TONE[status.dutyState]
+  const StateIcon = tone.icon
   return (
-    <section aria-label="Duty">
-      <div className="flex items-baseline justify-between gap-2">
-        <p className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+    <section aria-label="Duty and rest">
+      <div className="flex items-center justify-between gap-2">
+        <p className={cn("flex shrink-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em]", tone.text)}>
+          <StateIcon className="h-3 w-3" aria-hidden />
           {view.state}
         </p>
         {view.chip && (
@@ -513,22 +399,15 @@ export function DutyBand({
         )}
       </div>
 
+      {/* What the duty or rest asks of the pilot now — the card's one line in
+          large type. Currency and limits are their own cards' to say. */}
+      <p className="mt-1 text-[22px] font-semibold leading-[1.1] tracking-tight text-foreground" suppressHydrationWarning>
+        {status.dutyAction.headline}
+      </p>
+
       {view.bar && <Timeline {...view.bar} nowMs={now} />}
 
       {view.scale.length > 0 && <Scale slots={view.scale} />}
-
-      {view.footnote && (
-        <p
-          className={cn(
-            "mt-1.5 text-[11px] leading-tight",
-            view.footnote.tone ? RAMP[view.footnote.tone].text : "text-muted-foreground",
-          )}
-          suppressHydrationWarning
-        >
-          {view.footnote.text}
-        </p>
-      )}
-
     </section>
   )
 }
