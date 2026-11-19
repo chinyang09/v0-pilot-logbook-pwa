@@ -54,6 +54,14 @@ export interface PilotStatus {
    */
   also: Requirement[]
   nextAction: NextAction
+  /**
+   * The DUTY AND REST card's own verdict and line — about duty and rest only.
+   * The dashboard gives each section one card (the owner, Nov 2026: no fact in
+   * two places), so a lapsed currency is the currency card's to say and is not
+   * this card's headline: "Rest until 22:00Z" stays here whatever else is due.
+   */
+  dutyState: AnnunciatorState
+  dutyAction: NextAction
   duty: DutyStatus
   legality: LegalityModel
   /** Live countdown target while rest is outstanding. Read off the duty state,
@@ -176,7 +184,16 @@ export function buildPilotStatus({
         .sort((a, b) => (b.urgency ?? 0) - (a.urgency ?? 0))
     : []
 
+  const dutyAction = deriveDutyAction({
+    duty,
+    fdpExceeded,
+    logbookEmpty,
+    clock: formatClock ?? ((ms: number) => clock(ms, timeZone)),
+  })
+
   return {
+    dutyState: dutyAction.tone,
+    dutyAction,
     state: nextDutyIllegal
       ? "action_required"
       : restOutstanding && state === "current"
@@ -189,6 +206,66 @@ export function buildPilotStatus({
     legality,
     legalAtUtc: restOutstanding ? (duty.rest?.legalAtUtc ?? null) : null,
   }
+}
+
+/**
+ * The duty and rest card's line: where the pilot stands in duty or rest, and
+ * what that asks of them — never a currency remedy (that card says its own).
+ *
+ * | | Line | Tone |
+ * |---|---|---|
+ * | FDP over its maximum | FDP exceeded | action |
+ * | next duty inside the rest owed | Rest short by 1:20 | action |
+ * | rest still running | Rest until 22:00Z | caution |
+ * | on duty | Sector 2 of 3 | current |
+ * | on standby | SBYC · Not called | current |
+ * | rested | Legal now | current |
+ */
+function deriveDutyAction({
+  duty,
+  fdpExceeded,
+  logbookEmpty,
+  clock,
+}: {
+  duty: DutyStatus
+  fdpExceeded: boolean
+  logbookEmpty: boolean
+  clock: (ms: number) => string
+}): NextAction {
+  if (fdpExceeded && duty.active) {
+    return { tone: "action_required", headline: "FDP exceeded", detail: "Notify company", href: "/fdp" }
+  }
+  if (duty.next?.legalAtReport === false && duty.rest) {
+    return {
+      tone: "action_required",
+      headline: `Rest short by ${hoursMinutes(duty.next.restShortfallMinutes)}`,
+      detail: "Notify company",
+      href: "/fdp",
+    }
+  }
+  if (duty.phase === "on_duty" && duty.active) {
+    const flown = duty.active.legs.filter((l) => l.status === "complete").length
+    const total = duty.active.legs.length || duty.active.sectorCount
+    return {
+      tone: "current",
+      headline: duty.active.notFdp ? duty.active.notFdp : total > 0 ? `Sector ${Math.min(flown + 1, total)} of ${total}` : "On duty",
+      href: "/fdp",
+    }
+  }
+  if (duty.standby) {
+    return {
+      tone: "current",
+      headline: `${duty.standby.code} · ${duty.standby.activated ? "Called out" : "Not called"}`,
+      href: "/fdp",
+    }
+  }
+  if (duty.rest && !duty.rest.isLegalNow) {
+    return { tone: "warning", headline: `Rest until ${clock(Date.parse(duty.rest.legalAtUtc))}`, href: "/fdp" }
+  }
+  if (duty.rest || duty.next || duty.lastDuty) return { tone: "current", headline: "Legal now", href: "/fdp" }
+  return logbookEmpty
+    ? { tone: "getting_started", headline: "Add your first flights", href: "/logbook" }
+    : { tone: "getting_started", headline: "No duty logged", href: "/logbook" }
 }
 
 /**

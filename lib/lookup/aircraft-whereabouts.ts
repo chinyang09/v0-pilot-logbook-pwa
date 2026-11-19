@@ -87,22 +87,27 @@ function span(ms: number): string {
 }
 
 /**
- * The inbound flight in two lines, relative to `nowMs`:
+ * The inbound flight in two lines, relative to `nowMs` — what it is doing, and
+ * which flight it is with its own STD and arrival gate (the owner: the gate
+ * means little without the flight it belongs to):
  *
- *   Landed 03:00Z · 30m ago          TR289 from DPS · Gate D41
- *   Landing 03:00Z · in 30m          TR289 from DPS · Gate D41
- *   Due 03:00Z · not departed yet    TR289 from DPS
+ *   Landed 03:00Z · 30m ago          TR289 from DPS · STD 00:10Z · Gate D41
+ *   Landing 03:00Z · in 30m          TR289 from DPS · STD 00:10Z · Gate D41
+ *   Due 03:00Z · not departed yet    TR289 from DPS · STD 00:10Z
+ *
+ * The parts are returned too, for a caller that lays them out itself.
  */
 export function whereaboutsLines(
   w: AircraftWhereabouts,
   nowMs: number,
   clockSeparator: "colon" | "none" = "colon",
   opts: { gate?: boolean } = {}
-): { primary: string; secondary: string } | null {
+): { primary: string; secondary: string; flight: string; std: string; gate: string } | null {
   const inbound = w.inbound
   if (!inbound) return null
+  const zulu = (iso: string) => `${formatClockDisplay(iso.slice(11, 16), clockSeparator)}Z`
   const at = inbound.arrival ? Date.parse(inbound.arrival) : null
-  const clock = inbound.arrival ? `${formatClockDisplay(inbound.arrival.slice(11, 16), clockSeparator)}Z` : "time unknown"
+  const clock = inbound.arrival ? zulu(inbound.arrival) : "time unknown"
   const primary =
     inbound.status === "landed"
       ? `Landed ${clock}${at !== null ? ` · ${span(nowMs - at)} ago` : ""}`
@@ -112,10 +117,10 @@ export function whereaboutsLines(
           : `Landing ${clock}${at !== null ? ` · in ${span(at - nowMs)}` : ""}`
         : `Due ${clock} · not departed yet`
   const from = inbound.origin ? ` from ${inbound.origin.iata || inbound.origin.icao}` : ""
+  const flight = `${inbound.flightNumber || "Flight"}${from}`
+  const std = inbound.scheduledDeparture ? `STD ${zulu(inbound.scheduledDeparture)}` : ""
   const gate = opts.gate === false ? "" : [inbound.arrivalGate && `Gate ${inbound.arrivalGate}`, inbound.arrivalTerminal && `T${inbound.arrivalTerminal.replace(/^T/i, "")}`]
     .filter(Boolean)
     .join(" ")
-  // The gate first: it is what a pilot walking in needs, and where a line is
-  // cut short (the duty band) it is the part that must survive.
-  return { primary, secondary: [gate, `${inbound.flightNumber || "Flight"}${from}`].filter(Boolean).join(" · ") }
+  return { primary, secondary: [flight, std, gate].filter(Boolean).join(" · "), flight, std, gate }
 }

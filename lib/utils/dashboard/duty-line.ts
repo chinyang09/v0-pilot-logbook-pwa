@@ -15,8 +15,8 @@ export interface DutyInfo {
   /** Each leg's departure and arrival gate, in leg order ("" until published). */
   legGates: { dep: string; arr: string }[]
   /**
-   * One line: the next leg's aeroplane ("9V-NCA · Landed 03:00Z · 30m ago ·
-   * Gate D41 T1 · TR289 from DPS"), or what stands in for it — never a
+   * One line: the next leg's aeroplane ("9V-NCA · TR289 from DPS · Gate D41 T1
+   * · STD 00:10Z · Landed 03:00Z · 30m ago"), or what stands in for it — never a
    * "not published" that was really a failure or a question not yet asked.
    */
   line: string
@@ -49,7 +49,11 @@ function dutyLine(legs: FlightLog[], lookups: DutyLookups | null, loading: boole
     const leg = lookups.inboundFlightId ? lookups.gates[lookups.inboundFlightId] : undefined
     const gateShown = leg?.status === "done" && !!leg.gates.departure.gate
     const lines = whereaboutsLines(w.whereabouts, w.checkedAt, display?.clockSeparator, { gate: !gateShown })
-    return lines ? [reg, lines.primary, lines.secondary].filter(Boolean).join(" · ") : `${reg} · no earlier flight found`
+    // The flight first, with its own gate and STD beside it, then what it is
+    // doing — a gate said apart from its flight was the owner's question.
+    return lines
+      ? [reg, lines.flight, lines.gate, lines.std, lines.primary].filter(Boolean).join(" · ")
+      : `${reg} · no earlier flight found`
   }
   if (w?.status === "missing") return `${reg} · no recent flights found`
   const gates = legs.map((f) => lookups.gates[f.id]).filter(Boolean)
@@ -61,3 +65,15 @@ function dutyLine(legs: FlightLog[], lookups: DutyLookups | null, loading: boole
   return published ? "Gates on the route above" : "Gates not published yet"
 }
 
+
+/**
+ * "D41 · T1" — a gate and its terminal, as far as either is known, and the
+ * STAND where the airport gives one that is not the gate itself (a remote
+ * stand: "B4 · T1 · Stand 512"). A contact stand named like its gate is the
+ * gate said twice.
+ */
+export function gateLabel(gate: string, terminal: string, stand = ""): string {
+  return [gate, terminal && `T${terminal.replace(/^T/i, "")}`, stand && stand !== gate && `Stand ${stand}`]
+    .filter(Boolean)
+    .join(" · ")
+}

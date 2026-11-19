@@ -449,3 +449,44 @@ describe("buildPilotStatus — a logbook with nothing in it", () => {
     expect(s.state).toBe("action_required")
   })
 })
+
+describe("buildPilotStatus — the duty and rest card's own verdict", () => {
+  const resting = { isLegalNow: false, elapsedMinutes: 60, requiredMinutes: 720, legalAtUtc: "2026-08-14T22:42:00Z" }
+
+  it("says rest whatever else is due — a lapsed currency is the currency card's", () => {
+    // The owner, Nov 2026: one card per section, no fact in two places.
+    const s = status({ recency: { takeoffs: 0, landings: 0, current: false, lapseIso: "2026-08-01" } }, [], resting)
+    expect(s.state).toBe("action_required")
+    expect(s.dutyAction.headline).toBe("Rest until 22:42")
+    expect(s.dutyState).toBe("warning")
+  })
+
+  it("is not raised by a currency when rested", () => {
+    const s = status(
+      { currencies: [currency({ code: "MEDIC", status: "expired", daysRemaining: -2 })] },
+      [],
+      { ...resting, isLegalNow: true, elapsedMinutes: 900 },
+    )
+    expect(s.state).toBe("action_required")
+    expect(s.dutyAction.headline).toBe("Legal now")
+    expect(s.dutyState).toBe("current")
+  })
+
+  it("on duty, names the sector", () => {
+    const s = status({}, [duty({ reportTime: "06:00", debriefTime: "18:00", sectorCount: 2 })], resting)
+    expect(s.dutyAction.headline).toMatch(/^Sector \d of 2$|^On duty$/)
+    expect(s.dutyState).toBe("current")
+  })
+
+  it("with nothing logged, starts the pilot off", () => {
+    const s = buildPilotStatus({
+      legality: buildLegalityModel({ ...CLEAR, logbookEmpty: true }),
+      duty: deriveDutyStatus([], NOW, null),
+      timeZone: "UTC",
+      logbookEmpty: true,
+      now: NOW,
+    })
+    expect(s.dutyAction.headline).toBe("Add your first flights")
+    expect(s.dutyState).toBe("getting_started")
+  })
+})

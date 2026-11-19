@@ -33,7 +33,6 @@ import { ACTION_LABEL_CLASS, ACTION_TILE_PX, actionTileClass } from "@/component
 import { cn } from "@/lib/utils"
 
 export type WidgetId =
-  | "status"
   | "duty"
   | "flight"
   | "weather"
@@ -73,12 +72,22 @@ const GAP = 14
 /** The widest a lifted card goes — a tablet in a phone-sized window stays a card. */
 const CARD_MAX_PX = 480
 
-/** The tile: the face, as a button. `open` rings it while its card is in the panel beside. */
+/** A flagged card's edge: its section's worst state, so the card says it at a glance. */
+const TONE_BORDER = { fail: "border-destructive/60", caution: "border-chart-4/60" } as const
+
+/**
+ * The tile: the face, as a button. `open` rings it while its card is in the
+ * panel beside. `controls` sit over its top-right corner, OUTSIDE the button
+ * (a button inside a button is not one a keyboard or a screen reader can
+ * use) — the flight tile's duty stepper.
+ */
 export function Widget({
   id,
   label,
   open = false,
   hidden = false,
+  tone = null,
+  controls,
   onOpen,
   className,
   children,
@@ -88,32 +97,36 @@ export function Widget({
   open?: boolean
   /** Its card is up: the tile has become the card. */
   hidden?: boolean
+  tone?: "fail" | "caution" | "ok" | "unknown" | null
+  controls?: React.ReactNode
   onOpen: (id: WidgetId, anchor: WidgetAnchor) => void
   className?: string
   children: React.ReactNode
 }) {
   const ref = React.useRef<HTMLButtonElement>(null)
   return (
-    <button
-      ref={ref}
-      type="button"
-      data-widget={id}
-      aria-label={`${label}, more`}
-      aria-current={open || undefined}
-      onClick={() => {
-        const r = ref.current?.getBoundingClientRect()
-        if (r) onOpen(id, { left: r.left, top: r.top, width: r.width, height: r.height })
-      }}
-      className={cn(
-        "relative flex min-w-0 flex-col justify-start overflow-hidden rounded-2xl border border-border bg-card p-3 text-left",
-        "transition-[box-shadow,background-color] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        open && "ring-2 ring-inset ring-foreground/25",
-        hidden && "invisible",
-        className,
-      )}
-    >
-      {children}
-    </button>
+    <div className={cn("relative flex min-w-0", hidden && "invisible", className)}>
+      <button
+        ref={ref}
+        type="button"
+        data-widget={id}
+        aria-label={`${label}, more`}
+        aria-current={open || undefined}
+        onClick={() => {
+          const r = ref.current?.getBoundingClientRect()
+          if (r) onOpen(id, { left: r.left, top: r.top, width: r.width, height: r.height })
+        }}
+        className={cn(
+          "relative flex min-w-0 flex-1 flex-col justify-start overflow-hidden rounded-2xl border border-border bg-card p-3 text-left",
+          "transition-[box-shadow,background-color] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          (tone === "fail" || tone === "caution") && TONE_BORDER[tone],
+          open && "ring-2 ring-inset ring-foreground/25",
+        )}
+      >
+        {children}
+      </button>
+      {controls && <div className="absolute right-1.5 top-1.5">{controls}</div>}
+    </div>
   )
 }
 
@@ -231,8 +244,13 @@ export function WidgetSheet({
   const restH = Math.min(height ?? anchor.height, maxCard)
   const restLeft = wide ? anchor.left : (vw - width) / 2
   const restTop = Math.max(MARGIN + 12, (vh - (restH + actionsH)) / 2)
-  const dx = anchor.left - restLeft
-  const dy = anchor.top - restTop
+  // The card is PLACED on the tile and travels to its resting place. Placed at
+  // rest and offset back by (tile − rest), its start moved with every change of
+  // the rest — and the rest is known only once the card's height is: a tall
+  // card's rest is near the top, so it was drawn from there ("appearing from
+  // the top") instead of from its own tile.
+  const toX = restLeft - anchor.left
+  const toY = restTop - anchor.top
   const tileClip = `inset(0px calc(100% - ${anchor.width}px) calc(100% - ${anchor.height}px) 0px round ${TILE_RADIUS}px)`
   const fullClip = `inset(0px calc(0% - 0px) calc(0% - 0px) 0px round ${TILE_RADIUS}px)`
   const t = closing ? CLOSE : OPEN
@@ -255,9 +273,9 @@ export function WidgetSheet({
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={title} className="pointer-events-none absolute inset-0">
         <motion.div
           className="pointer-events-auto fixed"
-          style={{ left: restLeft, top: restTop, width }}
-          initial={{ x: dx, y: dy }}
-          animate={open ? { x: 0, y: 0 } : { x: dx, y: dy }}
+          style={{ left: anchor.left, top: anchor.top, width }}
+          initial={{ x: 0, y: 0 }}
+          animate={open ? { x: toX, y: toY } : { x: 0, y: 0 }}
           transition={t}
           onAnimationComplete={() => {
             if (closingRef.current) finishClose()
