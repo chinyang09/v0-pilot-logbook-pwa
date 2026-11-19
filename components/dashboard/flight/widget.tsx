@@ -33,7 +33,6 @@ import { ACTION_LABEL_CLASS, ACTION_TILE_PX, actionTileClass } from "@/component
 import { cn } from "@/lib/utils"
 
 export type WidgetId =
-  | "aircraft"
   | "duty"
   | "flight"
   | "weather"
@@ -73,6 +72,8 @@ const GAP = 14
 /** The widest a lifted card goes — a tablet in a phone-sized window stays a card. */
 const CARD_MAX_PX = 480
 
+/** A flagged card's edge: its section's worst state, so the card says it at a glance. */
+const TONE_BORDER = { fail: "border-destructive/60", caution: "border-chart-4/60" } as const
 
 /**
  * The tile: the face, as a button. `open` rings it while its card is in the
@@ -85,10 +86,8 @@ export function Widget({
   label,
   open = false,
   hidden = false,
-  surface,
+  tone = null,
   controls,
-  controlsClassName = "right-1.5 top-1.5",
-  disabled = false,
   onOpen,
   className,
   children,
@@ -98,12 +97,8 @@ export function Widget({
   open?: boolean
   /** Its card is up: the tile has become the card. */
   hidden?: boolean
-  /** Extra classes on the card — a flagged area's edge and wash. */
-  surface?: string
+  tone?: "fail" | "caution" | "ok" | "unknown" | null
   controls?: React.ReactNode
-  controlsClassName?: string
-  /** Arranging: the card is moved, not opened. */
-  disabled?: boolean
   onOpen: (id: WidgetId, anchor: WidgetAnchor) => void
   className?: string
   children: React.ReactNode
@@ -117,22 +112,20 @@ export function Widget({
         data-widget={id}
         aria-label={`${label}, more`}
         aria-current={open || undefined}
-        tabIndex={disabled ? -1 : undefined}
         onClick={() => {
-          if (disabled) return
           const r = ref.current?.getBoundingClientRect()
           if (r) onOpen(id, { left: r.left, top: r.top, width: r.width, height: r.height })
         }}
         className={cn(
           "relative flex min-w-0 flex-1 flex-col justify-start overflow-hidden rounded-2xl border border-border bg-card p-3 text-left",
           "transition-[box-shadow,background-color] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          surface,
+          (tone === "fail" || tone === "caution") && TONE_BORDER[tone],
           open && "ring-2 ring-inset ring-foreground/25",
         )}
       >
         {children}
       </button>
-      {controls && <div className={cn("absolute", controlsClassName)}>{controls}</div>}
+      {controls && <div className="absolute right-1.5 top-1.5">{controls}</div>}
     </div>
   )
 }

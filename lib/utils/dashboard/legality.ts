@@ -149,8 +149,6 @@ export interface LegalityInput {
   /** Rolling limits a future schedule is projected to breach, by limit name. */
   forecastBreaches?: string[]
   currencies: CurrencyWithStatus[]
-  /** How many documents get their own cell before the rest are folded up. */
-  documentRows?: number
   /**
    * Nothing in the logbook yet. Recency is then not ASSESSED rather than
    * failed: 0 / 3 on a fresh install is not a pilot who lapsed, it is an app
@@ -186,14 +184,12 @@ export interface LegalityInput {
  * state before the next look; the rest fold into one cell stating how many are
  * clear, which the reader can expand.
  */
-const DEFAULT_DOCUMENT_ROWS = 3
 
 export function buildLegalityModel({
   recency,
   capacity,
   forecastBreaches = [],
   currencies,
-  documentRows = DEFAULT_DOCUMENT_ROWS,
   logbookEmpty = false,
   unavailable = [],
   unlogged = [],
@@ -291,9 +287,12 @@ export function buildLegalityModel({
   // Nearest expiry first. An EXPIRED document is a hard stop; one inside its own
   // critical/warning window is still valid, so it cautions rather than fails —
   // the distinction is the whole point of the two thresholds a currency carries.
+  //
+  // EVERY document is its own requirement. The rest used to fold into one
+  // "7 more" cell after the nearest three, which the dashboard's currency card
+  // then drew as if it were a document of its own (the owner's report).
   const sortedDocs = [...currencies].sort((a, b) => a.daysRemaining - b.daysRemaining)
-  const shown = sortedDocs.slice(0, documentRows)
-  for (const doc of shown) {
+  for (const doc of sortedDocs) {
     const state: RequirementState =
       doc.status === "expired"
         ? "fail"
@@ -348,20 +347,6 @@ export function buildLegalityModel({
             : undefined,
     })
   }
-  const folded = sortedDocs.slice(shown.length)
-  if (folded.length > 0) {
-    requirements.push({
-      id: "doc-rest",
-      group: "currency",
-      label: `${folded.length} more`,
-      state: "ok",
-      value: `${folded[0].daysRemaining}d+`,
-      daysUntil: folded[0].daysRemaining,
-      detail: folded.map((d) => ({ label: d.code, value: `${d.daysRemaining}d` })),
-      href: "/currencies",
-    })
-  }
-
   // ── Rolling limits ──────────────────────────────────────────────────────
   const limitRows = [
     { id: "duty-14", label: "Duty 14d", forecastName: "14-day duty", cap: capacity.duty14Days },
@@ -429,7 +414,7 @@ export function buildLegalityModel({
   // Nothing flagged → whichever CURRENCY expires soonest. Rolling limits are
   // excluded by construction: they carry no `daysUntil` because they refill.
   const nearestExpiry = requirements
-    .filter((r) => r.daysUntil !== undefined && r.id !== "doc-rest")
+    .filter((r) => r.daysUntil !== undefined)
     .sort((a, b) => (a.daysUntil ?? 0) - (b.daysUntil ?? 0))[0]
 
   return {

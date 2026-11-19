@@ -200,7 +200,7 @@ describe("buildLegalityModel — documents", () => {
     expect(model.requirements.find((r) => r.id === "doc-CRM")!.state).toBe("ok")
   })
 
-  it("shows the nearest expiries and folds the rest into an expandable cell", () => {
+  it("gives every document its own requirement, nearest expiry first — no fold", () => {
     const model = buildLegalityModel({
       ...CLEAR,
       currencies: [
@@ -209,16 +209,10 @@ describe("buildLegalityModel — documents", () => {
         currency({ code: "MID", daysRemaining: 60 }),
         currency({ code: "ALSO", daysRemaining: 280 }),
       ],
-      documentRows: 2,
     })
 
     const ids = model.requirements.filter((r) => r.group === "currency").map((r) => r.id)
-    expect(ids).toEqual(["recency", "doc-NEAR", "doc-MID", "doc-rest"])
-    // Nothing is hidden — the fold lists what it folded.
-    expect(model.requirements.find((r) => r.id === "doc-rest")!.detail).toEqual([
-      { label: "ALSO", value: "280d" },
-      { label: "FAR", value: "300d" },
-    ])
+    expect(ids).toEqual(["recency", "doc-NEAR", "doc-MID", "doc-ALSO", "doc-FAR"])
   })
 
   it("does not repeat the code as a description", () => {
@@ -287,9 +281,7 @@ describe("buildLegalityModel — binding constraint", () => {
     expect(model.binding?.value).toBe("58d")
   })
 
-  it("never picks the fold cell as the binding one", () => {
-    // The fold stands for several documents at once, so naming it would tell
-    // the pilot nothing they could act on.
+  it("binds to the nearest expiry when nothing is flagged", () => {
     const model = buildLegalityModel({
       ...CLEAR,
       recency: { takeoffs: 6, landings: 6, current: true, lapseIso: "2027-06-01" },
@@ -299,7 +291,6 @@ describe("buildLegalityModel — binding constraint", () => {
         currency({ code: "C", daysRemaining: 120 }),
         currency({ code: "D", daysRemaining: 130 }),
       ],
-      documentRows: 3,
     })
     expect(model.binding?.id).toBe("doc-A")
   })

@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { ArrowUpDown, Calendar, Check, SlidersHorizontal } from "lucide-react"
+import { Calendar, Check, LayoutGrid, SlidersHorizontal } from "lucide-react"
 
 import { GlassButtonGroup, GlassGroupButton } from "@/components/ui/glass-icon-button"
 import {
@@ -139,16 +139,16 @@ export function DashboardActions() {
       )}
 
       <GlassButtonGroup>
-        {/* The flight page's cards in the pilot's own order: Arrange shows a
-            grip on each, Done puts them back to being opened. */}
+        {/* The flight page's tiles in the pilot's own order: Arrange lets them
+            be dragged, Done puts them back to being opened. */}
         {view === "flight" && (
           <GlassGroupButton
-            ariaLabel={arranging ? "Done arranging" : "Arrange cards"}
+            ariaLabel={arranging ? "Done arranging" : "Arrange tiles"}
             ariaPressed={arranging}
             active={arranging}
             onClick={() => setArranging(!arranging)}
           >
-            {arranging ? <Check className="h-5 w-5" /> : <ArrowUpDown className="h-5 w-5" />}
+            {arranging ? <Check className="h-5 w-5" /> : <LayoutGrid className="h-5 w-5" />}
           </GlassGroupButton>
         )}
         <AlertsDropdown />
