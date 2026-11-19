@@ -21,9 +21,7 @@
 
 "use client";
 
-import { useCallback, useRef, useState } from "react";
-import { Upload, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { extractDocuments } from "@/lib/utils/parsers/extractors";
 import { isLogtenKind } from "@/lib/utils/parsers/detect";
 import {
@@ -82,6 +80,12 @@ interface Props {
   context?: "logbook" | "roster" | "shared";
   /** Triggered after a successful execution so the page can refresh. */
   onComplete?: () => void;
+  /** The files the button's picker handed over; a new `key` starts an import. */
+  request: { key: number; files: File[] } | null;
+  /** Busy or not — the button shows it. */
+  onBusyChange: (busy: boolean) => void;
+  /** Clears the button's picker so the same file can be chosen again. */
+  onResetPicker: () => void;
 }
 
 /** "1 flight", "2 flights" — the summary line read "1 sim sessions". */
@@ -97,8 +101,13 @@ function seatFromRank(rank: string): Pick<Personnel, "roles" | "defaultPIC" | "d
   return {};
 }
 
-export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
+/**
+ * The import itself — every parser, the reconciler, the executor and the
+ * review dialogs. It is loaded only once the pilot has chosen files
+ * (`UnifiedImportButton` holds the picker), so ~120KB of code that runs after
+ * one tap in a hundred is no longer part of the logbook's first load.
+ */
+export function ImportFlow({ context = "shared", onComplete, request, onBusyChange, onResetPicker }: Props) {
   const [progress, setProgress] = useState<ImportStage | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [pendingPlan, setPendingPlan] = useState<PlannedImport | null>(null);
@@ -143,7 +152,7 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
     setSubject(null);
     pendingFilesRef.current = [];
     setBusy(false);
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    onResetPicker();
   };
 
   const runLogtenParse = useCallback(
@@ -625,10 +634,10 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
         setProgress(null);
       } finally {
         setBusy(false);
-        if (fileInputRef.current) fileInputRef.current.value = "";
+        onResetPicker();
       }
     },
-    [handleExecute, runLogtenParse]
+    [handleExecute, runLogtenParse, onResetPicker]
   );
 
   const confirmSubject = useCallback(async () => {
@@ -646,11 +655,18 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
     await handleFiles(files);
   }, [subject, handleFiles]);
 
-  const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    if (files.length === 0) return;
-    handleFiles(files);
-  };
+  // Each request from the picker is handled once (its key), however often
+  // this re-renders.
+  const handledRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!request || handledRef.current === request.key || request.files.length === 0) return;
+    handledRef.current = request.key;
+    handleFiles(request.files);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a request is acted on once, by its key
+  }, [request]);
+  useEffect(() => {
+    onBusyChange(busy);
+  }, [busy, onBusyChange]);
 
   const onDialogChange = (open: boolean) => {
     if (!open && !showReview && !showLogtenReview && !busy) {
@@ -661,30 +677,6 @@ export function UnifiedImportButton({ context = "shared", onComplete }: Props) {
 
   return (
     <>
-      <input
-        type="file"
-        ref={fileInputRef}
-        className="hidden"
-        accept=".csv,.pdf,.txt,.tsv"
-        multiple
-        onChange={onChange}
-      />
-
-      <Button
-        variant="ghost"
-        size="icon"
-        disabled={busy}
-        aria-label="Import files"
-        className="h-10 w-10 rounded-full"
-        onClick={() => fileInputRef.current?.click()}
-      >
-        {busy ? (
-          <Loader2 className="h-5 w-5 animate-spin" />
-        ) : (
-          <Upload className="h-5 w-5" />
-        )}
-      </Button>
-
       <ImportStatusDialog
         open={isOpen && !showReview && !showLogtenReview}
         onOpenChange={onDialogChange}
