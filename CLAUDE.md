@@ -679,7 +679,7 @@ one looks it up in full like a typed code.
 | gates (`flight/gates`, `useDutyLookups`) | for a SINGAPORE end, Changi's own flight record first (`lib/lookup/changi.ts`, below); then the tracked flight's `info`, else the departures board at the origin and the arrivals board at the destination, from an hour before | NOT in the flight form (it is for logging): drawn on the dashboard's sector chain, under each stop, asked ONLY while the page is on screen and the duty within 18h of now (no SWR key otherwise, so coming back asks about the duty as it now stands — deduplicated to 5 min — instead of showing a stale "nothing yet"), every 15 min while it stays up, with a refresh; never stored (a gate is published late and moves). The duty's legs end at the first 8h on the ground (`dutyFlights` — 18h can reach the next duty's first sector). The line under the chain (`describeDuty`, `lib/utils/dashboard/duty-line.ts`) never calls a failure "not published yet": checking / not checked / unavailable / not published are four different sentences |
 | a fleet (`airline/fleet`, `AirlineFleetSection`, the add-aircraft form's **By fleet** mode) | the airline's fleet page, by type | By registration is the default; By fleet asks for the pilot's airline when it opens, and otherwise only on Find / Enter — never per keystroke. Add writes a whole type in one `bulkPut` (`addFleetAircraftToDatabase`); a registration already held is left as it is |
 | the network (`airline/routes`, `airline/routes/from`) | the routes page's `arrRoutes`; a map pin's per-airport JSON | in the door, nothing reads them yet — the destination seeding they enable is on hold |
-| where the aeroplane is (`aircraft/whereabouts`, `lib/lookup/aircraft-whereabouts.ts`) | the registration's list: the last flight it DEPARTS on before `at` (our departure, or now) — landed / airborne / not yet left — and the one after; the inbound's ARRIVAL gate from the live flight, else the arrivals board | the duty band's line under the chain for the NEXT LEG STILL TO FLY (`inboundLeg` — on duty a later leg can be another tail; legs in FLOWN order, `sortFlights` is newest first), the duty panel, and the aircraft panel's **Now** section (on a tap); "9V-NCA · Landed 03:00Z · 30m ago · TR289 from DPS" — the inbound's arrival gate is said only while the leg's OWN departure gate is not yet published (it is drawn under the stop, and in the panel's Gates row; saying it twice was the owner's report), and then it comes first so a cut-short line keeps it; never stored; a departure within 20 min of `at` is our own flight pushing back, not the inbound |
+| where the aeroplane is (`aircraft/whereabouts`, `lib/lookup/aircraft-whereabouts.ts`) | the registration's list: the last flight it DEPARTS on before `at` (our departure, or now) — landed / airborne / not yet left — and the one after; the inbound's ARRIVAL gate from the live flight, else the arrivals board | the duty band's line under the chain for the NEXT LEG STILL TO FLY (`inboundLeg` — on duty a later leg can be another tail; legs in FLOWN order, `sortFlights` is newest first), the duty panel, and the aircraft panel's **Now** section (on a tap); "9V-NCA · TR289 from DPS · Gate D41 · STD 00:10Z · Landed 03:00Z · 30m ago" — the inbound FLIGHT first, its gate and STD beside it (a gate apart from its flight meant little, the owner); the inbound's arrival gate is said only while the leg's OWN departure gate is not yet published (it is drawn under the stop; saying it twice was the owner's report); no belt; never stored; a departure within 20 min of `at` is our own flight pushing back, not the inbound |
 | the missing sector (`seedDerivedLeg`, `seedFromNextFlight`) | what the aeroplane flies after the leg a Next Leg / Return was made from (`aircraft/whereabouts` at that leg's arrival) | fills the new leg's blanks — number, far end, scheduled times — only when that flight leaves from this leg's departure airport; may move the DERIVED leg's date a day on (an overnight return), only while it records no times |
 | the pilot's airline (`useAirlineCode`: Settings › Logging › Airline, `logging_airline`, else the SELF card's company through the airline list) | the airline list (`lib/airlines/airlines.ts`, `/airlines`, kept 30 days in localStorage) | an EMPTY Flight # starts with it on focus (`DraftInput`'s `prefill`, committed only once something is typed — clearing it leaves the field empty; not on a simulator). A LETTER typed first replaces it and a digit is added to it (`afterPrefill`), so typing "TR288" out of habit or pasting it is not "TRTR288"; Lookup prefixes a digits-only number (`withAirlinePrefix`); By fleet starts with it. A crew card's company field lists airlines as it is typed and a pick writes the standard name |
 | gates from the dashboard | the flight page's This / Next Duty tile | gates under each stop and the inbound line; the tile opens each leg's Gates, the Inbound and Open Flight on the SAME cache (`lookup:duty:` key), so either refreshes both |
@@ -781,7 +781,8 @@ stale-while-revalidate, which stamped the new version on the OLD file.
 
 The company issues two PDF/CSV reports — a **Personal Crew Schedule Report**
 and a **Crew Logbook Report** — and both land through one entry point
-(`components/import/unified-import-button.tsx`). Uploading both together
+(`components/import/unified-import-button.tsx` — the button and picker; the
+pipeline behind it, `import-flow.tsx`, loads once files are chosen). Uploading both together
 cross-hydrates them into one plan.
 
 ```
@@ -1229,14 +1230,35 @@ tiles (`flight/widget.tsx`, faces in `flight/faces.tsx`, bodies in
 
 | Tile | Glance | Its card adds | Circles |
 |---|---|---|---|
-| Status | the annunciator (state, imperative, governing / Also) | only the flagged requirements the face does not name — none, no body | Currency, FDP |
-| Duty | the duty clock | a figure grid (Legal From, Minimum "10:00 + night", Report, Next FDP — or FDP, Latest On-Blocks, Table, Flight on duty) and the duties after, a line each | FDP |
-| This / Next Duty | flight numbers, the chain with each stop's time and gate, the aeroplane, the inbound line | a row per leg — times, gates, tail; a tap opens it | each leg's flight, Refresh |
+| Duty & Rest | the phase and its state icon, the line ("Rest until 22:00Z", "Sector 2 of 3", "Legal now"), the timeline and its three captions | on duty: Latest On-Blocks, Off Duty; off duty: Rested, Last Duty | FDP |
+| Flights (the chosen duty, ‹ › to step) | Now / Next / Later · day, flight numbers with the duty's FDP/max, the chain with each stop's time and gate, then the aeroplane line — or, for a later duty, the rest before it against its minimum | Report (a later duty), Off Duty, FDP Table; a row per leg — gates with stand, the airport's inbound flight, tail; the inbound row (flight, STD, where, its gate); the duties to choose from | Refresh (only once gates are asked) |
 | Weather | each airport's worst category and first hazard | per airport: category and hazard CHIPS, the METAR, and ONLY the TAF periods over the duty's times there, each with its leg | Refresh |
 | Crew | who, and the day last flown together ("New") | a row each: initials, name, role · flights together, the day; a tap opens their card | Crew |
 | Last There | the day last flown INTO each destination (not the origin) | a row each: the day, arrivals this year, local time now, a sun or moon for the arrival | — |
 | Currency | the three most pressing, with the tally | every currency as a figure-over-name cell, tinted only when flagged | Currency |
 | Limits | the four rolling limits as small bars | the hours LEFT in each, or "Breach ahead" | FDP |
+
+**ONE CARD PER SECTION, no fact in two places** (the owner, Nov 2026). The
+Status tile is gone: its annunciator led with whatever was most pressing —
+"Rest until" over "Tightest 90-Day Recency 0/3" — and the duty tile and the
+currency tile then said both again. Now the DUTY & REST card says duty and rest
+only, in their own verdict (`PilotStatus.dutyState` / `dutyAction` —
+`deriveDutyAction`: FDP exceeded, rest short, rest until, sector n of m,
+standby, legal now), and a lapsed currency or a limit is ITS card's to say: a
+flagged currency or limits card takes a red / amber edge (`Widget`'s `tone`).
+The next duty's FDP moved from the duty card to the flight card (it is a fact
+about that duty); the aeroplane's registration is named once, in the line
+under the chain; the leg rows in the flights card carry no times (the chain
+does), and the per-leg circles went (each leg's row opens it).
+
+**The dashboard can be about a LATER duty** (the owner: "a dashboard that
+displays critical info based on flight duty selected"). The flight tile's ‹ ›
+(`DutyStepper`, OUTSIDE the tile's button, in `Widget`'s `controls`) and the
+list in its card step through the duties with flying in them, up to 14
+(`choices`); flights, gates, weather, crew and Last There follow the chosen
+one; the duty and rest card stays about NOW. Coming back to the page returns
+to the default. A later duty shows its own FDP/max (`fdpMinutesOf`) and the
+rest before it (`restBefore`) on its face, red when short.
 
 **The card IS the tile, lifted — the flight card's context preview** (the
 owner, Nov 2026: the first sheet — a title bar, a close button, grouped
@@ -1250,7 +1272,10 @@ face did and more (crew, last there, currency, weather) leads with its LABEL
 instead (`header: "label"`), so no name appears twice.
 
 - **A phone: the tile LIFTS** (`WidgetSheet`) — laid out once at its resting
-  size, it travels from the tile and a clip that starts as the tile's exact box
+  size, PLACED ON THE TILE and moved to its rest (`x`/`y` to rest − tile). It
+  was placed at rest and offset back, and the rest is only known once the
+  card's height is measured — a tall card's rest is near the top, so a bottom
+  tile's card was drawn from there ("appearing from the top", the owner). It travels from the tile and a clip that starts as the tile's exact box
   and corners opens over it. A full-width tile keeps its width, so its face is
   the first frame to the pixel; a narrow tile's face copy covers its box on the
   first frame and on the close. Scrim, Escape and back close it; an action runs
@@ -1262,20 +1287,22 @@ instead (`header: "label"`), so no name appears twice.
   dashboard's own panel (a flight id), as the summary rows do.
 - Measured at 4× on the owner's logbook: a card opens in one task of 54–77ms;
   an idle dashboard runs nothing.
-- **Fit:** measured at 390×844, 360×780 and 1180×820: the grid is 625px with
-  nothing to scroll. Every face is one line per fact, truncated, so a tile does
+- **Fit:** measured at 390×844, 360×780 and 1180×820: the grid is 537px with
+  nothing to scroll (625 with the Status tile). Every face is one line per fact, truncated, so a tile does
   not change height as answers land; a tile that ADDS a line has to be
   re-measured at 360×780.
-- **The duty is the one in progress, else the next** (`dutyFlights` from its
-  report). Gates and the aeroplane are asked within 18h of it, the weather
+- **The duty is the one in progress, else the next, else the one chosen**
+  (`dutyFlights` from its report). Gates and the aeroplane are asked within 18h of it, the weather
   within 30h (a TAF's reach), only while the page is on screen.
 - **"Last" is before THIS duty** (`flight-brief.ts`, tested): on the second
   sector the first one today is not the last time with the captain, and a
   sector still to fly is not the last visit. Positioning and simulators count
   as neither.
 - The legal page's instruments live on in `flight/instruments.tsx`, and every
-  rule written about them below still holds there — the annunciator, the duty
-  band's phases, the status ramp, "the FDP maximum is never hardcoded".
+  rule written about them below still holds there — the duty band's phases,
+  the status ramp, "the FDP maximum is never hardcoded". The annunciator's
+  verdict became the duty and rest card's eyebrow and line (above); the rules
+  below about it hold for that line.
 
 **The period controls belong to the summary page only.** The calendar button and
 the period are meaningless on the legal page, so they are not rendered there at
@@ -4722,13 +4749,13 @@ alone on purpose. The reason is recorded so the next pass doesn't re-derive it
   repeat launch; idle 20–45ms of main thread per 4–5s, no running animations;
   heap 12–15MB after GC with every kept-alive tab visited, 2,238 nodes, 703
   listeners. Waiting:
-  - **The import pipeline is a STATIC import of the logbook and roster pages**
-    (`UnifiedImportButton` → every parser, LogTen, the reconciler, the
-    executor, the review dialogs): ~120KB minified, est. 35–40KB gzip, used
-    only after a tap. On a repeat launch V8's code cache makes it ~7–20ms; the
-    cost is the first launch after install and after every deploy. The shape:
-    a thin button that `import()`s the pipeline on tap, warmed at idle so an
-    offline import still finds it cached.
+  - DONE (Nov 2026): **the import pipeline is its own chunk** (141KB raw /
+    44KB gzip), out of the logbook's first load. `UnifiedImportButton` is the
+    button and the file picker only (iOS opens a picker only inside the tap);
+    `ImportFlow` (`import-flow.tsx`, `React.lazy`) takes the files once
+    chosen, and is fetched when the page is idle so the service worker holds
+    it for an offline import. Measured: a real schedule PDF reviews in 4.6s
+    warm, 9.3s on a fresh profile still seeding its airports.
   - **Opening a flight** is ~380ms of React reconciliation at 4× (four long
     tasks, worst 185ms). App code in it is small (the form 19ms, swipe rows
     28ms). Mounting the lower sections after the first paint would shorten the
@@ -5585,6 +5612,9 @@ When making changes, be aware of these high-impact files:
 - Do not derive the duty band's bar colour from how full it is — state the tone. A nearly-full FDP bar is a warning and a nearly-full REST bar is good news; deriving it painted a fully-rested pilot amber. And do not put a standby's window on the status ramp: how full it is is a magnitude, not a verdict (`RAMP.info`)
 - Do not print a rest's span to legality as its minimum — "Min 11:56" read as a miscount; it is "10:00 + night" (`restMinimumText`), with Legal From saying when
 - Do not give a flight-page card a title bar, a close button, sections or a disclosure, or say in it what its face says — it is the tile lifted (the flight card's preview): face, a hairline, figures and one-line rows, circles beneath
+- Do not put a fact on two dashboard cards — one card per section. The duty and rest card speaks from `dutyState` / `dutyAction` (never the overall `state` / `nextAction`, which lead with a currency), a currency or limit is its own card's, and a later duty's figures are the flights card's
+- Do not place a lifted card at its rest and offset it back to the tile — place it ON the tile and move it to rest; the rest is known only once the card is measured
+- Do not import a parser, the reconciler or a review dialog into the logbook page — the import pipeline is `import-flow.tsx`, loaded once files are chosen; `UnifiedImportButton` keeps only the button and the picker
 - Do not give a flight-page tile a line that wraps or appears only sometimes — one truncated line per fact, or the one-screen phone layout moves as answers land; and do not open a tile's detail on a phone anywhere but its own sheet, grown out of the tile
 - Do not read a TAF without the duty's times — highlight the periods within an hour of each leg's time at that airport (`stationWindows`), and lay a change group over what prevails rather than reading it alone
 - Do not put the duty band's ring back. The off-duty question is a COMPARISON of two instants on one axis — when the rest becomes legal, and when the next duty reports — and an arc has nowhere to put the second one. It is a timeline with the report as a CARET and the rest still owed as a red band, so a duty rostered inside the rest period is visible before a word is read
