@@ -23,6 +23,8 @@ import * as React from "react"
 import { usePathname } from "next/navigation"
 import { useFlights } from "@/hooks/data/use-flights"
 import { usePersonnel } from "@/hooks/data/use-crew"
+import { useCurrencies } from "@/hooks/data/use-currencies"
+import { currencySummary } from "@/lib/utils/dashboard/currency-summary"
 import { useFDPData } from "@/hooks/data/use-fdp-data"
 import { usePilotStatus } from "@/hooks/data/use-pilot-status"
 import { usePageActive } from "@/hooks/use-page-active"
@@ -48,9 +50,11 @@ import { getAirportByIcao, getAirportsRevision } from "@/lib/db/stores/reference
 import type { Airport } from "@/types/entities/airport.types"
 import { cn } from "@/lib/utils"
 import { useTick } from "./flight/instruments"
-import { CrewFace, CurrencyFace, DestinationFace, DutyFace, DutyStepper, FlightFace, LimitsFace, limitsOf } from "./flight/faces"
+import { CrewFace, CurrencyFace, DestinationFace, DutyFace, DutyStepper, FlightFace, LimitsFace, currencyRows, limitsOf } from "./flight/faces"
 import { WeatherFace, type WeatherState } from "./flight/weather"
 import { WIDGET_TITLE, useWidgetCtx, widgetContent } from "./flight/details"
+import { BentoGrid } from "./flight/bento"
+import { setArranging, useArranging, useTileOrder } from "@/hooks/use-dashboard-layout"
 import { Widget, WidgetCard, WidgetLabel, WidgetSheet, type WidgetAnchor, type WidgetId } from "./flight/widget"
 import { ActionRow, ActionStack } from "@/components/ui/action-row"
 import type { DutyChoice, FlightBrief } from "./flight/model"
@@ -121,12 +125,18 @@ export function FlightDashboard({ className }: { className?: string }) {
   // Which duty the page is about: null is the default (in progress, else
   // next). Coming back to the page goes back to it.
   const [chosenAt, setChosenAt] = React.useState<number | null>(null)
-  const isActive = usePageActive("/", () => setChosenAt(null))
+  const isActive = usePageActive("/", () => {
+    setChosenAt(null)
+    setArranging(false)
+  })
+  const order = useTileOrder()
+  const arranging = useArranging()
   const now = useTick(isActive)
   const { preferences } = usePreferences()
   const display = preferences?.display
   const { flights, isLoading: flightsLoading } = useFlights()
   const { personnel } = usePersonnel()
+  const { currencies } = useCurrencies()
   const { allDutyPeriods } = useFDPData()
   const dayKey = useDayKey()
   const recency = React.useMemo(
@@ -199,6 +209,7 @@ export function FlightDashboard({ className }: { className?: string }) {
     () => (legs.length ? destinationVisits(legs, flights, firstDepart ?? Infinity) : []),
     [legs, flights, firstDepart],
   )
+  const currency = React.useMemo(() => currencySummary(currencies, dutyAtMs), [currencies, dutyAtMs])
   const stations = React.useMemo(() => dutyStations(legs), [legs])
   const airports = useAirportsByIcao(stations)
 
@@ -258,6 +269,7 @@ export function FlightDashboard({ className }: { className?: string }) {
         refreshLookups: lookups.refresh,
       },
       crew,
+      currency,
       destinations,
       airports,
       weather,
@@ -267,7 +279,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       day: (ms: number) =>
         formatDayAt(ms, display?.useZuluTime === false ? zone : "UTC", { year: false }),
     }),
-    [status, now, display, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, crew, destinations, airports, weather, iataOf, pref, zone],
+    [status, now, display, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, crew, currency, destinations, airports, weather, iataOf, pref, zone],
   )
 
   /* ── Opening a widget ────────────────────────────────────────────────── */
@@ -320,22 +332,21 @@ export function FlightDashboard({ className }: { className?: string }) {
 
   const reqs = status.legality.requirements
   const tint = {
-    currency: worstOf(reqs.filter((r) => r.group === "currency").map((r) => r.state)),
+    currency: worstOf(currencyRows(brief).map((r) => r.state)),
     limits: worstOf(limitsOf(brief).map((r) => r.state)),
   } as Partial<Record<WidgetId, RequirementState | null>>
-  const tile = (id: WidgetId, face: React.ReactNode, cls?: string, controls?: React.ReactNode) => (
+  const tile = (id: WidgetId) => (
     <Widget
-      key={id}
       id={id}
       label={WIDGET_TITLE[id]}
       open={isDesktop && panelWidget === id}
       hidden={sheet?.id === id}
       onOpen={open}
       tone={tint[id] ?? null}
-      controls={controls}
-      className={cls}
+      controls={id === "flight" ? <DutyStepper index={index} count={choices.length} onStep={step} /> : undefined}
+      className="flex-1"
     >
-      {face}
+      {faceOf(id, brief)}
     </Widget>
   )
   return (
@@ -343,20 +354,13 @@ export function FlightDashboard({ className }: { className?: string }) {
       {/* Scrolls only as a LAST RESORT: every tile fits a phone held upright
           (measured: 360×780 and up). Held sideways it is ~390px tall, and the
           tiles scroll rather than being squeezed out of sight. */}
-      <div className="grid min-h-0 grid-cols-6 content-start gap-2 overflow-y-auto overscroll-contain scrollbar-hide @[44rem]:grid-cols-12">
-        {tile("duty", faceOf("duty", brief), "col-span-6 @[44rem]:col-span-12")}
-        {tile(
-          "flight",
-          faceOf("flight", brief),
-          "col-span-6 @[44rem]:col-span-12",
-          <DutyStepper index={index} count={choices.length} onStep={step} />,
-        )}
-        {tile("weather", faceOf("weather", brief), "col-span-2 @[44rem]:col-span-4")}
-        {tile("crew", faceOf("crew", brief), "col-span-2 @[44rem]:col-span-4")}
-        {tile("destination", faceOf("destination", brief), "col-span-2 @[44rem]:col-span-4")}
-        {tile("currency", faceOf("currency", brief), "col-span-3 @[44rem]:col-span-6")}
-        {tile("limits", faceOf("limits", brief), "col-span-3 @[44rem]:col-span-6")}
-      </div>
+      <BentoGrid
+        order={order}
+        arranging={arranging}
+        label={(id) => WIDGET_TITLE[id]}
+        tile={tile}
+        face={(id) => faceOf(id, brief)}
+      />
 
       {sheet &&
         (() => {

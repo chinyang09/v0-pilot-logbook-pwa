@@ -1234,9 +1234,33 @@ tiles (`flight/widget.tsx`, faces in `flight/faces.tsx`, bodies in
 | Flights (the chosen duty, ‹ › to step) | Now / Next / Later · day, flight numbers with the duty's FDP/max, the chain with each stop's time and gate, then the aeroplane line — or, for a later duty, the rest before it against its minimum | Report (a later duty), Off Duty, FDP Table; a row per leg — gates with stand, the airport's inbound flight, tail; the inbound row (flight, STD, where, its gate); the duties to choose from | Refresh (only once gates are asked) |
 | Weather | each airport's worst category and first hazard | per airport: category and hazard CHIPS, the METAR, and ONLY the TAF periods over the duty's times there, each with its leg | Refresh |
 | Crew | who, and the day last flown together ("New") | a row each: initials, name, role · flights together, the day; a tap opens their card | Crew |
-| Last There | the day last flown INTO each destination (not the origin) | a row each: the day, arrivals this year, local time now, a sun or moon for the arrival | — |
-| Currency | the three most pressing, with the tally | every currency as a figure-over-name cell, tinted only when flagged | Currency |
+| Last There | the day last flown INTO each destination (not the origin) | a row each: the place (city), last there, arrivals this year, local time now, a sun or moon for the arrival | — |
+| Currency | the three most pressing by NAME, with the tally — never "+N more" | the Currencies page in brief: 90-day recency (both halves, when it lapses) and sectors not logged, then EVERY document as that page groups it — needs attention, then current, soonest first — by name, "Expires 30 Nov", days left (`daysFigure`); a tap opens it on the page | Currency |
 | Limits | the four rolling limits as small bars | the hours LEFT in each, or "Breach ahead" | FDP |
+
+**A tile is a SUMMARY of its section** (the owner, Nov 2026: "bringing what is
+important to the table so the user doesn't have to go to the other tab"); its
+card brings what that section holds that matters for the flight. The currency
+card is the Currencies page (`currencySummary`, `lib/utils/dashboard/currency-summary.ts`,
+tested) — the same names, figure and order — plus the one thing the page
+cannot say: a document valid now that LAPSES BEFORE the chosen duty reports
+("before this duty", amber; `lapseOf`). The legality model gives EVERY
+document its own requirement: it used to fold all but the nearest three into
+one "7 more" cell, which the card then drew as a document (the owner's report).
+
+**A sortable bento** (the owner, Nov 2026; the readiness redesign of the same
+week was reverted — "I prefer the old one"). The header's grid button
+(Arrange, the flight page only; Escape or the tick ends it) lets a tile be
+picked up and dropped on another (`flight/bento.tsx`), or moved with the
+arrow keys. The order is per device (`use-dashboard-layout.ts`,
+`ooo:dashboard-tiles`) and is PACKED into rows of 12 columns (`packTiles`,
+`lib/utils/dashboard/bento.ts`, tested): each tile has the fewest columns it
+reads at (duty, flight 12; weather, crew, Last There 4; currency, limits 6),
+tiles share a row while those fit, and the spare columns are shared out — so
+any order fills every row edge to edge, and the default packs to exactly the
+layout above. The DOM never moves (the grid places each tile by CSS `order`),
+so reordering remounts nothing; `layout` animation runs only while arranging;
+the tile being dragged is a copy over its faded slot.
 
 **ONE CARD PER SECTION, no fact in two places** (the owner, Nov 2026). The
 Status tile is gone: its annunciator led with whatever was most pressing —
@@ -5611,6 +5635,8 @@ When making changes, be aware of these high-impact files:
 - Do not print the rolling limits in the duty band as well as the limits band — that was the duplication the rework removed. The duty band carries FDP and flight time for THIS duty only
 - Do not derive the duty band's bar colour from how full it is — state the tone. A nearly-full FDP bar is a warning and a nearly-full REST bar is good news; deriving it painted a fully-rested pilot amber. And do not put a standby's window on the status ramp: how full it is is a magnitude, not a verdict (`RAMP.info`)
 - Do not print a rest's span to legality as its minimum — "Min 11:56" read as a miscount; it is "10:00 + night" (`restMinimumText`), with Legal From saying when
+- Do not fold documents into a "+N more" requirement or line — the dashboard's currency card lists every document (`currencySummary`), by the name the Currencies page uses
+- Do not reorder the bento by moving DOM nodes or give its tiles `layout` outside Arrange — tiles stay in `DASHBOARD_TILES` order and the grid places them by `order`; and do not hardcode a tile's column span: it comes from `packTiles` and `TILE_MIN_COLS`
 - Do not give a flight-page card a title bar, a close button, sections or a disclosure, or say in it what its face says — it is the tile lifted (the flight card's preview): face, a hairline, figures and one-line rows, circles beneath
 - Do not put a fact on two dashboard cards — one card per section. The duty and rest card speaks from `dutyState` / `dutyAction` (never the overall `state` / `nextAction`, which lead with a currency), a currency or limit is its own card's, and a later duty's figures are the flights card's
 - Do not place a lifted card at its rest and offset it back to the tile — place it ON the tile and move it to rest; the rest is known only once the card is measured
