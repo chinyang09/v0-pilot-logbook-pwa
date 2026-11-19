@@ -13,6 +13,7 @@ import type { DutyLookups } from "@/hooks/use-duty-lookups"
 import type { DutyInfo } from "@/lib/utils/dashboard/duty-line"
 import type { CrewMate, DestinationVisits } from "@/lib/utils/dashboard/flight-brief"
 import type { LegTimes } from "@/lib/weather/brief"
+import type { CurrencySummary } from "@/lib/utils/dashboard/currency-summary"
 import type { WeatherState } from "./weather"
 
 export interface FlightBrief {
@@ -51,6 +52,8 @@ export interface FlightBrief {
     refreshLookups: () => void
   }
   crew: CrewMate[]
+  /** The Currencies page in brief: its documents, grouped as it groups them, judged against the chosen duty. */
+  currency: CurrencySummary
   destinations: DestinationVisits[]
   /** The airports the duty touches, by ICAO, once read. */
   airports: Map<string, Airport>

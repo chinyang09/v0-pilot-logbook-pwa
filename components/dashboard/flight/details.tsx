@@ -22,8 +22,9 @@ import { isNight } from "@/lib/utils/night-time"
 import { hasCoordinates } from "@/lib/utils/flight-calculations"
 import { getAirportLocalTime } from "@/lib/db/stores/reference/airports.store"
 import { cn } from "@/lib/utils"
+import { formatDay } from "@/lib/utils/date"
 import { REQ_TONE, STATE_ICON } from "./instruments"
-import { destinationsOf, limitsOf, orderCurrency, shortDay, shortName } from "./faces"
+import { destinationsOf, limitsOf, shortDay, shortName } from "./faces"
 import { WeatherBody } from "./weather"
 import type { FlightBrief } from "./model"
 import type { WidgetAction, WidgetId } from "./widget"
@@ -191,7 +192,7 @@ export function widgetContent(
     case "currency":
       return {
         header: "label",
-        body: <CurrencyBody brief={brief} />,
+        body: <CurrencyBody brief={brief} go={ctx.go} />,
         actions: [{ id: "cur", label: "Currency", icon: <ShieldCheck className="h-5 w-5" />, run: () => ctx.go("/currencies") }],
       }
     case "limits":
@@ -375,8 +376,17 @@ function DestinationBody({ brief, openFlight }: { brief: FlightBrief; openFlight
             lead={
               <span className="w-12 shrink-0 text-[15px] font-semibold tabular-nums text-foreground">{brief.code(d.icao)}</span>
             }
-            title={d.last ? shortDay(d.last.date) : "First time"}
-            sub={[d.year ? `${d.year}× this year` : null, airport?.tz ? getAirportLocalTime(airport.tz) : null].filter(Boolean).join(" · ") || undefined}
+            // Where it is, then when last there — the tile has only the code.
+            title={airport?.city || airport?.name || brief.code(d.icao)}
+            sub={
+              [
+                d.last ? `Last ${shortDay(d.last.date)}` : "First time",
+                d.year ? `${d.year}× this year` : null,
+                airport?.tz ? `Now ${getAirportLocalTime(airport.tz)}` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ") || undefined
+            }
             right={Arrive ? <Arrive className="h-4 w-4" aria-label={night ? "Arrive by night" : "Arrive by day"} /> : undefined}
           />
         )
@@ -385,27 +395,58 @@ function DestinationBody({ brief, openFlight }: { brief: FlightBrief; openFlight
   )
 }
 
-/** Every currency, a cell each: its figure over its name, tinted only when flagged. */
-function CurrencyBody({ brief }: { brief: FlightBrief }) {
-  const reqs = orderCurrency(brief.status.legality.requirements.filter((r) => r.group === "currency"))
-  if (reqs.length === 0) return null
+/**
+ * The Currencies page, brought to the card: the logbook's own requirements
+ * first (90-day recency, sectors not logged), then every document as the page
+ * groups them — what needs attention, then what is current, soonest first —
+ * by name, with its expiry date and days left. A document that lapses before
+ * the chosen duty says so. A tap opens it on the Currencies page.
+ */
+function CurrencyBody({ brief, go }: { brief: FlightBrief; go: (href: string) => void }) {
+  const logbook = brief.status.legality.requirements.filter((r) => r.group === "currency" && !r.id.startsWith("doc-"))
+  const { attention, current } = brief.currency
+  if (logbook.length === 0 && attention.length === 0 && current.length === 0) return null
+  const figure = (state: Requirement["state"], text: string) => (
+    <span className={cn("font-semibold", state === "ok" ? "text-foreground" : REQ_TONE[state].icon)}>{text}</span>
+  )
+  const lead = (state: Requirement["state"]) => {
+    const Icon = STATE_ICON[state]
+    return <Icon className={cn("h-4 w-4 shrink-0", REQ_TONE[state].icon)} aria-hidden />
+  }
+  const groups = [attention, current].filter((g) => g.length > 0)
   return (
-    <div className="grid grid-cols-2 gap-1.5 @[26rem]:grid-cols-3">
-      {reqs.map((r) => {
-        const Icon = STATE_ICON[r.state]
-        const flagged = r.state !== "ok"
-        return (
-          <div key={r.id} className={cn("min-w-0 rounded-lg px-2 py-1.5", flagged ? REQ_TONE[r.state].track : "bg-muted/40")}>
-            <p className="flex items-center gap-1">
-              <Icon className={cn("h-3 w-3 shrink-0", REQ_TONE[r.state].icon)} aria-hidden />
-              <span className={cn("truncate text-sm font-semibold tabular-nums", flagged ? REQ_TONE[r.state].icon : "text-foreground")}>
-                {r.value}
-              </span>
-            </p>
-            <p className="truncate text-[9px] font-medium uppercase tracking-wider text-muted-foreground">{r.label}</p>
-          </div>
-        )
-      })}
+    <div>
+      {logbook.map((r) => (
+        <TapRow
+          key={r.id}
+          onClick={r.href ? () => go(r.href) : undefined}
+          lead={lead(r.state)}
+          title={r.label}
+          // Recency: both halves, and when it lapses; not logged: which sectors.
+          sub={
+            (r.detail ?? [])
+              .filter((d) => d.label !== "Status")
+              .map((d) => (r.id === "recency" ? `${d.label} ${d.value.replace(/ \/ /g, "/")}` : d.value))
+              .join(" · ") || undefined
+          }
+          right={figure(r.state, r.value)}
+        />
+      ))}
+      {groups.map((group, gi) => (
+        <div key={gi} className={cn((logbook.length > 0 || gi > 0) && "mt-1 border-t border-border/70 pt-1")}>
+          {group.map((l) => (
+            <TapRow
+              key={l.id}
+              onClick={() => go(`/currencies?selected=${encodeURIComponent(l.id)}`)}
+              lead={lead(l.state)}
+              title={l.name}
+              // With its year: a licence valid to 2030 is not "1 Jun".
+              sub={[`Expires ${formatDay(l.expiryDate, { weekday: false })}`, l.lapsesBeforeDuty ? "before this duty" : null].filter(Boolean).join(" · ")}
+              right={figure(l.state, l.figure)}
+            />
+          ))}
+        </div>
+      ))}
     </div>
   )
 }

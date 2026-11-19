@@ -18,6 +18,8 @@ import { SwipeableCard, type SwipeAction } from "@/components/swipeable-card"
 import { ShieldAlert, ShieldCheck, ShieldX, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatYMDMedium as formatDate } from "@/lib/utils/date"
+// Shared with the dashboard's currency card, so the two read alike.
+import { daysFigure } from "@/lib/utils/dashboard/currency-summary"
 
 /**
  * The icon carries the state on every row — never colour alone. Only a
@@ -30,17 +32,6 @@ const STATUS: Record<CurrencyStatus, { icon: typeof ShieldCheck; text: string; l
   warning: { icon: ShieldAlert, text: "text-status-warning", label: "Expiring Soon" },
   critical: { icon: ShieldAlert, text: "text-status-critical", label: "Critical" },
   expired: { icon: ShieldX, text: "text-status-error", label: "Expired" },
-}
-
-/**
- * The figure a pilot reads: days left, or that it has gone. Past a year it is
- * years — "2888d" is a number to work out, "7.9y" is an answer.
- */
-export function daysFigure(days: number): string {
-  if (days < 0) return "Expired"
-  if (days === 0) return "Today"
-  if (days >= 365) return `${(days / 365).toFixed(1)}y`
-  return `${days}d`
 }
 
 interface CurrencyCardProps {

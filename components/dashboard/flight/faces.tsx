@@ -227,15 +227,8 @@ export function DestinationFace({ brief }: { brief: FlightBrief }) {
 
 /* ── Currency and limits ─────────────────────────────────────────────────── */
 
-/** Most pressing first: flagged by urgency, then the nearest expiry. */
-export function orderCurrency(reqs: Requirement[]): Requirement[] {
-  return [...reqs].sort(
-    (a, b) =>
-      (b.urgency ?? -1) - (a.urgency ?? -1) || (a.daysUntil ?? 9e9) - (b.daysUntil ?? 9e9),
-  )
-}
-
-function Tally({ requirements }: { requirements: Requirement[] }) {
+function Tally({ rows }: { rows: Array<{ state: Requirement["state"] }> }) {
+  const requirements = rows
   const fail = requirements.filter((r) => r.state === "fail").length
   const caution = requirements.filter((r) => r.state === "caution" || r.state === "unknown").length
   return (
@@ -257,28 +250,60 @@ function Tally({ requirements }: { requirements: Requirement[] }) {
   )
 }
 
+/** One line of the currency tile: a logbook requirement (recency, sectors not logged) or a document. */
+export interface CurrencyRow {
+  key: string
+  name: string
+  state: Requirement["state"]
+  figure: string
+}
+
+const SEVERITY: Record<Requirement["state"], number> = { fail: 0, unknown: 1, caution: 1, ok: 2 }
+
+/**
+ * Everything the currency tile summarises, most pressing first: the logbook's
+ * own requirements (90-day recency, sectors not logged, a read that failed)
+ * and every document on the Currencies page, by the NAME that page gives it.
+ * Within a state, the order is the page's — soonest first.
+ */
+export function currencyRows(brief: FlightBrief): CurrencyRow[] {
+  const logbook = brief.status.legality.requirements
+    .filter((r) => r.group === "currency" && !r.id.startsWith("doc-"))
+    .map((r) => ({ key: r.id, name: r.label, state: r.state, figure: r.value }))
+  const docs = [...brief.currency.attention, ...brief.currency.current].map((l) => ({
+    key: `doc-${l.id}`,
+    name: l.name,
+    state: l.state,
+    figure: l.lapsesBeforeDuty ? `${l.figure} · before duty` : l.figure,
+  }))
+  return [...logbook, ...docs].sort((a, b) => SEVERITY[a.state] - SEVERITY[b.state])
+}
+
+/**
+ * The Currencies page at a glance: the three most pressing, and a tally of the
+ * whole set — never "+N more": the card lists them all.
+ */
 export function CurrencyFace({ brief, rows = 3 }: { brief: FlightBrief; rows?: number }) {
-  const reqs = orderCurrency(brief.status.legality.requirements.filter((r) => r.group === "currency"))
+  const all = currencyRows(brief)
   return (
     <>
-      <WidgetLabel right={<Tally requirements={reqs} />}>Currency</WidgetLabel>
-      {reqs.length === 0 ? (
+      <WidgetLabel right={<Tally rows={all} />}>Currency</WidgetLabel>
+      {all.length === 0 ? (
         <p className="text-xs leading-snug text-muted-foreground">None tracked</p>
       ) : (
         <ul className="space-y-1">
-          {reqs.slice(0, rows).map((r) => {
+          {all.slice(0, rows).map((r) => {
             const Icon = STATE_ICON[r.state]
             return (
-              <li key={r.id} className="flex items-center gap-1.5 text-xs leading-tight">
+              <li key={r.key} className="flex items-center gap-1.5 text-xs leading-tight">
                 <Icon className={cn("h-3 w-3 shrink-0", REQ_TONE[r.state].icon)} aria-hidden />
-                <span className="min-w-0 flex-1 truncate text-foreground">{r.label}</span>
+                <span className="min-w-0 flex-1 truncate text-foreground">{r.name}</span>
                 <span className={cn("shrink-0 font-semibold tabular-nums", r.state === "ok" ? "text-foreground" : REQ_TONE[r.state].icon)}>
-                  {r.value}
+                  {r.figure.split(" · ")[0]}
                 </span>
               </li>
             )
           })}
-          {reqs.length > rows && <li className="text-[10px] text-muted-foreground">+{reqs.length - rows} more</li>}
         </ul>
       )}
     </>
@@ -296,7 +321,7 @@ export function LimitsFace({ brief }: { brief: FlightBrief }) {
   const limits = limitsOf(brief)
   return (
     <>
-      <WidgetLabel right={<Tally requirements={limits} />}>Limits</WidgetLabel>
+      <WidgetLabel right={<Tally rows={limits} />}>Limits</WidgetLabel>
       <ul className="space-y-1.5">
         {limits.map((r) => {
           const [used, limit] = r.value.split(" / ")
