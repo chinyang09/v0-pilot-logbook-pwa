@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { ArrowUpDown, Calendar, Check, SlidersHorizontal } from "lucide-react"
+import { Calendar, SlidersHorizontal } from "lucide-react"
 
 import { GlassButtonGroup, GlassGroupButton } from "@/components/ui/glass-icon-button"
 import {
@@ -15,7 +15,6 @@ import {
   useDashboardView,
 } from "@/hooks/use-dashboard-view"
 import { AlertsDropdown } from "./alerts-dropdown"
-import { setArranging, useArranging } from "@/hooks/use-dashboard-layout"
 import { ChoicePicker, type MenuOption } from "@/components/ui/option-menu"
 import { cn } from "@/lib/utils"
 
@@ -54,7 +53,6 @@ export function DashboardActions() {
     setShowCalendar,
   } = useDashboardPeriod()
   const view = useDashboardView()
-  const arranging = useArranging()
 
   const activePreset: DashboardPreset | null =
     period.kind === "preset" ? period.preset : null
@@ -76,10 +74,7 @@ export function DashboardActions() {
                 role="tab"
                 type="button"
                 aria-selected={isActive}
-                onClick={() => {
-                  setDashboardView(v.value)
-                  setArranging(false)
-                }}
+                onClick={() => setDashboardView(v.value)}
                 className={cn(
                   "h-10 rounded-full px-3 text-xs font-semibold transition-colors",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -139,18 +134,6 @@ export function DashboardActions() {
       )}
 
       <GlassButtonGroup>
-        {/* The flight page's cards in the pilot's own order: Arrange shows a
-            grip on each, Done puts them back to being opened. */}
-        {view === "flight" && (
-          <GlassGroupButton
-            ariaLabel={arranging ? "Done arranging" : "Arrange cards"}
-            ariaPressed={arranging}
-            active={arranging}
-            onClick={() => setArranging(!arranging)}
-          >
-            {arranging ? <Check className="h-5 w-5" /> : <ArrowUpDown className="h-5 w-5" />}
-          </GlassGroupButton>
-        )}
         <AlertsDropdown />
       </GlassButtonGroup>
     </>

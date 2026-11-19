@@ -36,6 +36,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { ReadingPanel } from "@/components/ui/detail-form-panel"
 import { ninetyDayRecency } from "@/lib/utils/dashboard-aggregate"
 import { dutyFlights } from "@/lib/utils/dashboard/duty-flights"
+import { describeDuty } from "@/lib/utils/dashboard/duty-line"
 import { dutyWindow } from "@/lib/utils/dashboard/duty-status"
 import { fdpMinutesOf } from "@/lib/utils/roster/fdp-calculator"
 import { crewOnDuty, destinationVisits, dutyStations, legTimes } from "@/lib/utils/dashboard/flight-brief"
@@ -46,29 +47,15 @@ import { formatDayAt } from "@/lib/utils/date"
 import { getAirportByIcao, getAirportsRevision } from "@/lib/db/stores/reference/airports.store"
 import type { Airport } from "@/types/entities/airport.types"
 import { cn } from "@/lib/utils"
-import { Reorder, useDragControls } from "framer-motion"
 import { useTick } from "./flight/instruments"
-import { DutyStepper, destinationsOf, limitsOf, orderCurrency, shortDay } from "./flight/faces"
-import { type WeatherState } from "./flight/weather"
+import { CrewFace, CurrencyFace, DestinationFace, DutyFace, DutyStepper, FlightFace, LimitsFace, limitsOf } from "./flight/faces"
+import { WeatherFace, type WeatherState } from "./flight/weather"
 import { WIDGET_TITLE, useWidgetCtx, widgetContent } from "./flight/details"
 import { Widget, WidgetCard, WidgetLabel, WidgetSheet, type WidgetAnchor, type WidgetId } from "./flight/widget"
-import { AREA_TITLE, AreaGrip, AreaRow, HERO_STEPPER_CLASS, ReadinessHero, areaCardClass } from "./flight/areas"
 import { ActionRow, ActionStack } from "@/components/ui/action-row"
 import type { DutyChoice, FlightBrief } from "./flight/model"
 import type { DutyPeriod } from "@/types/entities/roster.types"
-import { inboundLeg } from "@/lib/utils/dashboard/duty-flights"
-import {
-  aircraftArea,
-  crewArea,
-  currencyArea,
-  destinationArea,
-  dutyArea,
-  limitsArea,
-  readiness,
-  weatherArea,
-  type AreaStatus,
-} from "@/lib/utils/dashboard/area-status"
-import { setAreaOrder, setArranging, useAreaOrder, useArranging, type DashboardArea } from "@/hooks/use-dashboard-layout"
+import type { RequirementState } from "@/lib/utils/dashboard/legality"
 
 /** How far either side of now a duty's gates and aeroplane are worth asking about. */
 const LOOKUP_WINDOW_MS = 18 * 3600_000
@@ -80,6 +67,12 @@ const CHOICES = 14
 /** A duty with flying in it — what the flight card can be about. */
 const hasFlying = (dp: DutyPeriod) => !dp.dutyKind || dp.dutyKind === "flight" || dp.dutyKind === "positioning"
 
+/** The worst state among some requirements — a card's tint. */
+function worstOf(states: RequirementState[]): RequirementState | null {
+  if (states.includes("fail")) return "fail"
+  if (states.includes("caution") || states.includes("unknown")) return "caution"
+  return null
+}
 
 const NO_AIRPORTS = new Map<string, Airport>()
 
@@ -104,69 +97,31 @@ function useAirportsByIcao(icaos: readonly string[]): Map<string, Airport> {
   return found?.key === key ? found.map : NO_AIRPORTS
 }
 
-/** Every area's verdict, in words — one pass over the brief. */
-function areaStatuses(brief: FlightBrief): Record<DashboardArea, AreaStatus> {
-  const { duty, status, code, clock, now, airports } = brief
-  const reqs = status.legality.requirements
-  const leg = inboundLeg(duty.legs) ?? duty.legs[0] ?? null
-  const gate = leg && duty.lookups?.gates[leg.id]?.status === "done" ? (duty.lookups.gates[leg.id] as { status: "done"; gates: { departure: { gate: string } } }).gates.departure.gate : ""
-  const nameOf = (icao: string) => {
-    const a = airports.get(icao.toUpperCase())
-    const place = a?.city || a?.name
-    return place ? `${place} (${code(icao)})` : code(icao)
+/** What a tile shows — the face its card keeps as a header. */
+function faceOf(id: WidgetId, brief: FlightBrief): React.ReactNode {
+  switch (id) {
+    case "duty":
+      return <DutyFace brief={brief} />
+    case "flight":
+      return <FlightFace brief={brief} />
+    case "weather":
+      return <WeatherFace weather={brief.weather} code={brief.code} />
+    case "crew":
+      return <CrewFace brief={brief} />
+    case "destination":
+      return <DestinationFace brief={brief} />
+    case "currency":
+      return <CurrencyFace brief={brief} />
+    case "limits":
+      return <LimitsFace brief={brief} />
   }
-  return {
-    duty: dutyArea(status.duty, clock),
-    aircraft: aircraftArea({
-      registration: leg?.aircraftReg ?? "",
-      hasLegs: duty.legs.length > 0,
-      lookups: duty.lookups,
-      loading: duty.lookupsLoading,
-      gate,
-      nowMs: now,
-      clock,
-    }),
-    weather: weatherArea({
-      briefs: brief.weather.briefs,
-      asked: brief.weather.asked,
-      failed: brief.weather.failed,
-      loading: brief.weather.loading,
-      checkedAt: brief.weather.checkedAt,
-      code,
-    }),
-    crew: crewArea(brief.crew, shortDay),
-    destination: destinationArea(destinationsOf(brief), nameOf, now),
-    currency: currencyArea(orderCurrency(reqs.filter((r) => r.group === "currency"))),
-    limits: limitsArea(limitsOf(brief)),
-  }
-}
-
-/** What a card shows — the face its expanded card keeps as a header. */
-function faceOf(
-  id: WidgetId,
-  brief: FlightBrief,
-  areas: Record<DashboardArea, AreaStatus>,
-  order: DashboardArea[],
-): React.ReactNode {
-  if (id === "flight") {
-    // An empty logbook has passed nothing — empty limits are not "good to go".
-    const verdict =
-      brief.status.state === "getting_started"
-        ? { tone: "idle" as const, headline: "No flights yet", flagged: 0 }
-        : readiness(order.map((a) => areas[a]))
-    return <ReadinessHero brief={brief} tones={order.map((a) => areas[a].tone)} verdict={verdict} />
-  }
-  return <AreaRow id={id} status={areas[id]} opened />
 }
 
 export function FlightDashboard({ className }: { className?: string }) {
   // Which duty the page is about: null is the default (in progress, else
   // next). Coming back to the page goes back to it.
   const [chosenAt, setChosenAt] = React.useState<number | null>(null)
-  const isActive = usePageActive("/", () => {
-    setChosenAt(null)
-    setArranging(false)
-  })
+  const isActive = usePageActive("/", () => setChosenAt(null))
   const now = useTick(isActive)
   const { preferences } = usePreferences()
   const display = preferences?.display
@@ -226,6 +181,13 @@ export function FlightDashboard({ className }: { className?: string }) {
   const times = React.useMemo(() => legs.map(legTimes), [legs])
   const lookupsClose = dutyAtMs !== null && Math.abs(dutyAtMs - now) <= LOOKUP_WINDOW_MS
   const lookups = useDutyLookups(lookupsClose ? dutyAtMs : null, { active: isActive })
+  const info = React.useMemo(
+    () =>
+      lookupsClose && lookups.legs.length > 0
+        ? describeDuty(lookups.legs, lookups.lookups, lookups.loading, lookups.refresh, display)
+        : null,
+    [lookupsClose, lookups.legs, lookups.lookups, lookups.loading, lookups.refresh, display],
+  )
 
   /* ── Crew and destinations ───────────────────────────────────────────── */
   const crew = React.useMemo(
@@ -291,6 +253,7 @@ export function FlightDashboard({ className }: { className?: string }) {
         legs,
         times,
         lookups: lookupsClose ? lookups.lookups : null,
+        info,
         lookupsLoading: lookups.loading,
         refreshLookups: lookups.refresh,
       },
@@ -304,15 +267,10 @@ export function FlightDashboard({ className }: { className?: string }) {
       day: (ms: number) =>
         formatDayAt(ms, display?.useZuluTime === false ? zone : "UTC", { year: false }),
     }),
-    [status, now, display, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, lookups.loading, lookups.refresh, crew, destinations, airports, weather, iataOf, pref, zone],
+    [status, now, display, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, crew, destinations, airports, weather, iataOf, pref, zone],
   )
 
-  /* ── The areas ───────────────────────────────────────────────────────── */
-  const order = useAreaOrder()
-  const arranging = useArranging()
-  const areas = React.useMemo(() => areaStatuses(brief), [brief])
-
-  /* ── Opening a card ──────────────────────────────────────────────────── */
+  /* ── Opening a widget ────────────────────────────────────────────────── */
   const isDesktop = useIsDesktop()
   const { selectedId, setSelectedId, setDetailContent } = useDetailPanel()
   const onDashboard = usePathname() === "/"
@@ -329,14 +287,14 @@ export function FlightDashboard({ className }: { className?: string }) {
   )
   const nav = useWidgetCtx()
   const ctx = React.useMemo(() => ({ ...nav, selectDuty }), [nav, selectDuty])
-  // The panel beside the page shows the card it was asked for: the same card
-  // the phone lifts, its actions as capsules under it.
+  // The panel beside the page shows the widget it was asked for: the same
+  // card the phone lifts, its actions as capsules under it.
   React.useEffect(() => {
     if (!isActive || !onDashboard || !panelWidget || !WIDGET_TITLE[panelWidget]) return
     const { body, actions, header } = widgetContent(panelWidget, brief, ctx)
     setDetailContent(
       <ReadingPanel key={panelWidget} title={WIDGET_TITLE[panelWidget]}>
-        <WidgetCard face={header === "face" ? faceOf(panelWidget, brief, areas, order) : null} body={body} />
+        <WidgetCard face={header === "face" ? faceOf(panelWidget, brief) : null} body={body} />
         {actions.length > 0 && (
           <ActionStack>
             {actions.map((a) => (
@@ -346,10 +304,10 @@ export function FlightDashboard({ className }: { className?: string }) {
         )}
       </ReadingPanel>,
     )
-  }, [isActive, onDashboard, panelWidget, brief, ctx, areas, order, setDetailContent])
+  }, [isActive, onDashboard, panelWidget, brief, ctx, setDetailContent])
 
   // Beside the page, the panel is never left saying "Select…": with nothing
-  // chosen it opens the duty's flight.
+  // chosen it opens the duty's flights, else the currency list.
   const loading = flightsLoading || statusLoading
   React.useEffect(() => {
     if (!isDesktop || !isActive || !onDashboard || loading || selectedId) return
@@ -360,59 +318,50 @@ export function FlightDashboard({ className }: { className?: string }) {
     return <Skeleton className={cn("h-full min-h-[24rem] rounded-3xl", className)} />
   }
 
+  const reqs = status.legality.requirements
+  const tint = {
+    currency: worstOf(reqs.filter((r) => r.group === "currency").map((r) => r.state)),
+    limits: worstOf(limitsOf(brief).map((r) => r.state)),
+  } as Partial<Record<WidgetId, RequirementState | null>>
+  const tile = (id: WidgetId, face: React.ReactNode, cls?: string, controls?: React.ReactNode) => (
+    <Widget
+      key={id}
+      id={id}
+      label={WIDGET_TITLE[id]}
+      open={isDesktop && panelWidget === id}
+      hidden={sheet?.id === id}
+      onOpen={open}
+      tone={tint[id] ?? null}
+      controls={controls}
+      className={cls}
+    >
+      {face}
+    </Widget>
+  )
   return (
-    <div className={cn("flex max-h-full min-h-0 flex-col", className)}>
-      {/* Scrolls only as a LAST RESORT: the hero and every area fit a phone
-          held upright (measured 360×780 and up). */}
-      <div className="min-h-0 space-y-1.5 overflow-y-auto overscroll-contain scrollbar-hide">
-        <Widget
-          id="flight"
-          label="Readiness and the next flight"
-          open={isDesktop && panelWidget === "flight"}
-          hidden={sheet?.id === "flight"}
-          disabled={arranging}
-          onOpen={open}
-          className={cn(arranging && "opacity-60")}
-          surface="px-3 pt-3 pb-3"
-          controls={!arranging && <DutyStepper index={index} count={choices.length} onStep={step} />}
-          controlsClassName={HERO_STEPPER_CLASS}
-        >
-          {faceOf("flight", brief, areas, order)}
-        </Widget>
-        {/* The areas, in the pilot's order — dragged by their grip while
-            arranging (the header's Arrange). */}
-        {/* Reorder only WHILE arranging: its items are layout-projected, so
-            every render measures them — a forced layout on every minute's tick
-            and every tab switch, for a drag nobody is making. */}
-        {arranging ? (
-          <Reorder.Group as="div" axis="y" values={order} onReorder={setAreaOrder} className="space-y-1.5">
-            {order.map((id) => (
-              <AreaItem key={id} id={id} status={areas[id]} arranging open={false} hidden={false} onOpen={open} />
-            ))}
-          </Reorder.Group>
-        ) : (
-          <div className="space-y-1.5">
-            {order.map((id) => (
-              <Widget
-                key={id}
-                id={id}
-                label={AREA_TITLE[id]}
-                open={isDesktop && panelWidget === id}
-                hidden={sheet?.id === id}
-                onOpen={open}
-                surface={cn("px-3 py-2", areaCardClass(areas[id].tone))}
-              >
-                <AreaRow id={id} status={areas[id]} />
-              </Widget>
-            ))}
-          </div>
+    <div className={cn("@container flex max-h-full min-h-0 flex-col", className)}>
+      {/* Scrolls only as a LAST RESORT: every tile fits a phone held upright
+          (measured: 360×780 and up). Held sideways it is ~390px tall, and the
+          tiles scroll rather than being squeezed out of sight. */}
+      <div className="grid min-h-0 grid-cols-6 content-start gap-2 overflow-y-auto overscroll-contain scrollbar-hide @[44rem]:grid-cols-12">
+        {tile("duty", faceOf("duty", brief), "col-span-6 @[44rem]:col-span-12")}
+        {tile(
+          "flight",
+          faceOf("flight", brief),
+          "col-span-6 @[44rem]:col-span-12",
+          <DutyStepper index={index} count={choices.length} onStep={step} />,
         )}
+        {tile("weather", faceOf("weather", brief), "col-span-2 @[44rem]:col-span-4")}
+        {tile("crew", faceOf("crew", brief), "col-span-2 @[44rem]:col-span-4")}
+        {tile("destination", faceOf("destination", brief), "col-span-2 @[44rem]:col-span-4")}
+        {tile("currency", faceOf("currency", brief), "col-span-3 @[44rem]:col-span-6")}
+        {tile("limits", faceOf("limits", brief), "col-span-3 @[44rem]:col-span-6")}
       </div>
 
       {sheet &&
         (() => {
           const { body, actions, header } = widgetContent(sheet.id, brief, ctx)
-          const face = faceOf(sheet.id, brief, areas, order)
+          const face = faceOf(sheet.id, brief)
           return (
             <WidgetSheet
               anchor={sheet.anchor}
@@ -426,48 +375,5 @@ export function FlightDashboard({ className }: { className?: string }) {
           )
         })()}
     </div>
-  )
-}
-
-/** One area: its row, and — while arranging — the grip it is dragged by. */
-function AreaItem({
-  id,
-  status,
-  arranging,
-  open,
-  hidden,
-  onOpen,
-}: {
-  id: DashboardArea
-  status: AreaStatus
-  arranging: boolean
-  open: boolean
-  hidden: boolean
-  onOpen: (id: WidgetId, anchor: WidgetAnchor) => void
-}) {
-  const controls = useDragControls()
-  return (
-    <Reorder.Item
-      as="div"
-      value={id}
-      dragListener={false}
-      dragControls={controls}
-      whileDrag={{ scale: 1.02, zIndex: 10 }}
-      className="relative"
-    >
-      <Widget
-        id={id}
-        label={AREA_TITLE[id]}
-        open={open}
-        hidden={hidden}
-        disabled={arranging}
-        onOpen={onOpen}
-        surface={cn("px-3 py-2", areaCardClass(status.tone), arranging && "pr-14")}
-        controls={arranging && <AreaGrip label={AREA_TITLE[id]} onPointerDown={(e) => controls.start(e)} />}
-        controlsClassName="right-1 top-1/2 -translate-y-1/2"
-      >
-        <AreaRow id={id} status={status} arranging={arranging} />
-      </Widget>
-    </Reorder.Item>
   )
 }

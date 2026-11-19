@@ -12,9 +12,11 @@
  */
 
 import type * as React from "react"
+import { TriangleAlert } from "lucide-react"
 import { ageText } from "@/lib/weather/format"
 import { categoryOf, hazardLine, hazardsOf, type FlightCategory, type StationBrief, type StationWindow } from "@/lib/weather/brief"
 import { cn } from "@/lib/utils"
+import { WidgetLabel } from "./widget"
 
 export const CATEGORY_TEXT: Record<FlightCategory, string> = {
   VFR: "text-chart-2",
@@ -36,6 +38,41 @@ export interface WeatherState {
   sourceAt: number | null
   stale: boolean
   refresh: () => void
+}
+
+const hazardText = hazardLine
+
+export function WeatherFace({ weather, code }: { weather: WeatherState; code: (icao: string) => string }) {
+  const { briefs } = weather
+  const anyHazard = briefs.some((b) => b.hazards.length > 0)
+  return (
+    <>
+      <WidgetLabel right={anyHazard ? <TriangleAlert className="h-3 w-3 text-status-warning" aria-label="Hazards forecast" /> : undefined}>
+        Weather
+      </WidgetLabel>
+      {!weather.asked ? (
+        <p className="text-xs leading-snug text-muted-foreground">{briefs.length ? "Checked nearer the duty" : "—"}</p>
+      ) : weather.failed ? (
+        <p className="text-xs leading-snug text-muted-foreground">Unavailable</p>
+      ) : weather.loading && !weather.checkedAt ? (
+        <p className="text-xs leading-snug text-muted-foreground">Checking…</p>
+      ) : (
+        <ul className="space-y-0.5">
+          {briefs.slice(0, 3).map((b) => (
+            <li key={b.station} className="flex items-baseline justify-between gap-1.5 text-xs leading-tight">
+              <span className="truncate font-medium text-foreground">{code(b.station)}</span>
+              <span className="shrink-0 font-semibold tabular-nums">
+                <span className={b.worst ? CATEGORY_TEXT[b.worst] : "text-muted-foreground"}>{b.worst ?? "—"}</span>
+                {b.hazards[0] && (
+                  <span className="ml-1 text-status-warning">{b.hazards[0].replace(/^(TEMPO|PROB\d+) /, "")}</span>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  )
 }
 
 /** A hazard as a chip — "TS", "TEMPO CB". */
