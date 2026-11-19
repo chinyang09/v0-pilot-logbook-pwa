@@ -40,6 +40,7 @@ describe("the duty band's line", () => {
             origin: { icao: "WADD", iata: "DPS" },
             destination: { icao: "WSSS", iata: "SIN" },
             departure: "2026-10-30T00:30:00Z",
+            scheduledDeparture: "2026-10-30T00:10:00Z",
             arrival: "2026-10-30T03:00:00Z",
             arrivalGate: "D41",
             arrivalTerminal: "1",
@@ -48,9 +49,9 @@ describe("the duty band's line", () => {
         } as never,
       },
     })
-    expect(line(l)).toBe("9V-NCA · Landed 03:00Z · 30m ago · Gate D41 T1 · TR289 from DPS")
+    expect(line(l)).toBe("9V-NCA · TR289 from DPS · Gate D41 T1 · STD 00:10Z · Landed 03:00Z · 30m ago")
     // Once the leg's own gate is drawn under its stop, it is not said twice.
-    expect(line({ ...l, gates: { a: gates("D41", "") } })).toBe("9V-NCA · Landed 03:00Z · 30m ago · TR289 from DPS")
+    expect(line({ ...l, gates: { a: gates("D41", "") } })).toBe("9V-NCA · TR289 from DPS · STD 00:10Z · Landed 03:00Z · 30m ago")
   })
 
   it("says checking while it asks, and not asked when it has not", () => {
