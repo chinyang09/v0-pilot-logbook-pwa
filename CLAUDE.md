@@ -676,13 +676,13 @@ one looks it up in full like a typed code.
 |---|---|---|
 | a flight from its number + date (`flight/suggest`, `lib/lookup/flight-suggest.ts`) | the number's list (`/flight`): a week ahead SCHEDULED, a week back flown; the registration appears on the day the aeroplane is assigned | `basis: "scheduled"` is that UTC date's row; past the list, `"usual"` moves the nearest day's times onto the date and NEVER carries its registration |
 | filling the form (`lib/utils/flight-seed.ts` `lookupPatch`, `useFlightLookup`) | — | asked ONLY on the form's Lookup button (or Enter in Flight #) — it used to ask by itself once the number settled, a lookup per pause while typing. An answer is applied only while the form still holds the number and date it was asked for (`sameFlightNumber`) — one landing after the pilot moved on is dropped, and the status line hides once either changes. Writes BLANK fields and whatever the PREVIOUS lookup wrote that the pilot has not touched since (`ownedAfter`), so 288 then 289 moves the route and times with the number and clears 288's aeroplane; anything the pilot entered is kept, and "Replace" writes over it. Replace is offered only where the pilot's OWN non-blank value differs — a blank is filled, and a value that merely completes theirs (the IATA of their ICAO, the type of their registration) is filled too; "9VTNF" and "wsss" are not differences. It is read off the form AS IT STANDS (`lookupDiffers`), not stored when the answer came, so it follows edits; the line names the rows ("Kept yours: Aircraft, To") under the summary, never beside it A `usual` answer fills route and times (the pilot asked; the status line says "Usual times (6 Nov)") but never the aeroplane; never OOOI, never a simulator, signed or locked entry. The status line wraps between its parts (`whitespace-nowrap` per part), never inside a registration |
-| gates (`flight/gates`, `useDutyLookups`) | for a SINGAPORE end, Changi's own flight record first (`lib/lookup/changi.ts`, below); then the tracked flight's `info`, else the departures board at the origin and the arrivals board at the destination, from an hour before | NOT in the flight form (it is for logging): drawn on the dashboard's sector chain, under each stop, asked ONLY while the page is on screen and the duty within 18h of now (no SWR key otherwise, so coming back asks about the duty as it now stands — deduplicated to 5 min — instead of showing a stale "nothing yet"), every 15 min while it stays up, with a refresh; never stored (a gate is published late and moves). The duty's legs end at the first 8h on the ground (`dutyFlights` — 18h can reach the next duty's first sector). The line under the chain (`describeDuty`, `lib/utils/dashboard/duty-line.ts`) never calls a failure "not published yet": checking / not checked / unavailable / not published are four different sentences |
+| gates (`flight/gates`, `useDutyLookups`) | for a SINGAPORE end, Changi's own flight record first (`lib/lookup/changi.ts`, below); then the tracked flight's `info`, else the departures board at the origin and the arrivals board at the destination, from an hour before | NOT in the flight form (it is for logging): on the dashboard's AIRCRAFT area — its row says the next leg's gate, its card every leg's gates (with the stand and the airport's inbound flight) — asked ONLY while the page is on screen and the duty within 18h of now (no SWR key otherwise, so coming back asks about the duty as it now stands — deduplicated to 5 min — instead of showing a stale "nothing yet"), every 15 min while it stays up, with a refresh; never stored (a gate is published late and moves). The duty's legs end at the first 8h on the ground (`dutyFlights` — 18h can reach the next duty's first sector). A failure is never "not published yet": checking / from 18h before / unavailable / not published are different sentences |
 | a fleet (`airline/fleet`, `AirlineFleetSection`, the add-aircraft form's **By fleet** mode) | the airline's fleet page, by type | By registration is the default; By fleet asks for the pilot's airline when it opens, and otherwise only on Find / Enter — never per keystroke. Add writes a whole type in one `bulkPut` (`addFleetAircraftToDatabase`); a registration already held is left as it is |
 | the network (`airline/routes`, `airline/routes/from`) | the routes page's `arrRoutes`; a map pin's per-airport JSON | in the door, nothing reads them yet — the destination seeding they enable is on hold |
 | where the aeroplane is (`aircraft/whereabouts`, `lib/lookup/aircraft-whereabouts.ts`) | the registration's list: the last flight it DEPARTS on before `at` (our departure, or now) — landed / airborne / not yet left — and the one after; the inbound's ARRIVAL gate from the live flight, else the arrivals board | the duty band's line under the chain for the NEXT LEG STILL TO FLY (`inboundLeg` — on duty a later leg can be another tail; legs in FLOWN order, `sortFlights` is newest first), the duty panel, and the aircraft panel's **Now** section (on a tap); "9V-NCA · TR289 from DPS · Gate D41 · STD 00:10Z · Landed 03:00Z · 30m ago" — the inbound FLIGHT first, its gate and STD beside it (a gate apart from its flight meant little, the owner); the inbound's arrival gate is said only while the leg's OWN departure gate is not yet published (it is drawn under the stop; saying it twice was the owner's report); no belt; never stored; a departure within 20 min of `at` is our own flight pushing back, not the inbound |
 | the missing sector (`seedDerivedLeg`, `seedFromNextFlight`) | what the aeroplane flies after the leg a Next Leg / Return was made from (`aircraft/whereabouts` at that leg's arrival) | fills the new leg's blanks — number, far end, scheduled times — only when that flight leaves from this leg's departure airport; may move the DERIVED leg's date a day on (an overnight return), only while it records no times |
 | the pilot's airline (`useAirlineCode`: Settings › Logging › Airline, `logging_airline`, else the SELF card's company through the airline list) | the airline list (`lib/airlines/airlines.ts`, `/airlines`, kept 30 days in localStorage) | an EMPTY Flight # starts with it on focus (`DraftInput`'s `prefill`, committed only once something is typed — clearing it leaves the field empty; not on a simulator). A LETTER typed first replaces it and a digit is added to it (`afterPrefill`), so typing "TR288" out of habit or pasting it is not "TRTR288"; Lookup prefixes a digits-only number (`withAirlinePrefix`); By fleet starts with it. A crew card's company field lists airlines as it is typed and a pick writes the standard name |
-| gates from the dashboard | the flight page's This / Next Duty tile | gates under each stop and the inbound line; the tile opens each leg's Gates, the Inbound and Open Flight on the SAME cache (`lookup:duty:` key), so either refreshes both |
+| gates from the dashboard | the flight page's Aircraft area | where the aeroplane is and the next leg's gate on the row; the inbound flight and every leg's gates in its card, on ONE cache (`lookup:duty:` key) |
 | the import cross-check (`aircraft-cross-check.ts`) | `flight/suggest` per touched flight, a week back to a day ahead, ≤ 24, nearest today first | a flight logged on another aeroplane than that day's SCHEDULED one gets an `aircraft_mismatch` NOTE (`aircraft-check:<flight>`, once; resolves itself when they agree) — never a change |
 
 The flight number's list, the boards and the per-airport timetable all reach
@@ -1220,45 +1220,50 @@ hydrated inside `subscribe` (which React calls in an effect), so there is no
 setState-in-effect and no first render with the wrong page. A stored "legal"
 reads as "flight".
 
-#### The Flight page — widgets in the order a pilot's day runs (Nov 2026)
+#### The Flight page — readiness, then one row per area (Nov 2026 redesign)
 
-The owner's rework of the legal page: "a smart dashboard that provides a great
-overview in a chronological sense". `components/dashboard/flight-dashboard.tsx`
-builds ONE model a minute (`FlightBrief`, `flight/model.ts`) and draws it as
-tiles (`flight/widget.tsx`, faces in `flight/faces.tsx`, bodies in
-`flight/details.tsx`):
+The owner's brief, after two rounds of tiles: "creative and attention
+grabbing", "not so technical", "one look good to go or something flagging",
+"no repetition", "widget cards sortable", and each card "one look good to go
+or not; expanded, full situational awareness of that area".
+`components/dashboard/flight-dashboard.tsx` builds ONE model a minute
+(`FlightBrief`, `flight/model.ts`), turns it into a verdict per AREA in words
+(`lib/utils/dashboard/area-status.ts`, pure and tested), and draws:
 
-| Tile | Glance | Its card adds | Circles |
-|---|---|---|---|
-| Duty & Rest | the phase and its state icon, the line ("Rest until 22:00Z", "Sector 2 of 3", "Legal now"), the timeline and its three captions | on duty: Latest On-Blocks, Off Duty; off duty: Rested, Last Duty | FDP |
-| Flights (the chosen duty, ‹ › to step) | Now / Next / Later · day, flight numbers with the duty's FDP/max, the chain with each stop's time and gate, then the aeroplane line — or, for a later duty, the rest before it against its minimum | Report (a later duty), Off Duty, FDP Table; a row per leg — gates with stand, the airport's inbound flight, tail; the inbound row (flight, STD, where, its gate); the duties to choose from | Refresh (only once gates are asked) |
-| Weather | each airport's worst category and first hazard | per airport: category and hazard CHIPS, the METAR, and ONLY the TAF periods over the duty's times there, each with its leg | Refresh |
-| Crew | who, and the day last flown together ("New") | a row each: initials, name, role · flights together, the day; a tap opens their card | Crew |
-| Last There | the day last flown INTO each destination (not the origin) | a row each: the day, arrivals this year, local time now, a sun or moon for the arrival | — |
-| Currency | the three most pressing, with the tally | every currency as a figure-over-name cell, tinted only when flagged | Currency |
-| Limits | the four rolling limits as small bars | the hours LEFT in each, or "Breach ahead" | FDP |
+| | Glance | Its card |
+|---|---|---|
+| **Readiness hero** (`ReadinessHero`, `flight/areas.tsx`) | a RING with one segment per area, lit by its verdict, and the page's one answer — "Good to go" / "1 thing to check" / "Action needed" (`readiness`: the worst verdict; an empty logbook is neutral "No flights yet") — over a boarding-pass TEAR LINE, the chosen duty: Now / Next / Later · day, flight numbers, the route, and a COUNTDOWN to what happens next (report, a departure, a landing). ‹ › on it chooses the duty (`DutyStepper`, outside the button, `HERO_STEPPER_CLASS`) | Flight: the chain with each stop's time; Report, Off Duty, FDP / max (Table), the rest before a later duty; each leg (a tap opens it); Show Another Duty |
+| Duty & Rest | "Resting until 22:00Z" / "Rested — legal for duty" / "3:20 of duty time left" / "Rest 0:45 short of report" | the duty band's timeline (`DutyBand bare`) and Latest On-Blocks, Off Duty — or Rested, Last Duty |
+| Aircraft | "9V-NCA is on the ground" · Gate C11 · TR289 from DPS, 45m ago | the inbound flight (number, from, STD, where, its gate), each leg's gates with stand and the airport's inbound flight, the tail once (only again where it changes) |
+| Weather | "Thunderstorms at CGK" (`hazardWords` — never a METAR code) / "Fine at SIN and CGK" | per airport: category and hazard chips, the METAR, the TAF periods over the duty's times |
+| Crew | "Capt Tan Wei Ming +1" · First time flying together | a row each, last flown together |
+| Destination | "Jakarta (CGK)" · Last there 19 days ago | each destination: last there, this year, local time, sun or moon on arrival |
+| Currency | "All 9 current" / the lapsed one's REMEDY ("3 takeoffs required") | every currency as a cell |
+| Limits | "Plenty of room" · Fullest: Duty 14d, 10% used / "Close to the Flight 28d limit" | the hours left in each |
 
-**ONE CARD PER SECTION, no fact in two places** (the owner, Nov 2026). The
-Status tile is gone: its annunciator led with whatever was most pressing —
-"Rest until" over "Tightest 90-Day Recency 0/3" — and the duty tile and the
-currency tile then said both again. Now the DUTY & REST card says duty and rest
-only, in their own verdict (`PilotStatus.dutyState` / `dutyAction` —
-`deriveDutyAction`: FDP exceeded, rest short, rest until, sector n of m,
-standby, legal now), and a lapsed currency or a limit is ITS card's to say: a
-flagged currency or limits card takes a red / amber edge (`Widget`'s `tone`).
-The next duty's FDP moved from the duty card to the flight card (it is a fact
-about that duty); the aeroplane's registration is named once, in the line
-under the chain; the leg rows in the flights card carry no times (the chain
-does), and the per-leg circles went (each leg's row opens it).
-
-**The dashboard can be about a LATER duty** (the owner: "a dashboard that
-displays critical info based on flight duty selected"). The flight tile's ‹ ›
-(`DutyStepper`, OUTSIDE the tile's button, in `Widget`'s `controls`) and the
-list in its card step through the duties with flying in them, up to 14
-(`choices`); flights, gates, weather, crew and Last There follow the chosen
-one; the duty and rest card stays about NOW. Coming back to the page returns
-to the default. A later duty shows its own FDP/max (`fdpMinutesOf`) and the
-rest before it (`restBefore`) on its face, red when short.
+- **A verdict per area, a light per verdict.** `go` ✓ green, `check` ! amber,
+  `stop` ✕ red — the row's icon tile, the light on its right and, flagged,
+  its card's edge and wash (`AREA_TONE`, `areaCardClass`). Crew and
+  destination give no verdict (`info`), so they carry a chevron and a quiet
+  ring segment; nothing to say yet is `idle`.
+- **No area says another's fact.** The flight card is the schedule and its
+  duty time; the aircraft card the tail, the inbound and the gates; the duty
+  card rest; a currency is only the currency row's. The hero names no area —
+  the flagged rows glow ("They are highlighted below").
+- **Sortable** (`hooks/use-dashboard-layout.ts`, a per-device module store,
+  `ooo:dashboard-order`, normalised so a new area is appended): the header's
+  Arrange (⇅, the flight page only) shows a grip on each row; drag by it
+  (framer `Reorder`, `useDragControls` on the grip, `touch-action: none`);
+  Done ends it, as do leaving the page and switching to Summary. The rows are
+  a `Reorder.Group` ONLY while arranging — a `Reorder.Item` is layout-
+  projected, so every render measures it (measured: the page switches
+  slowed by ~50–150ms at 4× until it was confined to arranging). The hero is
+  not sortable: it is the answer.
+- **Fit:** 626px at 390×844 and 360×780 — the hero ~178, seven 56px rows.
+- **The dashboard can be about a LATER duty** (‹ › or the card's list, up to
+  14 duties with flying); flights, the aircraft, weather, crew and
+  destination follow it; Duty & Rest stays about NOW. Coming back to the page
+  returns to the default.
 
 **The card IS the tile, lifted — the flight card's context preview** (the
 owner, Nov 2026: the first sheet — a title bar, a close button, grouped
@@ -5612,7 +5617,9 @@ When making changes, be aware of these high-impact files:
 - Do not derive the duty band's bar colour from how full it is — state the tone. A nearly-full FDP bar is a warning and a nearly-full REST bar is good news; deriving it painted a fully-rested pilot amber. And do not put a standby's window on the status ramp: how full it is is a magnitude, not a verdict (`RAMP.info`)
 - Do not print a rest's span to legality as its minimum — "Min 11:56" read as a miscount; it is "10:00 + night" (`restMinimumText`), with Legal From saying when
 - Do not give a flight-page card a title bar, a close button, sections or a disclosure, or say in it what its face says — it is the tile lifted (the flight card's preview): face, a hairline, figures and one-line rows, circles beneath
-- Do not put a fact on two dashboard cards — one card per section. The duty and rest card speaks from `dutyState` / `dutyAction` (never the overall `state` / `nextAction`, which lead with a currency), a currency or limit is its own card's, and a later duty's figures are the flights card's
+- Do not put a fact on two dashboard areas, or a code where a word will do — every area's line comes from `area-status.ts` (tested), the duty area never leads with a currency, the hero names no area, and a hazard is "Thunderstorms", not "TS"
+- Do not keep the area rows in a `Reorder.Group` outside arranging — `Reorder.Item` is layout-projected and measures on every render; and do not let a stored order drop an area (`normaliseAreaOrder` appends new ones)
+- Do not call an empty logbook "Good to go" — empty limits pass nothing; the hero is neutral until there are flights
 - Do not place a lifted card at its rest and offset it back to the tile — place it ON the tile and move it to rest; the rest is known only once the card is measured
 - Do not import a parser, the reconciler or a review dialog into the logbook page — the import pipeline is `import-flow.tsx`, loaded once files are chosen; `UnifiedImportButton` keeps only the button and the picker
 - Do not give a flight-page tile a line that wraps or appears only sometimes — one truncated line per fact, or the one-screen phone layout moves as answers land; and do not open a tile's detail on a phone anywhere but its own sheet, grown out of the tile

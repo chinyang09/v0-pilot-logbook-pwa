@@ -184,10 +184,13 @@ export function DutyBand({
   status,
   now,
   display,
+  bare = false,
 }: {
   status: PilotStatus
   now: number
   display?: DisplayPreferences
+  /** The timeline and its captions only — inside a card whose face has said the state and the line. */
+  bare?: boolean
 }) {
   const { phase, active, lastDuty, next, rest, standby } = status.duty
 
@@ -379,6 +382,7 @@ export function DutyBand({
   const StateIcon = tone.icon
   return (
     <section aria-label="Duty and rest">
+      {!bare && (<>
       <div className="flex items-center justify-between gap-2">
         <p className={cn("flex shrink-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em]", tone.text)}>
           <StateIcon className="h-3 w-3" aria-hidden />
@@ -404,6 +408,7 @@ export function DutyBand({
       <p className="mt-1 text-[22px] font-semibold leading-[1.1] tracking-tight text-foreground" suppressHydrationWarning>
         {status.dutyAction.headline}
       </p>
+      </>)}
 
       {view.bar && <Timeline {...view.bar} nowMs={now} />}
 
