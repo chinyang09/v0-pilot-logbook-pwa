@@ -19,7 +19,8 @@ import { cn } from "@/lib/utils"
 import { WidgetLabel } from "./widget"
 
 export const CATEGORY_TEXT: Record<FlightCategory, string> = {
-  VFR: "text-chart-2",
+  // Dark cockpit: VFR is the nominal state and lights nothing.
+  VFR: "text-muted-foreground",
   MVFR: "text-sky-600 dark:text-sky-400",
   IFR: "text-destructive",
   LIFR: "text-fuchsia-600 dark:text-fuchsia-400",

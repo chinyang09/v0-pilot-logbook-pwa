@@ -12,14 +12,18 @@
  * The expanded card IS the tile: its face stays at the top, as it was, and
  * what the tile had no room for is laid out under a hairline — figures in a
  * grid, short rows, chips — never a title bar, sections or a disclosure. What
- * can be DONE goes in the circles beneath (the preview's action row).
+ * can be done is ONE quiet footer line (Refresh, the section it summarises) —
+ * not circles under the card (the owner: "don't have to fully copy the flight
+ * card").
  *
- * The morph is the preview's: laid out ONCE at its resting size, the card
- * TRAVELS from the tile and is REVEALED by a clip that starts as exactly the
- * tile's box and corners — never scaled. A full-width tile keeps its width,
- * so its face is the card's first frame to the pixel; a narrow tile's face
- * sits in the tile's box and gives way to the full-width face as the clip
- * widens.
+ * The morph is TRANSFORM and OPACITY only (the owner: "less janky"). The card
+ * is laid out once at its resting size and measured while hidden; then it
+ * starts ON the tile — moved there and scaled to the tile's width — and
+ * travels to rest. Closing runs it back onto the tile, which is shown again
+ * the moment the close begins, so the card fades into the tile rather than
+ * vanishing and leaving a hole (the clip it replaced animated on the main
+ * thread every frame, and a narrow tile closed in two steps: the clip, then
+ * the tile's own height coming back).
  */
 
 import * as React from "react"
@@ -28,8 +32,7 @@ import { motion } from "framer-motion"
 import { useBackDismiss } from "@/hooks/use-back-dismiss"
 import { useDialogFocus } from "@/hooks/use-dialog-focus"
 import { setMenuOpen } from "@/lib/utils/menu-lock"
-import { POP_SPRING } from "@/lib/motion"
-import { ACTION_LABEL_CLASS, ACTION_TILE_PX, actionTileClass } from "@/components/flight-quick-actions"
+import { ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export type WidgetId =
@@ -48,27 +51,12 @@ export interface WidgetAnchor {
   height: number
 }
 
-/** What a widget can DO — a circle under the card, a capsule in the panel. */
-export interface WidgetAction {
-  id: string
-  label: string
-  icon: React.ReactNode
-  /** Runs once the card has closed (its history entry gone). */
-  run: () => void
-  /** Keeps the card open (Refresh). */
-  stay?: boolean
-  busy?: boolean
-}
-
-/** The tile's own corner (`rounded-2xl`) — the card's clip keeps it on every frame. */
-const TILE_RADIUS = 16
-const OPEN = { type: "spring" as const, duration: 0.42, bounce: 0.1 }
-const CLOSE = { type: "spring" as const, duration: 0.32, bounce: 0 }
+const OPEN = { type: "spring" as const, duration: 0.38, bounce: 0.08 }
+const CLOSE = { type: "spring" as const, duration: 0.3, bounce: 0 }
 const EASE = [0.32, 0.72, 0, 1] as const
 const SCRIM = "bg-black/45 dark:bg-black/75"
 const LIFT_SHADOW = "0px 25px 50px -12px rgba(0,0,0,0.45)"
 const MARGIN = 12
-const GAP = 14
 /** The widest a lifted card goes — a tablet in a phone-sized window stays a card. */
 const CARD_MAX_PX = 480
 
@@ -88,6 +76,7 @@ export function Widget({
   hidden = false,
   tone = null,
   controls,
+  controlsClassName = "right-1.5 top-1.5",
   onOpen,
   className,
   children,
@@ -99,6 +88,8 @@ export function Widget({
   hidden?: boolean
   tone?: "fail" | "caution" | "ok" | "unknown" | null
   controls?: React.ReactNode
+  /** Where the controls sit over the tile. */
+  controlsClassName?: string
   onOpen: (id: WidgetId, anchor: WidgetAnchor) => void
   className?: string
   children: React.ReactNode
@@ -125,7 +116,7 @@ export function Widget({
       >
         {children}
       </button>
-      {controls && <div className="absolute right-1.5 top-1.5">{controls}</div>}
+      {controls && <div className={cn("absolute", controlsClassName)}>{controls}</div>}
     </div>
   )
 }
@@ -142,48 +133,102 @@ export function WidgetLabel({ children, right }: { children: React.ReactNode; ri
   )
 }
 
-/**
- * The card, as the panel beside a tablet's page shows it: the face, the body
- * under a hairline, the actions as capsules beneath.
- */
-export function WidgetCard({ face, body }: { face: React.ReactNode | null; body: React.ReactNode | null }) {
+/** What a widget can DO — one quiet line under the card. */
+export interface WidgetAction {
+  id: string
+  label: string
+  icon?: React.ReactNode
+  /** Runs once the card has closed (its history entry gone). */
+  run: () => void
+  /** Keeps the card open (Refresh). */
+  stay?: boolean
+  busy?: boolean
+}
+
+/** The footer line: each action a text button, the section link last with a chevron. */
+function WidgetFooter({ actions, run }: { actions: WidgetAction[]; run: (a: WidgetAction) => void }) {
+  if (actions.length === 0) return null
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-border bg-card">
-      {face && <div className="relative p-3 pb-2">{face}</div>}
-      {body && <div className={cn("px-3 pb-3 pt-2.5", face && "border-t border-border/70")}>{body}</div>}
+    <div className="flex items-center justify-end gap-1 border-t border-border/70 px-1.5 py-1">
+      {actions.map((a) => (
+        <button
+          key={a.id}
+          type="button"
+          onClick={() => run(a)}
+          aria-busy={a.busy || undefined}
+          className="flex h-9 items-center gap-1 rounded-full px-2.5 text-[13px] font-medium text-primary transition-colors active:bg-muted/60"
+        >
+          {a.icon}
+          {a.label}
+          {!a.stay && <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
+        </button>
+      ))}
     </div>
   )
 }
 
 /**
+ * The card, as the panel beside a tablet's page shows it: the face, the body
+ * under a hairline, the footer line beneath.
+ */
+export function WidgetCard({
+  face,
+  body,
+  actions = [],
+}: {
+  face: React.ReactNode | null
+  body: React.ReactNode | null
+  actions?: WidgetAction[]
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-border bg-card">
+      {face && <div className="relative p-3 pb-2">{face}</div>}
+      {body && <div className={cn("px-3 pb-3 pt-2.5", face && "border-t border-border/70")}>{body}</div>}
+      <WidgetFooter actions={actions} run={(a) => a.run()} />
+    </div>
+  )
+}
+
+/** What the sheet draws, given the way to close it first (an action runs as the close's follow-up). */
+export interface SheetContent {
+  header: React.ReactNode
+  body: React.ReactNode | null
+  actions: WidgetAction[]
+}
+
+/**
  * A widget lifted out of the page on a phone. Closes on the scrim, Escape and
- * the back gesture — back INTO its tile, the same morph run backwards. An
- * action runs as the close's follow-up, so a navigation is not undone by the
- * card's own history entry.
+ * the back gesture — back ONTO its tile. Anything inside that goes somewhere
+ * (a crew member, a currency, a flight, a footer link) closes the card first
+ * and runs as the close's follow-up, so the card never stays over the page it
+ * led to and a navigation is not undone by the card's own history entry.
  */
 export function WidgetSheet({
   anchor,
   title,
-  face,
-  header,
-  body,
-  actions,
+  render,
+  onOpened,
+  onClosing,
   onClose,
 }: {
   anchor: WidgetAnchor
   title: string
-  /** The tile's face: the card's first frame. */
-  face: React.ReactNode
-  /** The card's own header: the face again, or only the tile's label. */
-  header: React.ReactNode
-  body: React.ReactNode | null
-  actions: WidgetAction[]
+  /** The card's content, handed `dismiss(then?)` for anything that leaves it. */
+  render: (dismiss: (then?: () => void) => void) => SheetContent
+  /** The card has arrived: the tile can make way (it is under the card until then). */
+  onOpened: () => void
+  /** The close has begun: the tile shows again under the card. */
+  onClosing: () => void
   onClose: () => void
 }) {
   const closeRef = React.useRef(onClose)
+  const closingCbRef = React.useRef(onClosing)
+  const openedRef = React.useRef(onOpened)
   React.useEffect(() => {
     closeRef.current = onClose
-  }, [onClose])
+    closingCbRef.current = onClosing
+    openedRef.current = onOpened
+  }, [onClose, onClosing, onOpened])
 
   const dialogRef = React.useRef<HTMLDivElement>(null)
   useDialogFocus(dialogRef, true)
@@ -213,7 +258,8 @@ export function WidgetSheet({
     if (closingRef.current) return
     closingRef.current = true
     setClosing(true)
-    window.setTimeout(finishClose, 520)
+    closingCbRef.current()
+    window.setTimeout(finishClose, 420)
   }, [finishClose])
   const requestClose = useBackDismiss(true, startClose)
 
@@ -231,28 +277,22 @@ export function WidgetSheet({
 
   if (typeof document === "undefined") return null
 
-  const open = height !== null && !closing
+  const content = render((then) => requestClose(then))
+  const measured = height !== null
+  const open = measured && !closing
   const vw = window.innerWidth
   const vh = window.innerHeight
-  // A full-width tile keeps its width (its face is the first frame, to the
-  // pixel); a narrow one opens to the width a full-width tile has.
+  // A full-width tile keeps its width; a narrow one opens to the width a
+  // full-width tile has.
   const fullWidth = Math.min(vw - MARGIN * 2, CARD_MAX_PX)
   const wide = anchor.width >= fullWidth - 24
   const width = wide ? anchor.width : fullWidth
-  const actionsH = actions.length ? GAP + ACTION_TILE_PX : 0
-  const maxCard = vh - MARGIN * 2 - 24 - actionsH
+  const maxCard = vh - MARGIN * 2 - 24
   const restH = Math.min(height ?? anchor.height, maxCard)
   const restLeft = wide ? anchor.left : (vw - width) / 2
-  const restTop = Math.max(MARGIN + 12, (vh - (restH + actionsH)) / 2)
-  // The card is PLACED on the tile and travels to its resting place. Placed at
-  // rest and offset back by (tile − rest), its start moved with every change of
-  // the rest — and the rest is known only once the card's height is: a tall
-  // card's rest is near the top, so it was drawn from there ("appearing from
-  // the top") instead of from its own tile.
-  const toX = restLeft - anchor.left
-  const toY = restTop - anchor.top
-  const tileClip = `inset(0px calc(100% - ${anchor.width}px) calc(100% - ${anchor.height}px) 0px round ${TILE_RADIUS}px)`
-  const fullClip = `inset(0px calc(0% - 0px) calc(0% - 0px) 0px round ${TILE_RADIUS}px)`
+  const restTop = Math.max(MARGIN + 12, (vh - restH) / 2)
+  // ON the tile: moved to its corner and scaled to its width (top-left origin).
+  const onTile = { x: anchor.left - restLeft, y: anchor.top - restTop, scale: anchor.width / width }
   const t = closing ? CLOSE : OPEN
 
   return createPortal(
@@ -261,7 +301,7 @@ export function WidgetSheet({
         className={cn("absolute inset-0", SCRIM)}
         initial={{ opacity: 0 }}
         animate={{ opacity: open ? 1 : 0 }}
-        transition={{ duration: closing ? 0.24 : 0.3, ease: EASE }}
+        transition={{ duration: closing ? 0.22 : 0.26, ease: EASE }}
         onPointerDown={() => {
           scrimPressRef.current = true
         }}
@@ -272,94 +312,34 @@ export function WidgetSheet({
       />
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={title} className="pointer-events-none absolute inset-0">
         <motion.div
-          className="pointer-events-auto fixed"
-          style={{ left: anchor.left, top: anchor.top, width }}
-          initial={{ x: 0, y: 0 }}
-          animate={open ? { x: toX, y: toY } : { x: 0, y: 0 }}
-          transition={t}
+          ref={cardRef}
+          className="pointer-events-auto fixed origin-top-left overflow-y-auto overflow-x-hidden overscroll-contain rounded-2xl border border-border bg-card scrollbar-hide"
+          // Measured hidden first: the rest is known only once the height is.
+          style={{
+            left: restLeft,
+            top: restTop,
+            width,
+            maxHeight: maxCard,
+            visibility: measured ? undefined : "hidden",
+            boxShadow: LIFT_SHADOW,
+          }}
+          initial={{ ...onTile, opacity: 0 }}
+          animate={open ? { x: 0, y: 0, scale: 1, opacity: 1 } : { ...onTile, opacity: 0 }}
+          transition={{
+            ...t,
+            opacity: closing
+              ? { duration: 0.2, delay: 0.1, ease: EASE }
+              : { duration: 0.12, ease: EASE },
+          }}
           onAnimationComplete={() => {
             if (closingRef.current) finishClose()
+            else if (measured) openedRef.current()
           }}
         >
-          <motion.div
-            aria-hidden
-            className="pointer-events-none absolute inset-0"
-            style={{ boxShadow: LIFT_SHADOW, borderRadius: TILE_RADIUS, height: restH }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: open ? 1 : 0 }}
-            transition={open ? { duration: 0.2, delay: 0.16, ease: EASE } : { duration: 0.08 }}
-          />
-          <motion.div
-            ref={cardRef}
-            className="relative overflow-y-auto overscroll-contain rounded-2xl border border-border bg-card"
-            style={{ maxHeight: maxCard }}
-            initial={{ clipPath: tileClip }}
-            animate={{ clipPath: open ? fullClip : tileClip }}
-            transition={t}
-          >
-            {/* The face — the tile's own, as the card's header. A narrow
-                tile's re-flows to the card's width, so it arrives a beat
-                after the copy of the tile below has covered the first frame. */}
-            <motion.div
-              className="relative p-3"
-              initial={{ opacity: wide && header === face ? 1 : 0 }}
-              animate={{ opacity: (wide && header === face) || open || closing ? 1 : 0 }}
-              transition={{ duration: 0.18, delay: wide && header === face ? 0 : 0.06, ease: EASE }}
-            >
-              {header}
-            </motion.div>
-            {body && (
-              <motion.div
-                className="border-t border-border/70 px-3 pb-3 pt-2.5"
-                initial={{ opacity: 0, y: -6 }}
-                animate={open || closing ? { opacity: 1, y: 0 } : { opacity: 0, y: -6 }}
-                transition={{ duration: 0.3, delay: 0.08, ease: EASE }}
-              >
-                {body}
-              </motion.div>
-            )}
-            {(!wide || header !== face) && (
-              <motion.div
-                aria-hidden
-                className="pointer-events-none absolute left-0 top-0 overflow-hidden bg-card p-3"
-                style={{ width: anchor.width, height: anchor.height, borderRadius: TILE_RADIUS }}
-                initial={{ opacity: 1 }}
-                animate={{ opacity: open ? 0 : 1 }}
-                transition={open ? { duration: 0.16, ease: EASE } : { duration: 0.12, ease: EASE }}
-              >
-                {face}
-              </motion.div>
-            )}
-          </motion.div>
+          <div className="relative p-3">{content.header}</div>
+          {content.body && <div className="border-t border-border/70 px-3 pb-3 pt-2.5">{content.body}</div>}
+          <WidgetFooter actions={content.actions} run={(a) => (a.stay ? a.run() : requestClose(a.run))} />
         </motion.div>
-
-        {/* What can be done — the preview's circles, under the card's resting
-            place. Each fades itself (a fading ancestor would be a backdrop root). */}
-        {actions.length > 0 && (
-          <div
-            className="pointer-events-auto fixed inset-x-0 flex items-start justify-center gap-2"
-            style={{ top: restTop + restH + GAP, visibility: height === null ? "hidden" : undefined }}
-          >
-            {actions.map((a, i) => (
-              <motion.button
-                key={a.id}
-                type="button"
-                onClick={() => (a.stay ? a.run() : requestClose(a.run))}
-                aria-label={a.label}
-                aria-busy={a.busy || undefined}
-                tabIndex={open ? 0 : -1}
-                initial={{ scale: 0.5, opacity: 0 }}
-                animate={open ? { scale: 1, opacity: 1 } : { scale: 0.85, opacity: 0 }}
-                transition={open ? { ...POP_SPRING, delay: 0.12 + i * 0.03 } : { duration: 0.1, ease: "easeOut" }}
-                style={{ width: ACTION_TILE_PX, height: ACTION_TILE_PX, touchAction: "manipulation" }}
-                className={actionTileClass}
-              >
-                {a.icon}
-                <span className={cn(ACTION_LABEL_CLASS, "max-w-[56px] truncate")}>{a.label}</span>
-              </motion.button>
-            ))}
-          </div>
-        )}
       </div>
     </div>,
     document.body,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { moveTile, nudgeTile, packTiles } from "../bento"
+import { moveTile, nextWidth, nudgeTile, packTiles, widthLabel } from "../bento"
 
 const MIN = { duty: 12, flight: 12, weather: 4, crew: 4, destination: 4, currency: 6, limits: 6 }
 type Id = keyof typeof MIN
@@ -45,5 +45,24 @@ describe("moveTile / nudgeTile", () => {
     expect(nudgeTile(DEFAULT, "duty", -1)).toEqual(DEFAULT)
     expect(nudgeTile(DEFAULT, "duty", 1).slice(0, 2)).toEqual(["flight", "duty"])
     expect(nudgeTile(DEFAULT, "limits", 1)).toEqual(DEFAULT)
+  })
+})
+
+describe("widths", () => {
+  it("packs the pilot's own widths: two thirds beside a third, a half alone", () => {
+    const widths = { ...MIN, weather: 8, crew: 4, destination: 6 }
+    expect(packTiles(DEFAULT, widths).map((r) => r.map((t) => `${t.id}:${t.span}`))).toEqual([
+      ["duty:12"],
+      ["flight:12"],
+      ["weather:8", "crew:4"],
+      ["destination:6", "currency:6"],
+      ["limits:12"],
+    ])
+  })
+
+  it("cycles a third → a half → two thirds → the row → a third", () => {
+    expect([4, 6, 8, 12].map((w) => nextWidth(w))).toEqual([6, 8, 12, 4])
+    expect(nextWidth(12, [6, 8, 12])).toBe(6)
+    expect([4, 6, 8, 12].map(widthLabel)).toEqual(["⅓", "½", "⅔", "Full"])
   })
 })

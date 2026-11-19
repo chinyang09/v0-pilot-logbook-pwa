@@ -32,9 +32,11 @@ export const STATE_ICON: Record<RequirementState, React.ComponentType<{ classNam
 }
 
 /**
- * The ECAM ramp. Green nominal, amber attention, red action — and every state
- * ships with its own icon, because on this page more than any other it must
- * survive a colour-blind reader and a sunlit screen.
+ * The ECAM ramp, read as a DARK COCKPIT (the owner, Nov 2026: "no lights means
+ * it is good"): nominal shows NOTHING — no green, no tick, no wash — amber is
+ * attention and red is action, each with its own icon, because on this page
+ * more than any other a flag must survive a colour-blind reader and a sunlit
+ * screen.
  *
  * `glow` is a soft radial wash bled into the top of the surface. It is the one
  * decorative move on the page and it is doing a real job: the panel takes on
@@ -42,13 +44,14 @@ export const STATE_ICON: Record<RequirementState, React.ComponentType<{ classNam
  */
 export const TONE: Record<
   AnnunciatorState,
-  { text: string; wash: string; glow: string; icon: React.ComponentType<{ className?: string }> }
+  { text: string; wash: string; glow: string; icon: React.ComponentType<{ className?: string }> | null }
 > = {
+  // Dark: nothing lit when all is well.
   current: {
-    text: "text-chart-2",
-    wash: "bg-chart-2/10",
-    glow: "from-chart-2/[0.12]",
-    icon: Check,
+    text: "text-muted-foreground",
+    wash: "",
+    glow: "from-transparent",
+    icon: null,
   },
   warning: {
     text: "text-chart-4",
@@ -73,7 +76,8 @@ export const TONE: Record<
 }
 
 export const REQ_TONE: Record<RequirementState, { icon: string; fill: string; track: string }> = {
-  ok: { icon: "text-chart-2", fill: "bg-chart-2", track: "bg-chart-2/15" },
+  // Dark cockpit: a requirement that is met lights nothing.
+  ok: { icon: "text-muted-foreground", fill: "bg-muted-foreground", track: "bg-muted" },
   caution: { icon: "text-status-warning", fill: "bg-chart-4", track: "bg-chart-4/15" },
   fail: { icon: "text-destructive", fill: "bg-destructive", track: "bg-destructive/15" },
   unknown: { icon: "text-muted-foreground", fill: "bg-muted-foreground", track: "bg-muted" },
@@ -136,7 +140,8 @@ export function useTick(active: boolean): number {
  * it does on a requirement cell. `idle` is "there is no limit to draw".
  */
 export const RAMP = {
-  ok: { fill: "bg-chart-2", text: "text-chart-2" },
+  // Dark cockpit: a bar with room in it is neutral, not green.
+  ok: { fill: "bg-foreground/45", text: "text-foreground" },
   caution: { fill: "bg-chart-4", text: "text-chart-4" },
   fail: { fill: "bg-destructive", text: "text-destructive" },
   info: { fill: "bg-primary", text: "text-primary" },
@@ -381,7 +386,7 @@ export function DutyBand({
     <section aria-label="Duty and rest">
       <div className="flex items-center justify-between gap-2">
         <p className={cn("flex shrink-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em]", tone.text)}>
-          <StateIcon className="h-3 w-3" aria-hidden />
+          {StateIcon && <StateIcon className="h-3 w-3" aria-hidden />}
           {view.state}
         </p>
         {view.chip && (
@@ -579,7 +584,7 @@ export function SectorChain({
             <span
               className={cn(
                 "mt-[5px] h-[2px] min-w-4 flex-1 rounded-full",
-                stops[i].done ? "bg-chart-2" : i - 1 === activeIndex ? "bg-chart-2/40" : "bg-border",
+                stops[i].done ? "bg-foreground/50" : i - 1 === activeIndex ? "bg-foreground/25" : "bg-border",
               )}
               aria-hidden="true"
             />
@@ -588,10 +593,11 @@ export function SectorChain({
             <span
               className={cn(
                 "h-3 w-3 rounded-full border-2",
+                // Progress, not a verdict: ink, never green.
                 stop.done
-                  ? "border-chart-2 bg-chart-2"
+                  ? "border-foreground/60 bg-foreground/60"
                   : i === activeIndex + 1 && activeIndex >= 0
-                    ? "border-chart-2 bg-card"
+                    ? "border-foreground/60 bg-card"
                     : "border-border bg-card",
               )}
             />

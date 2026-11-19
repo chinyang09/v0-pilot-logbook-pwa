@@ -1228,15 +1228,15 @@ builds ONE model a minute (`FlightBrief`, `flight/model.ts`) and draws it as
 tiles (`flight/widget.tsx`, faces in `flight/faces.tsx`, bodies in
 `flight/details.tsx`):
 
-| Tile | Glance | Its card adds | Circles |
+| Tile | Glance | Its card adds | Footer |
 |---|---|---|---|
-| Duty & Rest | the phase and its state icon, the line ("Rest until 22:00Z", "Sector 2 of 3", "Legal now"), the timeline and its three captions | on duty: Latest On-Blocks, Off Duty; off duty: Rested, Last Duty | FDP |
-| Flights (the chosen duty, ‹ › to step) | Now / Next / Later · day, flight numbers with the duty's FDP/max, the chain with each stop's time and gate, then the aeroplane line — or, for a later duty, the rest before it against its minimum | Report (a later duty), Off Duty, FDP Table; a row per leg — gates with stand, the airport's inbound flight, tail; the inbound row (flight, STD, where, its gate); the duties to choose from | Refresh (only once gates are asked) |
+| Duty & Rest | the phase (an icon only when it flags), the line ("Rest until 22:00Z", "Sector 2 of 3", "Legal now"), the timeline and its three captions | on duty: Latest On-Blocks, Off Duty; off duty: Rested, Last Duty | FDP › |
+| Flights (the chosen duty — its date line is a menu) | Now / Next / Later · day ⌄, flight numbers with the duty's FDP/max, the chain with each stop's times — out at the first, in at the last, and BOTH at a stop between ("01:50–02:35Z") — and gate, then the aeroplane line — or, for a later duty, the rest before it against its minimum | Report (a later duty), Off Duty; a row per leg — gates with stand, the airport's inbound flight, tail; the inbound row (flight, STD, where, its gate) | Refresh (only once gates are asked) |
 | Weather | each airport's worst category and first hazard | per airport: category and hazard CHIPS, the METAR, and ONLY the TAF periods over the duty's times there, each with its leg | Refresh |
-| Crew | who, and the day last flown together ("New") | a row each: initials, name, role · flights together, the day; a tap opens their card | Crew |
-| Last There | the day last flown INTO each destination (not the origin) | a row each: the place (city), last there, arrivals this year, local time now, a sun or moon for the arrival | — |
-| Currency | the three most pressing by NAME, with the tally — never "+N more" | the Currencies page in brief: 90-day recency (both halves, when it lapses) and sectors not logged, then EVERY document as that page groups it — needs attention, then current, soonest first — by name, "Expires 30 Nov", days left (`daysFigure`); a tap opens it on the page | Currency |
-| Limits | the four rolling limits as small bars | the hours LEFT in each, or "Breach ahead" | FDP |
+| Crew | who, and the day last flown together ("New") | a row each: initials, name, role · flights together, the day; a tap opens their card | Crew › |
+| Destination | the day last flown INTO each destination (not the origin) | each destination as a PICTURE (`AirportPanel`, `flight/airport.tsx`, after a station-weather widget the owner sent): the place, local time, day or night on arrival; the category as a dot only below VFR; wind and gust (amber), ceiling, visibility; the runway the wind favours drawn with the wind's arrow, and its head / tail (amber) and crosswind (`favouredRunway`, `lib/weather/runway-wind.ts`, tested — read off the designator, an approximation of the magnetic heading); last there and arrivals this year | — |
+| Currency | the three most pressing by NAME, with the tally — never "+N more" | the Currencies page in brief: 90-day recency (both halves, when it lapses) and sectors not logged, then EVERY document as that page groups it — needs attention, then current, soonest first — by name, "Expires 30 Nov 26", days left (`daysFigure`); a tap opens it on the page | Currencies › |
+| Limits | the four rolling limits as small bars | the hours LEFT in each, or "Breach ahead" | FDP › |
 
 **A tile is a SUMMARY of its section** (the owner, Nov 2026: "bringing what is
 important to the table so the user doesn't have to go to the other tab"); its
@@ -1254,11 +1254,15 @@ week was reverted — "I prefer the old one"). The header's grid button
 picked up and dropped on another (`flight/bento.tsx`), or moved with the
 arrow keys. The order is per device (`use-dashboard-layout.ts`,
 `ooo:dashboard-tiles`) and is PACKED into rows of 12 columns (`packTiles`,
-`lib/utils/dashboard/bento.ts`, tested): each tile has the fewest columns it
-reads at (duty, flight 12; weather, crew, Last There 4; currency, limits 6),
-tiles share a row while those fit, and the spare columns are shared out — so
-any order fills every row edge to edge, and the default packs to exactly the
-layout above. The DOM never moves (the grid places each tile by CSS `order`),
+`lib/utils/dashboard/bento.ts`, tested): each tile has a WIDTH the pilot
+chooses in Arrange — its chip steps ⅓ → ½ → ⅔ → Full (`ooo:dashboard-widths`;
+the duty and the flight tile take ½ at least, `TILE_ALLOWED_WIDTHS`) — tiles
+share a row while their widths fit, and the spare columns are shared out, so
+any order and any widths fill every row edge to edge (two thirds beside a
+third, a half beside a third reads 7 | 5), and the defaults (duty, flight
+Full; weather, crew, destination ⅓; currency, limits ½) pack to exactly the
+layout above. While arranging, a tile's face is dimmed and its width chip
+sits in its middle. The DOM never moves (the grid places each tile by CSS `order`),
 so reordering remounts nothing; `layout` animation runs only while arranging;
 the tile being dragged is a copy over its faded slot.
 
@@ -1275,11 +1279,20 @@ about that duty); the aeroplane's registration is named once, in the line
 under the chain; the leg rows in the flights card carry no times (the chain
 does), and the per-leg circles went (each leg's row opens it).
 
+**Dark cockpit** (the owner, Nov 2026: "Airbus concept of dark cockpit. No
+lights means it is good"). Nominal lights NOTHING on the flight page: no green
+tick, no green wash, no green bar — a met requirement draws no icon (its row
+keeps the icon's room), the tally shows only amber and red counts, a duty
+that is fine has no state icon, a bar with room is ink (`RAMP.ok`), VFR is
+muted text and draws no dot, the sector chain's progress is ink. Amber is
+attention and red is action, each with its own icon.
+
 **The dashboard can be about a LATER duty** (the owner: "a dashboard that
-displays critical info based on flight duty selected"). The flight tile's ‹ ›
-(`DutyStepper`, OUTSIDE the tile's button, in `Widget`'s `controls`) and the
-list in its card step through the duties with flying in them, up to 14
-(`choices`); flights, gates, weather, crew and Last There follow the chosen
+displays critical info based on flight duty selected"). The flight tile's own
+date line is a MENU of the duties with flying in them, up to 14 (`DutyChooser`
+— a `ChoicePicker` over the line, OUTSIDE the tile's button, in `Widget`'s
+`controls`; each row the day, then the route and report). It was ‹ › and a
+list in the card, which the owner did not want; flights, gates, weather, crew and Last There follow the chosen
 one; the duty and rest card stays about NOW. Coming back to the page returns
 to the default. A later duty shows its own FDP/max (`fdpMinutesOf`) and the
 rest before it (`restBefore`) on its face, red when short.
@@ -1290,22 +1303,28 @@ sections and disclosures — read as "even more words", and most of it was not
 useful). It keeps the tile's face as its header, lays what the tile had no
 room for under a hairline (`details.tsx`: figures in a grid, one-line rows,
 chips — never a sentence, a heading or a disclosure; nothing the face already
-says), and puts what can be DONE in the preview's circles beneath it
-(`WidgetAction`, `actionTileClass`). A narrow tile whose body says all its
+says), and puts what can be DONE on ONE quiet footer line (`WidgetAction`:
+Refresh, and the section it summarises "Currencies ›") — the circles under the
+card went (the owner: "don't have to fully copy the flight card"). A narrow tile whose body says all its
 face did and more (crew, last there, currency, weather) leads with its LABEL
 instead (`header: "label"`), so no name appears twice.
 
-- **A phone: the tile LIFTS** (`WidgetSheet`) — laid out once at its resting
-  size, PLACED ON THE TILE and moved to its rest (`x`/`y` to rest − tile). It
-  was placed at rest and offset back, and the rest is only known once the
-  card's height is measured — a tall card's rest is near the top, so a bottom
-  tile's card was drawn from there ("appearing from the top", the owner). It travels from the tile and a clip that starts as the tile's exact box
-  and corners opens over it. A full-width tile keeps its width, so its face is
-  the first frame to the pixel; a narrow tile's face copy covers its box on the
-  first frame and on the close. Scrim, Escape and back close it; an action runs
-  as the close's follow-up (Refresh stays open). No title bar, no close button.
+- **A phone: the tile LIFTS** (`WidgetSheet`) — TRANSFORM and OPACITY only
+  (the owner: "less janky"). The card is laid out at its rest and measured
+  HIDDEN first (the rest depends on its height — computed before it, a tall
+  card's start was near the top), then starts ON the tile — moved to its
+  corner, scaled to its width from the top-left — and travels to rest. The
+  tile stays under it until it has arrived (`onOpened`) and shows again the
+  moment the close begins (`onClosing`), so the card fades INTO the tile. It
+  was a clip-path reveal: a main-thread animation every frame, and a narrow
+  tile closed in two steps (the clip, then the tile's height coming back).
+  ANYTHING in the card that goes somewhere — a crew member, a currency, a
+  flight, a footer link — closes it first and runs as the close's follow-up
+  (`render(dismiss)`); the card stayed over the page it had led to. The card
+  scrolls only vertically, without a bar (`overflow-x-hidden scrollbar-hide`).
+  Scrim, Escape and back close it. No title bar, no close button.
 - **A tablet / desktop: main + detail** — a tile opens the same card in the
-  detail panel (`w:<id>`, ringed tile; `WidgetCard`, its circles as capsules,
+  detail panel (`w:<id>`, ringed tile; `WidgetCard` with the same footer line,
   no label under the panel's own title), and with nothing chosen the panel
   opens the duty's flights (`explicit: false`). A flight opens in the
   dashboard's own panel (a flight id), as the summary rows do.
@@ -5635,11 +5654,14 @@ When making changes, be aware of these high-impact files:
 - Do not print the rolling limits in the duty band as well as the limits band — that was the duplication the rework removed. The duty band carries FDP and flight time for THIS duty only
 - Do not derive the duty band's bar colour from how full it is — state the tone. A nearly-full FDP bar is a warning and a nearly-full REST bar is good news; deriving it painted a fully-rested pilot amber. And do not put a standby's window on the status ramp: how full it is is a magnitude, not a verdict (`RAMP.info`)
 - Do not print a rest's span to legality as its minimum — "Min 11:56" read as a miscount; it is "10:00 + night" (`restMinimumText`), with Legal From saying when
+- Do not light the flight page for something that is FINE — no green tick, wash, bar or dot (dark cockpit: `TONE.current`, `REQ_TONE.ok`, `RAMP.ok` are neutral); only amber and red, each with its icon
+- Do not animate the dashboard's lifted card with a clip, a size or a layout — it is transform and opacity only, measured hidden before it moves; and do not let anything in it navigate without closing it first (`render(dismiss)`)
+- Do not hardcode a tile's width — the pilot chooses it in Arrange (`setTileWidth`, `TILE_ALLOWED_WIDTHS`), and `packTiles` fills each row from those widths
 - Do not fold documents into a "+N more" requirement or line — the dashboard's currency card lists every document (`currencySummary`), by the name the Currencies page uses
-- Do not reorder the bento by moving DOM nodes or give its tiles `layout` outside Arrange — tiles stay in `DASHBOARD_TILES` order and the grid places them by `order`; and do not hardcode a tile's column span: it comes from `packTiles` and `TILE_MIN_COLS`
-- Do not give a flight-page card a title bar, a close button, sections or a disclosure, or say in it what its face says — it is the tile lifted (the flight card's preview): face, a hairline, figures and one-line rows, circles beneath
+- Do not reorder the bento by moving DOM nodes or give its tiles `layout` outside Arrange — tiles stay in `DASHBOARD_TILES` order and the grid places them by `order`; a tile's column span comes from `packTiles` over the pilot's widths
+- Do not give a flight-page card a title bar, a close button, sections, a disclosure or circles under it, or say in it what its face says — it is the tile lifted: face, a hairline, figures and one-line rows, one footer line
 - Do not put a fact on two dashboard cards — one card per section. The duty and rest card speaks from `dutyState` / `dutyAction` (never the overall `state` / `nextAction`, which lead with a currency), a currency or limit is its own card's, and a later duty's figures are the flights card's
-- Do not place a lifted card at its rest and offset it back to the tile — place it ON the tile and move it to rest; the rest is known only once the card is measured
+- Do not start a lifted card moving before it is measured — its rest depends on its height, so it is measured hidden at rest and only then starts ON the tile (a transform) and travels to rest
 - Do not import a parser, the reconciler or a review dialog into the logbook page — the import pipeline is `import-flow.tsx`, loaded once files are chosen; `UnifiedImportButton` keeps only the button and the picker
 - Do not give a flight-page tile a line that wraps or appears only sometimes — one truncated line per fact, or the one-screen phone layout moves as answers land; and do not open a tile's detail on a phone anywhere but its own sheet, grown out of the tile
 - Do not read a TAF without the duty's times — highlight the periods within an hour of each leg's time at that airport (`stationWindows`), and lay a change group over what prevails rather than reading it alone

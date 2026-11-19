@@ -87,6 +87,82 @@ export function setArranging(on: boolean): void {
 
 const DEFAULT_ORDER: DashboardTile[] = [...DASHBOARD_TILES]
 
+/* ── Widths ─────────────────────────────────────────────────────────────── */
+
+/** Each tile's width by default, in columns of 12 — the layout as it has always been. */
+export const DEFAULT_TILE_WIDTHS: Record<DashboardTile, number> = {
+  duty: 12,
+  flight: 12,
+  weather: 4,
+  crew: 4,
+  destination: 4,
+  currency: 6,
+  limits: 6,
+}
+
+/** The widths each tile may take: the duty band and the sector chain need half a row at least. */
+export const TILE_ALLOWED_WIDTHS: Record<DashboardTile, readonly number[]> = {
+  duty: [6, 8, 12],
+  flight: [6, 8, 12],
+  weather: [4, 6, 8, 12],
+  crew: [4, 6, 8, 12],
+  destination: [4, 6, 8, 12],
+  currency: [4, 6, 8, 12],
+  limits: [4, 6, 8, 12],
+}
+
+const WIDTHS_KEY = "ooo:dashboard-widths"
+
+/** Stored widths, put right: an unknown tile or a width it may not take falls back to its default. */
+export function normaliseTileWidths(stored: unknown): Record<DashboardTile, number> {
+  const out = { ...DEFAULT_TILE_WIDTHS }
+  if (stored && typeof stored === "object") {
+    for (const id of DASHBOARD_TILES) {
+      const w = (stored as Record<string, unknown>)[id]
+      if (typeof w === "number" && TILE_ALLOWED_WIDTHS[id].includes(w)) out[id] = w
+    }
+  }
+  return out
+}
+
+let widths: Record<DashboardTile, number> = DEFAULT_TILE_WIDTHS
+let widthsHydrated = false
+
+function hydrateWidths(): void {
+  if (widthsHydrated) return
+  widthsHydrated = true
+  try {
+    const raw = window.localStorage.getItem(WIDTHS_KEY)
+    if (raw) {
+      widths = normaliseTileWidths(JSON.parse(raw))
+      emit()
+    }
+  } catch {
+    // The defaults stand.
+  }
+}
+
+function subscribeWidths(listener: () => void): () => void {
+  listeners.add(listener)
+  hydrateWidths()
+  return () => listeners.delete(listener)
+}
+
+export function setTileWidth(id: DashboardTile, cols: number): void {
+  if (!TILE_ALLOWED_WIDTHS[id].includes(cols) || widths[id] === cols) return
+  widths = { ...widths, [id]: cols }
+  try {
+    window.localStorage.setItem(WIDTHS_KEY, JSON.stringify(widths))
+  } catch {
+    // Kept for this session only.
+  }
+  emit()
+}
+
+export function useTileWidths(): Record<DashboardTile, number> {
+  return useSyncExternalStore(subscribeWidths, () => widths, () => DEFAULT_TILE_WIDTHS)
+}
+
 export function useTileOrder(): DashboardTile[] {
   return useSyncExternalStore(subscribe, () => order, () => DEFAULT_ORDER)
 }
