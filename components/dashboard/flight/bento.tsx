@@ -3,10 +3,11 @@
 /**
  * The flight dashboard's tiles as a SORTABLE BENTO (the owner, Nov 2026).
  *
- * The tiles keep their look; their ORDER is the pilot's (per device,
- * `use-dashboard-layout.ts`), packed into rows that are always filled edge to
- * edge (`packTiles`). Arrange — the header's grid button — lets a tile be
- * picked up and dropped where another is; arrow keys move it for a keyboard.
+ * The tiles keep their look; their ORDER and WIDTH are the pilot's (per
+ * device, `use-dashboard-layout.ts`), packed into rows that are always filled
+ * edge to edge (`packTiles`). Arrange — the header's grid button — lets a tile
+ * be picked up and dropped where another is (arrow keys for a keyboard), and
+ * its width chip steps it through a third, a half, two thirds and the row.
  *
  * - **The DOM never moves.** Every tile stays at its place in the tree and the
  *   grid places it by CSS `order`, so reordering remounts nothing (a tile's
@@ -23,21 +24,17 @@ import * as React from "react"
 import { createPortal } from "react-dom"
 import { animate, motion, useMotionValue } from "framer-motion"
 import { Move } from "lucide-react"
-import { GRID_COLUMNS, moveTile, nudgeTile, packTiles } from "@/lib/utils/dashboard/bento"
-import { DASHBOARD_TILES, setArranging, setTileOrder, type DashboardTile } from "@/hooks/use-dashboard-layout"
+import { GRID_COLUMNS, moveTile, nextWidth, nudgeTile, packTiles, widthLabel } from "@/lib/utils/dashboard/bento"
+import {
+  DASHBOARD_TILES,
+  TILE_ALLOWED_WIDTHS,
+  setArranging,
+  setTileOrder,
+  setTileWidth,
+  type DashboardTile,
+} from "@/hooks/use-dashboard-layout"
 import { haptic } from "@/lib/utils/haptics"
 import { cn } from "@/lib/utils"
-
-/** The fewest of the 12 columns each tile reads at. */
-export const TILE_MIN_COLS: Record<DashboardTile, number> = {
-  duty: 12,
-  flight: 12,
-  weather: 4,
-  crew: 4,
-  destination: 4,
-  currency: 6,
-  limits: 6,
-}
 
 /** Swaps wait this long after the last — a layout settling under the finger is not a new target. */
 const SWAP_COOLDOWN_MS = 140
@@ -53,12 +50,15 @@ interface Drag {
 
 export function BentoGrid({
   order,
+  widths,
   arranging,
   label,
   tile,
   face,
 }: {
   order: DashboardTile[]
+  /** Each tile's chosen width, in columns of 12. */
+  widths: Record<DashboardTile, number>
   arranging: boolean
   label: (id: DashboardTile) => string
   /** The tile as the page shows it. */
@@ -69,9 +69,9 @@ export function BentoGrid({
   const placed = React.useMemo(() => {
     const m = new Map<DashboardTile, { order: number; span: number }>()
     let i = 0
-    for (const row of packTiles(order, TILE_MIN_COLS)) for (const t of row) m.set(t.id, { order: i++, span: t.span })
+    for (const row of packTiles(order, widths)) for (const t of row) m.set(t.id, { order: i++, span: t.span })
     return m
-  }, [order])
+  }, [order, widths])
 
   const orderRef = React.useRef(order)
   React.useEffect(() => {
@@ -196,11 +196,12 @@ export function BentoGrid({
             >
               <div
                 className={cn(
-                  "pointer-events-none relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-dashed border-foreground/30 bg-card p-3 transition-opacity",
-                  lifted && "opacity-30",
+                  "pointer-events-none relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-dashed border-foreground/30 bg-card p-3",
                 )}
               >
-                {face(id)}
+                {/* Dimmed while arranging: the tile is being placed, not read,
+                    and its width chip sits over the middle of it. */}
+                <div className={cn("transition-opacity", lifted ? "opacity-20" : "opacity-45")}>{face(id)}</div>
               </div>
               <span
                 aria-hidden
@@ -208,6 +209,20 @@ export function BentoGrid({
               >
                 <Move className="h-3.5 w-3.5" />
               </span>
+              {/* Its width: a tap steps a third → a half → two thirds → the row.
+                  Its own press, never the start of a drag. */}
+              <button
+                type="button"
+                aria-label={`${label(id)} width: ${widthLabel(widths[id])}. Change`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => {
+                  setTileWidth(id, nextWidth(widths[id], TILE_ALLOWED_WIDTHS[id]))
+                  haptic("tick")
+                }}
+                className="absolute left-1/2 top-1/2 z-[1] flex h-9 min-w-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-[var(--control)] px-3 text-sm font-semibold tabular-nums text-foreground"
+              >
+                {widthLabel(widths[id])}
+              </button>
             </motion.div>
           )
         })}

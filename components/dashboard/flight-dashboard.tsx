@@ -50,13 +50,12 @@ import { getAirportByIcao, getAirportsRevision } from "@/lib/db/stores/reference
 import type { Airport } from "@/types/entities/airport.types"
 import { cn } from "@/lib/utils"
 import { useTick } from "./flight/instruments"
-import { CrewFace, CurrencyFace, DestinationFace, DutyFace, DutyStepper, FlightFace, LimitsFace, currencyRows, limitsOf } from "./flight/faces"
+import { CrewFace, CurrencyFace, DestinationFace, DutyChooser, DutyFace, FlightFace, LimitsFace, currencyRows, limitsOf } from "./flight/faces"
 import { WeatherFace, type WeatherState } from "./flight/weather"
 import { WIDGET_TITLE, useWidgetCtx, widgetContent } from "./flight/details"
 import { BentoGrid } from "./flight/bento"
-import { setArranging, useArranging, useTileOrder } from "@/hooks/use-dashboard-layout"
+import { setArranging, useArranging, useTileOrder, useTileWidths } from "@/hooks/use-dashboard-layout"
 import { Widget, WidgetCard, WidgetLabel, WidgetSheet, type WidgetAnchor, type WidgetId } from "./flight/widget"
-import { ActionRow, ActionStack } from "@/components/ui/action-row"
 import type { DutyChoice, FlightBrief } from "./flight/model"
 import type { DutyPeriod } from "@/types/entities/roster.types"
 import type { RequirementState } from "@/lib/utils/dashboard/legality"
@@ -130,6 +129,7 @@ export function FlightDashboard({ className }: { className?: string }) {
     setArranging(false)
   })
   const order = useTileOrder()
+  const widths = useTileWidths()
   const arranging = useArranging()
   const now = useTick(isActive)
   const { preferences } = usePreferences()
@@ -167,13 +167,6 @@ export function FlightDashboard({ className }: { className?: string }) {
   const choice = choices[index] ?? null
   const current = onDuty && index === 0
   const dutyAtMs = choice?.atMs ?? null
-  const step = React.useCallback(
-    (delta: number) => {
-      const next = choices[Math.min(choices.length - 1, Math.max(0, index + delta))]
-      setChosenAt(next && next !== choices[0] ? next.atMs : null)
-    },
-    [choices, index],
-  )
   const selectDuty = React.useCallback(
     (atMs: number) => setChosenAt(choices[0]?.atMs === atMs ? null : atMs),
     [choices],
@@ -287,33 +280,28 @@ export function FlightDashboard({ className }: { className?: string }) {
   const { selectedId, setSelectedId, setDetailContent } = useDetailPanel()
   const onDashboard = usePathname() === "/"
   const panelWidget = selectedId?.startsWith("w:") ? (selectedId.slice(2) as WidgetId) : null
-  const [sheetState, setSheet] = React.useState<{ id: WidgetId; anchor: WidgetAnchor } | null>(null)
+  // The tile stays under its card while it travels and comes back the moment
+  // the close begins, so the card fades INTO it (`phase`).
+  const [sheetState, setSheet] = React.useState<{ id: WidgetId; anchor: WidgetAnchor; phase: "opening" | "open" | "closing" } | null>(null)
   // A phone that turns into a tablet leaves its sheet behind: the panel is the detail there.
   const sheet = isDesktop ? null : sheetState
   const open = React.useCallback(
     (id: WidgetId, anchor: WidgetAnchor) => {
       if (isDesktop) setSelectedId(`w:${id}`)
-      else setSheet({ id, anchor })
+      else setSheet({ id, anchor, phase: "opening" })
     },
     [isDesktop, setSelectedId],
   )
   const nav = useWidgetCtx()
   const ctx = React.useMemo(() => ({ ...nav, selectDuty }), [nav, selectDuty])
   // The panel beside the page shows the widget it was asked for: the same
-  // card the phone lifts, its actions as capsules under it.
+  // card the phone lifts, its footer line under it.
   React.useEffect(() => {
     if (!isActive || !onDashboard || !panelWidget || !WIDGET_TITLE[panelWidget]) return
     const { body, actions, header } = widgetContent(panelWidget, brief, ctx)
     setDetailContent(
       <ReadingPanel key={panelWidget} title={WIDGET_TITLE[panelWidget]}>
-        <WidgetCard face={header === "face" ? faceOf(panelWidget, brief) : null} body={body} />
-        {actions.length > 0 && (
-          <ActionStack>
-            {actions.map((a) => (
-              <ActionRow key={a.id} label={a.label} icon={a.icon} disabled={a.busy} onClick={a.run} />
-            ))}
-          </ActionStack>
-        )}
+        <WidgetCard face={header === "face" ? faceOf(panelWidget, brief) : null} body={body} actions={actions} />
       </ReadingPanel>,
     )
   }, [isActive, onDashboard, panelWidget, brief, ctx, setDetailContent])
@@ -340,10 +328,11 @@ export function FlightDashboard({ className }: { className?: string }) {
       id={id}
       label={WIDGET_TITLE[id]}
       open={isDesktop && panelWidget === id}
-      hidden={sheet?.id === id}
+      hidden={sheet?.id === id && sheet.phase === "open"}
       onOpen={open}
       tone={tint[id] ?? null}
-      controls={id === "flight" ? <DutyStepper index={index} count={choices.length} onStep={step} /> : undefined}
+      controls={id === "flight" ? <DutyChooser brief={brief} onChoose={selectDuty} /> : undefined}
+      controlsClassName={id === "flight" ? "left-1.5 top-1.5" : undefined}
       className="flex-1"
     >
       {faceOf(id, brief)}
@@ -356,28 +345,36 @@ export function FlightDashboard({ className }: { className?: string }) {
           tiles scroll rather than being squeezed out of sight. */}
       <BentoGrid
         order={order}
+        widths={widths}
         arranging={arranging}
         label={(id) => WIDGET_TITLE[id]}
         tile={tile}
         face={(id) => faceOf(id, brief)}
       />
 
-      {sheet &&
-        (() => {
-          const { body, actions, header } = widgetContent(sheet.id, brief, ctx)
-          const face = faceOf(sheet.id, brief)
-          return (
-            <WidgetSheet
-              anchor={sheet.anchor}
-              title={WIDGET_TITLE[sheet.id]}
-              face={face}
-              header={header === "face" ? face : <WidgetLabel>{WIDGET_TITLE[sheet.id]}</WidgetLabel>}
-              body={body}
-              actions={actions}
-              onClose={() => setSheet(null)}
-            />
-          )
-        })()}
+      {sheet && (
+        <WidgetSheet
+          anchor={sheet.anchor}
+          title={WIDGET_TITLE[sheet.id]}
+          // Anything in the card that goes somewhere closes it first.
+          render={(dismiss) => {
+            const sheetCtx = {
+              openFlight: (id: string) => dismiss(() => nav.openFlight(id)),
+              go: (href: string) => dismiss(() => nav.go(href)),
+              selectDuty,
+            }
+            const { body, actions, header } = widgetContent(sheet.id, brief, sheetCtx)
+            return {
+              header: header === "face" ? faceOf(sheet.id, brief) : <WidgetLabel>{WIDGET_TITLE[sheet.id]}</WidgetLabel>,
+              body,
+              actions,
+            }
+          }}
+          onOpened={() => setSheet((s) => (s && s.phase === "opening" ? { ...s, phase: "open" } : s))}
+          onClosing={() => setSheet((s) => (s ? { ...s, phase: "closing" } : s))}
+          onClose={() => setSheet(null)}
+        />
+      )}
     </div>
   )
 }

@@ -7,7 +7,8 @@
  * move as the answers land). The detail behind each is in `details.tsx`.
  */
 
-import { Check, ChevronLeft, ChevronRight, OctagonAlert, TriangleAlert } from "lucide-react"
+import { ChevronDown, OctagonAlert, TriangleAlert } from "lucide-react"
+import { ChoicePicker } from "@/components/ui/option-menu"
 import type { Requirement } from "@/lib/utils/dashboard/legality"
 import type { SectorLeg } from "@/lib/utils/dashboard/duty-status"
 import { formatDay } from "@/lib/utils/date"
@@ -92,18 +93,30 @@ export function FlightFace({ brief }: { brief: FlightBrief }) {
   // The aeroplane is named once: in the line under the chain, which says
   // where it is when that is known.
   const line = duty.info?.line ?? [reg, rest?.text].filter(Boolean).join(" · ")
+  // Under each stop: out from the first, in at the last, and at a stop in
+  // between BOTH — in from the leg before, out on the leg after ("01:50–02:35Z";
+  // the owner: the next sector's out was missing).
+  const at = (ms: number | null) => (ms !== null ? clock(ms) : "")
   const times =
     duty.times.length === legs.length && legs.length > 0
       ? [
-          duty.times[0].departMs !== null ? clock(duty.times[0].departMs) : "",
-          ...duty.times.map((t) => (t.arriveMs !== null ? clock(t.arriveMs) : "")),
+          at(duty.times[0].departMs),
+          ...duty.times.map((t, i) => {
+            const arr = at(t.arriveMs)
+            const next = duty.times[i + 1]
+            if (!next) return arr
+            const dep = at(next.departMs)
+            if (!arr || !dep) return arr || dep
+            return `${arr.replace(/Z$/, "")}–${dep}`
+          }),
         ]
       : undefined
   return (
     <>
       <WidgetLabel>
-        <span suppressHydrationWarning>
+        <span className="inline-flex items-center gap-0.5" suppressHydrationWarning>
           {dutyWord(brief)} · {day(duty.atMs)}
+          {duty.choices.length > 1 && <ChevronDown className="h-3 w-3" aria-hidden />}
         </span>
       </WidgetLabel>
       {(numbers.length > 0 || duty.fdp) && (
@@ -141,33 +154,33 @@ export function FlightFace({ brief }: { brief: FlightBrief }) {
 }
 
 /**
- * ‹ › on the flight tile: which duty the dashboard is about. The duty in
- * progress (or the next) by default; the later ones a tap each.
+ * Which duty the dashboard is about — chosen by tapping the flight tile's own
+ * date line ("NEXT · WED, 18 NOV ⌄"), a menu of the duties ahead (the owner:
+ * not ‹ ›). It sits OVER that line, outside the tile's button (a button in a
+ * button is not one a keyboard or a screen reader can use).
  */
-export function DutyStepper({
-  index,
-  count,
-  onStep,
-}: {
-  index: number
-  count: number
-  onStep: (delta: number) => void
-}) {
-  if (count < 2) return null
-  const btn =
-    "relative flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-muted disabled:opacity-30 after:absolute after:-inset-1.5 after:content-['']"
+export function DutyChooser({ brief, onChoose }: { brief: FlightBrief; onChoose: (atMs: number) => void }) {
+  const { duty, day, clock } = brief
+  if (duty.choices.length < 2 || duty.atMs === null) return null
+  // The day leads (the menu is narrow on a phone); the report and the route
+  // are its second line.
+  const options = duty.choices.map((c, i) => ({
+    value: String(c.atMs),
+    label: i === 0 ? `${duty.current ? "Now" : "Next"} · ${day(c.atMs)}` : day(c.atMs),
+    // The report first: the route is the part that can truncate.
+    hint: [`Report ${clock(c.atMs)}`, (c.period?.route ?? "").replace(/-/g, " ")].filter(Boolean).join(" · "),
+  }))
   return (
-    <div className="flex items-center gap-0.5">
-      <button type="button" className={btn} disabled={index === 0} aria-label="Earlier duty" onClick={() => onStep(-1)}>
-        <ChevronLeft className="h-4 w-4" />
-      </button>
-      <span className="w-7 text-center text-[10px] font-semibold tabular-nums text-muted-foreground" aria-live="polite">
-        {index + 1}/{count}
-      </span>
-      <button type="button" className={btn} disabled={index >= count - 1} aria-label="Later duty" onClick={() => onStep(1)}>
-        <ChevronRight className="h-4 w-4" />
-      </button>
-    </div>
+    <ChoicePicker
+      label="Duty"
+      value={String(duty.atMs)}
+      options={options}
+      onValueChange={(v) => onChoose(Number(v))}
+      align="start"
+      className="block h-7 w-48 max-w-[70vw] rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <span className="sr-only">Choose the duty</span>
+    </ChoicePicker>
   )
 }
 
@@ -208,7 +221,7 @@ export function DestinationFace({ brief }: { brief: FlightBrief }) {
   const dests = destinationsOf(brief)
   return (
     <>
-      <WidgetLabel>Last There</WidgetLabel>
+      <WidgetLabel>Destination</WidgetLabel>
       {dests.length === 0 ? (
         <p className="text-xs leading-snug text-muted-foreground">—</p>
       ) : (
@@ -245,7 +258,7 @@ function Tally({ rows }: { rows: Array<{ state: Requirement["state"] }> }) {
           {caution}
         </span>
       )}
-      {fail === 0 && caution === 0 && requirements.length > 0 && <Check className="h-3 w-3 text-chart-2" aria-label="All met" />}
+      {/* Dark cockpit: all met lights nothing. */}
     </span>
   )
 }
@@ -296,7 +309,11 @@ export function CurrencyFace({ brief, rows = 3 }: { brief: FlightBrief; rows?: n
             const Icon = STATE_ICON[r.state]
             return (
               <li key={r.key} className="flex items-center gap-1.5 text-xs leading-tight">
-                <Icon className={cn("h-3 w-3 shrink-0", REQ_TONE[r.state].icon)} aria-hidden />
+                {r.state === "ok" ? (
+                  <span className="w-3 shrink-0" aria-hidden />
+                ) : (
+                  <Icon className={cn("h-3 w-3 shrink-0", REQ_TONE[r.state].icon)} aria-hidden />
+                )}
                 <span className="min-w-0 flex-1 truncate text-foreground">{r.name}</span>
                 <span className={cn("shrink-0 font-semibold tabular-nums", r.state === "ok" ? "text-foreground" : REQ_TONE[r.state].icon)}>
                   {r.figure.split(" · ")[0]}

@@ -12,20 +12,18 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { Moon, Plane, PlaneLanding, RefreshCw, ShieldCheck, Sun, Timer, Users } from "lucide-react"
+import { Plane, PlaneLanding, RefreshCw } from "lucide-react"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { dutyWindow, formatDutyClock, formatRestSpan } from "@/lib/utils/dashboard/duty-status"
 import { gateLabel } from "@/lib/utils/dashboard/duty-line"
 import { whereaboutsLines } from "@/lib/lookup/aircraft-whereabouts"
 import type { Requirement } from "@/lib/utils/dashboard/legality"
-import { isNight } from "@/lib/utils/night-time"
-import { hasCoordinates } from "@/lib/utils/flight-calculations"
-import { getAirportLocalTime } from "@/lib/db/stores/reference/airports.store"
 import { cn } from "@/lib/utils"
 import { formatDay } from "@/lib/utils/date"
 import { REQ_TONE, STATE_ICON } from "./instruments"
 import { destinationsOf, limitsOf, shortDay, shortName } from "./faces"
 import { WeatherBody } from "./weather"
+import { AirportPanel } from "./airport"
 import type { FlightBrief } from "./model"
 import type { WidgetAction, WidgetId } from "./widget"
 
@@ -34,7 +32,7 @@ export const WIDGET_TITLE: Record<WidgetId, string> = {
   flight: "Flights",
   weather: "Weather",
   crew: "Crew",
-  destination: "Last There",
+  destination: "Destination",
   currency: "Currency",
   limits: "Limits",
 }
@@ -49,7 +47,7 @@ function Fig({ label, value, tone }: { label: string; value: React.ReactNode; to
       <p
         className={cn(
           "truncate text-[15px] font-semibold tabular-nums",
-          tone === "over" ? "text-destructive" : tone === "ok" ? "text-chart-2" : "text-foreground",
+          tone === "over" ? "text-destructive" : "text-foreground",
         )}
         suppressHydrationWarning
       >
@@ -134,7 +132,7 @@ export function widgetContent(
    */
   header: "face" | "label"
 } {
-  const fdp: WidgetAction = { id: "fdp", label: "FDP", icon: <Timer className="h-5 w-5" />, run: () => ctx.go("/fdp") }
+  const fdp: WidgetAction = { id: "fdp", label: "FDP", run: () => ctx.go("/fdp") }
   switch (id) {
     case "duty":
       return { header: "face", body: hasDutyBody(brief) ? <DutyBody brief={brief} /> : null, actions: [fdp] }
@@ -142,7 +140,7 @@ export function widgetContent(
       const legs = brief.duty.legs
       return {
         header: "face",
-        body: legs.length || brief.duty.choices.length > 1 ? <FlightBody brief={brief} ctx={ctx} /> : null,
+        body: legs.length ? <FlightBody brief={brief} ctx={ctx} /> : null,
         // Each leg opens from its own row; the one thing to DO is ask again.
         actions: [
           ...(legs.length && brief.duty.lookups
@@ -150,7 +148,7 @@ export function widgetContent(
                 {
                   id: "refresh",
                   label: "Refresh",
-                  icon: <RefreshCw className={cn("h-5 w-5", brief.duty.lookupsLoading && "animate-spin")} />,
+                  icon: <RefreshCw className={cn("h-3.5 w-3.5", brief.duty.lookupsLoading && "animate-spin")} aria-hidden />,
                   run: brief.duty.refreshLookups,
                   stay: true,
                   busy: brief.duty.lookupsLoading,
@@ -169,7 +167,7 @@ export function widgetContent(
               {
                 id: "refresh",
                 label: "Refresh",
-                icon: <RefreshCw className={cn("h-5 w-5", brief.weather.refreshing && "animate-spin")} />,
+                icon: <RefreshCw className={cn("h-3.5 w-3.5", brief.weather.refreshing && "animate-spin")} aria-hidden />,
                 run: brief.weather.refresh,
                 stay: true,
                 busy: brief.weather.refreshing,
@@ -181,7 +179,7 @@ export function widgetContent(
       return {
         header: brief.crew.length ? "label" : "face",
         body: brief.crew.length ? <CrewBody brief={brief} go={ctx.go} /> : null,
-        actions: [{ id: "crew", label: "Crew", icon: <Users className="h-5 w-5" />, run: () => ctx.go("/crew") }],
+        actions: [{ id: "crew", label: "Crew", run: () => ctx.go("/crew") }],
       }
     case "destination":
       return {
@@ -193,7 +191,7 @@ export function widgetContent(
       return {
         header: "label",
         body: <CurrencyBody brief={brief} go={ctx.go} />,
-        actions: [{ id: "cur", label: "Currency", icon: <ShieldCheck className="h-5 w-5" />, run: () => ctx.go("/currencies") }],
+        actions: [{ id: "cur", label: "Currencies", run: () => ctx.go("/currencies") }],
       }
     case "limits":
       return { header: "face", body: <LimitsBody brief={brief} />, actions: [fdp] }
@@ -244,7 +242,8 @@ function DutyBody({ brief }: { brief: FlightBrief }) {
 
 /**
  * The chosen duty: its figures (what its face does not say), each leg a row a
- * tap opens, the aeroplane coming in, and the duties to choose from.
+ * tap opens, and the aeroplane coming in. The duty is chosen on the tile's
+ * own date line, not here.
  */
 function FlightBody({ brief, ctx }: { brief: FlightBrief; ctx: WidgetCtx }) {
   const { duty, code, clock, day } = brief
@@ -259,9 +258,6 @@ function FlightBody({ brief, ctx }: { brief: FlightBrief; ctx: WidgetCtx }) {
           {/* The next duty's report is the duty card's; a later one's is new here. */}
           {w && duty.index > 0 && <Fig label="Report" value={clock(w.startMs)} />}
           {w && <Fig label="Off Duty" value={clock(w.endMs)} />}
-          {duty.period?.fdpTableUsed && duty.fdp && duty.fdp.max > 0 && (
-            <Fig label="FDP Table" value={duty.period.fdpTableUsed} />
-          )}
         </Grid>
       )}
       {duty.legs.length > 0 && (
@@ -275,7 +271,7 @@ function FlightBody({ brief, ctx }: { brief: FlightBrief; ctx: WidgetCtx }) {
               <TapRow
                 key={f.id}
                 onClick={() => ctx.openFlight(f.id)}
-                lead={<Plane className={cn("h-4 w-4 shrink-0", f.inTime ? "text-chart-2" : "text-muted-foreground")} aria-hidden />}
+                lead={<Plane className={cn("h-4 w-4 shrink-0", f.inTime ? "text-foreground" : "text-muted-foreground")} aria-hidden />}
                 title={
                   <>
                     {f.flightNumber || "Flight"}{" "}
@@ -315,28 +311,6 @@ function FlightBody({ brief, ctx }: { brief: FlightBrief; ctx: WidgetCtx }) {
           )}
         </div>
       )}
-      {duty.choices.length > 1 && ctx.selectDuty && (
-        <div className="mt-1.5 border-t border-border/70 pt-1">
-          {duty.choices.slice(0, 6).map((c, i) => {
-            const chosen = i === duty.index
-            return (
-              <TapRow
-                key={c.atMs}
-                onClick={chosen ? undefined : () => ctx.selectDuty!(c.atMs)}
-                lead={
-                  <span
-                    aria-hidden
-                    className={cn("h-2 w-2 shrink-0 rounded-full", chosen ? "bg-primary" : "border border-muted-foreground/60")}
-                  />
-                }
-                title={<span className={cn(!chosen && "font-normal")}>{day(c.atMs)}</span>}
-                sub={c.period?.route || undefined}
-                right={clock(c.atMs)}
-              />
-            )
-          })}
-        </div>
-      )}
     </div>
   )
 }
@@ -359,35 +333,30 @@ function CrewBody({ brief, go }: { brief: FlightBrief; go: (href: string) => voi
   )
 }
 
-/** Each destination: when last there, how often, the time there now, day or night on arrival. */
+/**
+ * Each destination as a picture of its weather and the wind on its runway
+ * (`AirportPanel`), with when last there under it.
+ */
 function DestinationBody({ brief, openFlight }: { brief: FlightBrief; openFlight: (id: string) => void }) {
   return (
-    <div>
+    <div className="divide-y divide-border/70">
       {destinationsOf(brief).map((d) => {
-        const airport = brief.airports.get(d.icao)
+        const metar = brief.weather.briefs.find((b) => b.station === d.icao)?.metar ?? null
         const arrival = brief.duty.times.find((t) => t.arrivalIcao === d.icao)?.arriveMs ?? null
-        const night =
-          arrival !== null && airport && hasCoordinates(airport) ? isNight(new Date(arrival), airport.latitude, airport.longitude) : null
-        const Arrive = night === null ? null : night ? Moon : Sun
+        const lastLine = [d.last ? `Last there ${shortDay(d.last.date)}` : "First time", d.year ? `${d.year}× this year` : null]
+          .filter(Boolean)
+          .join(" · ")
         return (
-          <TapRow
+          <AirportPanel
             key={d.icao}
-            onClick={d.last ? () => openFlight(d.last!.flightId) : undefined}
-            lead={
-              <span className="w-12 shrink-0 text-[15px] font-semibold tabular-nums text-foreground">{brief.code(d.icao)}</span>
-            }
-            // Where it is, then when last there — the tile has only the code.
-            title={airport?.city || airport?.name || brief.code(d.icao)}
-            sub={
-              [
-                d.last ? `Last ${shortDay(d.last.date)}` : "First time",
-                d.year ? `${d.year}× this year` : null,
-                airport?.tz ? `Now ${getAirportLocalTime(airport.tz)}` : null,
-              ]
-                .filter(Boolean)
-                .join(" · ") || undefined
-            }
-            right={Arrive ? <Arrive className="h-4 w-4" aria-label={night ? "Arrive by night" : "Arrive by day"} /> : undefined}
+            icao={d.icao}
+            code={brief.code(d.icao)}
+            airport={brief.airports.get(d.icao)}
+            metar={metar}
+            arrivalMs={arrival}
+            weatherAsked={brief.weather.asked}
+            lastLine={lastLine}
+            onLast={d.last ? () => openFlight(d.last!.flightId) : undefined}
           />
         )
       })}
@@ -409,7 +378,9 @@ function CurrencyBody({ brief, go }: { brief: FlightBrief; go: (href: string) =>
   const figure = (state: Requirement["state"], text: string) => (
     <span className={cn("font-semibold", state === "ok" ? "text-foreground" : REQ_TONE[state].icon)}>{text}</span>
   )
+  // Dark cockpit: a met requirement draws no icon, only its place in the row.
   const lead = (state: Requirement["state"]) => {
+    if (state === "ok") return <span className="w-4 shrink-0" aria-hidden />
     const Icon = STATE_ICON[state]
     return <Icon className={cn("h-4 w-4 shrink-0", REQ_TONE[state].icon)} aria-hidden />
   }
