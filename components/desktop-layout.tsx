@@ -56,7 +56,8 @@ interface AppShellProps {
  * on Crew or Currencies left the reader to work out what an "item" was.
  */
 const DETAIL_PLACEHOLDER: Record<string, string> = {
-  "/": "Select a requirement or a flight",
+  "/": "Select a tile",
+  "/summary": "Select a flight",
   "/logbook": "Select a flight or a duty",
   "/aircraft": "Select an aircraft",
   "/airports": "Select an airport",

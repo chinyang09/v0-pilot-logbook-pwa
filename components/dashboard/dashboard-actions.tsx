@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Calendar, Check, LayoutGrid, SlidersHorizontal } from "lucide-react"
+import { Calendar, CalendarClock, Check, SlidersHorizontal } from "lucide-react"
 
 import { GlassButtonGroup, GlassGroupButton } from "@/components/ui/glass-icon-button"
 import {
@@ -9,13 +9,9 @@ import {
   useDashboardPeriod,
   type DashboardPreset,
 } from "@/hooks/use-dashboard-period"
-import {
-  DASHBOARD_VIEWS,
-  setDashboardView,
-  useDashboardView,
-} from "@/hooks/use-dashboard-view"
 import { AlertsDropdown } from "./alerts-dropdown"
 import { setArranging, useArranging } from "@/hooks/use-dashboard-layout"
+import { setChosenDuty, useChosenDuty, useDutyMenu } from "@/hooks/use-dashboard-duty"
 import { ChoicePicker, type MenuOption } from "@/components/ui/option-menu"
 import { cn } from "@/lib/utils"
 
@@ -31,126 +27,96 @@ const PERIOD_OPTIONS: Array<MenuOption<string>> = PERIOD_PRESETS.map((p) => ({
   hint: PERIOD_HINTS[p.value],
 }))
 
+/** A group button that opens a menu: an icon over a small label, like the period's. */
+const MENU_BUTTON = cn(
+  "flex h-10 min-w-10 flex-col items-center justify-center rounded-full px-2 text-foreground transition-colors",
+  "hover:bg-[var(--on-glass-fill-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+)
+
 /**
- * The dashboard's header actions.
+ * The FLIGHT DECK's header (the owner, Nov 2026: the flight dashboard and the
+ * summary are two pages now, each with its own header).
  *
- * The view toggle is ALWAYS present — it is how the two pages are reached, so
- * it cannot be behind anything. Everything else is scoped to the page it
- * belongs to: the calendar and the period pills only mean something on the
- * summary page, and carrying them onto the flight page would put two controls
- * with no effect beside a screen that is meant to be read in two seconds.
- *
- * That scoping is also what keeps the action bar narrow enough. The left action
- * group is anchored to the viewport edge and the nav pill is centred between
- * the groups, so a bar that grows — and the period pills expand — is the one
- * thing that can push a button under the pill.
+ * | | |
+ * |---|---|
+ * | the DUTY menu | which duty the page is about — the one in progress or next, else a later one ("Next · 21 Nov" in the button). It was a menu laid over the flights tile's date line, which the tile's card did not carry, so the duty could not be changed once the card was open |
+ * | Done | only while arranging — a long press on a tile enters Arrange |
+ * | the bell | import notes |
  */
-export function DashboardActions() {
-  const {
-    period,
-    resolved,
-    setPeriod,
-    showCalendar,
-    setShowCalendar,
-  } = useDashboardPeriod()
-  const view = useDashboardView()
+export function FlightDeckActions() {
+  const menu = useDutyMenu()
+  const chosen = useChosenDuty()
   const arranging = useArranging()
-
-  const activePreset: DashboardPreset | null =
-    period.kind === "preset" ? period.preset : null
-
-  const filterLabel = period.kind === "preset" ? resolved.shortLabel : "Custom"
-
   return (
     <>
-      <GlassButtonGroup>
-        {/* The two pages. A segmented pair rather than an icon: "Flight" and
-            "Summary" are not things an icon says, and getting this wrong costs
-            a tap plus a re-read of a whole screen. */}
-        <div role="tablist" aria-label="Dashboard view" className="flex items-center gap-0.5">
-          {DASHBOARD_VIEWS.map((v) => {
-            const isActive = view === v.value
-            return (
-              <button
-                key={v.value}
-                role="tab"
-                type="button"
-                aria-selected={isActive}
-                onClick={() => {
-                  setDashboardView(v.value)
-                  setArranging(false)
-                }}
-                className={cn(
-                  "h-10 rounded-full px-3 text-xs font-semibold transition-colors",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  isActive
-                    ? "bg-[var(--on-glass-active)] text-[var(--on-glass-active-fg)]"
-                    : "text-foreground hover:bg-[var(--on-glass-fill-soft)]",
-                )}
-              >
-                {v.label}
-              </button>
-            )
-          })}
-        </div>
-      </GlassButtonGroup>
-
-      {/* Period controls belong to the summary page only. */}
-      {view === "summary" && (
+      {menu && menu.options.length > 0 && (
         <GlassButtonGroup>
-          <GlassGroupButton
-            ariaLabel="Date range"
-            ariaPressed={showCalendar}
-            active={showCalendar || period.kind === "custom"}
-            onClick={() => setShowCalendar(!showCalendar)}
-          >
-            <Calendar className="h-5 w-5" />
-          </GlassGroupButton>
-
-          {/* NO month label here. The calendar's own header is the date
-              selector and the thing that opens the month/year picker — a second
-              one in the action bar says the same thing twice, and it is what
-              grew the left action group into the centred nav pill on the
-              logbook before it was removed there. */}
-
-          {/* The period is a MENU that grows out of its button, like the +
-              and the calendar's Duties — not pills that expand inline. The
-              left action group is anchored to the viewport edge and the nav
-              pill is centred, so a bar that grew pushed its last buttons under
-              the pill (the owner's iPad screenshot: 7d / 28d / 1y running into
-              Dashboard). A menu keeps the bar the same width whatever is open. */}
           <ChoicePicker
-            label="Period"
-            value={activePreset ?? "custom"}
-            options={PERIOD_OPTIONS}
-            onValueChange={(v) => setPeriod({ kind: "preset", preset: v as DashboardPreset })}
+            label="Duty"
+            value={chosen === null ? menu.options[0].value : String(chosen)}
+            options={menu.options}
+            onValueChange={(v) => setChosenDuty(v === menu.options[0].value ? null : Number(v))}
             morph
-            className={cn(
-              "flex h-10 min-w-10 flex-col items-center justify-center rounded-full px-2 text-foreground transition-colors",
-              "hover:bg-[var(--on-glass-fill-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            )}
+            disabled={menu.options.length < 2}
+            className={cn(MENU_BUTTON, "min-w-14")}
           >
-            <SlidersHorizontal className="h-[15px] w-[15px]" aria-hidden />
-            <span className="mt-0.5 text-[10px] font-semibold leading-none tabular-nums">
-              {filterLabel}
+            <CalendarClock className="h-[15px] w-[15px]" aria-hidden />
+            <span className="mt-0.5 text-[10px] font-semibold leading-none tabular-nums" suppressHydrationWarning>
+              {menu.day}
             </span>
           </ChoicePicker>
         </GlassButtonGroup>
       )}
-
       <GlassButtonGroup>
-        {/* The flight page's tiles in the pilot's own order: Arrange lets them
-            be dragged, Done puts them back to being opened. */}
-        {view === "flight" && (
-          <GlassGroupButton
-            ariaLabel={arranging ? "Done arranging" : "Arrange tiles"}
-            ariaPressed={arranging}
-            active={arranging}
-            onClick={() => setArranging(!arranging)}
-          >
-            {arranging ? <Check className="h-5 w-5" /> : <LayoutGrid className="h-5 w-5" />}
+        {arranging && (
+          <GlassGroupButton ariaLabel="Done arranging" ariaPressed active onClick={() => setArranging(false)}>
+            <Check className="h-5 w-5" />
           </GlassGroupButton>
         )}
+        <AlertsDropdown />
+      </GlassButtonGroup>
+    </>
+  )
+}
+
+/**
+ * The SUMMARY's header: the date range (its calendar), the period, the bell.
+ *
+ * NO month label: the calendar's own header is the date selector — a second
+ * one in the action bar says the same thing twice, and it is what grew the
+ * left action group into the centred nav pill on the logbook. The period is a
+ * MENU that grows out of its button, not pills that expand inline: the left
+ * group is anchored to the viewport edge and the nav pill is centred, so a
+ * bar that grew pushed its last buttons under the pill.
+ */
+export function SummaryActions() {
+  const { period, resolved, setPeriod, showCalendar, setShowCalendar } = useDashboardPeriod()
+  const activePreset: DashboardPreset | null = period.kind === "preset" ? period.preset : null
+  const filterLabel = period.kind === "preset" ? resolved.shortLabel : "Custom"
+  return (
+    <>
+      <GlassButtonGroup>
+        <GlassGroupButton
+          ariaLabel="Date range"
+          ariaPressed={showCalendar}
+          active={showCalendar || period.kind === "custom"}
+          onClick={() => setShowCalendar(!showCalendar)}
+        >
+          <Calendar className="h-5 w-5" />
+        </GlassGroupButton>
+        <ChoicePicker
+          label="Period"
+          value={activePreset ?? "custom"}
+          options={PERIOD_OPTIONS}
+          onValueChange={(v) => setPeriod({ kind: "preset", preset: v as DashboardPreset })}
+          morph
+          className={MENU_BUTTON}
+        >
+          <SlidersHorizontal className="h-[15px] w-[15px]" aria-hidden />
+          <span className="mt-0.5 text-[10px] font-semibold leading-none tabular-nums">{filterLabel}</span>
+        </ChoicePicker>
+      </GlassButtonGroup>
+      <GlassButtonGroup>
         <AlertsDropdown />
       </GlassButtonGroup>
     </>

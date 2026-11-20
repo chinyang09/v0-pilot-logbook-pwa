@@ -7,6 +7,7 @@ export const MAX_NAV_TABS = 4
 /** Every tab the app knows; anything else stored (a newer build's tab) is dropped here. */
 const KNOWN: ReadonlySet<BottomNavTab> = new Set<BottomNavTab>([
   "dashboard",
+  "summary",
   "logbook",
   "aircraft",
   "crew",

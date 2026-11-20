@@ -32,8 +32,16 @@ export async function GET(request: Request) {
 
   try {
     const data = await getAirportInfo(ids, { store: mongoAirportInfoStore(await getDB()) })
-    // Reference data: a browser may keep it for a day.
-    return NextResponse.json({ ok: true, data }, { headers: { "cache-control": "private, max-age=86400" } })
+    // Reference data: a browser may keep it for a day — but only a COMPLETE
+    // answer. A source that failed leaves ids out, and kept for a day that
+    // partial answer was what the browser read back on every retry: a duty
+    // chosen with a new destination drew no runways until the page was left
+    // and reopened (the owner's report).
+    const complete = ids.every((id) => id in data)
+    return NextResponse.json(
+      { ok: true, data },
+      { headers: { "cache-control": complete ? "private, max-age=86400" : "no-store" } },
+    )
   } catch (e) {
     console.error("[AirportInfo] lookup failed:", e)
     return NextResponse.json({ ok: false, error: "Airport info unavailable" }, { status: 503 })

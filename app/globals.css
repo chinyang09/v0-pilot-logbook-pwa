@@ -1964,3 +1964,15 @@ textarea:focus-within {
 }
 [data-stamped] { animation: clock-stamp 1.1s ease-out; }
 @media (prefers-reduced-motion: reduce) { [data-stamped] { animation-duration: 0.01s; } }
+
+/* The currency card's sweep: a currency selected on the dot calendar lights
+   the days from today up to it, one after another (each dot's delay is set
+   inline), and they stay faintly lit — how many days, at a glance. Opacity
+   only, on SVG dots. */
+@keyframes currency-sweep {
+  0% { opacity: 0; }
+  40% { opacity: 0.95; }
+  100% { opacity: 0.35; }
+}
+.currency-sweep { opacity: 0.35; animation: currency-sweep 0.7s ease-out both; }
+@media (prefers-reduced-motion: reduce) { .currency-sweep { animation: none; } }

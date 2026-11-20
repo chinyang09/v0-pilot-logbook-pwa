@@ -52,7 +52,9 @@ import { getAirportByIcao, getAirportsRevision, isAirportTableSeeded, onAirportS
 import type { Airport } from "@/types/entities/airport.types"
 import { cn } from "@/lib/utils"
 import { useTick } from "./flight/instruments"
-import { CurrencyFace, DestinationFace, DutyChooser, DutyFace, FlightFace, LimitsFace, currencyRows, limitsOf } from "./flight/faces"
+import { CurrencyFace, DestinationFace, DutyFace, FlightFace, LimitsFace, currencyRows, destinationsOf, favouredAt, limitsOf } from "./flight/faces"
+import { dutyTone } from "./flight/duty-clock"
+import { setChosenDuty, useChosenDuty, publishDutyChoices } from "@/hooks/use-dashboard-duty"
 import { WeatherFace, type WeatherState } from "./flight/weather"
 import { WIDGET_TITLE, useWidgetCtx, widgetContent } from "./flight/details"
 import { BentoGrid } from "./flight/bento"
@@ -76,6 +78,26 @@ function worstOf(states: RequirementState[]): RequirementState | null {
   if (states.includes("fail")) return "fail"
   if (states.includes("caution") || states.includes("unknown")) return "caution"
   return null
+}
+
+/**
+ * Each tile's edge — dark cockpit: nothing when all is well, amber for
+ * attention, red for action. The reason is lit inside the tile.
+ */
+function tileTones(brief: FlightBrief): Partial<Record<WidgetId, RequirementState | null>> {
+  const wx = brief.weather.briefs.find((b) => b.station === brief.weatherStation) ?? null
+  const poor = (c: string | null | undefined) => c === "IFR" || c === "LIFR"
+  const destPoor = destinationsOf(brief).some((d) => {
+    const b = brief.weather.briefs.find((x) => x.station === d.icao)
+    return poor(b?.metar?.category) || (favouredAt(brief, d.icao)?.headKt ?? 0) < 0
+  })
+  return {
+    duty: dutyTone(brief),
+    weather: wx && (poor(wx.worst) || wx.hazards.length > 0) ? "caution" : null,
+    destination: destPoor ? "caution" : null,
+    currency: worstOf(currencyRows(brief).map((r) => r.state)),
+    limits: worstOf(limitsOf(brief).map((r) => r.state)),
+  }
 }
 
 const NO_AIRPORTS = new Map<string, Airport>()
@@ -136,10 +158,10 @@ function faceOf(id: WidgetId, brief: FlightBrief, size: TileSize, inCard = false
 
 export function FlightDashboard({ className }: { className?: string }) {
   // Which duty the page is about: null is the default (in progress, else
-  // next). Coming back to the page goes back to it.
-  const [chosenAt, setChosenAt] = React.useState<number | null>(null)
+  // next), chosen in the header. Coming back to the page goes back to it.
+  const chosenAt = useChosenDuty()
   const isActive = usePageActive("/", () => {
-    setChosenAt(null)
+    setChosenDuty(null)
     setArranging(false)
   })
   const order = useTileOrder()
@@ -183,7 +205,7 @@ export function FlightDashboard({ className }: { className?: string }) {
   const current = onDuty && index === 0
   const dutyAtMs = choice?.atMs ?? null
   const selectDuty = React.useCallback(
-    (atMs: number) => setChosenAt(choices[0]?.atMs === atMs ? null : atMs),
+    (atMs: number) => setChosenDuty(choices[0]?.atMs === atMs ? null : atMs),
     [choices],
   )
   const fdp = React.useMemo(() => {
@@ -219,6 +241,10 @@ export function FlightDashboard({ className }: { className?: string }) {
     () => crewOnDuty(legs, flights, personnel ?? [], dayKey),
     [legs, flights, personnel, dayKey],
   )
+  const legCrew = React.useMemo(
+    () => legs.map((l) => crewOnDuty([l], flights, personnel ?? [], dayKey)),
+    [legs, flights, personnel, dayKey],
+  )
   const firstDepart = times[0]?.departMs ?? dutyAtMs
   const destinations = React.useMemo(
     () => (legs.length ? destinationVisits(legs, flights, firstDepart ?? Infinity) : []),
@@ -229,10 +255,10 @@ export function FlightDashboard({ className }: { className?: string }) {
   const airports = useAirportsByIcao(stations)
   // Runways and frequencies for the destinations — the tile reads the
   // favoured runway; kept on the device 30 days, so this is rarely a request.
-  const destIcaos = React.useMemo(() => {
-    const origin = (legs[0]?.departureIcao || "").toUpperCase()
-    return [...new Set(legs.map((l) => (l.arrivalIcao || "").toUpperCase()))].filter((i) => i && i !== origin)
-  }, [legs])
+  const destIcaos = React.useMemo(
+    () => [...new Set(legs.map((l) => (l.arrivalIcao || "").toUpperCase()))].filter(Boolean),
+    [legs],
+  )
   const airportInfo = useAirportInfo(destIcaos, isActive && destIcaos.length > 0)
 
   /* ── Weather ─────────────────────────────────────────────────────────── */
@@ -300,6 +326,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       margin,
       recencyLapseIso: recency.lapseIso,
       crew,
+      legCrew,
       currency,
       destinations,
       airports,
@@ -312,8 +339,28 @@ export function FlightDashboard({ className }: { className?: string }) {
       day: (ms: number) =>
         formatDayAt(ms, display?.useZuluTime === false ? zone : "UTC", { year: false }),
     }),
-    [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, margin, recency.lapseIso, crew, currency, destinations, airports, airportInfo, weather, weatherStation, iataOf, pref, zone],
+    [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, margin, recency.lapseIso, crew, legCrew, currency, destinations, airports, airportInfo, weather, weatherStation, iataOf, pref, zone],
   )
+
+  /* ── The header's duty menu ──────────────────────────────────────────── */
+  // The day leads (the menu is narrow on a phone); the report and the route
+  // are its second line. Published while the page is on screen.
+  React.useEffect(() => {
+    if (!isActive) return
+    publishDutyChoices(
+      choices.length === 0 || dutyAtMs === null
+        ? null
+        : {
+            options: choices.map((c, i) => ({
+              value: String(c.atMs),
+              label: i === 0 ? `${current ? "Now" : "Next"} · ${brief.day(c.atMs)}` : brief.day(c.atMs),
+              hint: [`Report ${brief.clock(c.atMs)}`, (c.period?.route ?? "").replace(/-/g, " ")].filter(Boolean).join(" · "),
+            })),
+            word: index === 0 ? (current ? "Now" : "Next") : "Later",
+            day: brief.day(dutyAtMs).replace(/^\w+,?\s*/, ""),
+          },
+    )
+  }, [isActive, choices, dutyAtMs, current, index, brief])
 
   /* ── Opening a widget ────────────────────────────────────────────────── */
   const isDesktop = useIsDesktop()
@@ -364,14 +411,10 @@ export function FlightDashboard({ className }: { className?: string }) {
   }
 
   const reqs = status.legality.requirements
-  const tint = {
-    currency: worstOf(currencyRows(brief).map((r) => r.state)),
-    // A delay margin under an hour is the limits card's to flag too.
-    limits: worstOf([
-      ...limitsOf(brief).map((r) => r.state),
-      ...(brief.margin ? [brief.margin.minutes <= 0 ? ("fail" as const) : brief.margin.minutes < 60 ? ("caution" as const) : ("ok" as const)] : []),
-    ]),
-  } as Partial<Record<WidgetId, RequirementState | null>>
+  // Every tile with cause for concern says so with its EDGE (the owner:
+  // "instead of just an alert icon, the border … amber or red"), and its
+  // reason in the same colour inside it.
+  const tint = tileTones(brief)
   const tile = (id: WidgetId, size: TileSize) => (
     <Widget
       id={id}
@@ -380,8 +423,6 @@ export function FlightDashboard({ className }: { className?: string }) {
       hidden={sheet?.id === id}
       onOpen={open}
       tone={tint[id] ?? null}
-      controls={id === "flight" ? <DutyChooser brief={brief} onChoose={selectDuty} /> : undefined}
-      controlsClassName={id === "flight" ? "left-1.5 top-1.5" : undefined}
       className="flex-1"
     >
       {faceOf(id, brief, size)}

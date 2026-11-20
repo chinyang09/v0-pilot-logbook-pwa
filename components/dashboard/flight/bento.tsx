@@ -6,7 +6,8 @@
  * The tiles keep their look; their ORDER and SIZE are the pilot's (per
  * device, `use-dashboard-layout.ts`), placed on a grid three columns wide in
  * which a tile spans 1–3 columns and 1–2 rows, always filled edge to edge
- * (`packTiles`). Arrange — the header's grid button — lets a tile be picked up
+ * (`packTiles`). Arrange — a long press on any tile, which picks it up in
+ * the same gesture; Done in the header ends it — lets a tile be picked up
  * and dropped where another is (arrow keys for a keyboard), and RESIZED by
  * dragging its corner handle across the grid's cells (Shift + arrows): the
  * other tiles move round it live, so what is seen is the outcome.
@@ -30,6 +31,18 @@ import { GRID_COLUMNS, moveTile, nudgeTile, packTiles, sizeLabel, type TileSize 
 import { DASHBOARD_TILES, setArranging, setTileOrder, setTileSize, type DashboardTile } from "@/hooks/use-dashboard-layout"
 import { haptic } from "@/lib/utils/haptics"
 import { cn } from "@/lib/utils"
+
+/**
+ * A tile held on the page (`Widget`'s long press): the grid goes into
+ * Arrange and picks THIS tile up under the finger still down, so the hold
+ * and the drag are one gesture — the way a home screen does it.
+ */
+let pending: { id: DashboardTile; x: number; y: number } | null = null
+export function beginArrangeFrom(id: DashboardTile, x: number, y: number): void {
+  pending = { id, x, y }
+  haptic("tap")
+  setArranging(true)
+}
 
 /** Swaps wait this long after the last — a layout settling under the finger is not a new target. */
 const SWAP_COOLDOWN_MS = 140
@@ -182,16 +195,39 @@ export function BentoGrid({
       void animate(x, r.left, { duration: 0.2, ease: [0.22, 1, 0.36, 1] })
       void animate(y, r.top, { duration: 0.2, ease: [0.22, 1, 0.36, 1] }).then(done)
     }
+    // A drag that began as a long press began on a tile that lets the page
+    // pan: held, the finger's moves must carry the tile, not scroll the grid
+    // (which would also cancel the pointer).
+    const noScroll = (e: TouchEvent) => e.preventDefault()
     window.addEventListener("pointermove", onMove)
     window.addEventListener("pointerup", onUp)
     window.addEventListener("pointercancel", onUp)
+    window.addEventListener("touchmove", noScroll, { passive: false })
     return () => {
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
       window.removeEventListener("pointercancel", onUp)
+      window.removeEventListener("touchmove", noScroll)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one listener set per pick-up; ox/oy are fixed for it
   }, [dragId, x, y])
+
+  // The tile a long press entered Arrange with: picked up where the finger is.
+  React.useLayoutEffect(() => {
+    if (!arranging || !pending) return
+    const p = pending
+    pending = null
+    const slot = document.querySelector<HTMLElement>(`[data-tile-slot="${p.id}"]`)
+    const r = slot?.getBoundingClientRect()
+    if (!r) return
+    x.set(r.left)
+    y.set(r.top)
+    swap.current = { target: null, at: 0 }
+    // A layout effect with nothing else to read from: the pick-up IS the
+    // response to the hold, in the commit that entered Arrange.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDrag({ id: p.id, w: r.width, h: r.height, ox: p.x - r.left, oy: p.y - r.top, dropping: false })
+  }, [arranging, x, y])
 
   const pickUp = (e: React.PointerEvent<HTMLElement>, id: DashboardTile) => {
     if (e.button !== 0 || drag) return
@@ -221,15 +257,19 @@ export function BentoGrid({
 
   return (
     <>
+      {/* The SCROLLER is a wrapper, not the grid: a grid with a height of its
+          own shares that height out among its rows, and a tile (which clips,
+          so it has no minimum height) was SQUEEZED to fit — a reordered grid
+          taller than the phone cut the duty tile's captions off. Unbounded,
+          every row is as tall as its tallest tile, and only the wrapper
+          scrolls, as a last resort. */}
+      <div className={cn("min-h-0 overflow-y-auto overscroll-contain scrollbar-hide", arranging && "-m-2 p-2")} data-bento-scroll>
       <div
-        // While arranging, the grid gains a margin's room on every side (and
-        // gives it back as negative margin, so nothing moves) for the move
-        // badges that sit ON each tile's corner — inside it they covered the
-        // tile's own corner (a weather hazard, the currency tally).
-        className={cn(
-          "grid min-h-0 content-start gap-2 overflow-y-auto overscroll-contain scrollbar-hide",
-          arranging && "-m-2 p-2",
-        )}
+        // While arranging, the wrapper gains a margin's room on every side
+        // (and gives it back as negative margin, so nothing moves) for the
+        // move badges that sit ON each tile's corner — inside it they covered
+        // the tile's own corner (a weather hazard, the currency tally).
+        className="grid content-start gap-2"
         // A row is as tall as its tallest tile, and a tile two rows tall spans
         // both; the floor keeps a two-row tile visibly two rows.
         style={{ gridTemplateColumns: `repeat(${GRID_COLUMNS}, minmax(0, 1fr))`, gridAutoRows: "minmax(5.5rem, auto)" }}
@@ -296,6 +336,7 @@ export function BentoGrid({
             </motion.div>
           )
         })}
+      </div>
       </div>
 
       {drag &&

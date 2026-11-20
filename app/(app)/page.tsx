@@ -1,10 +1,9 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo } from "react"
 import { usePathname } from "next/navigation"
 import { mutate } from "swr"
 
-import { PageContainer } from "@/components/page-container"
 import { PageLoading } from "@/components/ui/page-loading"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
 import { useAuth } from "@/components/providers/auth-provider"
@@ -16,34 +15,23 @@ import { syncService } from "@/lib/sync"
 
 import { usePageActive } from "@/hooks/use-page-active"
 import { whenIdle } from "@/lib/utils/idle"
-import { useDashboardView } from "@/hooks/use-dashboard-view"
-import { DashboardActions } from "@/components/dashboard/dashboard-actions"
-import { DashboardCalendarPanel, DashboardCalendarSpacer } from "@/components/dashboard/dashboard-calendar-panel"
+import { FlightDeckActions } from "@/components/dashboard/dashboard-actions"
 import { FlightDashboard } from "@/components/dashboard/flight-dashboard"
-import { SummaryDashboard } from "@/components/dashboard/summary-dashboard"
 
 const refreshAllDataWhenIdle = () => whenIdle(() => void refreshAllData())
 
 /**
- * The dashboard, as two pages behind one toggle.
+ * The FLIGHT DECK — the app's home: am I fine, where am I in my duty, what is
+ * this or the next duty like (the owner, Nov 2026: the flight dashboard and
+ * the summary are two pages, "summary will be one by itself"). The Summary is
+ * `/summary`.
  *
- * | | Answers | Shape |
- * |---|---|---|
- * | **Flight** | am I fine, where am I in my duty, and what is my next duty like — legality, the flights, gates, weather, crew | one screen, no scroll, on a phone |
- * | **Summary** | what have I flown and how does it add up | period-scoped, scrolls |
- *
- * They get DIFFERENT containers, and that is the point of splitting them. The
- * flight page is laid out to the available height and fills it — it is read like
- * an instrument, in a couple of seconds, and a pilot should never have to
- * scroll to find out whether they are legal. The summary page is an ordinary
- * scrolling page, because reviewing a month is a different activity with no
- * reason to be cramped.
+ * Laid out to the available height and read like an instrument, in a couple
+ * of seconds: a pilot should never have to scroll to find out whether they
+ * are legal.
  */
 export default function Dashboard() {
   const { isLoading: authLoading, isAuthenticated } = useAuth()
-  // The calendar's measured height, which the summary reserves while it is open.
-  const [calendarHeight, setCalendarHeight] = useState(0)
-  const view = useDashboardView()
 
   // No `onDataChanged` subscription here: `SyncProvider` owns the one global
   // one. This page is keep-alive, so a second permanent subscriber just ran
@@ -54,11 +42,11 @@ export default function Dashboard() {
   // not in the tab switch (see whenIdle).
   const isActive = usePageActive("/", refreshAllDataWhenIdle)
 
-  const dashboardActions = useMemo(() => <DashboardActions />, [])
+  const dashboardActions = useMemo(() => <FlightDeckActions />, [])
   useRegisterMainActions(dashboardActions, isActive)
 
-  // MAIN / DETAIL: a flight opens in the detail panel (a summary row, or an
-  // "Open Flight" on the flight page); a flight-page widget (`w:<id>`) is
+  // MAIN / DETAIL: a flight opens in the detail panel (an "Open Flight" in a
+  // card); a widget (`w:<id>`) is
   // written by that page itself, which holds the model it comes from. This effect owns everything else —
   // including clearing the panel, since the dashboard now has one.
   const { selectedId, setSelectedId, setDetailContent } = useDetailPanel()
@@ -71,10 +59,7 @@ export default function Dashboard() {
     // Keep-alive: a hidden dashboard must not write the panel another page owns.
     if (!isActive || !onDashboard) return
     // `w:` is the flight page's own.
-    if (selectedId?.startsWith("w:")) {
-      if (view !== "flight") setDetailContent(null)
-      return
-    }
+    if (selectedId?.startsWith("w:")) return
     setDetailContent(
       selectedId ? (
         <div className="h-full overflow-hidden bg-background">
@@ -91,7 +76,7 @@ export default function Dashboard() {
         </div>
       ) : null
     )
-  }, [isActive, onDashboard, selectedId, view, isDesktop, setDetailContent, setSelectedId])
+  }, [isActive, onDashboard, selectedId, isDesktop, setDetailContent, setSelectedId])
 
   if (authLoading) {
     return <PageLoading />
@@ -101,42 +86,13 @@ export default function Dashboard() {
     return null
   }
 
-  if (view === "flight") {
-    // Laid out to the height rather than scrolled into: the chrome offsets are
-    // padding on a full-height flex column, and the panel takes what is left.
-    //
-    // The top is the chrome PLUS the gap every page leaves under it
-    // (`--content-top-gap`, 16px — a page title's, the logbook's first
-    // card's). At the bare chrome offset its first line — the annunciator,
-    // the one word the page exists to say — sat under the header's veil.
-    return (
-      <div className="flex h-full min-h-0 flex-col px-panel pt-[calc(var(--chrome-top)+var(--content-top-gap))] pb-chrome">
-        <FlightDashboard className="min-h-0" />
-      </div>
-    )
-  }
-
+  // Laid out to the height rather than scrolled into: the chrome offsets are
+  // padding on a full-height flex column, and the panel takes what is left.
+  // The top is the chrome PLUS the gap every page leaves under it
+  // (`--content-top-gap`, 16px).
   return (
-    // Outer relative wrapper anchors the calendar overlay to the main panel
-    // (so on split-pane layouts the picker stays centered over the dashboard,
-    // not the entire viewport). Calendar is rendered as a sibling of
-    // PageContainer's scrolling main, so it never scrolls with content.
-    //
-    // It PUSHES the summary down rather than floating over it. Floating, the
-    // period's hero figure sat right under the calendar's glass and read
-    // through it, between the day numbers. The spacer is the calendar's own
-    // measured height on `PANEL_MOTION`, so the panel opening and the page
-    // moving are one movement; `overflow-anchor: none` keeps the push from
-    // being cancelled by scroll anchoring (the logbook's rule).
-    <div className="relative h-full">
-      <PageContainer className="[overflow-anchor:none]">
-        <DashboardCalendarSpacer height={calendarHeight}>
-          <div className="mx-auto max-w-[1600px] px-panel">
-            <SummaryDashboard />
-          </div>
-        </DashboardCalendarSpacer>
-      </PageContainer>
-      <DashboardCalendarPanel onNaturalHeight={setCalendarHeight} />
+    <div className="flex h-full min-h-0 flex-col px-panel pt-[calc(var(--chrome-top)+var(--content-top-gap))] pb-chrome">
+      <FlightDashboard className="min-h-0" />
     </div>
   )
 }

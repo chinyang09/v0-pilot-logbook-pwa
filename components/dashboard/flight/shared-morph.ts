@@ -40,14 +40,48 @@ const COPIED = [
   "font-variant-numeric",
   "display",
   "align-items",
+  "justify-content",
+  "flex-direction",
   "column-gap",
+  "row-gap",
   "white-space",
+  "text-align",
+  "box-sizing",
+  "padding-top",
+  "padding-right",
+  "padding-bottom",
+  "padding-left",
 ]
 
 const boxIn = (el: Element, layer: Element): Box => {
   const r = el.getBoundingClientRect()
   const l = layer.getBoundingClientRect()
   return { x: r.left - l.left, y: r.top - l.top, w: r.width, h: r.height }
+}
+
+/**
+ * A run of plain text on one line is flown as its GLYPHS' own box (the
+ * text's range), not the element's: the tile's 12px line and the card's 14px
+ * one carry different leading, so scaled element boxes put the two copies'
+ * letters a pixel or two apart all through the crossfade. Boxed to the text,
+ * the scale between them is the font sizes' and the letters coincide.
+ */
+function textBoxIn(el: HTMLElement, layer: Element): Box | null {
+  if (el.childElementCount > 0 || !el.textContent?.trim()) return null
+  // A text with a shape of its own (the crew's initials in their circle)
+  // flies as its shape: boxed to the glyphs, the circle would shrink to them.
+  const cs = getComputedStyle(el)
+  if (!/rgba\(0, 0, 0, 0\)|transparent/.test(cs.backgroundColor) || parseFloat(cs.borderTopWidth) > 0) return null
+  const range = document.createRange()
+  range.selectNodeContents(el)
+  const rects = range.getClientRects()
+  if (rects.length !== 1) return null
+  const r = rects[0]
+  const e = el.getBoundingClientRect()
+  const l = layer.getBoundingClientRect()
+  // A truncated line keeps to the element's width.
+  const right = Math.min(r.right, e.right)
+  return { x: r.left - l.left, y: r.top - l.top, w: Math.max(0, right - r.left), h: r.height }
 }
 
 function firstByKey(root: Element, within?: DOMRect): Map<string, HTMLElement> {
@@ -64,12 +98,30 @@ function firstByKey(root: Element, within?: DOMRect): Map<string, HTMLElement> {
   return out
 }
 
-function copyOf(el: HTMLElement, box: Box): HTMLElement {
+function copyOf(el: HTMLElement, box: Box, text = false): HTMLElement {
   const copy = el.cloneNode(true) as HTMLElement
   copy.removeAttribute("data-morph")
   copy.removeAttribute("id")
   const cs = getComputedStyle(el)
   for (const p of COPIED) copy.style.setProperty(p, cs.getPropertyValue(p))
+  // An INLINE element's box is its font's content area, not its line: taken
+  // out of its line as a block of that height with the line's own
+  // line-height, its glyphs sat half the leading lower (or higher, under
+  // `leading-none`) than the original — the copy landed a few pixels off
+  // and the swap to the original snapped (the owner's "settles slightly
+  // below, then snaps up"). One line exactly the box's height puts the
+  // glyphs where they were.
+  if (text || cs.display === "inline") {
+    copy.style.display = "block"
+    copy.style.lineHeight = `${box.h}px`
+  }
+  if (text) {
+    // The box IS the glyphs: no padding round them, no alignment within.
+    copy.style.padding = "0px"
+    copy.style.textAlign = "left"
+    copy.style.whiteSpace = "nowrap"
+    if (cs.textOverflow === "ellipsis") Object.assign(copy.style, { overflow: "hidden", textOverflow: "ellipsis" })
+  }
   Object.assign(copy.style, {
     position: "absolute",
     left: "0px",
@@ -80,8 +132,8 @@ function copyOf(el: HTMLElement, box: Box): HTMLElement {
     transformOrigin: "0 0",
     pointerEvents: "none",
     visibility: "visible",
-    overflow: "visible",
   })
+  if (!text || cs.textOverflow !== "ellipsis") copy.style.overflow = "visible"
   return copy
 }
 
@@ -119,14 +171,18 @@ export function runSharedMorph({
   for (const [key, f] of faceEls) {
     const c = cardEls.get(key)
     if (!c) continue
-    const fb = boxIn(f, face)
-    const cb = boxIn(c, card)
+    // Both as text, or both as boxes: a pair must scale between like boxes.
+    const ft = textBoxIn(f, face)
+    const ct = ft ? textBoxIn(c, card) : null
+    const text = !!(ft && ct)
+    const fb = text ? ft! : boxIn(f, face)
+    const cb = text ? ct! : boxIn(c, card)
     if (fb.h < 1 || cb.h < 1) continue
     // A card element scrolled out of the card's view has nowhere to come from.
     const cr = c.getBoundingClientRect()
     if (cr.bottom < cardBox.top || cr.top > cardBox.bottom) continue
-    const fc = copyOf(f, fb)
-    const cc = copyOf(c, cb)
+    const fc = copyOf(f, fb, text)
+    const cc = copyOf(c, cb, text)
     layer.append(fc, cc)
     copies.push(fc, cc)
     for (const el of [f, c]) {
