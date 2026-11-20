@@ -17,11 +17,14 @@ import type { CurrencySummary } from "@/lib/utils/dashboard/currency-summary"
 import type { WeatherState } from "./weather"
 import type { AirportInfo } from "@/lib/weather/airport-info"
 import type { DelayMargin } from "@/lib/utils/dashboard/delay-margin"
+import type { LogbookAuthority } from "@/lib/utils/logbook-rules"
 
 export interface FlightBrief {
   status: PilotStatus
   now: number
   display?: DisplayPreferences
+  /** The rules the pilot logs under — what a crew member's seat is called ("PIC", "P2"). */
+  authority: LogbookAuthority
   /**
    * The duty the page is about: the one in progress, else the next — or a
    * later one the pilot stepped to (the owner, Nov 2026: a dashboard about the

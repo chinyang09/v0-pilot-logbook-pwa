@@ -47,9 +47,14 @@ export interface WidgetAnchor {
   height: number
 }
 
-const OPEN = { type: "spring" as const, duration: 0.42, bounce: 0.1 }
-const CLOSE = { type: "spring" as const, duration: 0.34, bounce: 0 }
+// No overshoot, either way (the owner: the travelling contents "wobble before
+// settling"). A bounce on the surface carried everything on it past its
+// place and back, and the shared copies, on a spring of their own, overshot
+// again on top of it. One eased curve, the same for the surface and the
+// copies, lands them together and still.
 const EASE = [0.32, 0.72, 0, 1] as const
+const OPEN = { type: "tween" as const, duration: 0.4, ease: EASE }
+const CLOSE = { type: "tween" as const, duration: 0.32, ease: EASE }
 const SCRIM = "bg-black/45 dark:bg-black/75"
 const LIFT_SHADOW = "0px 25px 50px -12px rgba(0,0,0,0.45)"
 const NO_SHADOW = "0px 0px 0px 0px rgba(0,0,0,0)"

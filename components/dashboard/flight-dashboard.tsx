@@ -56,7 +56,8 @@ import { CurrencyFace, DestinationFace, DutyChooser, DutyFace, FlightFace, Limit
 import { WeatherFace, type WeatherState } from "./flight/weather"
 import { WIDGET_TITLE, useWidgetCtx, widgetContent } from "./flight/details"
 import { BentoGrid } from "./flight/bento"
-import { setArranging, useArranging, useTileOrder, useTileWidths } from "@/hooks/use-dashboard-layout"
+import { setArranging, useArranging, useTileOrder, useTileSizes } from "@/hooks/use-dashboard-layout"
+import { packTiles, type TileSize } from "@/lib/utils/dashboard/bento"
 import { Widget, WidgetCard, WidgetLabel, WidgetSheet, type WidgetAnchor, type WidgetId } from "./flight/widget"
 import type { DutyChoice, FlightBrief } from "./flight/model"
 import type { DutyPeriod } from "@/types/entities/roster.types"
@@ -108,21 +109,28 @@ function useAirportsByIcao(icaos: readonly string[]): Map<string, Airport> {
   return found?.key === key ? found.map : NO_AIRPORTS
 }
 
-/** What a tile shows — the face its card keeps as a header. */
-function faceOf(id: WidgetId, brief: FlightBrief): React.ReactNode {
+/** A card's header: the face at the card's full width. */
+const CARD_SIZE: TileSize = { cols: 3, rows: 1 }
+
+/**
+ * What a tile shows — the face its card keeps as a header. `size` is where the
+ * tile sits on the grid (a face lays itself out for it: the currency's dots
+ * look 90 days, six months or a year ahead); `inCard`, the card's header.
+ */
+function faceOf(id: WidgetId, brief: FlightBrief, size: TileSize, inCard = false): React.ReactNode {
   switch (id) {
     case "duty":
       return <DutyFace brief={brief} />
     case "flight":
-      return <FlightFace brief={brief} />
+      return <FlightFace brief={brief} size={size} inCard={inCard} />
     case "weather":
-      return <WeatherFace weather={brief.weather} code={brief.code} station={brief.weatherStation} />
+      return <WeatherFace weather={brief.weather} code={brief.code} clock={brief.clock} station={brief.weatherStation} size={size} />
     case "destination":
-      return <DestinationFace brief={brief} />
+      return <DestinationFace brief={brief} size={size} inCard={inCard} />
     case "currency":
-      return <CurrencyFace brief={brief} />
+      return <CurrencyFace brief={brief} size={size} />
     case "limits":
-      return <LimitsFace brief={brief} />
+      return <LimitsFace brief={brief} size={size} />
   }
 }
 
@@ -135,11 +143,12 @@ export function FlightDashboard({ className }: { className?: string }) {
     setArranging(false)
   })
   const order = useTileOrder()
-  const widths = useTileWidths()
+  const sizes = useTileSizes()
   const arranging = useArranging()
   const now = useTick(isActive)
   const { preferences } = usePreferences()
   const display = preferences?.display
+  const authority = preferences?.logging?.authority ?? "CAAS"
   const { flights, isLoading: flightsLoading } = useFlights()
   const { personnel } = usePersonnel()
   const { currencies } = useCurrencies()
@@ -272,6 +281,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       status,
       now,
       display,
+      authority,
       duty: {
         atMs: dutyAtMs,
         current,
@@ -302,7 +312,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       day: (ms: number) =>
         formatDayAt(ms, display?.useZuluTime === false ? zone : "UTC", { year: false }),
     }),
-    [status, now, display, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, margin, recency.lapseIso, crew, currency, destinations, airports, airportInfo, weather, weatherStation, iataOf, pref, zone],
+    [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, margin, recency.lapseIso, crew, currency, destinations, airports, airportInfo, weather, weatherStation, iataOf, pref, zone],
   )
 
   /* ── Opening a widget ────────────────────────────────────────────────── */
@@ -312,15 +322,20 @@ export function FlightDashboard({ className }: { className?: string }) {
   const panelWidget = selectedId?.startsWith("w:") ? (selectedId.slice(2) as WidgetId) : null
   // The tile is hidden for its card's whole life: the card's surface covers
   // it exactly when it opens and when it has gone back.
-  const [sheetState, setSheet] = React.useState<{ id: WidgetId; anchor: WidgetAnchor } | null>(null)
+  const [sheetState, setSheet] = React.useState<{ id: WidgetId; anchor: WidgetAnchor; size: TileSize } | null>(null)
   // A phone that turns into a tablet leaves its sheet behind: the panel is the detail there.
   const sheet = isDesktop ? null : sheetState
+  // Where each tile sits — a card opens from its tile at that size.
+  const placedSizes = React.useMemo(
+    () => new Map<WidgetId, TileSize>(packTiles(order, sizes).map((p) => [p.id, { cols: p.cols, rows: p.rows }])),
+    [order, sizes],
+  )
   const open = React.useCallback(
     (id: WidgetId, anchor: WidgetAnchor) => {
       if (isDesktop) setSelectedId(`w:${id}`)
-      else setSheet({ id, anchor })
+      else setSheet({ id, anchor, size: placedSizes.get(id) ?? CARD_SIZE })
     },
-    [isDesktop, setSelectedId],
+    [isDesktop, setSelectedId, placedSizes],
   )
   const nav = useWidgetCtx()
   const ctx = React.useMemo(() => ({ ...nav, selectDuty }), [nav, selectDuty])
@@ -331,7 +346,7 @@ export function FlightDashboard({ className }: { className?: string }) {
     const { body, actions, header } = widgetContent(panelWidget, brief, ctx)
     setDetailContent(
       <ReadingPanel key={panelWidget} title={WIDGET_TITLE[panelWidget]}>
-        <WidgetCard face={header === "face" ? faceOf(panelWidget, brief) : null} body={body} actions={actions} />
+        <WidgetCard face={header === "face" ? faceOf(panelWidget, brief, CARD_SIZE, true) : null} body={body} actions={actions} />
       </ReadingPanel>,
     )
   }, [isActive, onDashboard, panelWidget, brief, ctx, setDetailContent])
@@ -357,7 +372,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       ...(brief.margin ? [brief.margin.minutes <= 0 ? ("fail" as const) : brief.margin.minutes < 60 ? ("caution" as const) : ("ok" as const)] : []),
     ]),
   } as Partial<Record<WidgetId, RequirementState | null>>
-  const tile = (id: WidgetId) => (
+  const tile = (id: WidgetId, size: TileSize) => (
     <Widget
       id={id}
       label={WIDGET_TITLE[id]}
@@ -369,7 +384,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       controlsClassName={id === "flight" ? "left-1.5 top-1.5" : undefined}
       className="flex-1"
     >
-      {faceOf(id, brief)}
+      {faceOf(id, brief, size)}
     </Widget>
   )
   return (
@@ -379,19 +394,29 @@ export function FlightDashboard({ className }: { className?: string }) {
           tiles scroll rather than being squeezed out of sight. */}
       <BentoGrid
         order={order}
-        widths={widths}
+        sizes={sizes}
         arranging={arranging}
         label={(id) => WIDGET_TITLE[id]}
         tile={tile}
-        face={(id) => faceOf(id, brief)}
+        face={(id, size) => faceOf(id, brief, size)}
       />
 
       {sheet && (
         <WidgetSheet
           anchor={sheet.anchor}
           title={WIDGET_TITLE[sheet.id]}
-          face={faceOf(sheet.id, brief)}
-          seamless={widgetContent(sheet.id, brief, ctx).header === "face"}
+          face={faceOf(sheet.id, brief, sheet.size)}
+          // The tile opens straight down only where its face IS the card's
+          // header: a full-width, one-row tile whose face does not change in
+          // the card (the flights face drops its crew panel there; the
+          // destination's pages become the card's list).
+          seamless={
+            widgetContent(sheet.id, brief, ctx).header === "face" &&
+            sheet.size.cols === 3 &&
+            sheet.size.rows === 1 &&
+            sheet.id !== "flight" &&
+            sheet.id !== "destination"
+          }
           tone={tint[sheet.id] ?? null}
           // Anything in the card that goes somewhere closes it first.
           render={(dismiss) => {
@@ -402,7 +427,7 @@ export function FlightDashboard({ className }: { className?: string }) {
             }
             const { body, actions, header } = widgetContent(sheet.id, brief, sheetCtx)
             return {
-              header: header === "face" ? faceOf(sheet.id, brief) : <WidgetLabel>{WIDGET_TITLE[sheet.id]}</WidgetLabel>,
+              header: header === "face" ? faceOf(sheet.id, brief, CARD_SIZE, true) : <WidgetLabel>{WIDGET_TITLE[sheet.id]}</WidgetLabel>,
               body,
               actions,
             }

@@ -50,11 +50,16 @@ const boxIn = (el: Element, layer: Element): Box => {
   return { x: r.left - l.left, y: r.top - l.top, w: r.width, h: r.height }
 }
 
-function firstByKey(root: Element): Map<string, HTMLElement> {
+function firstByKey(root: Element, within?: DOMRect): Map<string, HTMLElement> {
   const out = new Map<string, HTMLElement>()
   for (const el of root.querySelectorAll<HTMLElement>("[data-morph]")) {
     const key = el.dataset.morph!
-    if (!out.has(key)) out.set(key, el)
+    if (out.has(key)) continue
+    if (within) {
+      const r = el.getBoundingClientRect()
+      if (r.right <= within.left + 1 || r.left >= within.right - 1) continue
+    }
+    out.set(key, el)
   }
   return out
 }
@@ -101,7 +106,10 @@ export function runSharedMorph({
   move: Transition
   fade: Transition
 }): { done: Promise<void>; cancel: () => void } {
-  const faceEls = firstByKey(face)
+  const faceBox = face.getBoundingClientRect()
+  // A tile's page that is swiped out of view (the destination pager) is not
+  // where anything comes from: the first VISIBLE element of a key is.
+  const faceEls = firstByKey(face, faceBox)
   const cardEls = firstByKey(card)
   const cardBox = card.getBoundingClientRect()
   const hidden: HTMLElement[] = []

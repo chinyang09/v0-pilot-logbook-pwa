@@ -21,7 +21,9 @@ import type { Requirement } from "@/lib/utils/dashboard/legality"
 import { cn } from "@/lib/utils"
 import { formatDay } from "@/lib/utils/date"
 import { REQ_TONE, STATE_ICON } from "./instruments"
-import { currencyRows, destinationsOf, distanceInto, limitsOf, marginText, marginTone, shortDay, shortName } from "./faces"
+import { crewRole, currenciesBySoonest, currencyRows, destinationsOf, distanceInto, limitsOf, marginText, marginTone, shortDay, shortName } from "./faces"
+import { CurrencyDots, OTHER, SERIES } from "./currency-dots"
+import { dotAt, dotLayout, localDayKey } from "@/lib/utils/dashboard/currency-dots"
 import { WeatherBody } from "./weather"
 import { AirportPanel } from "./airport"
 import { EnRoute, useDutyAlternates } from "./alternates"
@@ -343,7 +345,7 @@ function CrewBody({ brief, go }: { brief: FlightBrief; go: (href: string) => voi
           onClick={m.personId ? () => go(`/crew?selected=${m.personId}`) : undefined}
           lead={<Initials name={m.name} />}
           title={m.name}
-          sub={[m.role, m.count ? `${m.count} together` : null].filter(Boolean).join(" · ")}
+          sub={[crewRole(m.role, brief.authority), m.count ? `${m.count} together` : null].filter(Boolean).join(" · ")}
           right={m.last ? shortDay(m.last.date) : "New"}
         />
       ))}
@@ -404,6 +406,18 @@ function DestinationBody({ brief, openFlight }: { brief: FlightBrief; openFlight
 function CurrencyBody({ brief, go }: { brief: FlightBrief; go: (href: string) => void }) {
   const logbook = brief.status.legality.requirements.filter((r) => r.group === "currency" && !r.id.startsWith("doc-"))
   const { attention, current } = brief.currency
+  // The year ahead as dots, each currency in its own colour (the first three
+  // to run out; the rest ink) — a tap on a dot isolates its currency.
+  const [selected, setSelected] = React.useState<string | null>(null)
+  const today = localDayKey(brief.now)
+  const dated = React.useMemo(() => {
+    const layout = dotLayout(today, "1y")
+    return currenciesBySoonest(currencyRows(brief)).filter((r) => r.ymd !== null && dotAt(layout, r.ymd) !== null)
+  }, [brief, today])
+  const colour = (key: string) => {
+    const i = dated.findIndex((r) => r.key === key)
+    return i < 0 ? null : (SERIES[i] ?? OTHER)
+  }
   if (logbook.length === 0 && attention.length === 0 && current.length === 0) return null
   const flag = (state: Requirement["state"]) => {
     if (state === "ok") return null
@@ -413,12 +427,19 @@ function CurrencyBody({ brief, go }: { brief: FlightBrief; go: (href: string) =>
   const tone = (state: Requirement["state"]) => (state === "ok" ? "text-foreground" : REQ_TONE[state].icon)
   const row = (key: string, name: string, sub: string, figure: string, state: Requirement["state"], onClick?: () => void) => {
     const Box = onClick ? "button" : "div"
+    const c = colour(key)
     return (
       <Box
         key={key}
         {...(onClick ? { type: "button" as const, onClick } : {})}
-        className={cn("flex w-full items-baseline gap-2 rounded-md py-1 text-left", onClick && "-mx-1 px-1 active:bg-muted/60")}
+        className={cn(
+          "flex w-full items-baseline gap-2 rounded-md py-1 text-left transition-opacity",
+          onClick && "-mx-1 px-1 active:bg-muted/60",
+          selected !== null && selected !== key && "opacity-35",
+        )}
       >
+        {/* Its colour on the dots — the legend; nothing for one past the year. */}
+        <span aria-hidden className={cn("h-2 w-2 shrink-0 self-center rounded-full", c?.bg)} />
         <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-foreground" data-morph={`cur-name-${key}`}>
           {name}
         </span>
@@ -433,6 +454,18 @@ function CurrencyBody({ brief, go }: { brief: FlightBrief; go: (href: string) =>
   const recencyRows = currencyRows(brief).filter((r) => !r.key.startsWith("doc-"))
   return (
     <div>
+      {dated.length > 0 && (
+        <CurrencyDots
+          today={today}
+          ahead="1y"
+          marks={dated.map((r) => ({ key: r.key, name: r.name, state: r.state, ymd: r.ymd! }))}
+          closest={dated[0]?.key ?? null}
+          colorOf={(key) => colour(key)?.fill ?? OTHER.fill}
+          selected={selected}
+          onSelect={setSelected}
+          className="mb-2"
+        />
+      )}
       {logbook.map((r) => {
         const shown = recencyRows.find((x) => x.key === r.id)
         // Recency: both halves, and when it lapses; not logged: which sectors.
