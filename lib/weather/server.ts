@@ -24,6 +24,7 @@ import { gunzipSync } from "node:zlib"
 import type { Db } from "mongodb"
 import { parseMetarCache, parseTafCache } from "./parse"
 import type { MetarReport, TafReport, WeatherAnswer } from "./types"
+import type { GeoEntry } from "./alternates"
 
 export type WeatherKind = "metar" | "taf"
 type Report<K extends WeatherKind> = K extends "metar" ? MetarReport : TafReport
@@ -50,10 +51,28 @@ export interface WeatherStore {
   write<K extends WeatherKind>(kind: K, fetchedAt: number, stations: Record<string, Report<K>>): Promise<void>
   /** True when this caller may refresh `kind` now. */
   lock(kind: WeatherKind, now: number): Promise<boolean>
+  /** Where every TAF aerodrome is — written with the TAF snapshot. */
+  geo?(): Promise<GeoEntry[] | null>
+}
+
+/**
+ * The TAF snapshot as stored: each report WITHOUT its position, and the
+ * positions apart as one compact index (`geo`, ~4,000 entries) — what the
+ * alternates are chosen from, read on its own by projection.
+ */
+export function splitPositions(stations: Record<string, TafReport>): { stations: Record<string, TafReport>; geo: GeoEntry[] } {
+  const out: Record<string, TafReport> = {}
+  const geo: GeoEntry[] = []
+  for (const [id, r] of Object.entries(stations)) {
+    const { lat, lon, ...report } = r
+    out[id] = report
+    if (lat !== undefined && lon !== undefined) geo.push([id, Math.round(lat * 1e4) / 1e4, Math.round(lon * 1e4) / 1e4])
+  }
+  return { stations: out, geo }
 }
 
 export function mongoWeatherStore(db: Db): WeatherStore {
-  const col = db.collection<{ _id: string; fetchedAt?: Date; stations?: Record<string, unknown>; until?: Date }>("weatherCache")
+  const col = db.collection<{ _id: string; fetchedAt?: Date; stations?: Record<string, unknown>; geo?: GeoEntry[]; until?: Date }>("weatherCache")
   return {
     async read(kind, ids) {
       const projection: Record<string, 1> = { fetchedAt: 1 }
@@ -63,7 +82,16 @@ export function mongoWeatherStore(db: Db): WeatherStore {
       return { fetchedAt: doc.fetchedAt.getTime(), stations: (doc.stations ?? {}) as never }
     },
     async write(kind, fetchedAt, stations) {
+      if (kind === "taf") {
+        const split = splitPositions(stations as Record<string, TafReport>)
+        await col.replaceOne({ _id: kind }, { fetchedAt: new Date(fetchedAt), stations: split.stations, geo: split.geo }, { upsert: true })
+        return
+      }
       await col.replaceOne({ _id: kind }, { fetchedAt: new Date(fetchedAt), stations }, { upsert: true })
+    },
+    async geo() {
+      const doc = await col.findOne({ _id: "taf" }, { projection: { geo: 1 } })
+      return doc?.geo ?? null
     },
     async lock(kind, now) {
       try {
@@ -131,7 +159,10 @@ export async function getWeather(
     try {
       const stations = await pullCache(kind, fetchImpl)
       await store.write(kind, now, stations)
-      return { fetchedAt: now, stations: pick(stations, ids) }
+      const picked = pick(stations, ids)
+      // The positions ride only in the index.
+      if (kind === "taf") for (const r of Object.values(picked) as TafReport[]) (delete r.lat, delete r.lon)
+      return { fetchedAt: now, stations: picked }
     } catch (e) {
       console.warn(`[Weather] ${kind} refresh failed:`, e)
       stale = true
@@ -146,4 +177,18 @@ export async function getWeather(
     checkedAt: now,
     stale,
   }
+}
+
+/**
+ * The TAF aerodromes' positions, kept in this process for half an hour — the
+ * index changes as TAFs come and go, not by the minute, and it is ~100KB.
+ */
+let geoKept: { at: number; geo: GeoEntry[] } | null = null
+const GEO_KEEP_MS = 30 * 60_000
+
+export async function readGeoIndex(store: WeatherStore, now = Date.now()): Promise<GeoEntry[]> {
+  if (geoKept && now - geoKept.at < GEO_KEEP_MS) return geoKept.geo
+  const geo = (await store.geo?.()) ?? null
+  if (geo && geo.length > 0) geoKept = { at: now, geo }
+  return geo ?? geoKept?.geo ?? []
 }

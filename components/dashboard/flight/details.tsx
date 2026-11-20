@@ -21,9 +21,11 @@ import type { Requirement } from "@/lib/utils/dashboard/legality"
 import { cn } from "@/lib/utils"
 import { formatDay } from "@/lib/utils/date"
 import { REQ_TONE, STATE_ICON } from "./instruments"
-import { destinationsOf, limitsOf, shortDay, shortName } from "./faces"
+import { currencyRows, destinationsOf, distanceInto, limitsOf, marginText, marginTone, shortDay, shortName } from "./faces"
 import { WeatherBody } from "./weather"
 import { AirportPanel } from "./airport"
+import { EnRoute, useDutyAlternates } from "./alternates"
+import { useAirportInfo } from "@/hooks/use-airport-info"
 import type { FlightBrief } from "./model"
 import type { WidgetAction, WidgetId } from "./widget"
 
@@ -161,7 +163,12 @@ export function widgetContent(
     case "weather":
       return {
         header: "label",
-        body: <WeatherBody weather={brief.weather} code={brief.code} clock={brief.clock} now={brief.now} />,
+        body: (
+          <>
+            <WeatherBody weather={brief.weather} code={brief.code} clock={brief.clock} now={brief.now} />
+            <EnRoute brief={brief} />
+          </>
+        ),
         actions: brief.weather.asked
           ? [
               {
@@ -230,9 +237,15 @@ function DutyBody({ brief }: { brief: FlightBrief }) {
       </Grid>
     )
   }
+  // How much later than legal the next report is — the room for a delay, or
+  // for an addition the company asks for before it.
+  const next = status.duty.next
+  const legalAt = rest ? Date.parse(rest.legalAtUtc) : NaN
+  const spare = next && Number.isFinite(legalAt) && next.legalAtReport !== false ? Math.round((next.reportMs - Math.max(legalAt, brief.now)) / 60_000) : null
   return (
     <Grid>
       {rest && <Fig label="Rested" value={formatRestSpan(rest.elapsedMinutes)} />}
+      {spare !== null && spare > 0 && <Fig label="Spare Before Report" value={formatRestSpan(spare)} />}
       {lastDuty && (
         <Fig label={`Last Duty · ${day(lastDuty.debriefMs)}`} value={lastDuty.route || formatDutyClock(lastDuty.elapsedMinutes)} />
       )}
@@ -285,6 +298,9 @@ function FlightBody({ brief, ctx }: { brief: FlightBrief; ctx: WidgetCtx }) {
                     dep || arr ? `Gate ${dep || "–"} → ${arr || "–"}` : null,
                     // The airport names the flight the aeroplane comes in on.
                     done?.inboundFlight ? `Inbound ${done.inboundFlight}` : null,
+                    // And the one it goes on to after this leg — the owner's
+                    // "the next flight taking the same aircraft".
+                    done?.onwardFlight ? `On to ${done.onwardFlight}` : null,
                   ]
                     .filter(Boolean)
                     .join(" · ") || undefined
@@ -335,26 +351,39 @@ function CrewBody({ brief, go }: { brief: FlightBrief; go: (href: string) => voi
 
 /**
  * Each destination as a picture of its weather and the wind on its runway
- * (`AirportPanel`), with when last there under it.
+ * (`AirportPanel`), with its runways, frequencies and the aerodromes near it,
+ * and when last there under it. The airport data and the alternates are asked
+ * only now, while this card is open.
  */
 function DestinationBody({ brief, openFlight }: { brief: FlightBrief; openFlight: (id: string) => void }) {
+  const dests = destinationsOf(brief)
+  const info = useAirportInfo(
+    dests.map((d) => d.icao),
+    true,
+  )
+  const alternates = useDutyAlternates(brief, true)
   return (
     <div className="divide-y divide-border/70">
-      {destinationsOf(brief).map((d) => {
+      {dests.map((d) => {
         const metar = brief.weather.briefs.find((b) => b.station === d.icao)?.metar ?? null
         const arrival = brief.duty.times.find((t) => t.arrivalIcao === d.icao)?.arriveMs ?? null
+        const to = brief.airports.get(d.icao)
+        const distanceNm = distanceInto(brief, d.icao)
         const lastLine = [d.last ? `Last there ${shortDay(d.last.date)}` : "First time", d.year ? `${d.year}× this year` : null]
           .filter(Boolean)
           .join(" · ")
         return (
           <AirportPanel
             key={d.icao}
-            icao={d.icao}
             code={brief.code(d.icao)}
-            airport={brief.airports.get(d.icao)}
+            airport={to}
+            info={info[d.icao]}
             metar={metar}
             arrivalMs={arrival}
+            distanceNm={distanceNm}
             weatherAsked={brief.weather.asked}
+            nearby={alternates.near.get(d.icao) ?? []}
+            codeOf={brief.code}
             lastLine={lastLine}
             onLast={d.last ? () => openFlight(d.last!.flightId) : undefined}
           />
@@ -365,79 +394,102 @@ function DestinationBody({ brief, openFlight }: { brief: FlightBrief; openFlight
 }
 
 /**
- * The Currencies page, brought to the card: the logbook's own requirements
- * first (90-day recency, sectors not logged), then every document as the page
- * groups them — what needs attention, then what is current, soonest first —
- * by name, with its expiry date and days left. A document that lapses before
- * the chosen duty says so. A tap opens it on the Currencies page.
+ * The Currencies page, brought to the card: 90-day recency first (it is the
+ * one that usually binds — both halves and the day it lapses), sectors not
+ * logged, then every document as the page groups them — what needs
+ * attention, then what is current, soonest first. ONE line each: the name,
+ * the expiry date, the days left, and a flag after it only when there is one
+ * (the owner: no gutter of empty icons, and a shorter card). A tap opens it.
  */
 function CurrencyBody({ brief, go }: { brief: FlightBrief; go: (href: string) => void }) {
   const logbook = brief.status.legality.requirements.filter((r) => r.group === "currency" && !r.id.startsWith("doc-"))
   const { attention, current } = brief.currency
   if (logbook.length === 0 && attention.length === 0 && current.length === 0) return null
-  const figure = (state: Requirement["state"], text: string) => (
-    <span className={cn("font-semibold", state === "ok" ? "text-foreground" : REQ_TONE[state].icon)}>{text}</span>
-  )
-  // Dark cockpit: a met requirement draws no icon, only its place in the row.
-  const lead = (state: Requirement["state"]) => {
-    if (state === "ok") return <span className="w-4 shrink-0" aria-hidden />
+  const flag = (state: Requirement["state"]) => {
+    if (state === "ok") return null
     const Icon = STATE_ICON[state]
-    return <Icon className={cn("h-4 w-4 shrink-0", REQ_TONE[state].icon)} aria-hidden />
+    return <Icon className={cn("h-3.5 w-3.5 shrink-0", REQ_TONE[state].icon)} aria-label={state === "fail" ? "Not met" : "Attention"} />
   }
-  const groups = [attention, current].filter((g) => g.length > 0)
+  const tone = (state: Requirement["state"]) => (state === "ok" ? "text-foreground" : REQ_TONE[state].icon)
+  const row = (key: string, name: string, sub: string, figure: string, state: Requirement["state"], onClick?: () => void) => {
+    const Box = onClick ? "button" : "div"
+    return (
+      <Box
+        key={key}
+        {...(onClick ? { type: "button" as const, onClick } : {})}
+        className={cn("flex w-full items-baseline gap-2 rounded-md py-1 text-left", onClick && "-mx-1 px-1 active:bg-muted/60")}
+      >
+        <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-foreground">{name}</span>
+        <span className="shrink-0 text-xs tabular-nums text-muted-foreground" suppressHydrationWarning>{sub}</span>
+        <span className={cn("w-12 shrink-0 text-right text-[13px] font-semibold tabular-nums", tone(state))}>{figure}</span>
+        <span className="flex w-3.5 shrink-0 self-center">{flag(state)}</span>
+      </Box>
+    )
+  }
+  const recencyRows = currencyRows(brief).filter((r) => !r.key.startsWith("doc-"))
   return (
     <div>
-      {logbook.map((r) => (
-        <TapRow
-          key={r.id}
-          onClick={r.href ? () => go(r.href) : undefined}
-          lead={lead(r.state)}
-          title={r.label}
-          // Recency: both halves, and when it lapses; not logged: which sectors.
-          sub={
-            (r.detail ?? [])
-              .filter((d) => d.label !== "Status")
-              .map((d) => (r.id === "recency" ? `${d.label} ${d.value.replace(/ \/ /g, "/")}` : d.value))
-              .join(" · ") || undefined
-          }
-          right={figure(r.state, r.value)}
-        />
-      ))}
-      {groups.map((group, gi) => (
-        <div key={gi} className={cn((logbook.length > 0 || gi > 0) && "mt-1 border-t border-border/70 pt-1")}>
-          {group.map((l) => (
-            <TapRow
-              key={l.id}
-              onClick={() => go(`/currencies?selected=${encodeURIComponent(l.id)}`)}
-              lead={lead(l.state)}
-              title={l.name}
-              // With its year: a licence valid to 2030 is not "1 Jun".
-              sub={[`Expires ${formatDay(l.expiryDate, { weekday: false })}`, l.lapsesBeforeDuty ? "before this duty" : null].filter(Boolean).join(" · ")}
-              right={figure(l.state, l.figure)}
-            />
-          ))}
-        </div>
-      ))}
+      {logbook.map((r) => {
+        const shown = recencyRows.find((x) => x.key === r.id)
+        // Recency: both halves, and when it lapses; not logged: which sectors.
+        const sub =
+          (r.detail ?? [])
+            .filter((d) => d.label !== "Status")
+            .map((d) =>
+              r.id === "recency"
+                ? d.label === "Lapses"
+                  ? `to ${d.value}`
+                  : `${d.label === "Takeoffs" ? "T/O" : "LDG"} ${d.value.split(" / ")[0]}`
+                : d.value,
+            )
+            .join(" · ") || ""
+        return row(r.id, shown?.name ?? r.label, sub, r.value, shown?.state ?? r.state, r.href ? () => go(r.href!) : undefined)
+      })}
+      {[...attention, ...current].map((l, i) =>
+        <div key={l.id} className={cn(i === 0 && logbook.length > 0 && "mt-1 border-t border-border/70 pt-1")}>
+          {row(
+            l.id,
+            l.name,
+            // With its year: a licence valid to 2030 is not "1 Jun".
+            l.lapsesBeforeDuty ? "before duty" : formatDay(l.expiryDate, { weekday: false }),
+            l.figure,
+            l.state,
+            () => go(`/currencies?selected=${encodeURIComponent(l.id)}`),
+          )}
+        </div>,
+      )}
     </div>
   )
 }
 
-/** Each limit: the hours left in it — and "Breach ahead" where the roster runs past it. */
+/**
+ * The limits, as the margins a delay eats into: the chosen duty's FDP and
+ * every rolling window that holds it (its rostered successors counted), the
+ * smallest first — the face's "Delay" is the first of them — and a breach the
+ * roster runs into further ahead.
+ */
 function LimitsBody({ brief }: { brief: FlightBrief }) {
+  const m = brief.margin
+  const breaches = limitsOf(brief).filter((r) => r.detail?.some((d) => d.label === "Forecast"))
   return (
-    <Grid>
-      {limitsOf(brief).map((r) => {
-        const left = r.detail?.find((d) => d.label === "Remaining")?.value
-        const breach = r.detail?.some((d) => d.label === "Forecast")
-        return (
-          <Fig
-            key={r.id}
-            label={`${r.label} left`}
-            value={breach ? "Breach ahead" : (left ?? r.value)}
-            tone={r.state === "fail" || breach ? "over" : undefined}
-          />
-        )
-      })}
-    </Grid>
+    <div>
+      {m ? (
+        <>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">If This Duty Runs Late</p>
+          <Grid>
+            {m.each.map((e) => (
+              <Fig key={e.limit} label={e.limit} value={<span className={marginTone(e.minutes)}>+{marginText(e.minutes)}</span>} />
+            ))}
+          </Grid>
+        </>
+      ) : (
+        <p className="py-1 text-[13px] text-muted-foreground">No duty ahead to measure</p>
+      )}
+      {breaches.length > 0 && (
+        <p className="mt-1.5 border-t border-border/70 pt-1.5 text-[13px] font-semibold text-destructive">
+          Breach ahead · {breaches.map((r) => r.label).join(", ")}
+        </p>
+      )}
+    </div>
   )
 }

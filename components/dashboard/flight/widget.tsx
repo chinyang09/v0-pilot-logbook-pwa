@@ -16,14 +16,10 @@
  * not circles under the card (the owner: "don't have to fully copy the flight
  * card").
  *
- * The morph is TRANSFORM and OPACITY only (the owner: "less janky"). The card
- * is laid out once at its resting size and measured while hidden; then it
- * starts ON the tile — moved there and scaled to the tile's width — and
- * travels to rest. Closing runs it back onto the tile, which is shown again
- * the moment the close begins, so the card fades into the tile rather than
- * vanishing and leaving a hole (the clip it replaced animated on the main
- * thread every frame, and a narrow tile closed in two steps: the clip, then
- * the tile's own height coming back).
+ * The card GROWS OUT OF the tile: one surface runs from the tile's box to the
+ * card's, revealing a card laid out once at its final size (`WidgetSheet`).
+ * A card scaled down onto the tile (the round before) read as a thumbnail
+ * growing, not as the tile opening.
  */
 
 import * as React from "react"
@@ -51,11 +47,12 @@ export interface WidgetAnchor {
   height: number
 }
 
-const OPEN = { type: "spring" as const, duration: 0.38, bounce: 0.08 }
-const CLOSE = { type: "spring" as const, duration: 0.3, bounce: 0 }
+const OPEN = { type: "spring" as const, duration: 0.42, bounce: 0.1 }
+const CLOSE = { type: "spring" as const, duration: 0.34, bounce: 0 }
 const EASE = [0.32, 0.72, 0, 1] as const
 const SCRIM = "bg-black/45 dark:bg-black/75"
 const LIFT_SHADOW = "0px 25px 50px -12px rgba(0,0,0,0.45)"
+const NO_SHADOW = "0px 0px 0px 0px rgba(0,0,0,0)"
 const MARGIN = 12
 /** The widest a lifted card goes — a tablet in a phone-sized window stays a card. */
 const CARD_MAX_PX = 480
@@ -197,38 +194,49 @@ export interface SheetContent {
 }
 
 /**
- * A widget lifted out of the page on a phone. Closes on the scrim, Escape and
- * the back gesture — back ONTO its tile. Anything inside that goes somewhere
- * (a crew member, a currency, a flight, a footer link) closes the card first
- * and runs as the close's follow-up, so the card never stays over the page it
- * led to and a navigation is not undone by the card's own history entry.
+ * A widget lifted out of the page on a phone — it GROWS OUT OF its tile and
+ * goes back into it (the owner, Nov 2026: the scaled card "doesn't look like
+ * it expands from the widget").
+ *
+ * One SURFACE — the tile's own card, its border and corners — runs from the
+ * tile's box to the card's box and back. What is on it is laid out ONCE at
+ * its final size and anchored to the surface's top-left, so the growing
+ * surface reveals it rather than stretching it:
+ *
+ * | the tile | its card | on the surface |
+ * |---|---|---|
+ * | full width, the card keeps its face | the same width | the card itself from the first frame: its header IS the tile's face, in the same place — the tile simply opens downward |
+ * | narrower, or a card led by its label | the full width | the tile's face (at the tile's width) fades into the card as the surface widens |
+ *
+ * The tile is hidden for the card's whole life — the surface covers it
+ * exactly at both ends — so there is never a second copy and never a step.
+ * Anything inside that goes somewhere closes the card first and runs as the
+ * close's follow-up, so the card never stays over the page it led to.
  */
 export function WidgetSheet({
   anchor,
   title,
+  face,
+  seamless,
+  tone = null,
   render,
-  onOpened,
-  onClosing,
   onClose,
 }: {
   anchor: WidgetAnchor
   title: string
+  /** The tile's face, as the tile draws it — what the surface shows at the tile's size. */
+  face: React.ReactNode
+  /** The card's header is this face at this width: no crossfade, the tile just opens. */
+  seamless: boolean
+  tone?: "fail" | "caution" | "ok" | "unknown" | null
   /** The card's content, handed `dismiss(then?)` for anything that leaves it. */
   render: (dismiss: (then?: () => void) => void) => SheetContent
-  /** The card has arrived: the tile can make way (it is under the card until then). */
-  onOpened: () => void
-  /** The close has begun: the tile shows again under the card. */
-  onClosing: () => void
   onClose: () => void
 }) {
   const closeRef = React.useRef(onClose)
-  const closingCbRef = React.useRef(onClosing)
-  const openedRef = React.useRef(onOpened)
   React.useEffect(() => {
     closeRef.current = onClose
-    closingCbRef.current = onClosing
-    openedRef.current = onOpened
-  }, [onClose, onClosing, onOpened])
+  }, [onClose])
 
   const dialogRef = React.useRef<HTMLDivElement>(null)
   useDialogFocus(dialogRef, true)
@@ -258,8 +266,7 @@ export function WidgetSheet({
     if (closingRef.current) return
     closingRef.current = true
     setClosing(true)
-    closingCbRef.current()
-    window.setTimeout(finishClose, 420)
+    window.setTimeout(finishClose, 650)
   }, [finishClose])
   const requestClose = useBackDismiss(true, startClose)
 
@@ -288,11 +295,16 @@ export function WidgetSheet({
   const wide = anchor.width >= fullWidth - 24
   const width = wide ? anchor.width : fullWidth
   const maxCard = vh - MARGIN * 2 - 24
-  const restH = Math.min(height ?? anchor.height, maxCard)
-  const restLeft = wide ? anchor.left : (vw - width) / 2
-  const restTop = Math.max(MARGIN + 12, (vh - restH) / 2)
-  // ON the tile: moved to its corner and scaled to its width (top-left origin).
-  const onTile = { x: anchor.left - restLeft, y: anchor.top - restTop, scale: anchor.width / width }
+  // The content's height, plus the surface's two border pixels.
+  const restH = Math.min((height ?? anchor.height) + 2, maxCard)
+  const rest = {
+    left: wide ? anchor.left : (vw - width) / 2,
+    top: Math.max(MARGIN + 12, (vh - restH) / 2),
+    width,
+    height: restH,
+  }
+  const onTile = { left: anchor.left, top: anchor.top, width: anchor.width, height: anchor.height }
+  const crossfade = !(seamless && wide)
   const t = closing ? CLOSE : OPEN
 
   return createPortal(
@@ -301,7 +313,7 @@ export function WidgetSheet({
         className={cn("absolute inset-0", SCRIM)}
         initial={{ opacity: 0 }}
         animate={{ opacity: open ? 1 : 0 }}
-        transition={{ duration: closing ? 0.22 : 0.26, ease: EASE }}
+        transition={{ duration: closing ? 0.24 : 0.26, ease: EASE }}
         onPointerDown={() => {
           scrimPressRef.current = true
         }}
@@ -311,34 +323,45 @@ export function WidgetSheet({
         }}
       />
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={title} className="pointer-events-none absolute inset-0">
+        {/* The surface: the tile's card, growing to the card's box. */}
         <motion.div
-          ref={cardRef}
-          className="pointer-events-auto fixed origin-top-left overflow-y-auto overflow-x-hidden overscroll-contain rounded-2xl border border-border bg-card scrollbar-hide"
-          // Measured hidden first: the rest is known only once the height is.
-          style={{
-            left: restLeft,
-            top: restTop,
-            width,
-            maxHeight: maxCard,
-            visibility: measured ? undefined : "hidden",
-            boxShadow: LIFT_SHADOW,
-          }}
-          initial={{ ...onTile, opacity: 0 }}
-          animate={open ? { x: 0, y: 0, scale: 1, opacity: 1 } : { ...onTile, opacity: 0 }}
-          transition={{
-            ...t,
-            opacity: closing
-              ? { duration: 0.2, delay: 0.1, ease: EASE }
-              : { duration: 0.12, ease: EASE },
-          }}
+          className={cn(
+            "pointer-events-auto fixed overflow-hidden rounded-2xl border bg-card",
+            (tone === "fail" || tone === "caution") && !open ? TONE_BORDER[tone] : "border-border",
+          )}
+          initial={{ ...onTile, boxShadow: NO_SHADOW }}
+          animate={open ? { ...rest, boxShadow: LIFT_SHADOW } : { ...onTile, boxShadow: NO_SHADOW }}
+          transition={t}
           onAnimationComplete={() => {
             if (closingRef.current) finishClose()
-            else if (measured) openedRef.current()
           }}
         >
-          <div className="relative p-3">{content.header}</div>
-          {content.body && <div className="border-t border-border/70 px-3 pb-3 pt-2.5">{content.body}</div>}
-          <WidgetFooter actions={content.actions} run={(a) => (a.stay ? a.run() : requestClose(a.run))} />
+          {/* The tile's face at the tile's size, fading into the card. */}
+          {crossfade && (
+            <motion.div
+              aria-hidden
+              className="pointer-events-none absolute left-0 top-0 flex flex-col p-3"
+              style={{ width: anchor.width - 2, height: anchor.height - 2 }}
+              initial={{ opacity: 1 }}
+              animate={{ opacity: open ? 0 : 1 }}
+              transition={open ? { duration: 0.14, ease: EASE } : { duration: 0.18, delay: 0.08, ease: EASE }}
+            >
+              {face}
+            </motion.div>
+          )}
+          {/* The card, laid out once at its final width; the surface reveals it. */}
+          <motion.div
+            ref={cardRef}
+            className="absolute left-0 top-0 overflow-y-auto overflow-x-hidden overscroll-contain scrollbar-hide"
+            style={{ width: width - 2, maxHeight: maxCard - 2 }}
+            initial={{ opacity: crossfade ? 0 : 1 }}
+            animate={{ opacity: crossfade ? (open ? 1 : 0) : 1 }}
+            transition={open ? { duration: 0.2, delay: 0.06, ease: EASE } : { duration: 0.12, ease: EASE }}
+          >
+            <div className="relative p-3">{content.header}</div>
+            {content.body && <div className="border-t border-border/70 px-3 pb-3 pt-2.5">{content.body}</div>}
+            <WidgetFooter actions={content.actions} run={(a) => (a.stay ? a.run() : requestClose(a.run))} />
+          </motion.div>
         </motion.div>
       </div>
     </div>,

@@ -37,3 +37,16 @@ describe("the weather cache files", () => {
     expect(parseMetarCache("<html>Service unavailable</html>")).toEqual({})
   })
 })
+
+describe("the TAF aerodromes' positions", () => {
+  it("are read from the file and kept apart from the reports", async () => {
+    const { splitPositions } = await import("../server")
+    const { readFileSync } = await import("node:fs")
+    const path = await import("node:path")
+    const tafs = parseTafCache(readFileSync(path.join(__dirname, "fixtures", "tafs.sample.xml"), "utf8"))
+    const { stations, geo } = splitPositions(tafs)
+    expect(geo.length).toBe(Object.keys(tafs).length)
+    expect(geo.every(([id, lat, lon]) => /^[A-Z0-9]{4}$/.test(id) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180)).toBe(true)
+    expect(Object.values(stations).every((r) => !("lat" in r) && !("lon" in r))).toBe(true)
+  })
+})

@@ -259,8 +259,12 @@ function deriveDutyAction({
       href: "/fdp",
     }
   }
+  // Still resting, with the rest done before the next report (a short one is
+  // above): nothing is wrong, so nothing lights (dark cockpit). The headline
+  // is the instant the rest is done — when the next duty, or any addition
+  // the company asks for, may start (the owner's "earliest I can accept").
   if (duty.rest && !duty.rest.isLegalNow) {
-    return { tone: "warning", headline: `Rest until ${clock(Date.parse(duty.rest.legalAtUtc))}`, href: "/fdp" }
+    return { tone: "current", headline: `Legal from ${clock(Date.parse(duty.rest.legalAtUtc))}`, href: "/fdp" }
   }
   if (duty.rest || duty.next || duty.lastDuty) return { tone: "current", headline: "Legal now", href: "/fdp" }
   return logbookEmpty

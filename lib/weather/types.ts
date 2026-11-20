@@ -22,6 +22,9 @@ export interface TafReport {
   /** Valid from / to, ms. */
   from: number
   to: number
+  /** Where the aerodrome is — read from the file to build the alternates index, never stored on the report. */
+  lat?: number
+  lon?: number
 }
 
 /** The answer for a set of stations. A station the source has nothing for is absent. */

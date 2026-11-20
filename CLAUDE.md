@@ -721,6 +721,14 @@ minute and sends heavy users to those files:
 | shown | the flight page's Weather tile and its detail (`flight/weather.tsx`): each airport the duty touches, asked while the page is up and the duty within 30h, again every 10 minutes; Refresh says "Getting the latest…", then "Checked 16:52Z · reports as of 5m ago" (or that it failed, and what is shown) |
 | read | `lib/weather/brief.ts` (tested on the real fixtures): the TAF split into periods (base, FM, BECMG, TEMPO, PROB30/40, PROB TEMPO), each change group laid OVER what prevails; FAA categories; hazards (TS, CB, FZ, FG, heavy / frozen precipitation, SQ, FC, VA, DS, TCU, gust or wind ≥ 25kt, LIFR visibility / ceiling). Each airport's window is the duty's time there ± 1 hour — departure the actual OUT else the schedule; arrival the actual IN, else OUT + the PLANNED block once off blocks (the owner's rule), else the schedule (`legTimes`). The periods touching a window are LIT and say which leg ("TR275 arr"), amber when they bring a hazard or IFR; the METAR is read for its body only (not its trend) |
 
+**Airports and alternates from the same source** (Nov 2026 — the owner sent
+its OpenAPI file: "there is an airport one that we can use"):
+
+| | Rule |
+|---|---|
+| airport data | `/api/data/airport?ids=…` — runways with their TRUE heading (`alignment`: KSEA's 16/34 is 180, magnetic 164 + 16°E), length, width, surface; ATIS / tower frequencies; variation. REFERENCE data: `GET /api/lookup/airport-info?ids=` (Node, up to 12) asks the source ONCE for whatever MongoDB `airportInfo` does not hold fresh (30 days; an unknown airport 7), and the device keeps each answer 30 days (`useAirportInfo`). `lib/weather/airport-info.ts`, pinned on a real answer |
+| alternates | the TAF aerodromes — an aerodrome with a forecast is one a planner can name — from the TAF snapshot, which now stores their positions apart as one index (`geo`, `splitPositions`, read by projection and kept 30 min in the process). `GET /api/lookup/alternates?path=&dests=&exclude=` (Node) picks the 3 nearest each destination within 150nm and, along each leg longer than 300nm, the one nearest the track in each third of its middle within 150nm (`pickAlternates`, `lib/utils/geo.ts` for the great circle), and answers their METAR / TAF from the same snapshot — it makes NO request to the source of its own. Asked only while a card that lists them is open (`useDutyAlternates`); each read over the time it matters (`alternateWindows`) |
+
 NOT a Cloudflare Worker: a free Worker has 10ms of CPU, and unzipping and
 reading 9MB of XML takes ~80ms. NOT a Vercel cron: the free plan runs one a
 day. Parsing both full files takes ~40ms each (`parse.ts`, pinned on real
@@ -1230,13 +1238,13 @@ tiles (`flight/widget.tsx`, faces in `flight/faces.tsx`, bodies in
 
 | Tile | Glance | Its card adds | Footer |
 |---|---|---|---|
-| Duty & Rest | the phase (an icon only when it flags), the line ("Rest until 22:00Z", "Sector 2 of 3", "Legal now"), the timeline and its three captions | on duty: Latest On-Blocks, Off Duty; off duty: Rested, Last Duty | FDP › |
+| Duty & Rest | the phase (an icon only when it flags), the line ("Legal from 22:00Z" — when the rest is done: the next report, or any addition the company asks for, may start then; "Rest short by 3:00" in red when the report is inside it; "Sector 2 of 3", "Legal now"), the timeline and its three captions | on duty: Latest On-Blocks, Off Duty; off duty: Rested, Spare Before Report, Last Duty | FDP › |
 | Flights (the chosen duty — its date line is a menu) | Now / Next / Later · day ⌄, flight numbers with the duty's FDP/max, the chain with each stop's times — out at the first, in at the last, and BOTH at a stop between ("01:50–02:35Z") — and gate, then the aeroplane line — or, for a later duty, the rest before it against its minimum | Report (a later duty), Off Duty; a row per leg — gates with stand, the airport's inbound flight, tail; the inbound row (flight, STD, where, its gate) | Refresh (only once gates are asked) |
-| Weather | each airport's worst category and first hazard | per airport: category and hazard CHIPS, the METAR, and ONLY the TAF periods over the duty's times there, each with its leg | Refresh |
-| Crew | who, and the day last flown together ("New") | a row each: initials, name, role · flights together, the day; a tap opens their card | Crew › |
-| Destination | the day last flown INTO each destination (not the origin) | each destination as a PICTURE (`AirportPanel`, `flight/airport.tsx`, after a station-weather widget the owner sent): the place, local time, day or night on arrival; the category as a dot only below VFR; wind and gust (amber), ceiling, visibility; the runway the wind favours drawn with the wind's arrow, and its head / tail (amber) and crosswind (`favouredRunway`, `lib/weather/runway-wind.ts`, tested — read off the designator, an approximation of the magnetic heading); last there and arrivals this year | — |
-| Currency | the three most pressing by NAME, with the tally — never "+N more" | the Currencies page in brief: 90-day recency (both halves, when it lapses) and sectors not logged, then EVERY document as that page groups it — needs attention, then current, soonest first — by name, "Expires 30 Nov 26", days left (`daysFigure`); a tap opens it on the page | Currencies › |
-| Limits | the four rolling limits as small bars | the hours LEFT in each, or "Breach ahead" | FDP › |
+| Weather | each airport's worst category and first hazard | per airport: category and hazard CHIPS, the METAR read out (wind, gust amber, temperature / dew point, QNH) over its raw text, and ONLY the TAF periods over the duty's times there, each with its leg; then EN ROUTE — the TAF aerodromes along each leg, with their weather where it is not fine | Refresh |
+| Crew | who, and how often and when last flown together ("3× · 18 Nov", "New") | a row each: initials, name, role · flights together, the day; a tap opens their card | Crew › |
+| Destination | each destination (not the origin): the local time there now, the leg's great-circle distance, the day last flown INTO it | each destination as a PICTURE (`AirportPanel`, `flight/airport.tsx`, after a station-weather widget the owner sent): the place, local time and UTC offset, day or night on arrival, distance; the category as a dot only below VFR; wind and gust (amber), temperature, QNH, visibility, ceiling; the runway the wind favours drawn with the wind's arrow, and its head / tail (amber) and crosswind (`favouredRunway` on `runwayEndsFrom` — the airport data's TRUE headings, else the designator); its runways with length, ATIS / tower frequencies (`useAirportInfo`, below); the TAF aerodromes NEAR it with their weather (`useDutyAlternates`, below); last there and arrivals this year | — |
+| Currency | 90-day recency FIRST (it is the one that usually binds — the rest are a year long and renewed on the ground), judged against the DUTY ("before duty" when it lapses first), then the two most pressing documents by NAME; a flag AFTER the figure only when there is one (no gutter of empty icons — the owner), the tally counting only flags below the rows shown | ONE line each: name, expiry (or "before duty"), days left, flag — recency with T/O, LDG and its lapse; a tap opens it | Currencies › |
+| Limits | "Delay 4:45" — how much later the chosen duty can run inside EVERY limit (`delayMargin`, below), amber under an hour, red at none — and the four rolling limits as bars with the hours LEFT | "If This Duty Runs Late": the margin on the FDP and on each window that holds the duty, smallest first; "Breach ahead" where the roster runs into one | FDP › |
 
 **A tile is a SUMMARY of its section** (the owner, Nov 2026: "bringing what is
 important to the table so the user doesn't have to go to the other tab"); its
@@ -1247,6 +1255,19 @@ cannot say: a document valid now that LAPSES BEFORE the chosen duty reports
 ("before this duty", amber; `lapseOf`). The legality model gives EVERY
 document its own requirement: it used to fold all but the nearest three into
 one "7 more" cell, which the card then drew as a document (the owner's report).
+
+**The questions the tiles answer** (the owner, Nov 2026: a widget answers
+without being opened, in few words, and grabs attention only when there is
+cause): before a duty — will I be legal for it, and when is the earliest an
+addition could start (Duty & Rest's line); what are my limits, how much is
+left, and how much later can this duty run inside all of them (Limits:
+`delayMargin`, `lib/utils/dashboard/delay-margin.ts`, tested — the FDP's
+margin and every rolling window that holds the duty, the duties rostered
+after it counted, read off the same `calculateRollingStats` the bars use);
+are my currencies good FOR THIS DUTY, recency first; who is the crew and
+how often I have flown with them; where am I going, what time is it there
+and how far; what is the weather there ±1h of the duty's times there, and at
+the aerodromes near it and along the way.
 
 **A sortable bento** (the owner, Nov 2026; the readiness redesign of the same
 week was reverted — "I prefer the old one"). The header's grid button
@@ -1309,15 +1330,20 @@ card went (the owner: "don't have to fully copy the flight card"). A narrow tile
 face did and more (crew, last there, currency, weather) leads with its LABEL
 instead (`header: "label"`), so no name appears twice.
 
-- **A phone: the tile LIFTS** (`WidgetSheet`) — TRANSFORM and OPACITY only
-  (the owner: "less janky"). The card is laid out at its rest and measured
-  HIDDEN first (the rest depends on its height — computed before it, a tall
-  card's start was near the top), then starts ON the tile — moved to its
-  corner, scaled to its width from the top-left — and travels to rest. The
-  tile stays under it until it has arrived (`onOpened`) and shows again the
-  moment the close begins (`onClosing`), so the card fades INTO the tile. It
-  was a clip-path reveal: a main-thread animation every frame, and a narrow
-  tile closed in two steps (the clip, then the tile's height coming back).
+- **A phone: the card GROWS OUT OF its tile** (`WidgetSheet`; the owner: the
+  scaled card "doesn't look like it expands from the widget"). ONE surface —
+  the tile's own border and corners — runs from the tile's box to the card's
+  and back, and what is on it is laid out ONCE at its final size, anchored to
+  the surface's top-left, so the growing surface REVEALS it rather than
+  stretching it. A full-width tile whose card keeps its face opens downward
+  with the card visible from the first frame (its header IS the tile's face,
+  in the same place); a narrower tile's face, at the tile's width, fades into
+  the card as the surface widens. The tile is hidden for the card's whole
+  life — the surface covers it exactly at both ends — so there is never a
+  second copy and never a step; measured, the close lands on the tile's box
+  to the pixel in ~360ms. Rounds before: a card SCALED down onto the tile
+  (read as a thumbnail growing), and a clip-path reveal (a narrow tile closed
+  in two steps).
   ANYTHING in the card that goes somewhere — a crew member, a currency, a
   flight, a footer link — closes it first and runs as the close's follow-up
   (`render(dismiss)`); the card stayed over the page it had led to. The card
@@ -3977,6 +4003,8 @@ Notable route groups:
 | `/api/lookup/airline/{fleet,routes,routes/from}?iata=` | GET | Yes | The Worker's airline routes passed through: fleet by type, every airport pair, one airport's destinations with flight numbers |
 | `/api/lookup-test/<route>` | GET | No (OFF in production unless `LOOKUP_TEST_ROUTE=1`; a preview is behind Vercel's deployment protection) | The operator's test door, EDGE: every `/api/lookup` route without the sign-in, plus the Worker's `/probe` (`probe?explore=1`) run from where the APP runs — never `/raw` |
 | `/api/lookup/weather?ids=` | GET | Yes | METAR and TAF for up to 24 stations from the weather cache (MongoDB snapshot, refreshed on demand from aviationweather.gov's cache files) — Node |
+| `/api/lookup/airport-info?ids=` | GET | Yes | Runways (true headings), frequencies and variation for up to 12 airports — aviationweather.gov's airport data, kept 30 days in MongoDB `airportInfo` — Node |
+| `/api/lookup/alternates?path=&dests=&exclude=` | GET | Yes | The TAF aerodromes near each destination and along each leg, with their METAR / TAF from the weather snapshot — Node |
 | `/api/lookup/pool/aircraft` | POST | No | The shared aircraft pool — enriched submissions, MongoDB (Node) |
 | `/api/lookup/pool/airport` | POST | No | The shared airport pool — enriched submissions, MongoDB (Node) |
 | `/api/submissions/aircraft` | POST | Yes | Submit custom aircraft for enrichment |
@@ -5018,6 +5046,7 @@ other user collection.
 | `deletions` | Tombstones (TTL 30d) for propagating deletes across devices |
 | `feedback` | In-app bug / feature / tweak reports: `{userId, callsign, id, kind, area, title, details, context{route, build, userAgent, viewport, standalone, online}, writtenAt, status, createdAt, updatedAt, messages[{id, from: "pilot"\|"team", text, at, event?}], response? (legacy)}`. The pilot writes follow-ups and done / reopen; triage (`planned` / `wontfix`, replies) is written on the collection and shows in the report's conversation |
 | `weatherCache` | `{_id: "metar" \| "taf", fetchedAt, stations: {ICAO: report}}` — the whole world's current reports, replaced on demand at most every 10 minutes; `lock:<kind>` rows hold a refresh |
+| `airportInfo` | `{_id: ICAO, at, info: {icao, name, variationDeg, runways[{id, trueHeading, lengthFt, widthFt, surface}], freqs[[name, mhz]]} \| null}` — aviationweather.gov's airport data, one document per airport, kept 30 days (an unknown one 7). The `taf` weather snapshot also carries `geo: [[icao, lat, lon]]`, the TAF aerodromes' positions |
 | `flights`, `aircraft`, `personnel`, etc. | Synced user data collections |
 
 **Indexes:** `lib/mongodb/client.ts` runs an idempotent, best-effort
@@ -5655,7 +5684,9 @@ When making changes, be aware of these high-impact files:
 - Do not derive the duty band's bar colour from how full it is — state the tone. A nearly-full FDP bar is a warning and a nearly-full REST bar is good news; deriving it painted a fully-rested pilot amber. And do not put a standby's window on the status ramp: how full it is is a magnitude, not a verdict (`RAMP.info`)
 - Do not print a rest's span to legality as its minimum — "Min 11:56" read as a miscount; it is "10:00 + night" (`restMinimumText`), with Legal From saying when
 - Do not light the flight page for something that is FINE — no green tick, wash, bar or dot (dark cockpit: `TONE.current`, `REQ_TONE.ok`, `RAMP.ok` are neutral); only amber and red, each with its icon
-- Do not animate the dashboard's lifted card with a clip, a size or a layout — it is transform and opacity only, measured hidden before it moves; and do not let anything in it navigate without closing it first (`render(dismiss)`)
+- Do not SCALE the dashboard's card onto its tile, or show the tile under it — one surface grows from the tile's box to the card's (`WidgetSheet`), revealing a card laid out once at its final size, and the tile is hidden for the card's whole life; and do not let anything in the card navigate without closing it first (`render(dismiss)`)
+- Do not ask aviationweather.gov for airport data per look or from the browser — `/api/lookup/airport-info` batches the ids, MongoDB keeps each 30 days, the device 30 more. And do not ask it for alternates at all: they come from the TAF snapshot's own position index
+- Do not light a rest that will be done before the next report — "Legal from 22:00Z" is nominal (dark cockpit); only a report inside the rest is red
 - Do not hardcode a tile's width — the pilot chooses it in Arrange (`setTileWidth`, `TILE_ALLOWED_WIDTHS`), and `packTiles` fills each row from those widths
 - Do not fold documents into a "+N more" requirement or line — the dashboard's currency card lists every document (`currencySummary`), by the name the Currencies page uses
 - Do not reorder the bento by moving DOM nodes or give its tiles `layout` outside Arrange — tiles stay in `DASHBOARD_TILES` order and the grid places them by `order`; a tile's column span comes from `packTiles` over the pilot's widths

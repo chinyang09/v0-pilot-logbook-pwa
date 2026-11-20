@@ -16,6 +16,9 @@ import { cn } from "@/lib/utils"
 import { formatDutyClock, formatRestSpan } from "@/lib/utils/dashboard/duty-status"
 import { DutyBand, REQ_TONE, STATE_ICON, SectorChain, TONE } from "./instruments"
 import { WidgetLabel } from "./widget"
+import { getAirportLocalTime } from "@/lib/db/stores/reference/airports.store"
+import { greatCircleNm } from "@/lib/utils/geo"
+import { hasCoordinates } from "@/lib/utils/flight-calculations"
 import type { FlightBrief } from "./model"
 
 /** "18 Nov" — a stored day, as a tile has room for it. */
@@ -199,7 +202,7 @@ export function CrewFace({ brief }: { brief: FlightBrief }) {
             <li key={m.personId ?? m.name} className="text-xs leading-tight">
               <span className="block truncate font-medium text-foreground">{shortName(m.name)}</span>
               <span className="block truncate text-[10px] text-muted-foreground">
-                {m.last ? shortDay(m.last.date) : "New"}
+                {m.last ? `${m.count ? `${m.count}× · ` : ""}${shortDay(m.last.date)}` : "New"}
               </span>
             </li>
           ))}
@@ -217,6 +220,15 @@ export function destinationsOf(brief: FlightBrief) {
   return brief.destinations.filter((d) => d.icao !== origin)
 }
 
+/** The great-circle distance of the leg that lands at `icao`, nm. */
+export function distanceInto(brief: FlightBrief, icao: string): number | null {
+  const leg = brief.duty.legs.find((l) => (l.arrivalIcao || "").toUpperCase() === icao)
+  const from = leg ? brief.airports.get((leg.departureIcao || "").toUpperCase()) : undefined
+  const to = brief.airports.get(icao)
+  if (!from || !to || !hasCoordinates(from) || !hasCoordinates(to)) return null
+  return greatCircleNm({ lat: from.latitude, lon: from.longitude }, { lat: to.latitude, lon: to.longitude })
+}
+
 export function DestinationFace({ brief }: { brief: FlightBrief }) {
   const dests = destinationsOf(brief)
   return (
@@ -226,12 +238,28 @@ export function DestinationFace({ brief }: { brief: FlightBrief }) {
         <p className="text-xs leading-snug text-muted-foreground">—</p>
       ) : (
         <ul className="space-y-0.5">
-          {dests.slice(0, 3).map((d) => (
-            <li key={d.icao} className="flex items-baseline justify-between gap-1.5 text-xs leading-tight">
-              <span className="truncate font-medium text-foreground">{brief.code(d.icao)}</span>
-              <span className="shrink-0 tabular-nums text-muted-foreground">{d.last ? shortDay(d.last.date) : "First"}</span>
-            </li>
-          ))}
+          {dests.slice(0, 3).map((d) => {
+            const a = brief.airports.get(d.icao)
+            const nm = distanceInto(brief, d.icao)
+            return (
+              <li key={d.icao} className="text-xs leading-tight">
+                {/* Where, and the time there now. */}
+                <span className="flex items-baseline justify-between gap-1.5">
+                  <span className="truncate font-medium text-foreground">{brief.code(d.icao)}</span>
+                  {a?.tz && (
+                    <span className="shrink-0 tabular-nums text-foreground" suppressHydrationWarning>
+                      {getAirportLocalTime(a.tz).split(" ")[0]}
+                      <span className="text-[10px] text-muted-foreground"> L</span>
+                    </span>
+                  )}
+                </span>
+                {/* How far, and when last there. */}
+                <span className="block truncate text-[10px] tabular-nums text-muted-foreground">
+                  {[nm !== null ? `${Math.round(nm)}nm` : null, d.last ? shortDay(d.last.date) : "First"].filter(Boolean).join(" · ")}
+                </span>
+              </li>
+            )
+          })}
         </ul>
       )}
     </>
@@ -280,16 +308,31 @@ const SEVERITY: Record<Requirement["state"], number> = { fail: 0, unknown: 1, ca
  * Within a state, the order is the page's — soonest first.
  */
 export function currencyRows(brief: FlightBrief): CurrencyRow[] {
+  // 90-day recency is the one that usually binds (the rest are a year long
+  // and renewed on the ground), so it leads — and it is judged against the
+  // DUTY, not today: recency that lapses before the report does not cover it.
+  const lapseMs = brief.recencyLapseIso ? Date.parse(`${brief.recencyLapseIso}T00:00:00Z`) : NaN
   const logbook = brief.status.legality.requirements
     .filter((r) => r.group === "currency" && !r.id.startsWith("doc-"))
-    .map((r) => ({ key: r.id, name: r.label, state: r.state, figure: r.value }))
+    .map((r) => {
+      const beforeDuty =
+        r.id === "recency" && r.state !== "fail" && brief.duty.atMs !== null && Number.isFinite(lapseMs) && lapseMs <= brief.duty.atMs
+      return {
+        key: r.id,
+        name: r.id === "recency" ? "Recency 90d" : r.label,
+        state: beforeDuty ? ("caution" as const) : r.state,
+        figure: beforeDuty ? `${r.value} · before duty` : r.value,
+      }
+    })
   const docs = [...brief.currency.attention, ...brief.currency.current].map((l) => ({
     key: `doc-${l.id}`,
     name: l.name,
     state: l.state,
     figure: l.lapsesBeforeDuty ? `${l.figure} · before duty` : l.figure,
   }))
-  return [...logbook, ...docs].sort((a, b) => SEVERITY[a.state] - SEVERITY[b.state])
+  // Recency first whatever its state; then the documents, most pressing first.
+  const [recency, others] = [logbook.filter((r) => r.key === "recency"), logbook.filter((r) => r.key !== "recency")]
+  return [...recency, ...[...others, ...docs].sort((a, b) => SEVERITY[a.state] - SEVERITY[b.state])]
 }
 
 /**
@@ -300,7 +343,8 @@ export function CurrencyFace({ brief, rows = 3 }: { brief: FlightBrief; rows?: n
   const all = currencyRows(brief)
   return (
     <>
-      <WidgetLabel right={<Tally rows={all} />}>Currency</WidgetLabel>
+      {/* The rows shown carry their own flags; the tally counts only what is flagged below them. */}
+      <WidgetLabel right={<Tally rows={all.slice(rows)} />}>Currency</WidgetLabel>
       {all.length === 0 ? (
         <p className="text-xs leading-snug text-muted-foreground">None tracked</p>
       ) : (
@@ -308,16 +352,14 @@ export function CurrencyFace({ brief, rows = 3 }: { brief: FlightBrief; rows?: n
           {all.slice(0, rows).map((r) => {
             const Icon = STATE_ICON[r.state]
             return (
-              <li key={r.key} className="flex items-center gap-1.5 text-xs leading-tight">
-                {r.state === "ok" ? (
-                  <span className="w-3 shrink-0" aria-hidden />
-                ) : (
-                  <Icon className={cn("h-3 w-3 shrink-0", REQ_TONE[r.state].icon)} aria-hidden />
-                )}
+              // No gutter for an icon a met row does not have: the flag, when
+              // there is one, follows the figure.
+              <li key={r.key} className="flex items-center gap-1 text-xs leading-tight">
                 <span className="min-w-0 flex-1 truncate text-foreground">{r.name}</span>
                 <span className={cn("shrink-0 font-semibold tabular-nums", r.state === "ok" ? "text-foreground" : REQ_TONE[r.state].icon)}>
                   {r.figure.split(" · ")[0]}
                 </span>
+                {r.state !== "ok" && <Icon className={cn("h-3 w-3 shrink-0", REQ_TONE[r.state].icon)} aria-label={r.state === "fail" ? "Not met" : "Attention"} />}
               </li>
             )
           })}
@@ -334,14 +376,41 @@ export function limitsOf(brief: FlightBrief): Requirement[] {
   return LIMIT_ORDER.map((id) => byId.get(id)).filter((r): r is Requirement => !!r)
 }
 
+/**
+ * How much later the chosen duty can run inside every limit — the FDP's and
+ * every rolling window's — as a figure; amber under an hour, red at none.
+ */
+export function marginText(minutes: number): string {
+  // A day and more is said in hours: "+69h", not "+69:21".
+  return minutes >= 24 * 60 ? `${Math.floor(minutes / 60)}h` : formatDutyClock(minutes)
+}
+
+export function marginTone(minutes: number): string {
+  return minutes <= 0 ? "text-destructive" : minutes < 60 ? "text-status-warning" : "text-foreground"
+}
+
 export function LimitsFace({ brief }: { brief: FlightBrief }) {
   const limits = limitsOf(brief)
+  const m = brief.margin
   return (
     <>
-      <WidgetLabel right={<Tally rows={limits} />}>Limits</WidgetLabel>
+      <WidgetLabel
+        right={
+          m ? (
+            <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground" suppressHydrationWarning>
+              Delay <span className={cn("tabular-nums", marginTone(m.minutes))}>{marginText(m.minutes)}</span>
+            </span>
+          ) : (
+            <Tally rows={limits} />
+          )
+        }
+      >
+        Limits
+      </WidgetLabel>
       <ul className="space-y-1.5">
         {limits.map((r) => {
-          const [used, limit] = r.value.split(" / ")
+          // What is LEFT is the question ("how much more"); the bar shows what is used.
+          const left = (r.detail?.find((d) => d.label === "Remaining")?.value ?? "").replace(/h$/, "")
           const fraction = Math.min(1, Math.max(0, r.progress ?? 0))
           const fill = r.state === "ok" ? "bg-muted-foreground" : REQ_TONE[r.state].fill
           return (
@@ -349,8 +418,8 @@ export function LimitsFace({ brief }: { brief: FlightBrief }) {
               <span className="flex items-baseline justify-between gap-1">
                 <span className="truncate text-muted-foreground">{r.label}</span>
                 <span className="shrink-0 tabular-nums">
-                  <span className={cn("font-semibold", r.state === "ok" ? "text-foreground" : REQ_TONE[r.state].icon)}>{used}</span>
-                  <span className="text-muted-foreground">/{limit}</span>
+                  <span className={cn("font-semibold", r.state === "ok" ? "text-foreground" : REQ_TONE[r.state].icon)}>{left}h</span>
+                  <span className="text-muted-foreground"> left</span>
                 </span>
               </span>
               <span className="mt-1 block h-1 overflow-hidden rounded-full bg-muted">

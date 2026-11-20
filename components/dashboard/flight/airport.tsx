@@ -1,37 +1,41 @@
 "use client"
 
 /**
- * One destination as a PICTURE (the owner, Nov 2026: "provide more details for
- * airport… picture tells a thousand words"), after a station weather widget:
+ * One destination as a PICTURE (the owner, Nov 2026: "picture tells a
+ * thousand words"), after a station weather widget:
  *
  * ```
- * JAKARTA                         ● MVFR
- * 14:05 local · ☾
- * ─────────────────────────────────────────
- * ┌──┐  050°/14kt  ≋ 20kt
- * │╲ │  C 1,100' · Vis 6 km
- * └──┘  [ 19kt ↓   7kt →          34 ≡ ]
- * Last there 30 Oct · 3× this year       ›
+ * BANGKOK                                   ● MVFR
+ * VTBS · 14:05 UTC+7 ☾ · 765nm
+ * ─────────────────────────────────────────────
+ * ┌──┐  220°/15kt  ≋ 25kt
+ * │╲ │  28° · Q1009 · Vis 10 km · Ceiling 1,100'
+ * └──┘  [ 12kt ↓   6kt →            Rwy 19L ]
+ * Rwys   01R/19L 13,123' · 01L/19R 12,139'
+ * Freq   ATIS 127.8 · TWR 118.2
+ * Near   VTBD 16nm · VTBU 59nm IFR
+ * Last there 30 Oct · 3× this year                 ›
  * ```
  *
- * Dark cockpit: VFR, no gust, no ceiling light nothing; a category below VFR
- * is a coloured dot and word, a gust amber, a tailwind amber. The runway is
- * the one the wind favours (`favouredRunway`), read off its designator — an
- * approximation of the magnetic heading, said as "favoured", never as a
- * performance figure. Runways are asked only while this panel is up
- * (`useRunways`); without them the wind is drawn alone.
+ * Dark cockpit: VFR, no gust, no hazard light nothing; a category below VFR
+ * is a coloured dot, a gust or a tailwind amber. The runways are the airport
+ * data's (`useAirportInfo`, aviationweather.gov) with their TRUE headings, so
+ * the wind a METAR gives resolves onto them exactly; the favoured one is the
+ * most headwind. Without the data the wind is drawn alone.
  */
 
 import * as React from "react"
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronRight, Moon, Sun, Wind } from "lucide-react"
 import type { Airport } from "@/types/entities/airport.types"
-import { ceilingFt, metarConditions, type FlightCategory } from "@/lib/weather/brief"
-import { favouredRunway, runwayEnds, type WindOnRunway } from "@/lib/weather/runway-wind"
-import { useRunways } from "@/hooks/use-runways"
+import type { AirportInfo } from "@/lib/weather/airport-info"
+import { ceilingFt, metarConditions, metarReadings, type FlightCategory } from "@/lib/weather/brief"
+import { favouredRunway, runwayEndsFrom, type WindOnRunway } from "@/lib/weather/runway-wind"
 import { isNight } from "@/lib/utils/night-time"
 import { hasCoordinates } from "@/lib/utils/flight-calculations"
-import { getAirportLocalTime } from "@/lib/db/stores/reference/airports.store"
+import { getAirportLocalTime, getAirportTimeInfo } from "@/lib/db/stores/reference/airports.store"
+import { formatTimezoneOffset } from "@/lib/utils/time"
 import { cn } from "@/lib/utils"
+import { AlternateChip, type AlternateBrief } from "./alternates"
 
 /** A category below VFR — VFR is nominal and lights nothing. */
 const CATEGORY_DOT: Record<Exclude<FlightCategory, "VFR">, string> = {
@@ -40,7 +44,7 @@ const CATEGORY_DOT: Record<Exclude<FlightCategory, "VFR">, string> = {
   LIFR: "bg-fuchsia-500",
 }
 
-const fmtFt = (n: number) => `${n.toLocaleString("en-US")}'`
+const fmtFt = (n: number) => `${Math.round(n).toLocaleString("en-US")}'`
 const fmtVis = (m: number) => (m >= 9999 ? "10 km+" : m >= 5000 ? `${Math.round(m / 1000)} km` : `${m} m`)
 
 /** The runway and the wind on it, as a picture: north up, the wind's arrow pointing where it blows. */
@@ -55,23 +59,19 @@ function RunwayPicture({ favoured, windDir }: { favoured: WindOnRunway | null; w
   return (
     <svg width={S} height={S} viewBox={`0 0 ${S} ${S}`} className="shrink-0 rounded-xl bg-muted" aria-hidden>
       {h !== undefined && (
-        <>
-          {/* The runway the wind favours (its number is in the bar beside). */}
-          <line
-            x1={at(h + 180, 21)[0]}
-            y1={at(h + 180, 21)[1]}
-            x2={at(h, 21)[0]}
-            y2={at(h, 21)[1]}
-            stroke="currentColor"
-            strokeOpacity={0.75}
-            strokeWidth={5}
-            strokeLinecap="round"
-          />
-        </>
+        <line
+          x1={at(h + 180, 21)[0]}
+          y1={at(h + 180, 21)[1]}
+          x2={at(h, 21)[0]}
+          y2={at(h, 21)[1]}
+          stroke="currentColor"
+          strokeOpacity={0.75}
+          strokeWidth={5}
+          strokeLinecap="round"
+        />
       )}
       {windDir !== null && (
         <g className="text-primary">
-          {/* From where it comes, toward the centre. */}
           <line
             x1={at(windDir, 27)[0]}
             y1={at(windDir, 27)[1]}
@@ -91,32 +91,50 @@ function RunwayPicture({ favoured, windDir }: { favoured: WindOnRunway | null; w
   )
 }
 
+/** A labelled line: "Rwys  01R/19L 13,123' · …". */
+function Line({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <p className="flex items-baseline gap-2 text-[13px] tabular-nums">
+      <span className="w-9 shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
+      <span className="flex min-w-0 flex-wrap gap-x-2.5 gap-y-0.5">{children}</span>
+    </p>
+  )
+}
+
 export function AirportPanel({
-  icao,
   code,
   airport,
+  info,
   metar,
   arrivalMs,
+  distanceNm,
   weatherAsked,
+  nearby,
+  codeOf,
   lastLine,
   onLast,
 }: {
-  icao: string
-  /** How the pilot reads the code (Settings › Display). */
   code: string
   airport: Airport | undefined
+  /** Runways and frequencies; undefined while asked, null when the source has none. */
+  info: AirportInfo | null | undefined
   metar: { raw: string; category: FlightCategory | null } | null
   /** When the duty arrives there, for day or night on arrival. */
   arrivalMs: number | null
+  /** The leg's great-circle distance into it. */
+  distanceNm: number | null
   /** Whether the weather is asked at all — the duty is within a TAF's reach. */
   weatherAsked: boolean
+  /** The aerodromes near it, for a diversion. */
+  nearby: AlternateBrief[]
+  codeOf: (icao: string) => string
   /** "Last there 30 Oct · 3× this year". */
   lastLine: string
   onLast?: () => void
 }) {
-  const { names } = useRunways(icao, true)
   const c = React.useMemo(() => (metar ? metarConditions(metar.raw) : null), [metar])
-  const ends = React.useMemo(() => runwayEnds(names), [names])
+  const readings = React.useMemo(() => (metar ? metarReadings(metar.raw) : null), [metar])
+  const ends = React.useMemo(() => runwayEndsFrom(info?.runways ?? []), [info])
   const windDir = c?.windDir ?? null
   const favoured = c ? favouredRunway(ends, windDir, c.windKt) : null
   const ceiling = c ? ceilingFt(c) : null
@@ -124,23 +142,33 @@ export function AirportPanel({
   const night =
     arrivalMs !== null && airport && hasCoordinates(airport) ? isNight(new Date(arrivalMs), airport.latitude, airport.longitude) : null
   const Arrive = night === null ? null : night ? Moon : Sun
+  const local = airport?.tz ? getAirportLocalTime(airport.tz).split(" ")[0] : null
+  const offset = airport?.tz ? formatTimezoneOffset(getAirportTimeInfo(airport.tz).offset) : null
+  const place = airport?.city || airport?.name || ""
 
   const windText =
     c?.windKt === undefined ? null : c.windKt === 0 ? "Calm" : `${windDir === null ? "VRB" : String(windDir).padStart(3, "0") + "°"}/${c.windKt}kt`
+  const conditions = [
+    readings?.tempC !== null && readings?.tempC !== undefined ? `${readings.tempC}°` : null,
+    readings?.qnhHpa ? `Q${readings.qnhHpa}` : null,
+    c?.visM !== undefined ? `Vis ${fmtVis(c.visM)}` : null,
+  ].filter(Boolean)
 
   return (
     <div className="py-2">
-      {/* Where, and the time there. */}
+      {/* Where, the time there, and how far. */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-lg font-bold uppercase leading-tight tracking-tight text-foreground">
-            {airport?.city || airport?.name || code}
-          </p>
-          <p className="flex items-center gap-1.5 text-[13px] tabular-nums text-muted-foreground" suppressHydrationWarning>
-            {/* The code under the place — not when the place IS the code. */}
-            {(airport?.city || airport?.name) && <span>{code}</span>}
-            {airport?.tz && <span>{airport.city || airport.name ? "· " : ""}{getAirportLocalTime(airport.tz)}</span>}
+          <p className="truncate text-lg font-bold uppercase leading-tight tracking-tight text-foreground">{place || code}</p>
+          <p className="flex flex-wrap items-center gap-x-1.5 text-[13px] tabular-nums text-muted-foreground" suppressHydrationWarning>
+            {place && <span className="font-semibold text-foreground">{code}</span>}
+            {local && (
+              <span>
+                {local} {offset}
+              </span>
+            )}
             {Arrive && <Arrive className="h-3.5 w-3.5" aria-label={night ? "Arrive by night" : "Arrive by day"} />}
+            {distanceNm !== null && <span>· {Math.round(distanceNm).toLocaleString("en-US")}nm</span>}
           </p>
         </div>
         {category && category !== "VFR" && (
@@ -166,20 +194,17 @@ export function AirportPanel({
               ) : null}
             </p>
             <p className="truncate text-[13px] tabular-nums text-muted-foreground">
-              {ceiling !== null ? (
-                <>
-                  Ceiling <span className="font-semibold text-foreground">{fmtFt(ceiling)}</span>
-                </>
-              ) : (
-                "No ceiling"
-              )}
-              {c.visM !== undefined && <> · Vis {fmtVis(c.visM)}</>}
+              {[...conditions, ceiling !== null ? `Ceiling ${fmtFt(ceiling)}` : null].filter(Boolean).join(" · ")}
             </p>
             {favoured && (
               <p className="flex items-center gap-3 rounded-lg bg-muted px-2.5 py-1 text-[13px] font-semibold tabular-nums text-foreground">
                 <span className={cn("inline-flex items-center gap-0.5", favoured.headKt < 0 && "text-status-warning")}>
                   {Math.abs(favoured.headKt)}kt
-                  {favoured.headKt < 0 ? <ArrowUp className="h-3.5 w-3.5" aria-label="tailwind" /> : <ArrowDown className="h-3.5 w-3.5" aria-label="headwind" />}
+                  {favoured.headKt < 0 ? (
+                    <ArrowUp className="h-3.5 w-3.5" aria-label="tailwind" />
+                  ) : (
+                    <ArrowDown className="h-3.5 w-3.5" aria-label="headwind" />
+                  )}
                 </span>
                 {favoured.crossKt > 0 && (
                   <span className="inline-flex items-center gap-0.5">
@@ -201,6 +226,36 @@ export function AirportPanel({
           {weatherAsked ? "No report from here yet" : "Weather from 30 hours before"}
         </p>
       )}
+
+      {/* The airport itself: runways, frequencies, what is near. */}
+      <div className="mt-2 space-y-1">
+        {info && info.runways.length > 0 && (
+          <Line label="Rwys">
+            {info.runways.map((r) => (
+              <span key={r.id} className="whitespace-nowrap">
+                <span className="font-semibold text-foreground">{r.id}</span>
+                {r.lengthFt ? <span className="text-muted-foreground"> {fmtFt(r.lengthFt)}</span> : null}
+              </span>
+            ))}
+          </Line>
+        )}
+        {info && info.freqs.length > 0 && (
+          <Line label="Freq">
+            {info.freqs.slice(0, 4).map(([name, mhz]) => (
+              <span key={name + mhz} className="whitespace-nowrap">
+                <span className="text-muted-foreground">{name}</span> <span className="font-semibold text-foreground">{mhz}</span>
+              </span>
+            ))}
+          </Line>
+        )}
+        {nearby.length > 0 && (
+          <Line label="Near">
+            {nearby.map((a) => (
+              <AlternateChip key={a.alt.icao} a={a} code={codeOf} showWeather={weatherAsked} />
+            ))}
+          </Line>
+        )}
+      </div>
 
       {/* When last there — a tap opens that flight. */}
       {onLast ? (

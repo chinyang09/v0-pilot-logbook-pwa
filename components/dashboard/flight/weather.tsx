@@ -14,7 +14,7 @@
 import type * as React from "react"
 import { TriangleAlert } from "lucide-react"
 import { ageText } from "@/lib/weather/format"
-import { categoryOf, hazardLine, hazardsOf, type FlightCategory, type StationBrief, type StationWindow } from "@/lib/weather/brief"
+import { categoryOf, hazardLine, hazardsOf, metarConditions, metarReadings, type FlightCategory, type StationBrief, type StationWindow } from "@/lib/weather/brief"
 import { cn } from "@/lib/utils"
 import { WidgetLabel } from "./widget"
 
@@ -73,6 +73,23 @@ export function WeatherFace({ weather, code }: { weather: WeatherState; code: (i
         </ul>
       )}
     </>
+  )
+}
+
+/** The METAR read out: wind (gust amber), temperature, QNH — what a briefing reads off it first. */
+function MetarLine({ raw }: { raw: string }) {
+  const c = metarConditions(raw)
+  const r = metarReadings(raw)
+  const wind =
+    c.windKt === undefined ? null : c.windKt === 0 ? "Calm" : `${c.windDir === null || c.windDir === undefined ? "VRB" : String(c.windDir).padStart(3, "0") + "°"}/${c.windKt}kt`
+  const parts = [r.tempC !== null ? `${r.tempC}°/${r.dewC ?? "–"}°` : null, r.qnhHpa ? `Q${r.qnhHpa}` : null].filter(Boolean)
+  if (!wind && parts.length === 0) return null
+  return (
+    <p className="text-[13px] font-semibold tabular-nums text-foreground">
+      {wind}
+      {c.gustKt ? <span className="text-status-warning"> G{c.gustKt}</span> : null}
+      {parts.length > 0 && <span className="font-normal text-muted-foreground"> · {parts.join(" · ")}</span>}
+    </p>
   )
 }
 
@@ -144,6 +161,7 @@ export function WeatherBody({
                 </span>
               )}
             </div>
+            {b.metar && <MetarLine raw={b.metar.raw} />}
             {b.metar && <p className="break-words text-[12px] leading-snug text-muted-foreground tabular-nums">{b.metar.raw.replace(/^METAR /, "")}</p>}
             {lit.map(({ p, i, covers }) => {
               const own = p.kind === "base" || p.kind === "FM" ? p.conditions : p.stated

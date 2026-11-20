@@ -203,6 +203,31 @@ export function metarConditions(raw: string): Conditions {
   return readConditions(body)
 }
 
+/**
+ * The METAR's temperature, dew point and QNH — read off its body, which
+ * `metarConditions` skips (they are not conditions). An "A2992" altimeter is
+ * turned into hectopascals; nulls where the report does not give them.
+ */
+export function metarReadings(raw: string): { tempC: number | null; dewC: number | null; qnhHpa: number | null } {
+  let tempC: number | null = null
+  let dewC: number | null = null
+  let qnhHpa: number | null = null
+  const num = (s: string) => (s.startsWith("M") ? -Number(s.slice(1)) : Number(s))
+  for (const t of raw.trim().split(/\s+/).slice(2)) {
+    if (t === "RMK" || t === "TEMPO" || t === "BECMG" || t === "NOSIG") break
+    let m: RegExpMatchArray | null
+    if ((m = t.match(/^(M?\d{2})\/(M?\d{2})?$/))) {
+      tempC = num(m[1])
+      dewC = m[2] ? num(m[2]) : null
+    } else if ((m = t.match(/^Q(\d{4})$/))) {
+      qnhHpa = Number(m[1])
+    } else if ((m = t.match(/^A(\d{4})$/))) {
+      qnhHpa = Math.round(Number(m[1]) * 0.338639)
+    }
+  }
+  return { tempC, dewC, qnhHpa }
+}
+
 /* ── TAF ─────────────────────────────────────────────────────────────────── */
 
 /**
