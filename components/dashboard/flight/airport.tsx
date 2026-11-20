@@ -102,6 +102,7 @@ function Line({ label, children }: { label: string; children: React.ReactNode })
 }
 
 export function AirportPanel({
+  icao,
   code,
   airport,
   info,
@@ -114,6 +115,7 @@ export function AirportPanel({
   lastLine,
   onLast,
 }: {
+  icao: string
   code: string
   airport: Airport | undefined
   /** Runways and frequencies; undefined while asked, null when the source has none. */
@@ -159,22 +161,34 @@ export function AirportPanel({
       {/* Where, the time there, and how far. */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-lg font-bold uppercase leading-tight tracking-tight text-foreground">{place || code}</p>
+          <p className="truncate text-lg font-bold uppercase leading-tight tracking-tight text-foreground" data-morph={place ? `dest-place-${icao}` : `dest-code-${icao}`}>
+            {place || code}
+          </p>
           <p className="flex flex-wrap items-center gap-x-1.5 text-[13px] tabular-nums text-muted-foreground" suppressHydrationWarning>
-            {place && <span className="font-semibold text-foreground">{code}</span>}
+            {place && (
+              <span className="font-semibold text-foreground" data-morph={`dest-code-${icao}`}>
+                {code}
+              </span>
+            )}
             {local && (
               <span>
-                {local} {offset}
+                <span data-morph={`dest-time-${icao}`}>{local}</span> {offset}
               </span>
             )}
             {Arrive && <Arrive className="h-3.5 w-3.5" aria-label={night ? "Arrive by night" : "Arrive by day"} />}
-            {distanceNm !== null && <span>· {Math.round(distanceNm).toLocaleString("en-US")}nm</span>}
+            {distanceNm !== null && (
+              <span>
+                · <span data-morph={`dest-dist-${icao}`}>{Math.round(distanceNm).toLocaleString("en-US")}nm</span>
+              </span>
+            )}
           </p>
         </div>
         {category && category !== "VFR" && (
           <span className="flex shrink-0 flex-col items-end gap-1 pt-0.5">
             <span className={cn("h-3 w-3 rounded-full", CATEGORY_DOT[category])} aria-hidden />
-            <span className="text-xs font-semibold text-foreground">{category}</span>
+            <span className="text-xs font-semibold text-foreground" data-morph={`dest-cat-${icao}`}>
+              {category}
+            </span>
           </span>
         )}
       </div>
@@ -197,7 +211,10 @@ export function AirportPanel({
               {[...conditions, ceiling !== null ? `Ceiling ${fmtFt(ceiling)}` : null].filter(Boolean).join(" · ")}
             </p>
             {favoured && (
-              <p className="flex items-center gap-3 rounded-lg bg-muted px-2.5 py-1 text-[13px] font-semibold tabular-nums text-foreground">
+              <p
+                className="flex items-center gap-3 rounded-lg bg-muted px-2.5 py-1 text-[13px] font-semibold tabular-nums text-foreground"
+                data-morph={`dest-rwy-${icao}`}
+              >
                 <span className={cn("inline-flex items-center gap-0.5", favoured.headKt < 0 && "text-status-warning")}>
                   {Math.abs(favoured.headKt)}kt
                   {favoured.headKt < 0 ? (

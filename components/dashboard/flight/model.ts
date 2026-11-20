@@ -15,6 +15,7 @@ import type { CrewMate, DestinationVisits } from "@/lib/utils/dashboard/flight-b
 import type { LegTimes } from "@/lib/weather/brief"
 import type { CurrencySummary } from "@/lib/utils/dashboard/currency-summary"
 import type { WeatherState } from "./weather"
+import type { AirportInfo } from "@/lib/weather/airport-info"
 import type { DelayMargin } from "@/lib/utils/dashboard/delay-margin"
 
 export interface FlightBrief {
@@ -62,7 +63,11 @@ export interface FlightBrief {
   destinations: DestinationVisits[]
   /** The airports the duty touches, by ICAO, once read. */
   airports: Map<string, Airport>
+  /** Runways and frequencies for the destinations, by ICAO (undefined while asked, null when the source has none). */
+  airportInfo: Record<string, AirportInfo | null>
   weather: WeatherState
+  /** The airport the weather tile shows — where the duty goes next. */
+  weatherStation: string | null
   /** An airport's code as the pilot reads them (Settings › Display). */
   code: (icao: string, iata?: string) => string
   /** A point in time as the app writes one. */

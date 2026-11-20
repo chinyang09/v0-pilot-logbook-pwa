@@ -7,16 +7,20 @@
  * move as the answers land). The detail behind each is in `details.tsx`.
  */
 
-import { ChevronDown, OctagonAlert, TriangleAlert } from "lucide-react"
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronDown, OctagonAlert, TriangleAlert } from "lucide-react"
 import { ChoicePicker } from "@/components/ui/option-menu"
 import type { Requirement } from "@/lib/utils/dashboard/legality"
 import type { SectorLeg } from "@/lib/utils/dashboard/duty-status"
 import { formatDay } from "@/lib/utils/date"
 import { cn } from "@/lib/utils"
-import { formatDutyClock, formatRestSpan } from "@/lib/utils/dashboard/duty-status"
-import { DutyBand, REQ_TONE, STATE_ICON, SectorChain, TONE } from "./instruments"
+import { dutyWindow, formatDutyClock, formatRestSpan } from "@/lib/utils/dashboard/duty-status"
+import { DutyBand, REQ_TONE, STATE_ICON, TONE } from "./instruments"
 import { WidgetLabel } from "./widget"
-import { getAirportLocalTime } from "@/lib/db/stores/reference/airports.store"
+import { getAirportLocalTime, getAirportTimeInfo } from "@/lib/db/stores/reference/airports.store"
+import { formatTimezoneOffset } from "@/lib/utils/time"
+import { metarConditions } from "@/lib/weather/brief"
+import { favouredRunway, runwayEndsFrom, type WindOnRunway } from "@/lib/weather/runway-wind"
+import { CATEGORY_TEXT } from "./weather"
 import { greatCircleNm } from "@/lib/utils/geo"
 import { hasCoordinates } from "@/lib/utils/flight-calculations"
 import type { FlightBrief } from "./model"
@@ -79,6 +83,105 @@ export function restBeforeText(brief: FlightBrief): { text: string; short: boole
   return { text: `Rest ${formatRestSpan(r.restMinutes)} · Min ${formatDutyClock(r.requiredRestMinutes)}`, short: !r.compliant }
 }
 
+/**
+ * The duty laid on its day (the owner's duty-and-crew widget): a 24-hour
+ * strip, six-hourly ticks in the pilot's clock, the duty from report to off
+ * duty as a track, each leg filled on it — flown in ink, still to fly in the
+ * accent — and now as a hairline. A duty past midnight moves the window on
+ * so it is all in view.
+ */
+function DayBar({ brief }: { brief: FlightBrief }) {
+  const { duty, now, display } = brief
+  const zulu = display?.useZuluTime !== false
+  const legs = duty.times
+  const w = duty.period ? dutyWindow(duty.period) : null
+  const start0 = w?.startMs ?? duty.atMs
+  if (start0 === null) return null
+  const end0 = w?.endMs ?? Math.max(...legs.map((t) => t.arriveMs ?? 0), start0 + 3600_000)
+  const H = 3600_000
+  const dayStart = (ms: number) => {
+    const d = new Date(ms)
+    return zulu ? Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) : new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  }
+  let from = dayStart(start0)
+  while (end0 > from + 24 * H && from + 6 * H <= start0) from += 6 * H
+  const to = from + 24 * H
+  const pct = (ms: number) => `${Math.max(0, Math.min(100, ((ms - from) / (to - from)) * 100))}%`
+  const span = (a: number, b: number) => ({ left: pct(a), width: `calc(${pct(b)} - ${pct(a)})` })
+  const hourOf = (ms: number) => (zulu ? new Date(ms).getUTCHours() : new Date(ms).getHours())
+  return (
+    <div aria-hidden className="mb-1.5">
+      <div className="relative h-3">
+        {/* Six-hourly ticks across the day. */}
+        {[0, 6, 12, 18, 24].map((h) => (
+          <span key={h} className="absolute inset-y-0 w-px bg-border" style={{ left: pct(from + h * H) }} />
+        ))}
+        <span className="absolute inset-y-0 rounded-full border border-foreground/25 bg-muted" style={span(start0, end0)} />
+        {legs.map((t, i) =>
+          t.departMs !== null && t.arriveMs !== null ? (
+            <span
+              key={i}
+              className={cn("absolute inset-y-0.5 rounded-full", duty.legs[i]?.inTime ? "bg-foreground/55" : "bg-primary")}
+              style={span(t.departMs, t.arriveMs)}
+            />
+          ) : null,
+        )}
+        {now > from && now < to && <span className="absolute -inset-y-0.5 w-0.5 rounded-full bg-foreground" style={{ left: pct(now) }} />}
+      </div>
+      <div className="relative mt-0.5 h-3 text-[9px] tabular-nums text-muted-foreground">
+        {[0, 6, 12, 18].map((h) => (
+          <span key={h} className="absolute" style={{ left: pct(from + h * H) }}>
+            {String(hourOf(from + h * H)).padStart(2, "0")}
+          </span>
+        ))}
+        <span className="absolute right-0">{zulu ? "Z" : "L"}</span>
+      </div>
+    </div>
+  )
+}
+
+/** The crew beside the duty: initials, the name, their seat and how often flown together. */
+function CrewPanel({ brief }: { brief: FlightBrief }) {
+  const { crew } = brief
+  const shown = crew.slice(0, 3)
+  const role = (r: string) => (r === "PIC" ? "P1" : r === "SIC" ? "P2" : /relief/i.test(r) ? "RP" : r)
+  return (
+    <div className="-my-3 -mr-3 ml-3 flex w-[40%] max-w-44 shrink-0 flex-col justify-center gap-1.5 rounded-r-2xl border-l border-border/70 bg-muted/50 px-2.5 py-3">
+      {shown.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No crew yet</p>
+      ) : (
+        shown.map((m) => (
+          <div key={m.personId ?? m.name} className="flex min-w-0 items-center gap-1.5" data-morph={`crew-${m.personId ?? m.name}`}>
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-card text-[9px] font-semibold text-foreground">
+              {initialsOf(m.name)}
+            </span>
+            <span className="min-w-0 leading-tight">
+              <span className="block truncate text-[12px] font-medium text-foreground">{shortName(m.name)}</span>
+              <span className="block truncate text-[10px] tabular-nums text-muted-foreground">
+                {[role(m.role), m.last ? (m.count ? `${m.count}×` : null) : "New"].filter(Boolean).join(" · ")}
+              </span>
+            </span>
+          </div>
+        ))
+      )}
+      {crew.length > shown.length && <p className="pl-7 text-[11px] text-muted-foreground">+ {crew.length - shown.length} more</p>}
+    </div>
+  )
+}
+
+/** "Woon Kok Heng" → "WK". */
+export function initialsOf(name: string): string {
+  const parts = shortName(name).split(/\s+/).filter(Boolean)
+  return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase() || "?"
+}
+
+/**
+ * The chosen duty and who flies it, one tile (the owner's duty-and-crew
+ * widget, Nov 2026): the date line (a menu of duties), the duty on its day,
+ * the route in large type, the times and flight numbers, then the aeroplane
+ * line (where it is, the gate) — and the crew in a panel beside it. The card
+ * has each leg with its times and gates, and every crew member.
+ */
 export function FlightFace({ brief }: { brief: FlightBrief }) {
   const { duty, clock, day } = brief
   const { legs, route } = chainOf(brief)
@@ -93,45 +196,37 @@ export function FlightFace({ brief }: { brief: FlightBrief }) {
   const reg = duty.legs.find((l) => !l.inTime && l.aircraftReg)?.aircraftReg || duty.legs[0]?.aircraftReg || ""
   const numbers = duty.legs.map((l) => l.flightNumber).filter(Boolean)
   const rest = restBeforeText(brief)
-  // The aeroplane is named once: in the line under the chain, which says
-  // where it is when that is known.
   const line = duty.info?.line ?? [reg, rest?.text].filter(Boolean).join(" · ")
-  // Under each stop: out from the first, in at the last, and at a stop in
-  // between BOTH — in from the leg before, out on the leg after ("01:50–02:35Z";
-  // the owner: the next sector's out was missing).
-  const at = (ms: number | null) => (ms !== null ? clock(ms) : "")
-  const times =
-    duty.times.length === legs.length && legs.length > 0
-      ? [
-          at(duty.times[0].departMs),
-          ...duty.times.map((t, i) => {
-            const arr = at(t.arriveMs)
-            const next = duty.times[i + 1]
-            if (!next) return arr
-            const dep = at(next.departMs)
-            if (!arr || !dep) return arr || dep
-            return `${arr.replace(/Z$/, "")}–${dep}`
-          }),
-        ]
-      : undefined
+  const stops = legs.length ? [legs[0].from, ...legs.map((l) => l.to)] : (route ?? "").split("-").filter(Boolean)
+  const first = duty.times[0]?.departMs ?? null
+  const last = duty.times[duty.times.length - 1]?.arriveMs ?? null
+  const remaining = duty.legs.filter((l) => !l.inTime).length
+  // The next leg's departure gate — under its stop before; on the line now.
+  const nextIdx = Math.max(0, duty.legs.findIndex((l) => !l.inTime))
+  const gate = duty.info?.legGates[nextIdx]?.dep ?? ""
   return (
-    <>
-      <WidgetLabel>
-        <span className="inline-flex items-center gap-0.5" suppressHydrationWarning>
-          {dutyWord(brief)} · {day(duty.atMs)}
-          {duty.choices.length > 1 && <ChevronDown className="h-3 w-3" aria-hidden />}
-        </span>
-      </WidgetLabel>
-      {(numbers.length > 0 || duty.fdp) && (
-        <p className="-mt-0.5 mb-1.5 flex items-baseline justify-between gap-2 text-sm font-semibold text-foreground">
-          <span className="min-w-0 truncate">{numbers.join(" · ")}</span>
+    <div className="flex min-w-0">
+      {/* A container: on a phone the crew panel leaves the route ~190px, and a
+          three-stop route at 21px does not fit it (measured at 360). */}
+      <div className="@container min-w-0 flex-1">
+        <WidgetLabel>
+          <span className="inline-flex items-center gap-0.5" suppressHydrationWarning>
+            {dutyWord(brief)} · {day(duty.atMs)}
+            {duty.choices.length > 1 && <ChevronDown className="h-3 w-3" aria-hidden />}
+          </span>
+        </WidgetLabel>
+        <DayBar brief={brief} />
+        <p className="truncate text-[17px] font-bold leading-tight tracking-tight text-foreground @[15rem]:text-[21px]">
+          {stops.join(stops.length > 2 ? "–" : " – ") || "—"}
+        </p>
+        <p className="mt-0.5 flex items-baseline justify-between gap-1.5 text-[12px] tabular-nums" suppressHydrationWarning>
+          <span className="shrink-0 text-foreground">{first !== null && last !== null ? `${clock(first).replace(/Z$/, "")}–${clock(last)}` : ""}</span>
           {duty.fdp && (
-            // What this duty ASKS of the pilot: its FDP against its own Reg 14
-            // maximum (the duty card says what NOW asks).
+            // What this duty ASKS of the pilot: its FDP against its own Reg 14 maximum.
             <span
               className={cn(
-                "shrink-0 text-[11px] font-medium tabular-nums",
-                duty.fdp.max > 0 && duty.fdp.planned > duty.fdp.max ? "text-destructive" : "text-muted-foreground",
+                "min-w-0 truncate",
+                duty.fdp.max > 0 && duty.fdp.planned > duty.fdp.max ? "font-semibold text-destructive" : "text-muted-foreground",
               )}
             >
               FDP {formatDutyClock(duty.fdp.planned)}
@@ -139,20 +234,22 @@ export function FlightFace({ brief }: { brief: FlightBrief }) {
             </span>
           )}
         </p>
-      )}
-      <SectorChain legs={legs} nextRoute={route} legGates={duty.info?.legGates} times={times} />
-      {line && (
         <p
-          className={cn(
-            "mt-2 truncate text-[11px] leading-tight",
-            !duty.info && rest?.short ? "text-destructive" : "text-muted-foreground",
-          )}
+          className={cn("mt-0.5 truncate text-[11px] leading-tight", !duty.info && rest?.short ? "text-destructive" : "text-muted-foreground")}
           suppressHydrationWarning
         >
-          {line}
+          {[
+            numbers.join("/").replace(/\/([A-Z]{2})(\d)/g, (_, _a, d) => `/${d}`) || null,
+            duty.current && remaining > 0 ? (remaining === 1 ? "One more leg" : `${remaining} more legs`) : null,
+            gate ? `Gate ${gate}` : null,
+            line,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
         </p>
-      )}
-    </>
+      </div>
+      <CrewPanel brief={brief} />
+    </div>
   )
 }
 
@@ -187,31 +284,6 @@ export function DutyChooser({ brief, onChoose }: { brief: FlightBrief; onChoose:
   )
 }
 
-/* ── Crew ────────────────────────────────────────────────────────────────── */
-
-export function CrewFace({ brief }: { brief: FlightBrief }) {
-  const { crew, duty } = brief
-  return (
-    <>
-      <WidgetLabel>Crew</WidgetLabel>
-      {crew.length === 0 ? (
-        <p className="text-xs leading-snug text-muted-foreground">—</p>
-      ) : (
-        <ul className="space-y-0.5">
-          {crew.slice(0, 3).map((m) => (
-            <li key={m.personId ?? m.name} className="text-xs leading-tight">
-              <span className="block truncate font-medium text-foreground">{shortName(m.name)}</span>
-              <span className="block truncate text-[10px] text-muted-foreground">
-                {m.last ? `${m.count ? `${m.count}× · ` : ""}${shortDay(m.last.date)}` : "New"}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </>
-  )
-}
-
 /* ── Destinations ────────────────────────────────────────────────────────── */
 
 /** The airports worth asking "when was I last there" about — not where the duty starts. */
@@ -229,39 +301,101 @@ export function distanceInto(brief: FlightBrief, icao: string): number | null {
   return greatCircleNm({ lat: from.latitude, lon: from.longitude }, { lat: to.latitude, lon: to.longitude })
 }
 
+/** The runway the wind favours at a destination, from its runways and its METAR. */
+export function favouredAt(brief: FlightBrief, icao: string): WindOnRunway | null {
+  const info = brief.airportInfo[icao]
+  const raw = brief.weather.briefs.find((b) => b.station === icao)?.metar?.raw
+  if (!info || !raw) return null
+  const c = metarConditions(raw)
+  return favouredRunway(runwayEndsFrom(info.runways), c.windDir ?? null, c.windKt)
+}
+
+/** "25R ↓13 →7" — the favoured runway, its head (or tail, amber) and crosswind. */
+export function RunwayWind({ fav, className }: { fav: WindOnRunway; className?: string }) {
+  return (
+    <span className={cn("inline-flex items-center gap-1.5 tabular-nums", className)}>
+      <span className="font-semibold text-foreground">{fav.end.ident}</span>
+      <span className={cn("inline-flex items-center", fav.headKt < 0 ? "font-semibold text-status-warning" : "text-foreground")}>
+        {fav.headKt < 0 ? <ArrowUp className="h-3 w-3" aria-label="tailwind" /> : <ArrowDown className="h-3 w-3" aria-label="headwind" />}
+        {Math.abs(fav.headKt)}
+      </span>
+      {fav.crossKt > 0 && (
+        <span className="inline-flex items-center text-foreground">
+          {fav.crossFrom === "L" ? <ArrowRight className="h-3 w-3" aria-label="crosswind from the left" /> : <ArrowLeft className="h-3 w-3" aria-label="crosswind from the right" />}
+          {fav.crossKt}
+        </span>
+      )}
+    </span>
+  )
+}
+
+/**
+ * Where the duty is going (the owner: time and zone there, how far, when last
+ * there, its runways and whether it is IFR — at a glance). The destination
+ * the duty goes to next leads: its place, code, local time and zone, the
+ * leg's distance and the last visit, then the runway the wind favours with
+ * its components and the category when below VFR. Any other destination is a
+ * line under it.
+ */
 export function DestinationFace({ brief }: { brief: FlightBrief }) {
   const dests = destinationsOf(brief)
+  if (dests.length === 0) {
+    return (
+      <>
+        <WidgetLabel>Destination</WidgetLabel>
+        <p className="text-xs leading-snug text-muted-foreground">—</p>
+      </>
+    )
+  }
+  const lead = dests.find((d) => d.icao === brief.weatherStation) ?? dests[0]
+  const others = dests.filter((d) => d !== lead).slice(0, 2)
+  const a = brief.airports.get(lead.icao)
+  const nm = distanceInto(brief, lead.icao)
+  const fav = favouredAt(brief, lead.icao)
+  const cat = brief.weather.briefs.find((b) => b.station === lead.icao)?.metar?.category ?? null
+  const local = a?.tz ? getAirportLocalTime(a.tz).split(" ")[0] : null
+  const zone = a?.tz ? formatTimezoneOffset(getAirportTimeInfo(a.tz).offset) : null
   return (
     <>
-      <WidgetLabel>Destination</WidgetLabel>
-      {dests.length === 0 ? (
-        <p className="text-xs leading-snug text-muted-foreground">—</p>
-      ) : (
-        <ul className="space-y-0.5">
-          {dests.slice(0, 3).map((d) => {
-            const a = brief.airports.get(d.icao)
-            const nm = distanceInto(brief, d.icao)
-            return (
-              <li key={d.icao} className="text-xs leading-tight">
-                {/* Where, and the time there now. */}
-                <span className="flex items-baseline justify-between gap-1.5">
-                  <span className="truncate font-medium text-foreground">{brief.code(d.icao)}</span>
-                  {a?.tz && (
-                    <span className="shrink-0 tabular-nums text-foreground" suppressHydrationWarning>
-                      {getAirportLocalTime(a.tz).split(" ")[0]}
-                      <span className="text-[10px] text-muted-foreground"> L</span>
-                    </span>
-                  )}
-                </span>
-                {/* How far, and when last there. */}
-                <span className="block truncate text-[10px] tabular-nums text-muted-foreground">
-                  {[nm !== null ? `${Math.round(nm)}nm` : null, d.last ? shortDay(d.last.date) : "First"].filter(Boolean).join(" · ")}
-                </span>
-              </li>
-            )
-          })}
-        </ul>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="truncate text-[17px] font-bold leading-tight tracking-tight text-foreground" data-morph={`dest-code-${lead.icao}`}>
+          {brief.code(lead.icao)}
+        </span>
+        {cat && cat !== "VFR" && (
+          <span className={cn("shrink-0 text-[13px] font-semibold", CATEGORY_TEXT[cat])} data-morph={`dest-cat-${lead.icao}`}>
+            {cat}
+          </span>
+        )}
+      </div>
+      <p className="truncate text-[11px] uppercase tracking-wide text-muted-foreground" data-morph={`dest-place-${lead.icao}`}>
+        {a?.city || a?.name || "\u00a0"}
+      </p>
+      {local && (
+        <p className="mt-1.5 text-[20px] font-semibold leading-none tabular-nums text-foreground" suppressHydrationWarning>
+          <span data-morph={`dest-time-${lead.icao}`}>{local}</span>
+          <span className="ml-1 text-[11px] font-medium text-muted-foreground">{zone}</span>
+        </p>
       )}
+      <p className="mt-1 truncate text-[11px] tabular-nums text-muted-foreground">
+        {nm !== null && <span data-morph={`dest-dist-${lead.icao}`}>{Math.round(nm).toLocaleString("en-US")}nm</span>}
+        {nm !== null && " · "}
+        {lead.last ? `Last ${shortDay(lead.last.date)}` : "First time"}
+      </p>
+      {fav && (
+        <p className="mt-1.5 text-[12px]" data-morph={`dest-rwy-${lead.icao}`}>
+          <RunwayWind fav={fav} />
+        </p>
+      )}
+      {others.map((d) => (
+        <p key={d.icao} className="mt-1 truncate border-t border-border/60 pt-1 text-[11px] tabular-nums text-muted-foreground">
+          <span className="font-medium text-foreground">{brief.code(d.icao)}</span>
+          {(() => {
+            const o = brief.airports.get(d.icao)
+            return o?.tz ? <span suppressHydrationWarning> {getAirportLocalTime(o.tz).split(" ")[0]}</span> : null
+          })()}
+          {d.last ? ` · Last ${shortDay(d.last.date)}` : " · First"}
+        </p>
+      ))}
     </>
   )
 }
@@ -355,8 +489,13 @@ export function CurrencyFace({ brief, rows = 3 }: { brief: FlightBrief; rows?: n
               // No gutter for an icon a met row does not have: the flag, when
               // there is one, follows the figure.
               <li key={r.key} className="flex items-center gap-1 text-xs leading-tight">
-                <span className="min-w-0 flex-1 truncate text-foreground">{r.name}</span>
-                <span className={cn("shrink-0 font-semibold tabular-nums", r.state === "ok" ? "text-foreground" : REQ_TONE[r.state].icon)}>
+                <span className="min-w-0 flex-1 truncate text-foreground" data-morph={`cur-name-${r.key}`}>
+                  {r.name}
+                </span>
+                <span
+                  className={cn("shrink-0 font-semibold tabular-nums", r.state === "ok" ? "text-foreground" : REQ_TONE[r.state].icon)}
+                  data-morph={`cur-fig-${r.key}`}
+                >
                   {r.figure.split(" · ")[0]}
                 </span>
                 {r.state !== "ok" && <Icon className={cn("h-3 w-3 shrink-0", REQ_TONE[r.state].icon)} aria-label={r.state === "fail" ? "Not met" : "Attention"} />}

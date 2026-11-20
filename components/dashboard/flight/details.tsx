@@ -25,7 +25,6 @@ import { currencyRows, destinationsOf, distanceInto, limitsOf, marginText, margi
 import { WeatherBody } from "./weather"
 import { AirportPanel } from "./airport"
 import { EnRoute, useDutyAlternates } from "./alternates"
-import { useAirportInfo } from "@/hooks/use-airport-info"
 import type { FlightBrief } from "./model"
 import type { WidgetAction, WidgetId } from "./widget"
 
@@ -33,7 +32,6 @@ export const WIDGET_TITLE: Record<WidgetId, string> = {
   duty: "Duty & Rest",
   flight: "Flights",
   weather: "Weather",
-  crew: "Crew",
   destination: "Destination",
   currency: "Currency",
   limits: "Limits",
@@ -142,7 +140,7 @@ export function widgetContent(
       const legs = brief.duty.legs
       return {
         header: "face",
-        body: legs.length ? <FlightBody brief={brief} ctx={ctx} /> : null,
+        body: legs.length || brief.crew.length ? <FlightBody brief={brief} ctx={ctx} /> : null,
         // Each leg opens from its own row; the one thing to DO is ask again.
         actions: [
           ...(legs.length && brief.duty.lookups
@@ -165,7 +163,7 @@ export function widgetContent(
         header: "label",
         body: (
           <>
-            <WeatherBody weather={brief.weather} code={brief.code} clock={brief.clock} now={brief.now} />
+            <WeatherBody weather={brief.weather} code={brief.code} clock={brief.clock} now={brief.now} station={brief.weatherStation} />
             <EnRoute brief={brief} />
           </>
         ),
@@ -181,12 +179,6 @@ export function widgetContent(
               },
             ]
           : [],
-      }
-    case "crew":
-      return {
-        header: brief.crew.length ? "label" : "face",
-        body: brief.crew.length ? <CrewBody brief={brief} go={ctx.go} /> : null,
-        actions: [{ id: "crew", label: "Crew", run: () => ctx.go("/crew") }],
       }
     case "destination":
       return {
@@ -261,6 +253,7 @@ function DutyBody({ brief }: { brief: FlightBrief }) {
 function FlightBody({ brief, ctx }: { brief: FlightBrief; ctx: WidgetCtx }) {
   const { duty, code, clock, day } = brief
   const w = duty.period ? dutyWindow(duty.period) : null
+  const times = duty.times
   const inbound = duty.lookups?.inbound
   const lines =
     inbound?.status === "done" ? whereaboutsLines(inbound.whereabouts, brief.now, brief.display?.clockSeparator) : null
@@ -295,6 +288,10 @@ function FlightBody({ brief, ctx }: { brief: FlightBrief; ctx: WidgetCtx }) {
                 }
                 sub={
                   [
+                    // The leg's own times: the tile's bar draws them, the row says them.
+                    times[i]?.departMs != null && times[i]?.arriveMs != null
+                      ? `${clock(times[i].departMs!).replace(/Z$/, "")}–${clock(times[i].arriveMs!)}`
+                      : null,
                     dep || arr ? `Gate ${dep || "–"} → ${arr || "–"}` : null,
                     // The airport names the flight the aeroplane comes in on.
                     done?.inboundFlight ? `Inbound ${done.inboundFlight}` : null,
@@ -305,7 +302,6 @@ function FlightBody({ brief, ctx }: { brief: FlightBrief; ctx: WidgetCtx }) {
                     .filter(Boolean)
                     .join(" · ") || undefined
                 }
-                // The times are on the chain above; the row adds the tail.
                 right={f.aircraftReg || undefined}
               />
             )
@@ -325,6 +321,12 @@ function FlightBody({ brief, ctx }: { brief: FlightBrief; ctx: WidgetCtx }) {
               right={lines.gate || undefined}
             />
           )}
+        </div>
+      )}
+      {/* The crew is part of this card (the owner's duty-and-crew widget). */}
+      {brief.crew.length > 0 && (
+        <div className="mt-1.5 border-t border-border/70 pt-1">
+          <CrewBody brief={brief} go={ctx.go} />
         </div>
       )}
     </div>
@@ -357,10 +359,7 @@ function CrewBody({ brief, go }: { brief: FlightBrief; go: (href: string) => voi
  */
 function DestinationBody({ brief, openFlight }: { brief: FlightBrief; openFlight: (id: string) => void }) {
   const dests = destinationsOf(brief)
-  const info = useAirportInfo(
-    dests.map((d) => d.icao),
-    true,
-  )
+  const info = brief.airportInfo
   const alternates = useDutyAlternates(brief, true)
   return (
     <div className="divide-y divide-border/70">
@@ -375,6 +374,7 @@ function DestinationBody({ brief, openFlight }: { brief: FlightBrief; openFlight
         return (
           <AirportPanel
             key={d.icao}
+            icao={d.icao}
             code={brief.code(d.icao)}
             airport={to}
             info={info[d.icao]}
@@ -419,9 +419,13 @@ function CurrencyBody({ brief, go }: { brief: FlightBrief; go: (href: string) =>
         {...(onClick ? { type: "button" as const, onClick } : {})}
         className={cn("flex w-full items-baseline gap-2 rounded-md py-1 text-left", onClick && "-mx-1 px-1 active:bg-muted/60")}
       >
-        <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-foreground">{name}</span>
+        <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-foreground" data-morph={`cur-name-${key}`}>
+          {name}
+        </span>
         <span className="shrink-0 text-xs tabular-nums text-muted-foreground" suppressHydrationWarning>{sub}</span>
-        <span className={cn("w-12 shrink-0 text-right text-[13px] font-semibold tabular-nums", tone(state))}>{figure}</span>
+        <span className={cn("w-12 shrink-0 text-right text-[13px] font-semibold tabular-nums", tone(state))}>
+          <span data-morph={`cur-fig-${key}`}>{figure}</span>
+        </span>
         <span className="flex w-3.5 shrink-0 self-center">{flag(state)}</span>
       </Box>
     )
@@ -448,7 +452,7 @@ function CurrencyBody({ brief, go }: { brief: FlightBrief; go: (href: string) =>
       {[...attention, ...current].map((l, i) =>
         <div key={l.id} className={cn(i === 0 && logbook.length > 0 && "mt-1 border-t border-border/70 pt-1")}>
           {row(
-            l.id,
+            `doc-${l.id}`,
             l.name,
             // With its year: a licence valid to 2030 is not "1 Jun".
             l.lapsesBeforeDuty ? "before duty" : formatDay(l.expiryDate, { weekday: false }),

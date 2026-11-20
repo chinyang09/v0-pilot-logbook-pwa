@@ -718,7 +718,7 @@ minute and sends heavy users to those files:
 | refreshed | ON DEMAND (`getWeather`): a request that finds a snapshot older than `REFRESH_MS` (10 min) pulls that file — at most two upstream requests per ten minutes, none while nobody looks — after winning a one-minute lock (`lock:metar`); every other request answers from the snapshot. A pull that fails, or that reads fewer than 200 stations (an error page), keeps the old snapshot and the answer says `stale` |
 | read | only the asked stations, by PROJECTION (`stations.WSSS`) — a few hundred bytes, never the document |
 | route | `GET /api/lookup/weather?ids=WSSS,VTCC[&fresh=1]` — NODE (MongoDB, zlib), a static segment beside the pool, behind a sign-in; up to 24 ids; `no-store` (SWR dedupes). `fresh=1` is the pilot's Refresh: a snapshot over `FRESH_MS` (2 min) is pulled again — it used to revalidate into the browser's 2-minute cache, so Refresh did nothing and said nothing (the owner's report). Callers use `lookup.weather` |
-| shown | the flight page's Weather tile and its detail (`flight/weather.tsx`): each airport the duty touches, asked while the page is up and the duty within 30h, again every 10 minutes; Refresh says "Getting the latest…", then "Checked 16:52Z · reports as of 5m ago" (or that it failed, and what is shown) |
+| shown | the flight page's Weather tile and its detail (`flight/weather.tsx`): each airport the duty touches, asked while the page is up WHATEVER the duty's distance (the owner: real-time weather, not only near the duty — the periods are lit only where the TAF reaches), again every 10 minutes; Refresh says "Getting the latest…", then "Checked 16:52Z · reports as of 5m ago" (or that it failed, and what is shown) |
 | read | `lib/weather/brief.ts` (tested on the real fixtures): the TAF split into periods (base, FM, BECMG, TEMPO, PROB30/40, PROB TEMPO), each change group laid OVER what prevails; FAA categories; hazards (TS, CB, FZ, FG, heavy / frozen precipitation, SQ, FC, VA, DS, TCU, gust or wind ≥ 25kt, LIFR visibility / ceiling). Each airport's window is the duty's time there ± 1 hour — departure the actual OUT else the schedule; arrival the actual IN, else OUT + the PLANNED block once off blocks (the owner's rule), else the schedule (`legTimes`). The periods touching a window are LIT and say which leg ("TR275 arr"), amber when they bring a hazard or IFR; the METAR is read for its body only (not its trend) |
 
 **Airports and alternates from the same source** (Nov 2026 — the owner sent
@@ -1239,10 +1239,9 @@ tiles (`flight/widget.tsx`, faces in `flight/faces.tsx`, bodies in
 | Tile | Glance | Its card adds | Footer |
 |---|---|---|---|
 | Duty & Rest | the phase (an icon only when it flags), the line ("Legal from 22:00Z" — when the rest is done: the next report, or any addition the company asks for, may start then; "Rest short by 3:00" in red when the report is inside it; "Sector 2 of 3", "Legal now"), the timeline and its three captions | on duty: Latest On-Blocks, Off Duty; off duty: Rested, Spare Before Report, Last Duty | FDP › |
-| Flights (the chosen duty — its date line is a menu) | Now / Next / Later · day ⌄, flight numbers with the duty's FDP/max, the chain with each stop's times — out at the first, in at the last, and BOTH at a stop between ("01:50–02:35Z") — and gate, then the aeroplane line — or, for a later duty, the rest before it against its minimum | Report (a later duty), Off Duty; a row per leg — gates with stand, the airport's inbound flight, tail; the inbound row (flight, STD, where, its gate) | Refresh (only once gates are asked) |
-| Weather | each airport's worst category and first hazard | per airport: category and hazard CHIPS, the METAR read out (wind, gust amber, temperature / dew point, QNH) over its raw text, and ONLY the TAF periods over the duty's times there, each with its leg; then EN ROUTE — the TAF aerodromes along each leg, with their weather where it is not fine | Refresh |
-| Crew | who, and how often and when last flown together ("3× · 18 Nov", "New") | a row each: initials, name, role · flights together, the day; a tap opens their card | Crew › |
-| Destination | each destination (not the origin): the local time there now, the leg's great-circle distance, the day last flown INTO it | each destination as a PICTURE (`AirportPanel`, `flight/airport.tsx`, after a station-weather widget the owner sent): the place, local time and UTC offset, day or night on arrival, distance; the category as a dot only below VFR; wind and gust (amber), temperature, QNH, visibility, ceiling; the runway the wind favours drawn with the wind's arrow, and its head / tail (amber) and crosswind (`favouredRunway` on `runwayEndsFrom` — the airport data's TRUE headings, else the designator); its runways with length, ATIS / tower frequencies (`useAirportInfo`, below); the TAF aerodromes NEAR it with their weather (`useDutyAlternates`, below); last there and arrivals this year | — |
+| Flights & Crew (the chosen duty — its date line is a menu; the owner's sketch, Nov 2026) | Now / Next / Later · day ⌄; a 24-hour DAY BAR (`DayBar` — 0/6/12/18 ticks in the pilot's clock, shifted in 6h steps so the duty fits, each leg a segment, flown ones in ink, a now marker); the route large ("WSSS–WIII–WSSS", 17px under a 15rem column, 21px above); first out – last in with the FDP/max; flight numbers · "One more leg" · the next gate · the aeroplane line — or, for a later duty, the rest before it; the CREW on a panel at the right (`CrewPanel`: initials, name, role · times flown together or "New", "+ N more") | Report (a later duty), Off Duty; a row per leg — its times, gates with stand, the airport's inbound flight, tail; the inbound row; then the crew, a row each (a tap opens their card) | Refresh (only once gates are asked) |
+| Weather | the duty's NEXT ARRIVAL as a station (`WeatherFace`, after the owner's sketch): code and category, a WIND DIAL (`WindDial` — a wedge where the wind comes FROM, amber at 25kt or a gust, "220° / 15kt G25" in the middle), the sky ("Clear", "BKN 1,100'", the hazard first, amber) and temperature / dew point; a ⚠ beside the category when another airport of the duty is worse | per airport: category and hazard CHIPS, the METAR read out (wind, gust amber, temperature / dew point, QNH) over its raw text, and ONLY the TAF periods over the duty's times there, each with its leg; then EN ROUTE — the TAF aerodromes along each leg, with their weather where it is not fine | Refresh |
+| Destination | the lead destination (the weather tile's station when it is one) as a station: code, category (below VFR only), the place, the local time there now and its UTC offset, distance · last flown INTO it, and the runway the wind favours with its head / tail (amber) and crosswind ("25R ↓13 →7", from the runway data fetched WITH the page — `FlightBrief.airportInfo`); any other destination one line under it | each destination as a PICTURE (`AirportPanel`, `flight/airport.tsx`, after a station-weather widget the owner sent): the place, local time and UTC offset, day or night on arrival, distance; the category as a dot only below VFR; wind and gust (amber), temperature, QNH, visibility, ceiling; the runway the wind favours drawn with the wind's arrow, and its head / tail (amber) and crosswind (`favouredRunway` on `runwayEndsFrom` — the airport data's TRUE headings, else the designator); its runways with length, ATIS / tower frequencies (`useAirportInfo`, below); the TAF aerodromes NEAR it with their weather (`useDutyAlternates`, below); last there and arrivals this year | — |
 | Currency | 90-day recency FIRST (it is the one that usually binds — the rest are a year long and renewed on the ground), judged against the DUTY ("before duty" when it lapses first), then the two most pressing documents by NAME; a flag AFTER the figure only when there is one (no gutter of empty icons — the owner), the tally counting only flags below the rows shown | ONE line each: name, expiry (or "before duty"), days left, flag — recency with T/O, LDG and its lapse; a tap opens it | Currencies › |
 | Limits | "Delay 4:45" — how much later the chosen duty can run inside EVERY limit (`delayMargin`, below), amber under an hour, red at none — and the four rolling limits as bars with the hours LEFT | "If This Duty Runs Late": the margin on the FDP and on each window that holds the duty, smallest first; "Breach ahead" where the roster runs into one | FDP › |
 
@@ -1281,8 +1280,9 @@ the duty and the flight tile take ½ at least, `TILE_ALLOWED_WIDTHS`) — tiles
 share a row while their widths fit, and the spare columns are shared out, so
 any order and any widths fill every row edge to edge (two thirds beside a
 third, a half beside a third reads 7 | 5), and the defaults (duty, flight
-Full; weather, crew, destination ⅓; currency, limits ½) pack to exactly the
-layout above. While arranging, a tile's face is dimmed and its width chip
+Full; weather, destination ½; currency, limits ½) pack to exactly the
+layout above. The crew tile went into the flights tile (Nov 2026); the widths
+key is `:v2` so a stored crew width is not carried. While arranging, a tile's face is dimmed and its width chip
 sits in its middle. The DOM never moves (the grid places each tile by CSS `order`),
 so reordering remounts nothing; `layout` animation runs only while arranging;
 the tile being dragged is a copy over its faded slot.
@@ -1344,9 +1344,24 @@ instead (`header: "label"`), so no name appears twice.
   to the pixel in ~360ms. Rounds before: a card SCALED down onto the tile
   (read as a thumbnail growing), and a clip-path reveal (a narrow tile closed
   in two steps).
+  **What the tile and the card SHARE flies between them** (`runSharedMorph`,
+  `flight/shared-morph.ts`; the owner: "the relating contents on the widget
+  expand into the card"). An element tagged `data-morph="<key>"` on the face
+  and in the card — a destination's code, place, local time, distance and
+  runway; the weather station's code, category and wind; a currency's name
+  and figure; the tile's label — is copied onto a layer over both, the
+  originals hidden, and the face's copy travels to the card's place (scaled
+  by their heights) and fades as the card's arrives from the face's place:
+  one thing moving, not two crossfading. Keys are matched by the FIRST of each
+  on either side; a card element scrolled out of view does not fly.
   ANYTHING in the card that goes somewhere — a crew member, a currency, a
   flight, a footer link — closes it first and runs as the close's follow-up
-  (`render(dismiss)`); the card stayed over the page it had led to. The card
+  (`render(dismiss)`); the card stayed over the page it had led to. A close
+  that NAVIGATES does not shrink back onto the tile — the page is leaving —
+  it fades where it is (200ms, a slight scale-down) while the next page
+  arrives. The footer's actions are already dismiss-wrapped by `render`; the
+  footer wrapped them a second time, `useBackDismiss` ignored the second
+  dismiss, and the footer only ever closed the card (the owner's report). The card
   scrolls only vertically, without a bar (`overflow-x-hidden scrollbar-hide`).
   Scrim, Escape and back close it. No title bar, no close button.
 - **A tablet / desktop: main + detail** — a tile opens the same card in the
@@ -1361,8 +1376,9 @@ instead (`header: "label"`), so no name appears twice.
   not change height as answers land; a tile that ADDS a line has to be
   re-measured at 360×780.
 - **The duty is the one in progress, else the next, else the one chosen**
-  (`dutyFlights` from its report). Gates and the aeroplane are asked within 18h of it, the weather
-  within 30h (a TAF's reach), only while the page is on screen.
+  (`dutyFlights` from its report). Gates and the aeroplane are asked within 18h of it; the weather
+  and the destinations' runway data whenever there is a duty, only while the
+  page is on screen.
 - **"Last" is before THIS duty** (`flight-brief.ts`, tested): on the second
   sector the first one today is not the last time with the captain, and a
   sector still to fly is not the last visit. Positioning and simulators count
@@ -5684,6 +5700,8 @@ When making changes, be aware of these high-impact files:
 - Do not derive the duty band's bar colour from how full it is — state the tone. A nearly-full FDP bar is a warning and a nearly-full REST bar is good news; deriving it painted a fully-rested pilot amber. And do not put a standby's window on the status ramp: how full it is is a magnitude, not a verdict (`RAMP.info`)
 - Do not print a rest's span to legality as its minimum — "Min 11:56" read as a miscount; it is "10:00 + night" (`restMinimumText`), with Legal From saying when
 - Do not light the flight page for something that is FINE — no green tick, wash, bar or dot (dark cockpit: `TONE.current`, `REQ_TONE.ok`, `RAMP.ok` are neutral); only amber and red, each with its icon
+- Do not wrap a card's actions in `dismiss` a second time — `render(dismiss)` already did, and `useBackDismiss` ignores a second dismiss, dropping its follow-up (the footer closed and never navigated). And do not shrink a card back onto its tile when it is navigating away: it fades in place
+- Do not give the face and the card two copies of a shared fact that crossfade — tag both `data-morph` with one key and let `runSharedMorph` fly it
 - Do not SCALE the dashboard's card onto its tile, or show the tile under it — one surface grows from the tile's box to the card's (`WidgetSheet`), revealing a card laid out once at its final size, and the tile is hidden for the card's whole life; and do not let anything in the card navigate without closing it first (`render(dismiss)`)
 - Do not ask aviationweather.gov for airport data per look or from the browser — `/api/lookup/airport-info` batches the ids, MongoDB keeps each 30 days, the device 30 more. And do not ask it for alternates at all: they come from the TAF snapshot's own position index
 - Do not light a rest that will be done before the next report — "Legal from 22:00Z" is nominal (dark cockpit); only a report inside the rest is red
