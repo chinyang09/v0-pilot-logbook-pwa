@@ -1,11 +1,12 @@
 "use client"
 
 import { useSyncExternalStore } from "react"
+import { clampSize, type TileSize } from "@/lib/utils/dashboard/bento"
 
 /**
  * The flight dashboard's TILES in the pilot's own order, and whether they are
  * being arranged (the owner, Nov 2026: "a sortable bento box"). The order is
- * packed into rows by `packTiles` (`lib/utils/dashboard/bento.ts`).
+ * placed on a three-column grid by `packTiles` (`lib/utils/dashboard/bento.ts`).
  *
  * Per device, like the dashboard's page and the calendar's Duties: how a
  * screen is laid out is the device's look, not the account's logbook. A
@@ -88,54 +89,58 @@ export function setArranging(on: boolean): void {
 
 const DEFAULT_ORDER: DashboardTile[] = [...DASHBOARD_TILES]
 
-/* ── Widths ─────────────────────────────────────────────────────────────── */
+/* ── Sizes ──────────────────────────────────────────────────────────────── */
 
-/** Each tile's width by default, in columns of 12 — the layout as it has always been. */
-export const DEFAULT_TILE_WIDTHS: Record<DashboardTile, number> = {
-  duty: 12,
-  flight: 12,
-  // Half each: the weather's wind dial and the destination's runway need it.
-  weather: 6,
-  destination: 6,
-  currency: 6,
-  limits: 6,
+/**
+ * Each tile's size by default, on the three-column grid (`packTiles`): the duty
+ * and the flights across the page, the weather a tall column (its wind dial
+ * over the sky, the temperature and QNH) beside the destination, the
+ * currency's 90-day dots and the limits under that.
+ */
+export const DEFAULT_TILE_SIZES: Record<DashboardTile, TileSize> = {
+  duty: { cols: 3, rows: 1 },
+  flight: { cols: 3, rows: 1 },
+  weather: { cols: 1, rows: 2 },
+  destination: { cols: 2, rows: 1 },
+  currency: { cols: 1, rows: 1 },
+  limits: { cols: 1, rows: 1 },
 }
 
-/** The widths each tile may take: the duty band and the sector chain need half a row at least. */
-export const TILE_ALLOWED_WIDTHS: Record<DashboardTile, readonly number[]> = {
-  duty: [6, 8, 12],
-  flight: [6, 8, 12],
-  weather: [4, 6, 8, 12],
-  destination: [4, 6, 8, 12],
-  currency: [4, 6, 8, 12],
-  limits: [4, 6, 8, 12],
+/** The fewest columns a tile can take: the duty band and the day bar need two. */
+export const TILE_MIN_COLS: Record<DashboardTile, number> = {
+  duty: 2,
+  flight: 2,
+  weather: 1,
+  destination: 1,
+  currency: 1,
+  limits: 1,
 }
 
-// v2: the layout changed (crew folded into flights, weather and destination a half each).
-const WIDTHS_KEY = "ooo:dashboard-widths:v2"
+// v3: the grid became three columns with row spans (widths in twelfths went).
+const SIZES_KEY = "ooo:dashboard-sizes:v3"
 
-/** Stored widths, put right: an unknown tile or a width it may not take falls back to its default. */
-export function normaliseTileWidths(stored: unknown): Record<DashboardTile, number> {
-  const out = { ...DEFAULT_TILE_WIDTHS }
+/** Stored sizes, put right: an unknown tile or a size it may not take falls back to its default. */
+export function normaliseTileSizes(stored: unknown): Record<DashboardTile, TileSize> {
+  const out = { ...DEFAULT_TILE_SIZES }
   if (stored && typeof stored === "object") {
     for (const id of DASHBOARD_TILES) {
-      const w = (stored as Record<string, unknown>)[id]
-      if (typeof w === "number" && TILE_ALLOWED_WIDTHS[id].includes(w)) out[id] = w
+      const v = (stored as Record<string, unknown>)[id]
+      if (v && typeof v === "object") out[id] = clampSize(v as Partial<TileSize>, TILE_MIN_COLS[id])
     }
   }
   return out
 }
 
-let widths: Record<DashboardTile, number> = DEFAULT_TILE_WIDTHS
-let widthsHydrated = false
+let sizes: Record<DashboardTile, TileSize> = DEFAULT_TILE_SIZES
+let sizesHydrated = false
 
-function hydrateWidths(): void {
-  if (widthsHydrated) return
-  widthsHydrated = true
+function hydrateSizes(): void {
+  if (sizesHydrated) return
+  sizesHydrated = true
   try {
-    const raw = window.localStorage.getItem(WIDTHS_KEY)
+    const raw = window.localStorage.getItem(SIZES_KEY)
     if (raw) {
-      widths = normaliseTileWidths(JSON.parse(raw))
+      sizes = normaliseTileSizes(JSON.parse(raw))
       emit()
     }
   } catch {
@@ -143,25 +148,26 @@ function hydrateWidths(): void {
   }
 }
 
-function subscribeWidths(listener: () => void): () => void {
+function subscribeSizes(listener: () => void): () => void {
   listeners.add(listener)
-  hydrateWidths()
+  hydrateSizes()
   return () => listeners.delete(listener)
 }
 
-export function setTileWidth(id: DashboardTile, cols: number): void {
-  if (!TILE_ALLOWED_WIDTHS[id].includes(cols) || widths[id] === cols) return
-  widths = { ...widths, [id]: cols }
+export function setTileSize(id: DashboardTile, next: TileSize): void {
+  const size = clampSize(next, TILE_MIN_COLS[id])
+  if (sizes[id].cols === size.cols && sizes[id].rows === size.rows) return
+  sizes = { ...sizes, [id]: size }
   try {
-    window.localStorage.setItem(WIDTHS_KEY, JSON.stringify(widths))
+    window.localStorage.setItem(SIZES_KEY, JSON.stringify(sizes))
   } catch {
     // Kept for this session only.
   }
   emit()
 }
 
-export function useTileWidths(): Record<DashboardTile, number> {
-  return useSyncExternalStore(subscribeWidths, () => widths, () => DEFAULT_TILE_WIDTHS)
+export function useTileSizes(): Record<DashboardTile, TileSize> {
+  return useSyncExternalStore(subscribeSizes, () => sizes, () => DEFAULT_TILE_SIZES)
 }
 
 export function useTileOrder(): DashboardTile[] {

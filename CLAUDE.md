@@ -1239,10 +1239,10 @@ tiles (`flight/widget.tsx`, faces in `flight/faces.tsx`, bodies in
 | Tile | Glance | Its card adds | Footer |
 |---|---|---|---|
 | Duty & Rest | the phase (an icon only when it flags), the line ("Legal from 22:00Z" — when the rest is done: the next report, or any addition the company asks for, may start then; "Rest short by 3:00" in red when the report is inside it; "Sector 2 of 3", "Legal now"), the timeline and its three captions | on duty: Latest On-Blocks, Off Duty; off duty: Rested, Spare Before Report, Last Duty | FDP › |
-| Flights & Crew (the chosen duty — its date line is a menu; the owner's sketch, Nov 2026) | Now / Next / Later · day ⌄; a 24-hour DAY BAR (`DayBar` — 0/6/12/18 ticks in the pilot's clock, shifted in 6h steps so the duty fits, each leg a segment, flown ones in ink, a now marker); the route large ("WSSS–WIII–WSSS", 17px under a 15rem column, 21px above); first out – last in with the FDP/max; flight numbers · "One more leg" · the next gate · the aeroplane line — or, for a later duty, the rest before it; the CREW on a panel at the right (`CrewPanel`: initials, name, role · times flown together or "New", "+ N more") | Report (a later duty), Off Duty; a row per leg — its times, gates with stand, the airport's inbound flight, tail; the inbound row; then the crew, a row each (a tap opens their card) | Refresh (only once gates are asked) |
-| Weather | the duty's NEXT ARRIVAL as a station (`WeatherFace`, after the owner's sketch): code and category, a WIND DIAL (`WindDial` — a wedge where the wind comes FROM, amber at 25kt or a gust, "220° / 15kt G25" in the middle), the sky ("Clear", "BKN 1,100'", the hazard first, amber) and temperature / dew point; a ⚠ beside the category when another airport of the duty is worse | per airport: category and hazard CHIPS, the METAR read out (wind, gust amber, temperature / dew point, QNH) over its raw text, and ONLY the TAF periods over the duty's times there, each with its leg; then EN ROUTE — the TAF aerodromes along each leg, with their weather where it is not fine | Refresh |
-| Destination | the lead destination (the weather tile's station when it is one) as a station: code, category (below VFR only), the place, the local time there now and its UTC offset, distance · last flown INTO it, and the runway the wind favours with its head / tail (amber) and crosswind ("25R ↓13 →7", from the runway data fetched WITH the page — `FlightBrief.airportInfo`); any other destination one line under it | each destination as a PICTURE (`AirportPanel`, `flight/airport.tsx`, after a station-weather widget the owner sent): the place, local time and UTC offset, day or night on arrival, distance; the category as a dot only below VFR; wind and gust (amber), temperature, QNH, visibility, ceiling; the runway the wind favours drawn with the wind's arrow, and its head / tail (amber) and crosswind (`favouredRunway` on `runwayEndsFrom` — the airport data's TRUE headings, else the designator); its runways with length, ATIS / tower frequencies (`useAirportInfo`, below); the TAF aerodromes NEAR it with their weather (`useDutyAlternates`, below); last there and arrivals this year | — |
-| Currency | 90-day recency FIRST (it is the one that usually binds — the rest are a year long and renewed on the ground), judged against the DUTY ("before duty" when it lapses first), then the two most pressing documents by NAME; a flag AFTER the figure only when there is one (no gutter of empty icons — the owner), the tally counting only flags below the rows shown | ONE line each: name, expiry (or "before duty"), days left, flag — recency with T/O, LDG and its lapse; a tap opens it | Currencies › |
+| Flights & Crew (the chosen duty — its date line is a menu; the owner's sketch, Nov 2026) | Now / Next / Later · day ⌄; a 24-hour DAY BAR (`DayBar` — a tick each hour and a taller one every six with its hour under it, in the pilot's clock, shifted in 6h steps so the duty fits; the duty track and each leg SQUARED off and 18px tall so their ends read, flown legs in ink, a now marker); the route large ("WSSS–WIII–WSSS", 17px under a 15rem column, 21px above); first out – last in with the FDP/max; flight numbers · "One more leg" · the next gate · the aeroplane line — or, for a later duty, the rest before it; the CREW on a panel at the right across the row, under the duty in a narrower two-row tile, none in a narrower one-row tile (`CrewPanel`: initials, name, the seat AS THE PILOT'S LOGBOOK RULES NAME IT — `crewRole` → `roleLabel`, "PIC" / "P2" under CAAS, "Relief" — · times flown together or "New", "+ N more") | the card's header is the face WITHOUT the crew panel (the owner: full width — the crew is listed below); Report (a later duty), Off Duty; a row per leg — its times, gates with stand, the airport's inbound flight, tail; the inbound row; then the crew, a row each (a tap opens their card) | Refresh (only once gates are asked) |
+| Weather | the duty's NEXT ARRIVAL as a station (`WeatherFace`, after the owner's sketch): code and the METAR's category, "METAR 19:30Z" so it is plain what is read, a WIND DIAL (`WindDial` — a wedge where the wind comes FROM, amber at 25kt or a gust, "220° / 15kt G25" in the middle), the sky ("Clear", "BKN 1,100'", the sky's own hazard first, amber — the wind's is on the dial), temperature / dew point and QNH; then a labelled TAF line — the worst category and first hazard the TAF brings over the duty's time there (`tafSummary`, "IFR · TEMPO TS"), or "Not yet in reach" / "No TAF" (the owner: "we need both METAR and TAF"); a ⚠ beside the category when another airport of the duty is worse. Stacked in a tall tile, the dial beside the readings in a wide one | per airport: category and hazard CHIPS, the METAR (captioned "METAR · 19:30Z") read out (wind, gust amber, temperature / dew point, QNH) over its raw text, and ONLY the TAF periods over the duty's times there (captioned "TAF · over this duty", or "not yet in reach of this duty"), each with its leg; then EN ROUTE — the TAF aerodromes along each leg, with their weather where it is not fine | Refresh |
+| Destination | one destination a PAGE, swiped between with dots under them (`Pager` — pointer events on a transformed track, not a scroller, since the tile is a button; a swipe's click is swallowed), in the order the duty reaches them, opening on the next arrival; each as a station: code, category (below VFR only), the place, the local time there now and its UTC offset, distance · last flown INTO it, and the runway the wind favours with its head / tail (amber) and crosswind ("25R ↓13 →7", from the runway data fetched WITH the page — `FlightBrief.airportInfo`) | each destination as a PICTURE (`AirportPanel`, `flight/airport.tsx`, after a station-weather widget the owner sent): the place, local time and UTC offset, day or night on arrival, distance; the category as a dot only below VFR; wind and gust (amber), temperature, QNH, visibility, ceiling; the runway the wind favours drawn with the wind's arrow, and its head / tail (amber) and crosswind (`favouredRunway` on `runwayEndsFrom` — the airport data's TRUE headings, else the designator); its runways with length, ATIS / tower frequencies (`useAirportInfo`, below); the TAF aerodromes NEAR it with their weather (`useDutyAlternates`, below); last there and arrivals this year | — |
+| Currency | a DOT CALENDAR (`CurrencyDots`, `lib/utils/dashboard/currency-dots.ts`, tested; after a "days of the year" widget the owner sent): a dot a day, seven to a column (Monday at the top), running AHEAD from today — 90 days (13 weeks) in a third of the row, six months in two thirds, a year across it, calendar dates so a 29 February is a dot — each currency's last valid day lit in its state's colour (ink, amber, red; dark cockpit), the CLOSEST ringed, today an ink ring, month names under it; then the closest by name and figure (`currenciesBySoonest` — gone first, then by expiry; recency judged against the DUTY, "before duty" when it lapses first), more of them in a tall tile; the tally beside the label counts flags past the rows named | the year ahead as dots, each currency in its OWN colour — the first three to run out, the only three that stay apart for every reader when all are on screen (validated, light and dark); the rest ink — and a tap on a dot ISOLATES its currency, the others dimmed (a second tap steps to the next on that day); then ONE line each, its colour's swatch first as the legend: name, expiry (or "before duty"), days left, flag — recency with T/O, LDG and its lapse; a tap opens it | Currencies › |
 | Limits | "Delay 4:45" — how much later the chosen duty can run inside EVERY limit (`delayMargin`, below), amber under an hour, red at none — and the four rolling limits as bars with the hours LEFT | "If This Duty Runs Late": the margin on the FDP and on each window that holds the duty, smallest first; "Breach ahead" where the roster runs into one | FDP › |
 
 **A tile is a SUMMARY of its section** (the owner, Nov 2026: "bringing what is
@@ -1268,24 +1268,31 @@ how often I have flown with them; where am I going, what time is it there
 and how far; what is the weather there ±1h of the duty's times there, and at
 the aerodromes near it and along the way.
 
-**A sortable bento** (the owner, Nov 2026; the readiness redesign of the same
-week was reverted — "I prefer the old one"). The header's grid button
-(Arrange, the flight page only; Escape or the tick ends it) lets a tile be
-picked up and dropped on another (`flight/bento.tsx`), or moved with the
-arrow keys. The order is per device (`use-dashboard-layout.ts`,
-`ooo:dashboard-tiles`) and is PACKED into rows of 12 columns (`packTiles`,
-`lib/utils/dashboard/bento.ts`, tested): each tile has a WIDTH the pilot
-chooses in Arrange — its chip steps ⅓ → ½ → ⅔ → Full (`ooo:dashboard-widths`;
-the duty and the flight tile take ½ at least, `TILE_ALLOWED_WIDTHS`) — tiles
-share a row while their widths fit, and the spare columns are shared out, so
-any order and any widths fill every row edge to edge (two thirds beside a
-third, a half beside a third reads 7 | 5), and the defaults (duty, flight
-Full; weather, destination ½; currency, limits ½) pack to exactly the
-layout above. The crew tile went into the flights tile (Nov 2026); the widths
-key is `:v2` so a stored crew width is not carried. While arranging, a tile's face is dimmed and its width chip
-sits in its middle. The DOM never moves (the grid places each tile by CSS `order`),
-so reordering remounts nothing; `layout` animation runs only while arranging;
-the tile being dragged is a copy over its faded slot.
+**A sortable bento on a THREE-COLUMN grid** (the owner, Nov 2026: "imagine
+a grid of 3 column by 6 … a widget can occupy 2 vertical grids"). The
+header's grid button (Arrange, the flight page only; Escape or the tick ends
+it) lets a tile be picked up and dropped on another (`flight/bento.tsx`), or
+moved with the arrow keys, and RESIZED by dragging its corner handle across
+the grid's cells — 1 to 3 columns, 1 or 2 rows (Shift + arrows from a
+keyboard; the duty and the flights take two columns at least,
+`TILE_MIN_COLS`); the other tiles move round it live and its size is said in
+its middle while it changes. The order (`ooo:dashboard-tiles`) and the sizes
+(`ooo:dashboard-sizes:v3` — the twelfths of the round before are not carried)
+are per device (`use-dashboard-layout.ts`). `packTiles`
+(`lib/utils/dashboard/bento.ts`, tested) places each tile, in order, in the
+first place it fits from where the last went (never back above it), then
+gives every hole to a neighbour — the tile on its left widens, else the one on
+its right, else the one above grows down — so the grid is filled edge to edge
+whatever is chosen and a tile alone on its row takes the row. A row is as tall
+as its tallest tile (at least 5.5rem) and a two-row tile spans both. Every
+face is told its SIZE (`faceOf(id, brief, size)`) and lays itself out for it —
+the currency's dots look further ahead, the crew moves, the weather stacks.
+The defaults: duty and flights across, the weather a tall column beside the
+destination (two columns), the currency's 90 days and the limits (a third
+each — the limits' figure without "left", the delay margin its own line)
+under that. The grid places each tile by explicit row and column, so the DOM
+never moves and reordering remounts nothing; `layout` animation runs only
+while arranging; the tile being dragged is a copy over its faded slot.
 
 **ONE CARD PER SECTION, no fact in two places** (the owner, Nov 2026). The
 Status tile is gone: its annunciator led with whatever was most pressing —
@@ -1353,7 +1360,12 @@ instead (`header: "label"`), so no name appears twice.
   originals hidden, and the face's copy travels to the card's place (scaled
   by their heights) and fades as the card's arrives from the face's place:
   one thing moving, not two crossfading. Keys are matched by the FIRST of each
-  on either side; a card element scrolled out of view does not fly.
+  on either side that is IN VIEW — a destination page swiped out of the tile,
+  or a card element scrolled out of the card, does not fly. The surface and
+  the copies run ONE eased curve (`OPEN` / `CLOSE`, tweens, no overshoot):
+  a spring with a little bounce on the surface carried everything past its
+  place and back, and the copies' own spring overshot on top of it — the
+  owner's "wobble before settling".
   ANYTHING in the card that goes somewhere — a crew member, a currency, a
   flight, a footer link — closes it first and runs as the close's follow-up
   (`render(dismiss)`); the card stayed over the page it had led to. A close
@@ -1371,8 +1383,8 @@ instead (`header: "label"`), so no name appears twice.
   dashboard's own panel (a flight id), as the summary rows do.
 - Measured at 4× on the owner's logbook: a card opens in one task of 54–77ms;
   an idle dashboard runs nothing.
-- **Fit:** measured at 390×844, 360×780 and 1180×820: the grid is 537px with
-  nothing to scroll (625 with the Status tile). Every face is one line per fact, truncated, so a tile does
+- **Fit:** measured at 390×844, 360×780 and 1180×820: the default grid is 592px with
+  nothing to scroll, and a currency tile dragged to 2 × 2 still fits (692 at 390×844). Every face is one line per fact, truncated, so a tile does
   not change height as answers land; a tile that ADDS a line has to be
   re-measured at 360×780.
 - **The duty is the one in progress, else the next, else the one chosen**
@@ -5701,7 +5713,11 @@ When making changes, be aware of these high-impact files:
 - Do not print a rest's span to legality as its minimum — "Min 11:56" read as a miscount; it is "10:00 + night" (`restMinimumText`), with Legal From saying when
 - Do not light the flight page for something that is FINE — no green tick, wash, bar or dot (dark cockpit: `TONE.current`, `REQ_TONE.ok`, `RAMP.ok` are neutral); only amber and red, each with its icon
 - Do not wrap a card's actions in `dismiss` a second time — `render(dismiss)` already did, and `useBackDismiss` ignores a second dismiss, dropping its follow-up (the footer closed and never navigated). And do not shrink a card back onto its tile when it is navigating away: it fades in place
-- Do not give the face and the card two copies of a shared fact that crossfade — tag both `data-morph` with one key and let `runSharedMorph` fly it
+- Do not give the face and the card two copies of a shared fact that crossfade — tag both `data-morph` with one key and let `runSharedMorph` fly it. And do not put a spring with any bounce on the card's surface or the flying copies — one eased tween for both, or what travels wobbles before it settles
+- Do not size dashboard tiles in twelfths or tap through width chips again — it is a three-column grid, 1–3 columns by 1–2 rows, resized by dragging the corner handle (`packTiles`, `setTileSize`); and hand every face its placed SIZE rather than letting it guess from the viewport
+- Do not colour more than the first three currencies on the dot calendar — past three the reference palette's hues cannot all be told apart when all are on screen; the rest are ink, and a tap isolates any of them. On the TILE nothing nominal is coloured at all (dark cockpit): an expiry dot is ink, amber or red by its state
+- Do not name a crew member's seat by hand ("P1") — `crewRole` reads the pilot's logbook rules (`roleLabel`), the same names the flight form uses
+- Do not make a dashboard tile's pages a scroller — the tile is a button; `Pager` swipes a transformed track and swallows the swipe's click
 - Do not SCALE the dashboard's card onto its tile, or show the tile under it — one surface grows from the tile's box to the card's (`WidgetSheet`), revealing a card laid out once at its final size, and the tile is hidden for the card's whole life; and do not let anything in the card navigate without closing it first (`render(dismiss)`)
 - Do not ask aviationweather.gov for airport data per look or from the browser — `/api/lookup/airport-info` batches the ids, MongoDB keeps each 30 days, the device 30 more. And do not ask it for alternates at all: they come from the TAF snapshot's own position index
 - Do not light a rest that will be done before the next report — "Legal from 22:00Z" is nominal (dark cockpit); only a report inside the rest is red

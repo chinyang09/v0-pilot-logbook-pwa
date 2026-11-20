@@ -24,6 +24,12 @@ import { CATEGORY_TEXT } from "./weather"
 import { greatCircleNm } from "@/lib/utils/geo"
 import { hasCoordinates } from "@/lib/utils/flight-calculations"
 import type { FlightBrief } from "./model"
+import type { TileSize } from "@/lib/utils/dashboard/bento"
+import { PILOT_ROLES, roleLabel, type LogbookAuthority } from "@/lib/utils/logbook-rules"
+import type { PilotRole } from "@/types/entities/flight.types"
+import { addDays, localDayKey, lookAheadFor, type LookAhead } from "@/lib/utils/dashboard/currency-dots"
+import { CurrencyDots } from "./currency-dots"
+import * as React from "react"
 
 /** "18 Nov" — a stored day, as a tile has room for it. */
 export const shortDay = (ymd: string) => formatDay(ymd, { weekday: false, year: false })
@@ -85,10 +91,12 @@ export function restBeforeText(brief: FlightBrief): { text: string; short: boole
 
 /**
  * The duty laid on its day (the owner's duty-and-crew widget): a 24-hour
- * strip, six-hourly ticks in the pilot's clock, the duty from report to off
- * duty as a track, each leg filled on it — flown in ink, still to fly in the
- * accent — and now as a hairline. A duty past midnight moves the window on
- * so it is all in view.
+ * strip in the pilot's clock — a tick each hour, a taller one every six with
+ * its hour under it — the duty from report to off duty as a track, each leg
+ * filled on it (flown in ink, still to fly in the accent) and now as a
+ * hairline. The track and the legs are squared off (the owner: so their left
+ * and right ends read), and a duty past midnight moves the window on so it is
+ * all in view.
  */
 function DayBar({ brief }: { brief: FlightBrief }) {
   const { duty, now, display } = brief
@@ -111,24 +119,34 @@ function DayBar({ brief }: { brief: FlightBrief }) {
   const hourOf = (ms: number) => (zulu ? new Date(ms).getUTCHours() : new Date(ms).getHours())
   return (
     <div aria-hidden className="mb-1.5">
-      <div className="relative h-3">
-        {/* Six-hourly ticks across the day. */}
+      <div className="relative h-[18px]">
+        {/* The six-hourly lines run through the strip, behind the duty. */}
         {[0, 6, 12, 18, 24].map((h) => (
           <span key={h} className="absolute inset-y-0 w-px bg-border" style={{ left: pct(from + h * H) }} />
         ))}
-        <span className="absolute inset-y-0 rounded-full border border-foreground/25 bg-muted" style={span(start0, end0)} />
+        <span className="absolute inset-y-0 rounded-[3px] border border-foreground/30 bg-muted" style={span(start0, end0)} />
         {legs.map((t, i) =>
           t.departMs !== null && t.arriveMs !== null ? (
             <span
               key={i}
-              className={cn("absolute inset-y-0.5 rounded-full", duty.legs[i]?.inTime ? "bg-foreground/55" : "bg-primary")}
+              className={cn("absolute inset-y-[3px] rounded-[2px]", duty.legs[i]?.inTime ? "bg-foreground/55" : "bg-primary")}
               style={span(t.departMs, t.arriveMs)}
             />
           ) : null,
         )}
         {now > from && now < to && <span className="absolute -inset-y-0.5 w-0.5 rounded-full bg-foreground" style={{ left: pct(now) }} />}
       </div>
-      <div className="relative mt-0.5 h-3 text-[9px] tabular-nums text-muted-foreground">
+      {/* A tick each hour, the six-hourly ones taller. */}
+      <div className="relative h-1.5">
+        {Array.from({ length: 25 }, (_, h) => (
+          <span
+            key={h}
+            className={cn("absolute top-0 w-px", h % 6 === 0 ? "h-1.5 bg-foreground/45" : "h-1 bg-foreground/20")}
+            style={{ left: pct(from + h * H) }}
+          />
+        ))}
+      </div>
+      <div className="relative h-3 text-[9px] tabular-nums text-muted-foreground">
         {[0, 6, 12, 18].map((h) => (
           <span key={h} className="absolute" style={{ left: pct(from + h * H) }}>
             {String(hourOf(from + h * H)).padStart(2, "0")}
@@ -140,13 +158,28 @@ function DayBar({ brief }: { brief: FlightBrief }) {
   )
 }
 
-/** The crew beside the duty: initials, the name, their seat and how often flown together. */
-function CrewPanel({ brief }: { brief: FlightBrief }) {
+/** A crew member's seat as the pilot's logbook rules name it ("PIC", "P2"); a relief pilot is "Relief". */
+export function crewRole(role: string, authority: LogbookAuthority): string {
+  if ((PILOT_ROLES as readonly string[]).includes(role)) return roleLabel(role as PilotRole, authority)
+  return /relief/i.test(role) ? "Relief" : role
+}
+
+/**
+ * The crew beside the duty: initials, the name, their seat and how often flown
+ * together — on the right where the tile spans the row, under the duty in a
+ * narrower tile two rows tall.
+ */
+function CrewPanel({ brief, below = false }: { brief: FlightBrief; below?: boolean }) {
   const { crew } = brief
   const shown = crew.slice(0, 3)
-  const role = (r: string) => (r === "PIC" ? "P1" : r === "SIC" ? "P2" : /relief/i.test(r) ? "RP" : r)
+  const role = (r: string) => crewRole(r, brief.authority)
   return (
-    <div className="-my-3 -mr-3 ml-3 flex w-[40%] max-w-44 shrink-0 flex-col justify-center gap-1.5 rounded-r-2xl border-l border-border/70 bg-muted/50 px-2.5 py-3">
+    <div
+      className={cn(
+        "flex shrink-0 flex-col justify-center gap-1.5 border-border/70 bg-muted/50",
+        below ? "-mx-3 -mb-3 mt-2 flex-1 border-t px-3 py-2" : "-my-3 -mr-3 ml-3 w-[40%] max-w-44 rounded-r-2xl border-l px-2.5 py-3",
+      )}
+    >
       {shown.length === 0 ? (
         <p className="text-xs text-muted-foreground">No crew yet</p>
       ) : (
@@ -182,8 +215,12 @@ export function initialsOf(name: string): string {
  * line (where it is, the gate) — and the crew in a panel beside it. The card
  * has each leg with its times and gates, and every crew member.
  */
-export function FlightFace({ brief }: { brief: FlightBrief }) {
+export function FlightFace({ brief, size, inCard = false }: { brief: FlightBrief; size: TileSize; inCard?: boolean }) {
   const { duty, clock, day } = brief
+  // The crew: beside the duty across the row, under it in a tall narrower
+  // tile, and not at all in the card's header — the card lists every member
+  // under the legs (the owner: the card takes the full width).
+  const crewAt = inCard ? null : size.cols >= 3 ? "side" : size.rows >= 2 ? "below" : null
   const { legs, route } = chainOf(brief)
   if (duty.atMs === null) {
     return (
@@ -205,10 +242,10 @@ export function FlightFace({ brief }: { brief: FlightBrief }) {
   const nextIdx = Math.max(0, duty.legs.findIndex((l) => !l.inTime))
   const gate = duty.info?.legGates[nextIdx]?.dep ?? ""
   return (
-    <div className="flex min-w-0">
+    <div className={cn("flex min-w-0", crewAt === "below" && "flex-1 flex-col")}>
       {/* A container: on a phone the crew panel leaves the route ~190px, and a
           three-stop route at 21px does not fit it (measured at 360). */}
-      <div className="@container min-w-0 flex-1">
+      <div className={cn("@container min-w-0", crewAt !== "below" && "flex-1")}>
         <WidgetLabel>
           <span className="inline-flex items-center gap-0.5" suppressHydrationWarning>
             {dutyWord(brief)} · {day(duty.atMs)}
@@ -248,7 +285,7 @@ export function FlightFace({ brief }: { brief: FlightBrief }) {
             .join(" · ")}
         </p>
       </div>
-      <CrewPanel brief={brief} />
+      {crewAt && <CrewPanel brief={brief} below={crewAt === "below"} />}
     </div>
   )
 }
@@ -330,14 +367,145 @@ export function RunwayWind({ fav, className }: { fav: WindOnRunway; className?: 
 }
 
 /**
- * Where the duty is going (the owner: time and zone there, how far, when last
- * there, its runways and whether it is IFR — at a glance). The destination
- * the duty goes to next leads: its place, code, local time and zone, the
- * leg's distance and the last visit, then the runway the wind favours with
- * its components and the category when below VFR. Any other destination is a
- * line under it.
+ * Pages a tile can be SWIPED between (the owner: "allow the airport widget to
+ * be swipable"), with a dot for each under them. A swipe is pointer events on
+ * a transformed track, not a scroller — the tile is a button, and a scroller
+ * inside one is not one every engine scrolls — and a swipe never opens the
+ * card (its click is swallowed). A vertical move is left to the page.
  */
-export function DestinationFace({ brief }: { brief: FlightBrief }) {
+function Pager({ count, start, children }: { count: number; start: number; children: (i: number) => React.ReactNode }) {
+  const [page, setPage] = React.useState(start)
+  const track = React.useRef<HTMLDivElement>(null)
+  const drag = React.useRef<{ x0: number; y0: number; dx: number; w: number; active: boolean } | null>(null)
+  const swiped = React.useRef(false)
+  if (count < 2) return <>{children(0)}</>
+  const settle = (to: number) => {
+    const el = track.current
+    if (el) {
+      el.style.transition = ""
+      el.style.transform = `translateX(${-to * 100}%)`
+    }
+    setPage(to)
+  }
+  return (
+    <div
+      className="relative overflow-hidden"
+      style={{ touchAction: "pan-y" }}
+      onPointerDown={(e) => {
+        swiped.current = false
+        drag.current = { x0: e.clientX, y0: e.clientY, dx: 0, w: e.currentTarget.getBoundingClientRect().width, active: false }
+      }}
+      onPointerMove={(e) => {
+        const d = drag.current
+        if (!d) return
+        const dx = e.clientX - d.x0
+        const dy = e.clientY - d.y0
+        if (!d.active) {
+          if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
+            d.active = true
+            e.currentTarget.setPointerCapture(e.pointerId)
+          } else if (Math.abs(dy) > 8) drag.current = null
+          return
+        }
+        // Past the first or last page it gives a little, no more.
+        const edge = (page === 0 && dx > 0) || (page === count - 1 && dx < 0)
+        d.dx = edge ? dx / 4 : dx
+        swiped.current = true
+        const el = track.current
+        if (el) {
+          el.style.transition = "none"
+          el.style.transform = `translateX(calc(${-page * 100}% + ${d.dx}px))`
+        }
+      }}
+      onPointerUp={() => {
+        const d = drag.current
+        drag.current = null
+        if (!d?.active) return
+        const next = d.dx < -d.w * 0.18 ? page + 1 : d.dx > d.w * 0.18 ? page - 1 : page
+        settle(Math.max(0, Math.min(count - 1, next)))
+      }}
+      onPointerCancel={() => {
+        if (drag.current?.active) settle(page)
+        drag.current = null
+      }}
+      onClickCapture={(e) => {
+        if (!swiped.current) return
+        swiped.current = false
+        e.preventDefault()
+        e.stopPropagation()
+      }}
+    >
+      <div
+        ref={track}
+        className="flex transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
+        style={{ transform: `translateX(${-page * 100}%)` }}
+      >
+        {Array.from({ length: count }, (_, i) => (
+          <div key={i} className="w-full shrink-0" aria-hidden={i !== page || undefined}>
+            {children(i)}
+          </div>
+        ))}
+      </div>
+      <div aria-hidden className="mt-1.5 flex justify-center gap-1">
+        {Array.from({ length: count }, (_, i) => (
+          <span key={i} className={cn("h-1.5 w-1.5 rounded-full transition-colors", i === page ? "bg-foreground" : "bg-foreground/25")} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** One destination as the tile has it: code and category, place, local time and zone, distance and last visit, the favoured runway. */
+function DestinationPage({ brief, icao }: { brief: FlightBrief; icao: string }) {
+  const d = brief.destinations.find((x) => x.icao === icao)
+  const a = brief.airports.get(icao)
+  const nm = distanceInto(brief, icao)
+  const fav = favouredAt(brief, icao)
+  const cat = brief.weather.briefs.find((b) => b.station === icao)?.metar?.category ?? null
+  const local = a?.tz ? getAirportLocalTime(a.tz).split(" ")[0] : null
+  const zone = a?.tz ? formatTimezoneOffset(getAirportTimeInfo(a.tz).offset) : null
+  return (
+    <>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="truncate text-[17px] font-bold leading-tight tracking-tight text-foreground" data-morph={`dest-code-${icao}`}>
+          {brief.code(icao)}
+        </span>
+        {cat && cat !== "VFR" && (
+          <span className={cn("shrink-0 text-[13px] font-semibold", CATEGORY_TEXT[cat])} data-morph={`dest-cat-${icao}`}>
+            {cat}
+          </span>
+        )}
+      </div>
+      <p className="truncate text-[11px] uppercase tracking-wide text-muted-foreground" data-morph={`dest-place-${icao}`}>
+        {a?.city || a?.name || "\u00a0"}
+      </p>
+      {local && (
+        <p className="mt-1.5 truncate text-[20px] font-semibold leading-none tabular-nums text-foreground" suppressHydrationWarning>
+          <span data-morph={`dest-time-${icao}`}>{local}</span>
+          <span className="ml-1 text-[11px] font-medium text-muted-foreground">{zone}</span>
+        </p>
+      )}
+      <p className="mt-1 truncate text-[11px] tabular-nums text-muted-foreground">
+        {nm !== null && <span data-morph={`dest-dist-${icao}`}>{Math.round(nm).toLocaleString("en-US")}nm</span>}
+        {nm !== null && " · "}
+        {d?.last ? `Last ${shortDay(d.last.date)}` : "First time"}
+      </p>
+      {fav && (
+        <p className="mt-1.5 text-[12px]" data-morph={`dest-rwy-${icao}`}>
+          <RunwayWind fav={fav} />
+        </p>
+      )}
+    </>
+  )
+}
+
+/**
+ * Where the duty is going (the owner: time and zone there, how far, when last
+ * there, its runways and whether it is IFR — at a glance). One destination a
+ * page, in the order the duty reaches them, opening on the one it goes to
+ * next; swipe for the others.
+ */
+export function DestinationFace({ brief }: { brief: FlightBrief; size?: TileSize; inCard?: boolean }) {
   const dests = destinationsOf(brief)
   if (dests.length === 0) {
     return (
@@ -347,56 +515,11 @@ export function DestinationFace({ brief }: { brief: FlightBrief }) {
       </>
     )
   }
-  const lead = dests.find((d) => d.icao === brief.weatherStation) ?? dests[0]
-  const others = dests.filter((d) => d !== lead).slice(0, 2)
-  const a = brief.airports.get(lead.icao)
-  const nm = distanceInto(brief, lead.icao)
-  const fav = favouredAt(brief, lead.icao)
-  const cat = brief.weather.briefs.find((b) => b.station === lead.icao)?.metar?.category ?? null
-  const local = a?.tz ? getAirportLocalTime(a.tz).split(" ")[0] : null
-  const zone = a?.tz ? formatTimezoneOffset(getAirportTimeInfo(a.tz).offset) : null
+  const start = Math.max(0, dests.findIndex((d) => d.icao === brief.weatherStation))
   return (
-    <>
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="truncate text-[17px] font-bold leading-tight tracking-tight text-foreground" data-morph={`dest-code-${lead.icao}`}>
-          {brief.code(lead.icao)}
-        </span>
-        {cat && cat !== "VFR" && (
-          <span className={cn("shrink-0 text-[13px] font-semibold", CATEGORY_TEXT[cat])} data-morph={`dest-cat-${lead.icao}`}>
-            {cat}
-          </span>
-        )}
-      </div>
-      <p className="truncate text-[11px] uppercase tracking-wide text-muted-foreground" data-morph={`dest-place-${lead.icao}`}>
-        {a?.city || a?.name || "\u00a0"}
-      </p>
-      {local && (
-        <p className="mt-1.5 text-[20px] font-semibold leading-none tabular-nums text-foreground" suppressHydrationWarning>
-          <span data-morph={`dest-time-${lead.icao}`}>{local}</span>
-          <span className="ml-1 text-[11px] font-medium text-muted-foreground">{zone}</span>
-        </p>
-      )}
-      <p className="mt-1 truncate text-[11px] tabular-nums text-muted-foreground">
-        {nm !== null && <span data-morph={`dest-dist-${lead.icao}`}>{Math.round(nm).toLocaleString("en-US")}nm</span>}
-        {nm !== null && " · "}
-        {lead.last ? `Last ${shortDay(lead.last.date)}` : "First time"}
-      </p>
-      {fav && (
-        <p className="mt-1.5 text-[12px]" data-morph={`dest-rwy-${lead.icao}`}>
-          <RunwayWind fav={fav} />
-        </p>
-      )}
-      {others.map((d) => (
-        <p key={d.icao} className="mt-1 truncate border-t border-border/60 pt-1 text-[11px] tabular-nums text-muted-foreground">
-          <span className="font-medium text-foreground">{brief.code(d.icao)}</span>
-          {(() => {
-            const o = brief.airports.get(d.icao)
-            return o?.tz ? <span suppressHydrationWarning> {getAirportLocalTime(o.tz).split(" ")[0]}</span> : null
-          })()}
-          {d.last ? ` · Last ${shortDay(d.last.date)}` : " · First"}
-        </p>
-      ))}
-    </>
+    <Pager key={dests.map((d) => d.icao).join() + start} count={dests.length} start={start}>
+      {(i) => <DestinationPage brief={brief} icao={dests[i].icao} />}
+    </Pager>
   )
 }
 
@@ -431,6 +554,8 @@ export interface CurrencyRow {
   name: string
   state: Requirement["state"]
   figure: string
+  /** The last valid day — the dot it lights — or null for what has no expiry (sectors not logged). */
+  ymd: string | null
 }
 
 const SEVERITY: Record<Requirement["state"], number> = { fail: 0, unknown: 1, caution: 1, ok: 2 }
@@ -456,6 +581,8 @@ export function currencyRows(brief: FlightBrief): CurrencyRow[] {
         name: r.id === "recency" ? "Recency 90d" : r.label,
         state: beforeDuty ? ("caution" as const) : r.state,
         figure: beforeDuty ? `${r.value} · before duty` : r.value,
+        // Recency's last current day; lapsed (or never current), it is today's.
+        ymd: r.id === "recency" ? (brief.recencyLapseIso && r.state !== "fail" ? addDays(brief.recencyLapseIso, -1) : "0000-01-01") : null,
       }
     })
   const docs = [...brief.currency.attention, ...brief.currency.current].map((l) => ({
@@ -463,6 +590,7 @@ export function currencyRows(brief: FlightBrief): CurrencyRow[] {
     name: l.name,
     state: l.state,
     figure: l.lapsesBeforeDuty ? `${l.figure} · before duty` : l.figure,
+    ymd: l.expiryDate || null,
   }))
   // Recency first whatever its state; then the documents, most pressing first.
   const [recency, others] = [logbook.filter((r) => r.key === "recency"), logbook.filter((r) => r.key !== "recency")]
@@ -470,39 +598,67 @@ export function currencyRows(brief: FlightBrief): CurrencyRow[] {
 }
 
 /**
- * The Currencies page at a glance: the three most pressing, and a tally of the
- * whole set — never "+N more": the card lists them all.
+ * The currencies in the order they run out: what has already gone (and what
+ * is wrong now with no date — sectors not logged) first, then by expiry, the
+ * more pressing first on a tie. The first is the CLOSEST, the dot ringed.
  */
-export function CurrencyFace({ brief, rows = 3 }: { brief: FlightBrief; rows?: number }) {
-  const all = currencyRows(brief)
+export function currenciesBySoonest(rows: CurrencyRow[]): CurrencyRow[] {
+  const at = (r: CurrencyRow) => (r.ymd === null ? (r.state === "ok" ? "9999" : "0000") : r.ymd)
+  return [...rows].sort((a, b) => at(a).localeCompare(at(b)) || SEVERITY[a.state] - SEVERITY[b.state])
+}
+
+/** "90d", "6m", "1y" — how far the dots look, said beside the tile's label. */
+const AHEAD_SHORT: Record<LookAhead, string> = { "90d": "90d", "6m": "6m", "1y": "1y" }
+
+/**
+ * The currencies on a DOT CALENDAR (the owner, Nov 2026): a dot a day, looking
+ * 90 days, six months or a year ahead as the tile is a third, two thirds or
+ * the whole row wide, each expiry a dot lit in its state's colour and the
+ * closest ringed — then the closest by name (more of them in a tile two rows
+ * tall). The tally counts what is flagged past the rows named.
+ */
+export function CurrencyFace({ brief, size }: { brief: FlightBrief; size: TileSize }) {
+  const all = currenciesBySoonest(currencyRows(brief))
+  const ahead = lookAheadFor(size.cols)
+  // A third of the row names the closest only, its figure under its name.
+  const narrow = size.cols < 2
+  const lines = size.rows >= 2 ? (narrow ? 3 : 6) : narrow ? 1 : 2
+  const marks = all.filter((r) => r.ymd !== null).map((r) => ({ key: r.key, name: r.name, state: r.state, ymd: r.ymd! }))
   return (
     <>
-      {/* The rows shown carry their own flags; the tally counts only what is flagged below them. */}
-      <WidgetLabel right={<Tally rows={all.slice(rows)} />}>Currency</WidgetLabel>
+      {/* A third of the row has no room for the tally beside the label: its
+          edge and the dots' colours carry what is flagged. */}
+      <WidgetLabel right={narrow ? undefined : <Tally rows={all.slice(lines)} />}>
+        Currency
+        {!narrow && <span className="font-medium normal-case tracking-normal"> · {AHEAD_SHORT[ahead]}</span>}
+      </WidgetLabel>
       {all.length === 0 ? (
         <p className="text-xs leading-snug text-muted-foreground">None tracked</p>
       ) : (
-        <ul className="space-y-1">
-          {all.slice(0, rows).map((r) => {
-            const Icon = STATE_ICON[r.state]
-            return (
-              // No gutter for an icon a met row does not have: the flag, when
-              // there is one, follows the figure.
-              <li key={r.key} className="flex items-center gap-1 text-xs leading-tight">
-                <span className="min-w-0 flex-1 truncate text-foreground" data-morph={`cur-name-${r.key}`}>
-                  {r.name}
-                </span>
-                <span
-                  className={cn("shrink-0 font-semibold tabular-nums", r.state === "ok" ? "text-foreground" : REQ_TONE[r.state].icon)}
-                  data-morph={`cur-fig-${r.key}`}
-                >
-                  {r.figure.split(" · ")[0]}
-                </span>
-                {r.state !== "ok" && <Icon className={cn("h-3 w-3 shrink-0", REQ_TONE[r.state].icon)} aria-label={r.state === "fail" ? "Not met" : "Attention"} />}
-              </li>
-            )
-          })}
-        </ul>
+        <>
+          <CurrencyDots today={localDayKey(brief.now)} ahead={ahead} marks={marks} closest={marks[0]?.key ?? null} className="mb-1" />
+          <ul className="space-y-1">
+            {all.slice(0, lines).map((r) => {
+              const Icon = STATE_ICON[r.state]
+              return (
+                // No gutter for an icon a met row does not have: the flag, when
+                // there is one, follows the figure.
+                <li key={r.key} className={cn("flex items-center gap-1 text-xs leading-tight", narrow && "flex-wrap")}>
+                  <span className={cn("min-w-0 flex-1 truncate text-foreground", narrow && "basis-full")} data-morph={`cur-name-${r.key}`}>
+                    {r.name}
+                  </span>
+                  <span
+                    className={cn("shrink-0 font-semibold tabular-nums", r.state === "ok" ? "text-foreground" : REQ_TONE[r.state].icon)}
+                    data-morph={`cur-fig-${r.key}`}
+                  >
+                    {r.figure.split(" · ")[0]}
+                  </span>
+                  {r.state !== "ok" && <Icon className={cn("h-3 w-3 shrink-0", REQ_TONE[r.state].icon)} aria-label={r.state === "fail" ? "Not met" : "Attention"} />}
+                </li>
+              )
+            })}
+          </ul>
+        </>
       )}
     </>
   )
@@ -528,14 +684,18 @@ export function marginTone(minutes: number): string {
   return minutes <= 0 ? "text-destructive" : minutes < 60 ? "text-status-warning" : "text-foreground"
 }
 
-export function LimitsFace({ brief }: { brief: FlightBrief }) {
+export function LimitsFace({ brief, size }: { brief: FlightBrief; size?: TileSize }) {
   const limits = limitsOf(brief)
   const m = brief.margin
+  // A third of the row: the figure alone ("81h"), the delay margin its own line.
+  const narrow = (size?.cols ?? 3) < 2
   return (
     <>
       <WidgetLabel
         right={
-          m ? (
+          narrow ? (
+            <Tally rows={limits} />
+          ) : m ? (
             <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground" suppressHydrationWarning>
               Delay <span className={cn("tabular-nums", marginTone(m.minutes))}>{marginText(m.minutes)}</span>
             </span>
@@ -546,6 +706,11 @@ export function LimitsFace({ brief }: { brief: FlightBrief }) {
       >
         Limits
       </WidgetLabel>
+      {narrow && m && (
+        <p className="-mt-0.5 mb-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground" suppressHydrationWarning>
+          Delay <span className={cn("tabular-nums", marginTone(m.minutes))}>{marginText(m.minutes)}</span>
+        </p>
+      )}
       <ul className="space-y-1.5">
         {limits.map((r) => {
           // What is LEFT is the question ("how much more"); the bar shows what is used.
@@ -558,7 +723,7 @@ export function LimitsFace({ brief }: { brief: FlightBrief }) {
                 <span className="truncate text-muted-foreground">{r.label}</span>
                 <span className="shrink-0 tabular-nums">
                   <span className={cn("font-semibold", r.state === "ok" ? "text-foreground" : REQ_TONE[r.state].icon)}>{left}h</span>
-                  <span className="text-muted-foreground"> left</span>
+                  {!narrow && <span className="text-muted-foreground"> left</span>}
                 </span>
               </span>
               <span className="mt-1 block h-1 overflow-hidden rounded-full bg-muted">

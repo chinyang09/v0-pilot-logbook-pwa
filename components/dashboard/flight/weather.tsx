@@ -94,11 +94,11 @@ export function WindDial({ dir, kt, gust, size = 84 }: { dir: number | null | un
         {wedge && <path d={wedge} className={strong ? "fill-status-warning" : "fill-foreground/70"} />}
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center leading-none" data-morph="wx-wind">
-        <span className="text-[15px] font-semibold tabular-nums text-foreground">
+        <span className={cn("font-semibold tabular-nums text-foreground", size < 80 ? "text-[13px]" : "text-[15px]")}>
           {kt === undefined ? "—" : kt === 0 ? "Calm" : dir === null || dir === undefined ? "VRB" : `${String(dir).padStart(3, "0")}°`}
         </span>
         {kt ? (
-          <span className="mt-1 text-[12px] font-medium tabular-nums text-foreground">
+          <span className={cn("mt-1 font-medium tabular-nums text-foreground", size < 80 ? "text-[10px]" : "text-[12px]")}>
             {kt}kt{gust ? <span className="text-status-warning"> G{gust}</span> : null}
           </span>
         ) : null}
@@ -108,60 +108,128 @@ export function WindDial({ dir, kt, gust, size = 84 }: { dir: number | null | un
 }
 
 /**
- * The weather tile — ONE airport, the one the duty is going to next (the
- * owner's station widget, Nov 2026): its code and category, the wind as a
- * dial, the sky (a hazard over the duty's time there first) and the
- * temperature. Any OTHER airport of the duty with a hazard or a worse category
- * shows as the warning beside the category; the card lists them all.
+ * What the TAF says over the duty's time at a station (± an hour of each
+ * time there): the worst category and the first hazard — "IFR · TEMPO TS" —
+ * or why there is nothing to say yet.
  */
-export function WeatherFace({ weather, code, station }: { weather: WeatherState; code: (icao: string) => string; station: string | null }) {
+export function tafSummary(b: StationBrief | null): { text: string; warn: boolean; muted: boolean } {
+  if (!b?.taf) return { text: "No TAF", warn: false, muted: true }
+  const covered = b.briefs.filter((x) => x.brief.touching.length > 0)
+  if (covered.length === 0) return { text: "Not yet in reach", warn: false, muted: true }
+  let worst: FlightCategory | null = null
+  const hazards: string[] = []
+  const rank = (c: FlightCategory | null) => (c ? ["VFR", "MVFR", "IFR", "LIFR"].indexOf(c) : -1)
+  for (const { brief } of covered) {
+    if (rank(brief.worst) > rank(worst)) worst = brief.worst
+    for (const h of brief.hazards) if (!hazards.includes(h)) hazards.push(h)
+  }
+  return {
+    text: [worst, hazards[0]].filter(Boolean).join(" · ") || "—",
+    warn: hazards.length > 0 || worst === "IFR" || worst === "LIFR",
+    muted: false,
+  }
+}
+
+/**
+ * The duty's next arrival as a STATION (after the owner's sketch): its code
+ * and the category NOW, the METAR — labelled, with its time — as a wind dial,
+ * the sky, temperature / dew point and QNH, then the TAF over the duty's time
+ * there on its own labelled line (the owner: "we need both METAR and TAF").
+ * A ⚠ beside the category when another airport of the duty is worse. A tile
+ * two rows tall stacks it; a wide one puts the dial beside the readings.
+ */
+export function WeatherFace({
+  weather,
+  code,
+  clock,
+  station,
+  size,
+}: {
+  weather: WeatherState
+  code: (icao: string) => string
+  clock: (ms: number) => string
+  station: string | null
+  size?: { cols: number; rows: number }
+}) {
   const { briefs } = weather
   const b = briefs.find((x) => x.station === station) ?? briefs[0] ?? null
   const rank = (cat: FlightCategory | null) => (cat ? ["VFR", "MVFR", "IFR", "LIFR"].indexOf(cat) : -1)
   const elsewhere = briefs.some((x) => x !== b && (x.hazards.length > 0 || rank(x.worst) > rank(b?.worst ?? null)))
   const c = b?.metar ? metarConditions(b.metar.raw) : null
   const r = b?.metar ? metarReadings(b.metar.raw) : null
-  const sky = skyOf(c, b?.hazards[0])
+  // The sky's own hazard (TS, FG…) — the wind's is on the dial.
+  const sky = skyOf(c, b?.metar?.hazards.find((h) => !/KT$/.test(h)))
+  const taf = tafSummary(b)
   const status = weather.failed ? "Unavailable" : weather.loading && !weather.checkedAt ? "Checking…" : !b?.metar ? "No report" : null
+  const wide = (size?.cols ?? 1) >= 2
+  const tall = (size?.rows ?? 1) >= 2
+  const cat = b?.metar?.category ?? null
+  const caption = "text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground"
+
+  const readings = (
+    <div className="min-w-0 space-y-0.5 text-[12px] tabular-nums">
+      {sky && (
+        <p className={cn("flex min-w-0 items-center gap-1", sky.warn ? "font-semibold text-status-warning" : "text-foreground")}>
+          <sky.Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span className="truncate">{sky.text}</span>
+        </p>
+      )}
+      {r?.tempC !== null && r?.tempC !== undefined && (
+        <p className="flex items-center gap-1 text-foreground">
+          <Thermometer className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          {r.tempC}°{r.dewC !== null ? `/${r.dewC}°` : ""}
+        </p>
+      )}
+      {r?.qnhHpa ? (
+        <p className="text-foreground">
+          <span className="text-muted-foreground">QNH </span>
+          <span className="font-semibold">{r.qnhHpa}</span>
+        </p>
+      ) : null}
+    </div>
+  )
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-baseline justify-between gap-2">
         <span className="truncate text-[17px] font-bold leading-tight tracking-tight text-foreground" data-morph="wx-code">
           {b ? code(b.station) : "Weather"}
         </span>
         <span className="flex shrink-0 items-center gap-1 text-[13px] font-semibold">
           {elsewhere && <TriangleAlert className="h-3 w-3 text-status-warning" aria-label="Another airport of the duty has hazards" />}
-          {b?.worst && (
-            <span className={CATEGORY_TEXT[b.worst]} data-morph="wx-cat">
-              {b.worst}
-            </span>
-          )}
+          {cat && <span className={CATEGORY_TEXT[cat]}>{cat}</span>}
         </span>
       </div>
+      <p className={caption} suppressHydrationWarning>
+        METAR{b?.metar ? ` ${clock(b.metar.at)}` : ""}
+      </p>
       {status ? (
-        <p className="py-6 text-center text-xs text-muted-foreground">{status}</p>
-      ) : (
-        <div className="flex justify-center py-1">
-          <WindDial dir={c?.windDir} kt={c?.windKt} gust={c?.gustKt} />
+        <p className="py-5 text-center text-xs text-muted-foreground">{status}</p>
+      ) : wide ? (
+        <div className="mt-1 flex items-center gap-3">
+          <WindDial dir={c?.windDir} kt={c?.windKt} gust={c?.gustKt} size={tall ? 84 : 72} />
+          {readings}
         </div>
+      ) : (
+        <>
+          <div className="flex justify-center py-1">
+            <WindDial dir={c?.windDir} kt={c?.windKt} gust={c?.gustKt} size={tall ? 84 : 64} />
+          </div>
+          {readings}
+        </>
       )}
-      <div className="flex items-center justify-between gap-2 text-[12px] tabular-nums">
-        {sky ? (
-          <span className={cn("flex min-w-0 items-center gap-1", sky.warn ? "font-semibold text-status-warning" : "text-foreground")}>
-            <sky.Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            <span className="truncate">{sky.text}</span>
-          </span>
-        ) : (
-          <span />
-        )}
-        {r?.tempC !== null && r?.tempC !== undefined && (
-          <span className="flex shrink-0 items-center gap-0.5 text-foreground">
-            <Thermometer className="h-3.5 w-3.5" aria-hidden />
-            {r.tempC}°{r.dewC !== null ? `/${r.dewC}°` : ""}
-          </span>
-        )}
-      </div>
-    </>
+      <p className="mt-auto flex min-w-0 items-baseline gap-1.5 border-t border-border/60 pt-1 text-[12px]">
+        <span className={caption}>TAF</span>
+        <span
+          className={cn(
+            "min-w-0 font-semibold",
+            wide ? "truncate" : "line-clamp-2",
+            taf.muted ? "font-normal text-muted-foreground" : taf.warn ? "text-status-warning" : "text-foreground",
+          )}
+        >
+          {taf.text}
+        </span>
+      </p>
+    </div>
   )
 }
 
@@ -195,6 +263,9 @@ function Chip({ children, tone }: { children: React.ReactNode; tone: "warn" | "m
     </span>
   )
 }
+
+/** A part's caption in the card: "METAR · 06:30Z", "TAF · over this duty". */
+const SECTION = "text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground"
 
 /**
  * Each airport as the duty meets it: its category and hazards as chips, the
@@ -241,9 +312,7 @@ export function WeatherBody({
                 {code(b.station)}
               </span>
               {b.worst && (
-                <span data-morph={b.station === station ? "wx-cat" : undefined}>
-                  <Chip tone={b.worst}>{b.worst}</Chip>
-                </span>
+                <Chip tone={b.worst}>{b.worst}</Chip>
               )}
               {hazardLine(b.hazards)
                 .split(" · ")
@@ -259,8 +328,10 @@ export function WeatherBody({
                 </span>
               )}
             </div>
+            {b.metar && <p className={SECTION}>METAR · {clock(b.metar.at)}</p>}
             {b.metar && <MetarLine raw={b.metar.raw} morph={b.station === station} />}
             {b.metar && <p className="break-words text-[12px] leading-snug text-muted-foreground tabular-nums">{b.metar.raw.replace(/^METAR /, "")}</p>}
+            {b.taf && <p className={cn(SECTION, "pt-0.5")}>TAF · {lit.length ? "over this duty" : "not yet in reach of this duty"}</p>}
             {lit.map(({ p, i, covers }) => {
               const own = p.kind === "base" || p.kind === "FM" ? p.conditions : p.stated
               const cat = categoryOf(p.conditions)
