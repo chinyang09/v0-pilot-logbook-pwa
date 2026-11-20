@@ -33,6 +33,7 @@ import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { useDutyLookups } from "@/hooks/use-duty-lookups"
 import { useAirportWeather } from "@/hooks/use-airport-weather"
+import { useAirportInfo } from "@/hooks/use-airport-info"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ReadingPanel } from "@/components/ui/detail-form-panel"
@@ -51,7 +52,7 @@ import { getAirportByIcao, getAirportsRevision, isAirportTableSeeded, onAirportS
 import type { Airport } from "@/types/entities/airport.types"
 import { cn } from "@/lib/utils"
 import { useTick } from "./flight/instruments"
-import { CrewFace, CurrencyFace, DestinationFace, DutyChooser, DutyFace, FlightFace, LimitsFace, currencyRows, limitsOf } from "./flight/faces"
+import { CurrencyFace, DestinationFace, DutyChooser, DutyFace, FlightFace, LimitsFace, currencyRows, limitsOf } from "./flight/faces"
 import { WeatherFace, type WeatherState } from "./flight/weather"
 import { WIDGET_TITLE, useWidgetCtx, widgetContent } from "./flight/details"
 import { BentoGrid } from "./flight/bento"
@@ -63,8 +64,6 @@ import type { RequirementState } from "@/lib/utils/dashboard/legality"
 
 /** How far either side of now a duty's gates and aeroplane are worth asking about. */
 const LOOKUP_WINDOW_MS = 18 * 3600_000
-/** How far ahead a TAF reaches: past this the weather is not worth asking. */
-const WEATHER_AHEAD_MS = 30 * 3600_000
 /** How many duties ahead the flight card can step to. */
 const CHOICES = 14
 
@@ -117,9 +116,7 @@ function faceOf(id: WidgetId, brief: FlightBrief): React.ReactNode {
     case "flight":
       return <FlightFace brief={brief} />
     case "weather":
-      return <WeatherFace weather={brief.weather} code={brief.code} />
-    case "crew":
-      return <CrewFace brief={brief} />
+      return <WeatherFace weather={brief.weather} code={brief.code} station={brief.weatherStation} />
     case "destination":
       return <DestinationFace brief={brief} />
     case "currency":
@@ -221,12 +218,25 @@ export function FlightDashboard({ className }: { className?: string }) {
   const currency = React.useMemo(() => currencySummary(currencies, dutyAtMs), [currencies, dutyAtMs])
   const stations = React.useMemo(() => dutyStations(legs), [legs])
   const airports = useAirportsByIcao(stations)
+  // Runways and frequencies for the destinations — the tile reads the
+  // favoured runway; kept on the device 30 days, so this is rarely a request.
+  const destIcaos = React.useMemo(() => {
+    const origin = (legs[0]?.departureIcao || "").toUpperCase()
+    return [...new Set(legs.map((l) => (l.arrivalIcao || "").toUpperCase()))].filter((i) => i && i !== origin)
+  }, [legs])
+  const airportInfo = useAirportInfo(destIcaos, isActive && destIcaos.length > 0)
 
   /* ── Weather ─────────────────────────────────────────────────────────── */
-  const lastArrive = times.length ? (times[times.length - 1].arriveMs ?? dutyAtMs) : dutyAtMs
-  const weatherClose =
-    dutyAtMs !== null && dutyAtMs - now <= WEATHER_AHEAD_MS && (lastArrive ?? dutyAtMs) >= now - 3600_000
-  const wx = useAirportWeather(stations, isActive && weatherClose && stations.length > 0)
+  // Live, whatever the duty's distance (the owner: "pull real time weather
+  // instead of waiting"): the METAR is now; a TAF is read over the duty's
+  // times once they are within its reach.
+  const weatherClose = stations.length > 0
+  const wx = useAirportWeather(stations, isActive && weatherClose)
+  // The airport the weather tile shows: where the duty is going next.
+  const weatherStation = React.useMemo(() => {
+    const next = legs.find((l) => !l.inTime) ?? legs[legs.length - 1]
+    return (next?.arrivalIcao || "").toUpperCase() || stations[0] || null
+  }, [legs, stations])
   const windows = React.useMemo(() => stationWindows(times), [times])
   const stationBriefs = React.useMemo(() => briefStations(stations, windows, wx.weather), [stations, windows, wx.weather])
   const weather: WeatherState = React.useMemo(
@@ -283,14 +293,16 @@ export function FlightDashboard({ className }: { className?: string }) {
       currency,
       destinations,
       airports,
+      airportInfo,
       weather,
+      weatherStation,
       code: (icao: string, iata?: string) =>
         getAirportDisplayCode(icao, iata || iataOf.get((icao || "").toUpperCase()), pref) || icao,
       clock: (ms: number) => formatInstant(ms, display, zone),
       day: (ms: number) =>
         formatDayAt(ms, display?.useZuluTime === false ? zone : "UTC", { year: false }),
     }),
-    [status, now, display, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, margin, recency.lapseIso, crew, currency, destinations, airports, weather, iataOf, pref, zone],
+    [status, now, display, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, margin, recency.lapseIso, crew, currency, destinations, airports, airportInfo, weather, weatherStation, iataOf, pref, zone],
   )
 
   /* ── Opening a widget ────────────────────────────────────────────────── */

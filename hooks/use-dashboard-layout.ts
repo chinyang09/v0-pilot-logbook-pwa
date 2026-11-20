@@ -14,7 +14,8 @@ import { useSyncExternalStore } from "react"
  * client render agree.
  */
 
-export const DASHBOARD_TILES = ["duty", "flight", "weather", "crew", "destination", "currency", "limits"] as const
+// The crew is part of the flights tile (the owner's duty-and-crew widget, Nov 2026).
+export const DASHBOARD_TILES = ["duty", "flight", "weather", "destination", "currency", "limits"] as const
 export type DashboardTile = (typeof DASHBOARD_TILES)[number]
 
 const STORAGE_KEY = "ooo:dashboard-tiles"
@@ -93,9 +94,9 @@ const DEFAULT_ORDER: DashboardTile[] = [...DASHBOARD_TILES]
 export const DEFAULT_TILE_WIDTHS: Record<DashboardTile, number> = {
   duty: 12,
   flight: 12,
-  weather: 4,
-  crew: 4,
-  destination: 4,
+  // Half each: the weather's wind dial and the destination's runway need it.
+  weather: 6,
+  destination: 6,
   currency: 6,
   limits: 6,
 }
@@ -105,13 +106,13 @@ export const TILE_ALLOWED_WIDTHS: Record<DashboardTile, readonly number[]> = {
   duty: [6, 8, 12],
   flight: [6, 8, 12],
   weather: [4, 6, 8, 12],
-  crew: [4, 6, 8, 12],
   destination: [4, 6, 8, 12],
   currency: [4, 6, 8, 12],
   limits: [4, 6, 8, 12],
 }
 
-const WIDTHS_KEY = "ooo:dashboard-widths"
+// v2: the layout changed (crew folded into flights, weather and destination a half each).
+const WIDTHS_KEY = "ooo:dashboard-widths:v2"
 
 /** Stored widths, put right: an unknown tile or a width it may not take falls back to its default. */
 export function normaliseTileWidths(stored: unknown): Record<DashboardTile, number> {

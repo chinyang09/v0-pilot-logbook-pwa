@@ -28,6 +28,7 @@ import { motion } from "framer-motion"
 import { useBackDismiss } from "@/hooks/use-back-dismiss"
 import { useDialogFocus } from "@/hooks/use-dialog-focus"
 import { setMenuOpen } from "@/lib/utils/menu-lock"
+import { runSharedMorph } from "./shared-morph"
 import { ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -35,7 +36,6 @@ export type WidgetId =
   | "duty"
   | "flight"
   | "weather"
-  | "crew"
   | "destination"
   | "currency"
   | "limits"
@@ -122,7 +122,7 @@ export function Widget({
 export function WidgetLabel({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) {
   return (
     <div className="mb-1 flex items-center justify-between gap-2">
-      <span className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+      <span className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground" data-morph="label">
         {children}
       </span>
       {right}
@@ -256,6 +256,10 @@ export function WidgetSheet({
   }, [])
 
   const [closing, setClosing] = React.useState(false)
+  // Closing because something in the card LEADS somewhere: the card fades
+  // where it is while the next page appears under it, rather than shrinking
+  // back onto a tile that is no longer on screen.
+  const [leaving, setLeaving] = React.useState(false)
   const closingRef = React.useRef(false)
   const finishClose = React.useCallback(() => {
     if (!closingRef.current) return
@@ -282,9 +286,39 @@ export function WidgetSheet({
     return () => window.removeEventListener("keydown", onKey)
   }, [requestClose])
 
+  // Shared elements fly between the tile's face and the card, on the open and
+  // on a close back onto the tile (`runSharedMorph`).
+  const faceRef = React.useRef<HTMLDivElement>(null)
+  const flyRef = React.useRef<HTMLDivElement>(null)
+  const measuredNow = height !== null
+  React.useLayoutEffect(() => {
+    if (!measuredNow || leaving) return
+    const face = faceRef.current
+    const card = cardRef.current
+    const layer = flyRef.current
+    if (!face || !card || !layer) return
+    const run = runSharedMorph({
+      face,
+      card,
+      layer,
+      opening: !closing,
+      move: closing ? CLOSE : OPEN,
+      fade: closing ? { duration: 0.24, ease: EASE } : { duration: 0.26, ease: EASE },
+    })
+    return run.cancel
+  }, [measuredNow, closing, leaving])
+
+  const dismissCard = React.useCallback(
+    (then?: () => void) => {
+      if (then) setLeaving(true)
+      requestClose(then)
+    },
+    [requestClose],
+  )
+
   if (typeof document === "undefined") return null
 
-  const content = render((then) => requestClose(then))
+  const content = render(dismissCard)
   const measured = height !== null
   const open = measured && !closing
   const vw = window.innerWidth
@@ -306,9 +340,11 @@ export function WidgetSheet({
   const onTile = { left: anchor.left, top: anchor.top, width: anchor.width, height: anchor.height }
   const crossfade = !(seamless && wide)
   const t = closing ? CLOSE : OPEN
+  const LEAVE = { duration: 0.2, ease: EASE }
 
   return createPortal(
-    <div className="fixed inset-0 z-[210]">
+    // Leaving, it takes no taps: the page it led to is already under it.
+    <div className={cn("fixed inset-0 z-[210]", leaving && "pointer-events-none")}>
       <motion.div
         className={cn("absolute inset-0", SCRIM)}
         initial={{ opacity: 0 }}
@@ -326,12 +362,22 @@ export function WidgetSheet({
         {/* The surface: the tile's card, growing to the card's box. */}
         <motion.div
           className={cn(
-            "pointer-events-auto fixed overflow-hidden rounded-2xl border bg-card",
+            "fixed overflow-hidden rounded-2xl border bg-card",
+            leaving ? "pointer-events-none" : "pointer-events-auto",
             (tone === "fail" || tone === "caution") && !open ? TONE_BORDER[tone] : "border-border",
           )}
-          initial={{ ...onTile, boxShadow: NO_SHADOW }}
-          animate={open ? { ...rest, boxShadow: LIFT_SHADOW } : { ...onTile, boxShadow: NO_SHADOW }}
-          transition={t}
+          initial={{ ...onTile, boxShadow: NO_SHADOW, scale: 1 }}
+          animate={
+            leaving
+              ? { ...rest, boxShadow: LIFT_SHADOW, scale: 0.97 }
+              : open
+                ? { ...rest, boxShadow: LIFT_SHADOW, scale: 1 }
+                : { ...onTile, boxShadow: NO_SHADOW, scale: 1 }
+          }
+          // Leaving fades on the compositor: the card goes where it is while
+          // the next page comes up under it.
+          style={leaving ? { opacity: 0, transition: "opacity 200ms cubic-bezier(0.32, 0.72, 0, 1)" } : undefined}
+          transition={leaving ? LEAVE : t}
           onAnimationComplete={() => {
             if (closingRef.current) finishClose()
           }}
@@ -339,11 +385,13 @@ export function WidgetSheet({
           {/* The tile's face at the tile's size, fading into the card. */}
           {crossfade && (
             <motion.div
+              ref={faceRef}
               aria-hidden
               className="pointer-events-none absolute left-0 top-0 flex flex-col p-3"
               style={{ width: anchor.width - 2, height: anchor.height - 2 }}
               initial={{ opacity: 1 }}
-              animate={{ opacity: open ? 0 : 1 }}
+              // Leaving: the card stays as it is and the surface fades whole.
+              animate={{ opacity: open || leaving ? 0 : 1 }}
               transition={open ? { duration: 0.14, ease: EASE } : { duration: 0.18, delay: 0.08, ease: EASE }}
             >
               {face}
@@ -355,13 +403,18 @@ export function WidgetSheet({
             className="absolute left-0 top-0 overflow-y-auto overflow-x-hidden overscroll-contain scrollbar-hide"
             style={{ width: width - 2, maxHeight: maxCard - 2 }}
             initial={{ opacity: crossfade ? 0 : 1 }}
-            animate={{ opacity: crossfade ? (open ? 1 : 0) : 1 }}
+            animate={{ opacity: crossfade ? (open || leaving ? 1 : 0) : 1 }}
             transition={open ? { duration: 0.2, delay: 0.06, ease: EASE } : { duration: 0.12, ease: EASE }}
           >
             <div className="relative p-3">{content.header}</div>
             {content.body && <div className="border-t border-border/70 px-3 pb-3 pt-2.5">{content.body}</div>}
-            <WidgetFooter actions={content.actions} run={(a) => (a.stay ? a.run() : requestClose(a.run))} />
+            {/* A footer action that leads somewhere is already wrapped to close
+                the card first (`render`'s dismiss) — closing it again here
+                swallowed the navigation (the owner's report). */}
+            <WidgetFooter actions={content.actions} run={(a) => a.run()} />
           </motion.div>
+          {/* The shared elements' copies, in flight. */}
+          <div ref={flyRef} aria-hidden className="pointer-events-none absolute inset-0" />
         </motion.div>
       </div>
     </div>,
