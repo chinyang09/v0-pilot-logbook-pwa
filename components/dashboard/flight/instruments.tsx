@@ -310,7 +310,8 @@ export function DutyBand({
         bar: {
           fromMs: restStartMs,
           toMs: Math.max(next.reportMs, legalAtMs),
-          tone: short ? "fail" : rest?.isLegalNow ? "ok" : "caution",
+          // Dark cockpit: rest still running toward a legal report is fine.
+          tone: short ? "fail" : "ok",
           caretMs: next.reportMs,
           // The rest still owed at the moment of report — the shortfall, drawn
           // where it happens rather than stated as a number somewhere else.

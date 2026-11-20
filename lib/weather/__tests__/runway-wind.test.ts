@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { favouredRunway, runwayEnds, runwayNamesFrom, windOn } from "../runway-wind"
+import { favouredRunway, runwayEnds, runwayEndsFrom, windOn } from "../runway-wind"
 
 describe("runwayEnds", () => {
   it("reads both ends of each runway off its designator", () => {
@@ -18,11 +18,18 @@ describe("runwayEnds", () => {
   })
 })
 
-describe("runwayNamesFrom", () => {
-  it("reads the name off each runway record", () => {
-    expect(runwayNamesFrom([{ name: "02L/20R", length: { ft: 13123 } }, { name: " 15/33 " }, null, 4])).toEqual([
-      "02L/20R",
-      "15/33",
+describe("runwayEndsFrom", () => {
+  it("puts both ends on the TRUE heading given, else the designator", () => {
+    expect(
+      runwayEndsFrom([
+        { id: "16L/34R", trueHeading: 180 },
+        { id: "09/27", trueHeading: null },
+      ]),
+    ).toEqual([
+      { ident: "16L", headingDeg: 180 },
+      { ident: "34R", headingDeg: 0 },
+      { ident: "09", headingDeg: 90 },
+      { ident: "27", headingDeg: 270 },
     ])
   })
 })

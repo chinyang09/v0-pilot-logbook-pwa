@@ -2,11 +2,12 @@
  * Which runway the wind favours, and what it gives on it — the airport
  * panel's picture (the owner, Nov 2026: "picture tells a thousand words").
  *
- * A runway end is read off its designator: "02L" points 020°. That is the
- * MAGNETIC heading rounded to ten degrees, while a METAR's wind is TRUE; the
- * difference is the local variation (near zero across South-East Asia, a few
- * degrees in most places). It is an approximation and is said as one — a
- * glance at which way the wind sits, never a performance figure.
+ * A runway end's heading is its TRUE heading where the airport data gives one
+ * (`runwayEndsFrom`, aviationweather.gov's `alignment`) — the frame a METAR's
+ * wind is in, so the components are exact. Without it the designator stands
+ * in ("02L" points 020°): the MAGNETIC heading rounded to ten degrees, a few
+ * degrees out in most places. Either way it is a glance at which way the wind
+ * sits, never a performance figure.
  *
  * Pure, so it is tested without the page.
  */
@@ -49,15 +50,21 @@ export function runwayEnds(names: readonly string[]): RunwayEnd[] {
   return out
 }
 
-/** The runway names out of the lookup's raw runway records (`{ name: "02L/20R", … }`). */
-export function runwayNamesFrom(raw: readonly unknown[] | null | undefined): string[] {
-  const out: string[] = []
-  for (const r of raw ?? []) {
-    if (typeof r === "string") out.push(r)
-    else if (r && typeof r === "object") {
-      const name = (r as { name?: unknown; ident?: unknown }).name ?? (r as { ident?: unknown }).ident
-      if (typeof name === "string" && name.trim()) out.push(name.trim())
-    }
+/**
+ * Both ends of each runway, on the TRUE heading the airport data gives the
+ * first end ("02L/20R" at 23° → 02L 23°, 20R 203°); a runway with none falls
+ * back to its designator.
+ */
+export function runwayEndsFrom(runways: readonly { id: string; trueHeading: number | null }[]): RunwayEnd[] {
+  const out: RunwayEnd[] = []
+  const seen = new Set<string>()
+  for (const r of runways) {
+    const ends = runwayEnds([r.id])
+    ends.forEach((e, i) => {
+      if (seen.has(e.ident)) return
+      seen.add(e.ident)
+      out.push(r.trueHeading === null ? e : { ident: e.ident, headingDeg: (r.trueHeading + i * 180) % 360 })
+    })
   }
   return out
 }

@@ -19,6 +19,8 @@ import { readEnvelope, setQuery } from "@/lib/fr24/envelope"
 import type { Fr24Result } from "@/lib/fr24/types"
 import type { EnrichedAirport, LookupRoute, LookupRoutes, PooledAircraft } from "./types"
 import type { WeatherAnswer } from "@/lib/weather/types"
+import type { AirportInfo } from "@/lib/weather/airport-info"
+import type { Alternate } from "@/lib/weather/alternates"
 
 const CLIENT_TIMEOUT_MS = 15000
 
@@ -96,9 +98,35 @@ async function weatherGet(ids: string[], opts: { fresh?: boolean; signal?: Abort
   }
 }
 
+/** A Node route beside the door, read through the one envelope reader. */
+async function nodeGet<T>(url: string, signal?: AbortSignal): Promise<Fr24Result<T>> {
+  try {
+    const response = await fetch(url, { signal: withTimeout(signal) })
+    return readEnvelope<T>(response.status, await response.json().catch(() => null))
+  } catch (err) {
+    return { ok: false, status: 0, error: (err as Error).message }
+  }
+}
+
+const latLon = (ps: readonly { lat: number; lon: number }[]) => ps.map((p) => `${p.lat.toFixed(3)},${p.lon.toFixed(3)}`).join(";")
+
 export const lookup = {
   /** METAR and TAF for up to 24 stations (ICAO). */
   weather: weatherGet,
+  /** Runways (true headings) and frequencies, kept 30 days — `/api/lookup/airport-info`, Node. */
+  airportInfo: (ids: string[], signal?: AbortSignal) =>
+    nodeGet<Record<string, AirportInfo | null>>(`/api/lookup/airport-info?ids=${encodeURIComponent(ids.join(","))}`, signal),
+  /** The aerodromes near each destination and along each leg, with their weather — `/api/lookup/alternates`, Node. */
+  alternates: (
+    path: readonly { lat: number; lon: number }[],
+    dests: readonly { lat: number; lon: number }[],
+    exclude: readonly string[],
+    signal?: AbortSignal,
+  ) =>
+    nodeGet<{ alternates: Alternate[]; weather: WeatherAnswer | null }>(
+      `/api/lookup/alternates?path=${encodeURIComponent(latLon(path))}&dests=${encodeURIComponent(latLon(dests))}&exclude=${encodeURIComponent(exclude.join(","))}`,
+      signal,
+    ),
   /**
    * Every aircraft the text could be, each marked `exact`, exact first. Only an
    * exact one may be taken without the pilot choosing it.

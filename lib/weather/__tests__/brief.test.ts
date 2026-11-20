@@ -11,6 +11,7 @@ import {
   parseTaf,
   readConditions,
   stationWindows,
+  metarReadings,
 } from "../brief"
 
 const xml = readFileSync(path.join(__dirname, "fixtures", "tafs.sample.xml"), "utf8")
@@ -146,5 +147,13 @@ describe("hazards as a line", () => {
   it("groups each tag's hazards under it", async () => {
     const { hazardLine } = await import("../brief")
     expect(hazardLine(["CB", "TEMPO TS", "TEMPO CB", "PROB30 FG"])).toBe("CB · TEMPO TS CB · PROB30 FG")
+  })
+})
+
+describe("metarReadings", () => {
+  it("reads temperature, dew point and QNH off the body, not the trend", () => {
+    expect(metarReadings("METAR WSSS 181430Z 36006KT 9999 FEW020 28/24 Q1009 TEMPO TSRA")).toEqual({ tempC: 28, dewC: 24, qnhHpa: 1009 })
+    expect(metarReadings("METAR KSEA 181453Z 18010KT 10SM OVC020 M02/M05 A2992 RMK AO2")).toEqual({ tempC: -2, dewC: -5, qnhHpa: 1013 })
+    expect(metarReadings("METAR XXXX 181430Z 36006KT 9999")).toEqual({ tempC: null, dewC: null, qnhHpa: null })
   })
 })

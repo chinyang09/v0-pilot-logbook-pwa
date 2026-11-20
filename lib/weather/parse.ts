@@ -47,6 +47,12 @@ export function parseTafCache(xml: string): Record<string, TafReport> {
       from: time(tag(block, "valid_time_from")),
       to: time(tag(block, "valid_time_to")),
     }
+    const lat = Number(tag(block, "latitude"))
+    const lon = Number(tag(block, "longitude"))
+    if (tag(block, "latitude") && Number.isFinite(lat) && Number.isFinite(lon)) {
+      report.lat = lat
+      report.lon = lon
+    }
     if (!out[id] || report.issued > out[id].issued) out[id] = report
   }
   return out

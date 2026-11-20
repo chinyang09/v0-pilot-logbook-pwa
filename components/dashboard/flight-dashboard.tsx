@@ -41,12 +41,13 @@ import { dutyFlights } from "@/lib/utils/dashboard/duty-flights"
 import { describeDuty } from "@/lib/utils/dashboard/duty-line"
 import { dutyWindow } from "@/lib/utils/dashboard/duty-status"
 import { fdpMinutesOf } from "@/lib/utils/roster/fdp-calculator"
+import { delayMargin } from "@/lib/utils/dashboard/delay-margin"
 import { crewOnDuty, destinationVisits, dutyStations, legTimes } from "@/lib/utils/dashboard/flight-brief"
 import { briefStations, stationWindows } from "@/lib/weather/brief"
 import { getAirportDisplayCode } from "@/lib/utils/airport-display"
 import { formatInstant } from "@/lib/utils/tz-format"
 import { formatDayAt } from "@/lib/utils/date"
-import { getAirportByIcao, getAirportsRevision } from "@/lib/db/stores/reference/airports.store"
+import { getAirportByIcao, getAirportsRevision, isAirportTableSeeded, onAirportSeedProgress } from "@/lib/db/stores/reference/airports.store"
 import type { Airport } from "@/types/entities/airport.types"
 import { cn } from "@/lib/utils"
 import { useTick } from "./flight/instruments"
@@ -87,14 +88,22 @@ function useAirportsByIcao(icaos: readonly string[]): Map<string, Airport> {
   React.useEffect(() => {
     if (!key) return
     let alive = true
-    void Promise.all(key.split(",").map((c) => getAirportByIcao(c).catch(() => undefined))).then((airports) => {
-      if (!alive) return
-      const map = new Map<string, Airport>()
-      for (const a of airports) if (a) map.set(a.icao.toUpperCase(), a)
-      setFound({ key, map })
+    const read = () =>
+      void Promise.all(key.split(",").map((c) => getAirportByIcao(c).catch(() => undefined))).then((airports) => {
+        if (!alive) return
+        const map = new Map<string, Airport>()
+        for (const a of airports) if (a) map.set(a.icao.toUpperCase(), a)
+        setFound({ key, map })
+      })
+    read()
+    // A new install is still writing the airport table: read again when it
+    // has (the revision moves, but nothing re-renders this page for it).
+    const off = isAirportTableSeeded() ? () => {} : onAirportSeedProgress((done) => {
+      if (done >= 1) read()
     })
     return () => {
       alive = false
+      off()
     }
   }, [key, revision])
   return found?.key === key ? found.map : NO_AIRPORTS
@@ -180,6 +189,13 @@ export function FlightDashboard({ className }: { className?: string }) {
     const dp = choice.period
     return dp && dp.maxFdpMinutes > 0 ? { planned: fdpMinutesOf(dp), max: dp.maxFdpMinutes } : null
   }, [current, choice, index, status.duty.next])
+  // How much later this duty can run: its own FDP, and every rolling window
+  // that holds it (the duties rostered after it included).
+  const margin = React.useMemo(() => {
+    const dp = choice?.period
+    if (!dp) return null
+    return delayMargin(allDutyPeriods, dp, dp.maxFdpMinutes > 0 ? dp.maxFdpMinutes - fdpMinutesOf(dp) : null)
+  }, [choice, allDutyPeriods])
   const legs = React.useMemo(() => (dutyAtMs === null ? [] : dutyFlights(flights, dutyAtMs)), [flights, dutyAtMs])
   const times = React.useMemo(() => legs.map(legTimes), [legs])
   const lookupsClose = dutyAtMs !== null && Math.abs(dutyAtMs - now) <= LOOKUP_WINDOW_MS
@@ -261,6 +277,8 @@ export function FlightDashboard({ className }: { className?: string }) {
         lookupsLoading: lookups.loading,
         refreshLookups: lookups.refresh,
       },
+      margin,
+      recencyLapseIso: recency.lapseIso,
       crew,
       currency,
       destinations,
@@ -272,7 +290,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       day: (ms: number) =>
         formatDayAt(ms, display?.useZuluTime === false ? zone : "UTC", { year: false }),
     }),
-    [status, now, display, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, crew, currency, destinations, airports, weather, iataOf, pref, zone],
+    [status, now, display, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, margin, recency.lapseIso, crew, currency, destinations, airports, weather, iataOf, pref, zone],
   )
 
   /* ── Opening a widget ────────────────────────────────────────────────── */
@@ -280,15 +298,15 @@ export function FlightDashboard({ className }: { className?: string }) {
   const { selectedId, setSelectedId, setDetailContent } = useDetailPanel()
   const onDashboard = usePathname() === "/"
   const panelWidget = selectedId?.startsWith("w:") ? (selectedId.slice(2) as WidgetId) : null
-  // The tile stays under its card while it travels and comes back the moment
-  // the close begins, so the card fades INTO it (`phase`).
-  const [sheetState, setSheet] = React.useState<{ id: WidgetId; anchor: WidgetAnchor; phase: "opening" | "open" | "closing" } | null>(null)
+  // The tile is hidden for its card's whole life: the card's surface covers
+  // it exactly when it opens and when it has gone back.
+  const [sheetState, setSheet] = React.useState<{ id: WidgetId; anchor: WidgetAnchor } | null>(null)
   // A phone that turns into a tablet leaves its sheet behind: the panel is the detail there.
   const sheet = isDesktop ? null : sheetState
   const open = React.useCallback(
     (id: WidgetId, anchor: WidgetAnchor) => {
       if (isDesktop) setSelectedId(`w:${id}`)
-      else setSheet({ id, anchor, phase: "opening" })
+      else setSheet({ id, anchor })
     },
     [isDesktop, setSelectedId],
   )
@@ -321,14 +339,18 @@ export function FlightDashboard({ className }: { className?: string }) {
   const reqs = status.legality.requirements
   const tint = {
     currency: worstOf(currencyRows(brief).map((r) => r.state)),
-    limits: worstOf(limitsOf(brief).map((r) => r.state)),
+    // A delay margin under an hour is the limits card's to flag too.
+    limits: worstOf([
+      ...limitsOf(brief).map((r) => r.state),
+      ...(brief.margin ? [brief.margin.minutes <= 0 ? ("fail" as const) : brief.margin.minutes < 60 ? ("caution" as const) : ("ok" as const)] : []),
+    ]),
   } as Partial<Record<WidgetId, RequirementState | null>>
   const tile = (id: WidgetId) => (
     <Widget
       id={id}
       label={WIDGET_TITLE[id]}
       open={isDesktop && panelWidget === id}
-      hidden={sheet?.id === id && sheet.phase === "open"}
+      hidden={sheet?.id === id}
       onOpen={open}
       tone={tint[id] ?? null}
       controls={id === "flight" ? <DutyChooser brief={brief} onChoose={selectDuty} /> : undefined}
@@ -356,6 +378,9 @@ export function FlightDashboard({ className }: { className?: string }) {
         <WidgetSheet
           anchor={sheet.anchor}
           title={WIDGET_TITLE[sheet.id]}
+          face={faceOf(sheet.id, brief)}
+          seamless={widgetContent(sheet.id, brief, ctx).header === "face"}
+          tone={tint[sheet.id] ?? null}
           // Anything in the card that goes somewhere closes it first.
           render={(dismiss) => {
             const sheetCtx = {
@@ -370,8 +395,6 @@ export function FlightDashboard({ className }: { className?: string }) {
               actions,
             }
           }}
-          onOpened={() => setSheet((s) => (s && s.phase === "opening" ? { ...s, phase: "open" } : s))}
-          onClosing={() => setSheet((s) => (s ? { ...s, phase: "closing" } : s))}
           onClose={() => setSheet(null)}
         />
       )}

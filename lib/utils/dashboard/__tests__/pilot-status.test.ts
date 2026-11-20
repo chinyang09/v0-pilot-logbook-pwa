@@ -457,8 +457,9 @@ describe("buildPilotStatus — the duty and rest card's own verdict", () => {
     // The owner, Nov 2026: one card per section, no fact in two places.
     const s = status({ recency: { takeoffs: 0, landings: 0, current: false, lapseIso: "2026-08-01" } }, [], resting)
     expect(s.state).toBe("action_required")
-    expect(s.dutyAction.headline).toBe("Rest until 22:42")
-    expect(s.dutyState).toBe("warning")
+    // Resting toward a legal report lights nothing; the headline is when it is done.
+    expect(s.dutyAction.headline).toBe("Legal from 22:42")
+    expect(s.dutyState).toBe("current")
   })
 
   it("is not raised by a currency when rested", () => {

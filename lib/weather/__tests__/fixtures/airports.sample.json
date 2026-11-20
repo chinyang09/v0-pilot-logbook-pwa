@@ -1,0 +1,205 @@
+[
+ {
+  "icaoId": "KSEA",
+  "iataId": "SEA",
+  "faaId": "SEA",
+  "name": "SEATTLE/SEATTLE-TACOMA INTL ",
+  "state": "WA",
+  "country": "US",
+  "source": "FAA",
+  "type": "ARP",
+  "lat": 47.4499,
+  "lon": -122.3118,
+  "elev": 131,
+  "magdec": "16E",
+  "owner": "P",
+  "rwyNum": "3",
+  "rwyLength": "L",
+  "rwyType": "C",
+  "services": "S",
+  "tower": "T",
+  "beacon": "B",
+  "operations": "0",
+  "passengers": "45960",
+  "freqs": "D-ATIS,118.0;LCL/P,119.9;LCL/P,120.95",
+  "priority": "0",
+  "runways": [
+   {
+    "id": "16C/34C",
+    "dimension": "9426x150",
+    "surface": "C",
+    "alignment": 180
+   },
+   {
+    "id": "16L/34R",
+    "dimension": "11901x150",
+    "surface": "C",
+    "alignment": 180
+   },
+   {
+    "id": "16R/34L",
+    "dimension": "8500x150",
+    "surface": "C",
+    "alignment": 180
+   }
+  ]
+ },
+ {
+  "icaoId": "VTBS",
+  "iataId": "BKK",
+  "faaId": null,
+  "name": "BANGKOK/SUVARNABHUMI AIRPORT",
+  "state": "20",
+  "country": "TH",
+  "source": "Intl",
+  "type": "ARP",
+  "lat": 13.6826,
+  "lon": 100.7485,
+  "elev": 1,
+  "magdec": "0",
+  "owner": "P",
+  "rwyNum": "2",
+  "rwyLength": "L",
+  "rwyType": "H",
+  "services": "S",
+  "tower": "T",
+  "beacon": "B",
+  "passengers": "28750",
+  "freqs": "ATIS,127.8;TWR,118.2",
+  "priority": "4",
+  "runways": [
+   {
+    "id": "01R/19L",
+    "dimension": "13123x197",
+    "surface": "H",
+    "alignment": 15
+   },
+   {
+    "id": "01L/19R",
+    "dimension": "12139x197",
+    "surface": "H",
+    "alignment": 15
+   }
+  ]
+ },
+ {
+  "icaoId": "WADD",
+  "iataId": "DPS",
+  "faaId": null,
+  "name": "BALI/RAI INTERNATIONAL AIRPORT",
+  "state": "BA",
+  "country": "ID",
+  "source": "Intl",
+  "type": "ARP",
+  "lat": -8.7479,
+  "lon": 115.1647,
+  "elev": 3,
+  "magdec": "1E",
+  "owner": "P",
+  "rwyNum": "1",
+  "rwyLength": "L",
+  "rwyType": "H",
+  "services": "S",
+  "tower": "T",
+  "beacon": "B",
+  "passengers": "23000",
+  "freqs": "ATIS,126.2;TWR,118.1",
+  "priority": "1",
+  "runways": [
+   {
+    "id": "09/27",
+    "dimension": "9843x148",
+    "surface": "H",
+    "alignment": 87
+   }
+  ]
+ },
+ {
+  "icaoId": "WMKK",
+  "iataId": "KUL",
+  "faaId": null,
+  "name": "KUALA LUMPUR INTERNATIONAL AIRPORT",
+  "state": "SL",
+  "country": "MY",
+  "source": "Intl",
+  "type": "ARP",
+  "lat": 2.7375,
+  "lon": 101.6974,
+  "elev": 21,
+  "magdec": "0",
+  "owner": "P",
+  "rwyNum": "3",
+  "rwyLength": "L",
+  "rwyType": "H",
+  "services": "S",
+  "tower": "T",
+  "beacon": "B",
+  "passengers": "25380",
+  "freqs": "ATIS,128.05;TWR,118.8",
+  "priority": "4",
+  "runways": [
+   {
+    "id": "14L/32R",
+    "dimension": "13186x197",
+    "surface": "H",
+    "alignment": 146
+   },
+   {
+    "id": "14R/32L",
+    "dimension": "13123x197",
+    "surface": "H",
+    "alignment": 146
+   },
+   {
+    "id": "15/33",
+    "dimension": "12992x197",
+    "surface": "H",
+    "alignment": 146
+   }
+  ]
+ },
+ {
+  "icaoId": "WSSS",
+  "iataId": "SIN",
+  "faaId": null,
+  "name": "SINGAPORE CHANGI INTERNATIONAL AIRPORT",
+  "state": "4",
+  "country": "SG",
+  "source": "Intl",
+  "type": "ARP",
+  "lat": 1.3592,
+  "lon": 103.9893,
+  "elev": 17,
+  "magdec": "0",
+  "owner": "P",
+  "rwyNum": "3",
+  "rwyLength": "L",
+  "rwyType": "H",
+  "services": "S",
+  "tower": "T",
+  "beacon": "B",
+  "passengers": "32200",
+  "freqs": "ATIS,128.6;TWR,118.6",
+  "priority": "0",
+  "runways": [
+   {
+    "id": "02C/20C",
+    "dimension": "13123x197",
+    "surface": "H",
+    "alignment": 23
+   },
+   {
+    "id": "02L/20R",
+    "dimension": "13123x197",
+    "surface": "H",
+    "alignment": 23
+   },
+   {
+    "id": "02R/20L",
+    "dimension": "13123x197",
+    "surface": "H",
+    "alignment": 23
+   }
+  ]
+ }
+]

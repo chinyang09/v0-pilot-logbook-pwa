@@ -15,6 +15,7 @@ import type { CrewMate, DestinationVisits } from "@/lib/utils/dashboard/flight-b
 import type { LegTimes } from "@/lib/weather/brief"
 import type { CurrencySummary } from "@/lib/utils/dashboard/currency-summary"
 import type { WeatherState } from "./weather"
+import type { DelayMargin } from "@/lib/utils/dashboard/delay-margin"
 
 export interface FlightBrief {
   status: PilotStatus
@@ -51,6 +52,10 @@ export interface FlightBrief {
     lookupsLoading: boolean
     refreshLookups: () => void
   }
+  /** How much later the chosen duty can run inside every limit — FDP and the rolling windows. */
+  margin: DelayMargin | null
+  /** The first day 90-day recency is NOT met, YYYY-MM-DD (null when it is not met now). */
+  recencyLapseIso: string | null
   crew: CrewMate[]
   /** The Currencies page in brief: its documents, grouped as it groups them, judged against the chosen duty. */
   currency: CurrencySummary
