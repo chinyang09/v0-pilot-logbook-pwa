@@ -61,6 +61,8 @@ export interface FlightBrief {
   /** The first day 90-day recency is NOT met, YYYY-MM-DD (null when it is not met now). */
   recencyLapseIso: string | null
   crew: CrewMate[]
+  /** Each leg's own crew, in the order flown — the flights tile shows the leg on its page. */
+  legCrew: CrewMate[][]
   /** The Currencies page in brief: its documents, grouped as it groups them, judged against the chosen duty. */
   currency: CurrencySummary
   destinations: DestinationVisits[]

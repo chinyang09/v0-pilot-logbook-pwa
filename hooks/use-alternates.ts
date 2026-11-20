@@ -30,7 +30,7 @@ export function useAlternates(
       if (!res.ok) throw new Error(res.error)
       return res.data
     },
-    { revalidateOnFocus: false, shouldRetryOnError: false, dedupingInterval: 10 * 60_000 },
+    { revalidateOnFocus: false, errorRetryCount: 3, errorRetryInterval: 5_000, dedupingInterval: 10 * 60_000 },
   )
   return { alternates: data?.alternates ?? NO_ALTERNATES, weather: data?.weather ?? null, loading: isLoading, failed: !!error }
 }

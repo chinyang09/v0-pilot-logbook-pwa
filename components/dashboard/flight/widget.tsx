@@ -29,6 +29,8 @@ import { useBackDismiss } from "@/hooks/use-back-dismiss"
 import { useDialogFocus } from "@/hooks/use-dialog-focus"
 import { setMenuOpen } from "@/lib/utils/menu-lock"
 import { runSharedMorph } from "./shared-morph"
+import { beginArrangeFrom } from "./bento"
+import { setArranging } from "@/hooks/use-dashboard-layout"
 import { ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -59,11 +61,16 @@ const SCRIM = "bg-black/45 dark:bg-black/75"
 const LIFT_SHADOW = "0px 25px 50px -12px rgba(0,0,0,0.45)"
 const NO_SHADOW = "0px 0px 0px 0px rgba(0,0,0,0)"
 const MARGIN = 12
+/** How long a tile is held before it is picked up to arrange. */
+const LONG_PRESS_MS = 450
 /** The widest a lifted card goes — a tablet in a phone-sized window stays a card. */
 const CARD_MAX_PX = 480
 
 /** A flagged card's edge: its section's worst state, so the card says it at a glance. */
-const TONE_BORDER = { fail: "border-destructive/60", caution: "border-chart-4/60" } as const
+const TONE_BORDER = {
+  fail: "border-destructive ring-1 ring-inset ring-destructive/35",
+  caution: "border-chart-4 ring-1 ring-inset ring-chart-4/35",
+} as const
 
 /**
  * The tile: the face, as a button. `open` rings it while its card is in the
@@ -97,15 +104,59 @@ export function Widget({
   children: React.ReactNode
 }) {
   const ref = React.useRef<HTMLButtonElement>(null)
+  // A long press picks the tile up to ARRANGE (the owner: "long hold to
+  // activate sort, similar to how Android and Apple do it"): held still for
+  // LONG_PRESS_MS, the grid goes into Arrange with this tile in hand, and
+  // the same finger carries it. A move, a swipe between pages or a lift
+  // first is an ordinary tap or scroll. A mouse's right-click or a
+  // keyboard's context-menu key does the same, without the pick-up.
+  const press = React.useRef<{ x: number; y: number; timer: number } | null>(null)
+  const longPressed = React.useRef(false)
+  const cancelPress = () => {
+    if (press.current) window.clearTimeout(press.current.timer)
+    press.current = null
+  }
+  React.useEffect(() => cancelPress, [])
   return (
     <div className={cn("relative flex min-w-0", hidden && "invisible", className)}>
       <button
         ref={ref}
         type="button"
         data-widget={id}
-        aria-label={`${label}, more`}
+        aria-label={`${label}, more. Hold to arrange the tiles.`}
         aria-current={open || undefined}
+        onPointerDown={(e) => {
+          longPressed.current = false
+          if (e.button !== 0) return
+          cancelPress()
+          const { clientX: x, clientY: y } = e
+          press.current = {
+            x,
+            y,
+            timer: window.setTimeout(() => {
+              press.current = null
+              longPressed.current = true
+              beginArrangeFrom(id, x, y)
+            }, LONG_PRESS_MS),
+          }
+        }}
+        onPointerMove={(e) => {
+          const p = press.current
+          if (p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 8) cancelPress()
+        }}
+        onPointerUp={cancelPress}
+        onPointerCancel={cancelPress}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          cancelPress()
+          if (e.nativeEvent instanceof PointerEvent && e.nativeEvent.pointerType === "touch") return
+          setArranging(true)
+        }}
         onClick={() => {
+          if (longPressed.current) {
+            longPressed.current = false
+            return
+          }
           const r = ref.current?.getBoundingClientRect()
           if (r) onOpen(id, { left: r.left, top: r.top, width: r.width, height: r.height })
         }}

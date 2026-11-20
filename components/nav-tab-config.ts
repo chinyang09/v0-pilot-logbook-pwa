@@ -1,6 +1,7 @@
 import type React from "react"
 import {
-  LayoutDashboard,
+  Gauge,
+  ChartColumn,
   Book,
   Calendar,
   Plane,
@@ -31,10 +32,19 @@ export const TAB_CONFIG: Record<
   }
 > = {
   dashboard: {
-    label: "Dashboard",
-    icon: LayoutDashboard,
+    // The Flight Deck: the app's home (the owner, Nov 2026 — the flight
+    // dashboard and the summary are two pages). The Summary, without a tab
+    // of its own, lights it.
+    label: "Flight Deck",
+    icon: Gauge,
     href: "/",
-    isActive: (p) => p === "/",
+    isActive: (p) => p === "/" || p === "/summary",
+  },
+  summary: {
+    label: "Summary",
+    icon: ChartColumn,
+    href: "/summary",
+    isActive: (p) => p === "/summary",
   },
   logbook: {
     label: "Logbook",
@@ -121,6 +131,7 @@ export const TAB_CONFIG: Record<
 /** What Settings offers, in the sidebar's order. (Roster is not a tab: it is the logbook with its duties on.) */
 export const NAV_TAB_CHOICES: readonly BottomNavTab[] = [
   "dashboard",
+  "summary",
   "logbook",
   "aircraft",
   "airports",

@@ -21,8 +21,8 @@ import type { Requirement } from "@/lib/utils/dashboard/legality"
 import { cn } from "@/lib/utils"
 import { formatDay } from "@/lib/utils/date"
 import { REQ_TONE, STATE_ICON } from "./instruments"
-import { crewRole, currenciesBySoonest, currencyRows, destinationsOf, distanceInto, limitsOf, marginText, marginTone, shortDay, shortName } from "./faces"
-import { CurrencyDots, OTHER, SERIES } from "./currency-dots"
+import { crewKey, crewRole, currenciesBySoonest, currencyRows, destinationsOf, distanceInto, limitsOf, marginText, marginTone, shortDay, shortName } from "./faces"
+import { CurrencyDots } from "./currency-dots"
 import { dotAt, dotLayout, localDayKey } from "@/lib/utils/dashboard/currency-dots"
 import { WeatherBody } from "./weather"
 import { AirportPanel } from "./airport"
@@ -31,7 +31,7 @@ import type { FlightBrief } from "./model"
 import type { WidgetAction, WidgetId } from "./widget"
 
 export const WIDGET_TITLE: Record<WidgetId, string> = {
-  duty: "Duty & Rest",
+  duty: "Duty & FDP",
   flight: "Flights",
   weather: "Weather",
   destination: "Destination",
@@ -97,11 +97,11 @@ function TapRow({
 }
 
 /** "WL" — a crew member's initials, the avatar a contacts list draws. */
-function Initials({ name }: { name: string }) {
+function Initials({ name, morph }: { name: string; morph?: string }) {
   const parts = shortName(name).split(/\s+/).filter(Boolean)
   const text = ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase()
   return (
-    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-foreground">
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-foreground" data-morph={morph}>
       {text || "?"}
     </span>
   )
@@ -191,7 +191,7 @@ export function widgetContent(
     case "currency":
       return {
         header: "label",
-        body: <CurrencyBody brief={brief} go={ctx.go} />,
+        body: <CurrencyBody brief={brief} />,
         actions: [{ id: "cur", label: "Currencies", run: () => ctx.go("/currencies") }],
       }
     case "limits":
@@ -208,38 +208,46 @@ export function useWidgetCtx(): Omit<WidgetCtx, "selectDuty"> {
 
 /** Anything the duty card's face does not already say. */
 function hasDutyBody(brief: FlightBrief): boolean {
-  const { phase, active, rest, lastDuty } = brief.status.duty
+  const { phase, active, rest, lastDuty, next } = brief.status.duty
   if (phase === "on_duty" && active) return active.maxFdpMinutes > 0
-  return !!rest || !!lastDuty
+  return !!rest || !!lastDuty || !!next
 }
 
 /**
  * What the duty card's face has no room for — never a figure it already
- * shows. On duty: the latest the last leg may block in, and when the duty
- * ends. Off duty: how long rested so far, and the duty rested from.
+ * shows. The FDP's spare (how much later this duty can run on its own FDP —
+ * the limits card keeps the rolling windows), when the duty ends, how long
+ * rested so far, the room before the report, and the duty rested from.
  */
 function DutyBody({ brief }: { brief: FlightBrief }) {
   const { status, clock, day } = brief
-  const { active, rest, lastDuty } = status.duty
+  const { active, rest, lastDuty, next } = status.duty
+  const fdpSpare = brief.margin?.each.find((e) => e.limit === "FDP")?.minutes ?? null
+  const spareFig =
+    fdpSpare !== null ? (
+      <Fig label="FDP Spare" value={<span className={marginTone(fdpSpare)}>+{marginText(fdpSpare)}</span>} />
+    ) : null
   if (status.duty.phase === "on_duty" && active) {
     if (active.maxFdpMinutes <= 0) return null
-    const fdpOpenMs = active.startMs - (active.fdpElapsedMinutes - active.elapsedMinutes) * 60_000
     return (
       <Grid>
-        <Fig label="Latest On-Blocks" value={clock(fdpOpenMs + active.maxFdpMinutes * 60_000)} />
+        {spareFig}
         <Fig label="Off Duty" value={clock(active.debriefMs)} />
       </Grid>
     )
   }
   // How much later than legal the next report is — the room for a delay, or
   // for an addition the company asks for before it.
-  const next = status.duty.next
   const legalAt = rest ? Date.parse(rest.legalAtUtc) : NaN
   const spare = next && Number.isFinite(legalAt) && next.legalAtReport !== false ? Math.round((next.reportMs - Math.max(legalAt, brief.now)) / 60_000) : null
   return (
     <Grid>
       {rest && <Fig label="Rested" value={formatRestSpan(rest.elapsedMinutes)} />}
       {spare !== null && spare > 0 && <Fig label="Spare Before Report" value={formatRestSpan(spare)} />}
+      {next && next.maxFdpMinutes > 0 && brief.duty.index === 0 && (
+        <Fig label="Latest On-Blocks" value={clock(next.reportMs + next.maxFdpMinutes * 60_000)} />
+      )}
+      {brief.duty.index === 0 && spareFig}
       {lastDuty && (
         <Fig label={`Last Duty · ${day(lastDuty.debriefMs)}`} value={lastDuty.route || formatDutyClock(lastDuty.elapsedMinutes)} />
       )}
@@ -343,8 +351,9 @@ function CrewBody({ brief, go }: { brief: FlightBrief; go: (href: string) => voi
         <TapRow
           key={m.personId ?? m.name}
           onClick={m.personId ? () => go(`/crew?selected=${m.personId}`) : undefined}
-          lead={<Initials name={m.name} />}
-          title={m.name}
+          // The tile's initials and name fly into these (shared morph).
+          lead={<Initials name={m.name} morph={`crew-ini-${crewKey(m)}`} />}
+          title={<span data-morph={`crew-name-${crewKey(m)}`}>{m.name}</span>}
           sub={[crewRole(m.role, brief.authority), m.count ? `${m.count} together` : null].filter(Boolean).join(" · ")}
           right={m.last ? shortDay(m.last.date) : "New"}
         />
@@ -401,23 +410,22 @@ function DestinationBody({ brief, openFlight }: { brief: FlightBrief; openFlight
  * logged, then every document as the page groups them — what needs
  * attention, then what is current, soonest first. ONE line each: the name,
  * the expiry date, the days left, and a flag after it only when there is one
- * (the owner: no gutter of empty icons, and a shorter card). A tap opens it.
+ * (the owner: no gutter of empty icons, and a shorter card). A tap selects it
+ * on the dots, a second deselects; the Currencies page is the footer's link.
  */
-function CurrencyBody({ brief, go }: { brief: FlightBrief; go: (href: string) => void }) {
+function CurrencyBody({ brief }: { brief: FlightBrief }) {
   const logbook = brief.status.legality.requirements.filter((r) => r.group === "currency" && !r.id.startsWith("doc-"))
   const { attention, current } = brief.currency
-  // The year ahead as dots, each currency in its own colour (the first three
-  // to run out; the rest ink) — a tap on a dot isolates its currency.
+  // The year ahead as dots, every expiry ink — a tap on a dot or a row
+  // SELECTS its currency (the one dot in colour, the days up to it lit in
+  // turn), a second tap deselects. The Currencies page is the footer's.
   const [selected, setSelected] = React.useState<string | null>(null)
+  const toggle = (key: string) => setSelected((s) => (s === key ? null : key))
   const today = localDayKey(brief.now)
   const dated = React.useMemo(() => {
     const layout = dotLayout(today, "1y")
     return currenciesBySoonest(currencyRows(brief)).filter((r) => r.ymd !== null && dotAt(layout, r.ymd) !== null)
   }, [brief, today])
-  const colour = (key: string) => {
-    const i = dated.findIndex((r) => r.key === key)
-    return i < 0 ? null : (SERIES[i] ?? OTHER)
-  }
   if (logbook.length === 0 && attention.length === 0 && current.length === 0) return null
   const flag = (state: Requirement["state"]) => {
     if (state === "ok") return null
@@ -425,21 +433,20 @@ function CurrencyBody({ brief, go }: { brief: FlightBrief; go: (href: string) =>
     return <Icon className={cn("h-3.5 w-3.5 shrink-0", REQ_TONE[state].icon)} aria-label={state === "fail" ? "Not met" : "Attention"} />
   }
   const tone = (state: Requirement["state"]) => (state === "ok" ? "text-foreground" : REQ_TONE[state].icon)
-  const row = (key: string, name: string, sub: string, figure: string, state: Requirement["state"], onClick?: () => void) => {
-    const Box = onClick ? "button" : "div"
-    const c = colour(key)
+  const row = (key: string, name: string, sub: string, figure: string, state: Requirement["state"]) => {
+    const isSel = selected === key
     return (
-      <Box
+      <button
         key={key}
-        {...(onClick ? { type: "button" as const, onClick } : {})}
+        type="button"
+        aria-pressed={isSel}
+        onClick={() => toggle(key)}
         className={cn(
-          "flex w-full items-baseline gap-2 rounded-md py-1 text-left transition-opacity",
-          onClick && "-mx-1 px-1 active:bg-muted/60",
-          selected !== null && selected !== key && "opacity-35",
+          "-mx-1 flex w-[calc(100%+0.5rem)] items-baseline gap-2 rounded-md px-1 py-1 text-left transition-[opacity,background-color] active:bg-muted/60",
+          isSel && "bg-muted",
+          selected !== null && !isSel && "opacity-35",
         )}
       >
-        {/* Its colour on the dots — the legend; nothing for one past the year. */}
-        <span aria-hidden className={cn("h-2 w-2 shrink-0 self-center rounded-full", c?.bg)} />
         <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-foreground" data-morph={`cur-name-${key}`}>
           {name}
         </span>
@@ -448,7 +455,7 @@ function CurrencyBody({ brief, go }: { brief: FlightBrief; go: (href: string) =>
           <span data-morph={`cur-fig-${key}`}>{figure}</span>
         </span>
         <span className="flex w-3.5 shrink-0 self-center">{flag(state)}</span>
-      </Box>
+      </button>
     )
   }
   const recencyRows = currencyRows(brief).filter((r) => !r.key.startsWith("doc-"))
@@ -460,7 +467,6 @@ function CurrencyBody({ brief, go }: { brief: FlightBrief; go: (href: string) =>
           ahead="1y"
           marks={dated.map((r) => ({ key: r.key, name: r.name, state: r.state, ymd: r.ymd! }))}
           closest={dated[0]?.key ?? null}
-          colorOf={(key) => colour(key)?.fill ?? OTHER.fill}
           selected={selected}
           onSelect={setSelected}
           className="mb-2"
@@ -480,7 +486,7 @@ function CurrencyBody({ brief, go }: { brief: FlightBrief; go: (href: string) =>
                 : d.value,
             )
             .join(" · ") || ""
-        return row(r.id, shown?.name ?? r.label, sub, r.value, shown?.state ?? r.state, r.href ? () => go(r.href!) : undefined)
+        return row(r.id, shown?.name ?? r.label, sub, r.value, shown?.state ?? r.state)
       })}
       {[...attention, ...current].map((l, i) =>
         <div key={l.id} className={cn(i === 0 && logbook.length > 0 && "mt-1 border-t border-border/70 pt-1")}>
@@ -491,7 +497,6 @@ function CurrencyBody({ brief, go }: { brief: FlightBrief; go: (href: string) =>
             l.lapsesBeforeDuty ? "before duty" : formatDay(l.expiryDate, { weekday: false }),
             l.figure,
             l.state,
-            () => go(`/currencies?selected=${encodeURIComponent(l.id)}`),
           )}
         </div>,
       )}
@@ -514,7 +519,7 @@ function LimitsBody({ brief }: { brief: FlightBrief }) {
         <>
           <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">If This Duty Runs Late</p>
           <Grid>
-            {m.each.map((e) => (
+            {m.each.filter((e) => e.limit !== "FDP").map((e) => (
               <Fig key={e.limit} label={e.limit} value={<span className={marginTone(e.minutes)}>+{marginText(e.minutes)}</span>} />
             ))}
           </Grid>

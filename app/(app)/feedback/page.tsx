@@ -71,6 +71,7 @@ function areaOf(route: string): FeedbackArea {
   const first = route.split("/")[1] ?? ""
   const byPath: Record<string, FeedbackArea> = {
     "": "Dashboard",
+    summary: "Dashboard",
     logbook: "Logbook",
     flights: "Flight Form",
     aircraft: "Aircraft",

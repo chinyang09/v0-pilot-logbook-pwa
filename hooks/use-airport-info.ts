@@ -58,8 +58,15 @@ export function useAirportInfo(icaos: readonly string[], enabled: boolean): Reco
   const ids = [...new Set(icaos.map((i) => i.toUpperCase()))].sort()
   const { data } = useSWR(enabled && ids.length ? `lookup:airport-info:${ids.join(",")}` : null, () => fetchInfo(ids), {
     revalidateOnFocus: false,
-    shouldRetryOnError: false,
-    dedupingInterval: 3600_000,
+    // A failed ask is asked again (a cold function or a slow source), and so
+    // is an answer that left an airport out — until every one is in. Neither
+    // was: a new duty's destination drew no runways until the page remounted.
+    errorRetryCount: 4,
+    errorRetryInterval: 5_000,
+    refreshInterval: (latest) => (latest && ids.every((id) => id in latest) ? 0 : 20_000),
+    // Short: a kept answer costs no request (`fetchInfo` reads the device
+    // first), and an hour's dedupe swallowed the refresh above.
+    dedupingInterval: 10_000,
   })
   return data ?? NONE
 }

@@ -1,7 +1,8 @@
 "use client"
 
 import {
-  LayoutDashboard,
+  Gauge,
+  ChartColumn,
   Book,
   Plane,
   MapPin,
@@ -43,8 +44,11 @@ export interface NavSection {
 export const navSections: NavSection[] = [
   {
     label: "Dashboard",
-    heading: false,
-    items: [{ label: "Dashboard", href: "/", icon: <LayoutDashboard className="h-4 w-4" /> }],
+    heading: true,
+    items: [
+      { label: "Flight Deck", href: "/", icon: <Gauge className="h-4 w-4" />, description: "This or the next duty, at a glance" },
+      { label: "Summary", href: "/summary", icon: <ChartColumn className="h-4 w-4" />, description: "What you have flown, by period" },
+    ],
   },
   {
     label: "Logbook",
