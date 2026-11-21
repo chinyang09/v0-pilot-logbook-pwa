@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest"
 import { GRID_COLUMNS, clampSize, faceSize, moveTile, nudgeTile, packTiles, sizeLabel, type TileSize } from "../bento"
-import { DEFAULT_TILE_SIZES, normaliseTileSizes, sizesFromV3 } from "@/hooks/use-dashboard-layout"
+import { DEFAULT_TILE_SIZES, normaliseTileOrder, normaliseTileSizes, sizesFromV3 } from "@/hooks/use-dashboard-layout"
 
-type Id = "duty" | "flight" | "weather" | "destination" | "currency" | "limits"
-const DEFAULT_ORDER: Id[] = ["duty", "flight", "weather", "destination", "currency", "limits"]
+type Id = "duty" | "flight" | "airport" | "currency" | "limits"
+const DEFAULT_ORDER: Id[] = ["duty", "flight", "airport", "currency", "limits"]
 const DEFAULTS: Record<Id, TileSize> = DEFAULT_TILE_SIZES
 const layout = (order: Id[], sizes: Record<Id, TileSize>) =>
   packTiles(order, sizes).map((p) => `${p.id}@${p.row},${p.col} ${p.cols}x${p.rows}`)
@@ -25,14 +25,13 @@ function expectFilled(order: Id[], sizes: Record<Id, TileSize>, allowedHoles = 0
 }
 
 describe("packTiles on the 6 × 6 grid", () => {
-  it("places the default layout: two full bands, a tall weather tile beside the rest", () => {
+  it("places the default layout: two full bands, the airport station beside the currency over the limits", () => {
     expect(layout(DEFAULT_ORDER, DEFAULTS)).toEqual([
       "duty@0,0 6x2",
       "flight@2,0 6x2",
-      "weather@4,0 2x4",
-      "destination@4,2 4x2",
-      "currency@6,2 2x2",
-      "limits@6,4 2x2",
+      "airport@4,0 3x4",
+      "currency@4,3 3x2",
+      "limits@6,3 3x2",
     ])
     expectFilled(DEFAULT_ORDER, DEFAULTS)
   })
@@ -45,7 +44,7 @@ describe("packTiles on the 6 × 6 grid", () => {
   })
 
   it("keeps the pilot's order reading left to right, top to bottom", () => {
-    const order: Id[] = ["limits", "currency", "duty", "weather", "flight", "destination"]
+    const order: Id[] = ["limits", "currency", "duty", "airport", "flight"]
     const placed = packTiles(order, DEFAULTS)
     expect(placed.map((p) => p.id)).toEqual(order)
     for (let i = 1; i < placed.length; i++) {
@@ -59,9 +58,9 @@ describe("packTiles on the 6 × 6 grid", () => {
     for (const cols of [2, 4, 6]) for (const rows of [2, 4, 6]) even.push({ cols, rows })
     for (const w of even)
       for (const c of even) {
-        const sizes = { ...DEFAULTS, weather: w, currency: c }
+        const sizes = { ...DEFAULTS, airport: w, currency: c, limits: { cols: 2, rows: 2 } }
         expectFilled(DEFAULT_ORDER, sizes)
-        expectFilled(["weather", "duty", "currency", "flight", "limits", "destination"], sizes)
+        expectFilled(["airport", "duty", "currency", "flight", "limits"], sizes)
       }
   })
 
@@ -70,9 +69,9 @@ describe("packTiles on the 6 × 6 grid", () => {
     for (let cols = 1; cols <= 6; cols++) for (let rows = 1; rows <= 6; rows++) any.push({ cols, rows })
     for (const w of any)
       for (const c of any) {
-        const sizes = { ...DEFAULTS, weather: w, currency: c }
+        const sizes = { ...DEFAULTS, airport: w, currency: c }
         expectFilled(DEFAULT_ORDER, sizes, 1)
-        expectFilled(["weather", "duty", "currency", "flight", "limits", "destination"], sizes, 1)
+        expectFilled(["airport", "duty", "currency", "flight", "limits"], sizes, 1)
       }
   })
 
@@ -88,8 +87,8 @@ describe("packTiles on the 6 × 6 grid", () => {
   })
 
   it("carries a layout from the 3 × 2 grid across, doubled", () => {
-    const v4 = normaliseTileSizes(sizesFromV3({ weather: { cols: 2, rows: 2 }, duty: { cols: 3, rows: 1 } }))
-    expect(v4.weather).toEqual({ cols: 4, rows: 4 })
+    const v4 = normaliseTileSizes(sizesFromV3({ currency: { cols: 2, rows: 2 }, duty: { cols: 3, rows: 1 } }))
+    expect(v4.currency).toEqual({ cols: 4, rows: 4 })
     expect(v4.duty).toEqual({ cols: 6, rows: 2 })
     expect(v4.limits).toEqual(DEFAULTS.limits)
   })
@@ -97,11 +96,18 @@ describe("packTiles on the 6 × 6 grid", () => {
 
 describe("moveTile / nudgeTile", () => {
   it("moves a tile to where another is", () => {
-    expect(moveTile(DEFAULT_ORDER, "limits", "duty")).toEqual(["limits", "duty", "flight", "weather", "destination", "currency"])
+    expect(moveTile(DEFAULT_ORDER, "limits", "duty")).toEqual(["limits", "duty", "flight", "airport", "currency"])
   })
 
   it("nudges by one, clamped to the ends", () => {
     expect(nudgeTile(DEFAULT_ORDER, "duty", -1)).toEqual(DEFAULT_ORDER)
     expect(nudgeTile(DEFAULT_ORDER, "duty", 1).slice(0, 2)).toEqual(["flight", "duty"])
+  })
+})
+
+describe("normaliseTileOrder", () => {
+  it("puts the airport tile where the weather or destination tile was", () => {
+    expect(normaliseTileOrder(["duty", "weather", "flight", "destination", "limits", "currency"])).toEqual(["duty", "airport", "flight", "limits", "currency"])
+    expect(normaliseTileOrder(["destination", "duty"])).toEqual(["airport", "duty", "flight", "currency", "limits"])
   })
 })

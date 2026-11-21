@@ -38,8 +38,7 @@ import { cn } from "@/lib/utils"
 export type WidgetId =
   | "duty"
   | "flight"
-  | "weather"
-  | "destination"
+  | "airport"
   | "currency"
   | "limits"
 
