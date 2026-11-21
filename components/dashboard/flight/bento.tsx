@@ -9,7 +9,8 @@
  * (`packTiles`). Arrange — a long press on any tile, which picks it up in
  * the same gesture; Done in the header ends it — lets a tile be picked up
  * and dropped where another is (arrow keys for a keyboard), and RESIZED by
- * dragging its corner handle across the grid's cells (Shift + arrows): the
+ * dragging any edge of the tile in hand across the grid's cells (Shift +
+ * arrows): the
  * other tiles move round it live, so what is seen is the outcome.
  *
  * - **The DOM never moves.** Every tile stays at its place in the tree and the
@@ -26,7 +27,7 @@
 import * as React from "react"
 import { createPortal } from "react-dom"
 import { animate, motion, useMotionValue } from "framer-motion"
-import { Move, MoveDiagonal2 } from "lucide-react"
+import { Move } from "lucide-react"
 import { GRID_COLUMNS, moveTile, nudgeTile, packTiles, sizeLabel, type TileSize } from "@/lib/utils/dashboard/bento"
 import { DASHBOARD_TILES, setArranging, setTileOrder, setTileSize, type DashboardTile } from "@/hooks/use-dashboard-layout"
 import { haptic } from "@/lib/utils/haptics"
@@ -37,9 +38,15 @@ import { cn } from "@/lib/utils"
  * Arrange and picks THIS tile up under the finger still down, so the hold
  * and the drag are one gesture — the way a home screen does it.
  */
-let pending: { id: DashboardTile; x: number; y: number } | null = null
+const pending: { current: { id: DashboardTile; x: number; y: number } | null } = { current: null }
+/** The held tile, once: the grid takes it on entering Arrange. */
+function takePending() {
+  const p = pending.current
+  pending.current = null
+  return p
+}
 export function beginArrangeFrom(id: DashboardTile, x: number, y: number): void {
-  pending = { id, x, y }
+  pending.current = { id, x, y }
   haptic("tap")
   setArranging(true)
 }
@@ -58,10 +65,16 @@ interface Drag {
 
 /** The grid's gap, px (`gap-2`). */
 const GAP = 8
+/** A row's floor, px (2.5rem): two rows and the gap are the 3 × 2 grid's 5.5rem. */
+const ROW_MIN_PX = 40
 
-/** A tile's resize in progress: where it began, and the grid's pitch. */
+/** Which edge a resize pulls: left / right change the columns, top / bottom the rows. */
+type Edge = "l" | "r" | "t" | "b"
+
+/** A tile's resize in progress: where it began, the edge pulled, and the grid's pitch. */
 interface Resize {
   id: DashboardTile
+  edge: Edge
   x0: number
   y0: number
   start: TileSize
@@ -102,8 +115,14 @@ export function BentoGrid({
   React.useEffect(() => {
     if (!resize) return
     const onMove = (e: PointerEvent) => {
-      const cols = Math.round(resize.start.cols + (e.clientX - resize.x0) / resize.colPitch)
-      const rows = Math.round(resize.start.rows + (e.clientY - resize.y0) / resize.rowPitch)
+      // An edge pulled OUT grows the tile, pushed IN shrinks it, whichever
+      // side it is (the owner: "increase or decrease size from all
+      // direction"). Where the tile sits stays the packing's.
+      const dx = (e.clientX - resize.x0) / resize.colPitch
+      const dy = (e.clientY - resize.y0) / resize.rowPitch
+      const { edge, start } = resize
+      const cols = Math.round(start.cols + (edge === "r" ? dx : edge === "l" ? -dx : 0))
+      const rows = Math.round(start.rows + (edge === "b" ? dy : edge === "t" ? -dy : 0))
       const cur = sizesRef.current[resize.id]
       setTileSize(resize.id, { cols, rows })
       const next = sizesRef.current[resize.id]
@@ -122,7 +141,7 @@ export function BentoGrid({
 
   // A grid's pitch: a column's width plus the gap, a row's height (as this
   // tile has it) plus the gap — one step of the handle is one cell.
-  const startResize = (e: React.PointerEvent<HTMLElement>, id: DashboardTile) => {
+  const startResize = (e: React.PointerEvent<HTMLElement>, id: DashboardTile, edge: Edge) => {
     e.stopPropagation()
     e.preventDefault()
     const slot = e.currentTarget.closest<HTMLElement>("[data-tile-slot]")
@@ -132,13 +151,15 @@ export function BentoGrid({
     const r = slot.getBoundingClientRect()
     const start = sizesRef.current[id]
     const p = placed.get(id)
+    setActive(id)
     setResize({
       id,
+      edge,
       x0: e.clientX,
       y0: e.clientY,
       start,
       colPitch: (g.width - GAP * (GRID_COLUMNS - 1)) / GRID_COLUMNS + GAP,
-      rowPitch: Math.max(48, (r.height + GAP) / (p?.rows ?? 1)),
+      rowPitch: Math.max(ROW_MIN_PX + GAP, (r.height + GAP) / (p?.rows ?? 1)),
     })
     haptic("tick")
   }
@@ -149,6 +170,11 @@ export function BentoGrid({
   }, [order])
 
   const [drag, setDrag] = React.useState<Drag | null>(null)
+  // The tile in hand: its frame and its four edge handles are drawn; the
+  // others show only that they can be moved. A tap (or a pick-up) on another
+  // takes the handles to it.
+  const [activeState, setActive] = React.useState<DashboardTile | null>(null)
+  const active = arranging ? activeState : null
   const x = useMotionValue(0)
   const y = useMotionValue(0)
   const swap = React.useRef<{ target: DashboardTile | null; at: number }>({ target: null, at: 0 })
@@ -214,9 +240,9 @@ export function BentoGrid({
 
   // The tile a long press entered Arrange with: picked up where the finger is.
   React.useLayoutEffect(() => {
-    if (!arranging || !pending) return
-    const p = pending
-    pending = null
+    if (!arranging) return
+    const p = takePending()
+    if (!p) return
     const slot = document.querySelector<HTMLElement>(`[data-tile-slot="${p.id}"]`)
     const r = slot?.getBoundingClientRect()
     if (!r) return
@@ -227,6 +253,7 @@ export function BentoGrid({
     // response to the hold, in the commit that entered Arrange.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDrag({ id: p.id, w: r.width, h: r.height, ox: p.x - r.left, oy: p.y - r.top, dropping: false })
+    setActive(p.id)
   }, [arranging, x, y])
 
   const pickUp = (e: React.PointerEvent<HTMLElement>, id: DashboardTile) => {
@@ -237,6 +264,7 @@ export function BentoGrid({
     y.set(r.top)
     swap.current = { target: null, at: 0 }
     setDrag({ id, w: r.width, h: r.height, ox: e.clientX - r.left, oy: e.clientY - r.top, dropping: false })
+    setActive(id)
     haptic("tick")
   }
 
@@ -263,7 +291,7 @@ export function BentoGrid({
           taller than the phone cut the duty tile's captions off. Unbounded,
           every row is as tall as its tallest tile, and only the wrapper
           scrolls, as a last resort. */}
-      <div className={cn("min-h-0 overflow-y-auto overscroll-contain scrollbar-hide", arranging && "-m-2 p-2")} data-bento-scroll>
+      <div className={cn("min-h-0 overflow-y-auto overscroll-contain scrollbar-hide", arranging && "-m-4 p-4")} data-bento-scroll>
       <div
         // While arranging, the wrapper gains a margin's room on every side
         // (and gives it back as negative margin, so nothing moves) for the
@@ -272,7 +300,7 @@ export function BentoGrid({
         className="grid content-start gap-2"
         // A row is as tall as its tallest tile, and a tile two rows tall spans
         // both; the floor keeps a two-row tile visibly two rows.
-        style={{ gridTemplateColumns: `repeat(${GRID_COLUMNS}, minmax(0, 1fr))`, gridAutoRows: "minmax(5.5rem, auto)" }}
+        style={{ gridTemplateColumns: `repeat(${GRID_COLUMNS}, minmax(0, 1fr))`, gridAutoRows: `minmax(${ROW_MIN_PX}px, auto)` }}
       >
         {/* The DOM order never changes: the grid places each tile by row and column. */}
         {DASHBOARD_TILES.map((id) => {
@@ -300,6 +328,7 @@ export function BentoGrid({
               aria-label={`Move ${label(id)}, ${p.index + 1} of ${DASHBOARD_TILES.length}, ${sizeLabel(sizes[id])}. Arrow keys move it, Shift and arrows resize it.`}
               onPointerDown={(e) => pickUp(e, id)}
               onKeyDown={(e) => onKey(e, id)}
+              onFocus={() => setActive(id)}
               style={{ ...style, touchAction: "none" }}
               className="relative flex min-w-0 cursor-grab select-none rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
@@ -312,27 +341,44 @@ export function BentoGrid({
                     and its width chip sits over the middle of it. */}
                 <div className={cn("transition-opacity", lifted ? "opacity-20" : "opacity-45")}>{face(id, size)}</div>
               </div>
-              <span
-                aria-hidden
-                className="pointer-events-none absolute -right-1.5 -top-1.5 z-[1] flex h-6 w-6 items-center justify-center rounded-full border border-border bg-[var(--control)] text-foreground"
-              >
-                <Move className="h-3.5 w-3.5" />
-              </span>
+              {active !== id && (
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute -right-1.5 -top-1.5 z-[1] flex h-6 w-6 items-center justify-center rounded-full border border-border bg-[var(--control)] text-foreground"
+                >
+                  <Move className="h-3.5 w-3.5" />
+                </span>
+              )}
               {/* Its size, said while it changes. */}
               {resizing && (
                 <span className="pointer-events-none absolute left-1/2 top-1/2 z-[1] flex h-9 min-w-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-[var(--control)] px-3 text-sm font-semibold tabular-nums text-foreground">
                   {sizeLabel(sizes[id])}
                 </span>
               )}
-              {/* The corner handle: drag it across the grid's cells to resize. */}
-              <span
-                aria-hidden
-                onPointerDown={(e) => startResize(e, id)}
-                className="absolute -bottom-1.5 -right-1.5 z-[1] flex h-7 w-7 cursor-nwse-resize items-center justify-center rounded-full border border-border bg-[var(--control)] text-foreground after:absolute after:-inset-2"
-                style={{ touchAction: "none" }}
-              >
-                <MoveDiagonal2 className="h-3.5 w-3.5" />
-              </span>
+              {/* The tile in hand: a frame and a handle at the middle of each
+                  edge (the owner's sketch, after a home-screen widget) — drag
+                  an edge out to grow the tile that way, in to shrink it. */}
+              {active === id && (
+                <>
+                  <span aria-hidden className="pointer-events-none absolute -inset-[3px] z-[1] rounded-[18px] border-2 border-foreground/85" />
+                  {(["t", "r", "b", "l"] as const).map((edge) => (
+                    <span
+                      key={edge}
+                      aria-hidden
+                      data-edge={edge}
+                      onPointerDown={(e) => startResize(e, id, edge)}
+                      className={cn(
+                        "absolute z-[2] h-5 w-5 rounded-full border-2 border-foreground/85 bg-[var(--control)] after:absolute after:-inset-3",
+                        edge === "t" && "-top-[13px] left-1/2 -translate-x-1/2 cursor-ns-resize",
+                        edge === "b" && "-bottom-[13px] left-1/2 -translate-x-1/2 cursor-ns-resize",
+                        edge === "l" && "-left-[13px] top-1/2 -translate-y-1/2 cursor-ew-resize",
+                        edge === "r" && "-right-[13px] top-1/2 -translate-y-1/2 cursor-ew-resize",
+                      )}
+                      style={{ touchAction: "none" }}
+                    />
+                  ))}
+                </>
+              )}
             </motion.div>
           )
         })}

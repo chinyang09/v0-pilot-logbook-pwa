@@ -29,7 +29,9 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronRight, Moon, Sun, Win
 import type { Airport } from "@/types/entities/airport.types"
 import type { AirportInfo } from "@/lib/weather/airport-info"
 import { ceilingFt, metarConditions, metarReadings, type FlightCategory } from "@/lib/weather/brief"
-import { favouredRunway, runwayEndsFrom, type WindOnRunway } from "@/lib/weather/runway-wind"
+import { runwayEndsFrom, type WindOnRunway } from "@/lib/weather/runway-wind"
+import { runwayShown } from "@/lib/weather/runway-in-use"
+import { useRunwayInUse } from "@/hooks/use-runway-in-use"
 import { isNight } from "@/lib/utils/night-time"
 import { hasCoordinates } from "@/lib/utils/flight-calculations"
 import { getAirportLocalTime, getAirportTimeInfo } from "@/lib/db/stores/reference/airports.store"
@@ -114,7 +116,10 @@ export function AirportPanel({
   codeOf,
   lastLine,
   onLast,
+  traffic = true,
 }: {
+  /** Whether the live traffic is read for the runway in use. */
+  traffic?: boolean
   icao: string
   code: string
   airport: Airport | undefined
@@ -138,7 +143,9 @@ export function AirportPanel({
   const readings = React.useMemo(() => (metar ? metarReadings(metar.raw) : null), [metar])
   const ends = React.useMemo(() => runwayEndsFrom(info?.runways ?? []), [info])
   const windDir = c?.windDir ?? null
-  const favoured = c ? favouredRunway(ends, windDir, c.windKt) : null
+  // The runway the traffic is landing on, else the one the wind favours.
+  const inUse = useRunwayInUse(airport && hasCoordinates(airport) ? airport : null, ends, traffic)
+  const { wind: favoured, landing } = c ? runwayShown(ends, windDir, c.windKt, inUse) : { wind: null, landing: null }
   const ceiling = c ? ceilingFt(c) : null
   const category = metar?.category ?? null
   const night =
@@ -233,7 +240,16 @@ export function AirportPanel({
                     )}
                   </span>
                 )}
-                <span className="ml-auto text-muted-foreground">Rwy {favoured.end.ident}</span>
+                <span className="ml-auto text-muted-foreground">
+                  {landing ? (
+                    <>
+                      Landing <span className="text-foreground">{landing.ident}</span>
+                      <span className="font-normal"> · {landing.arrivals} arr</span>
+                    </>
+                  ) : (
+                    <>Rwy {favoured.end.ident}</>
+                  )}
+                </span>
               </p>
             )}
           </div>

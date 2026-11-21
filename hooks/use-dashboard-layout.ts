@@ -6,7 +6,7 @@ import { clampSize, type TileSize } from "@/lib/utils/dashboard/bento"
 /**
  * The flight dashboard's TILES in the pilot's own order, and whether they are
  * being arranged (the owner, Nov 2026: "a sortable bento box"). The order is
- * placed on a three-column grid by `packTiles` (`lib/utils/dashboard/bento.ts`).
+ * placed on a six-column grid by `packTiles` (`lib/utils/dashboard/bento.ts`).
  *
  * Per device, like the dashboard's page and the calendar's Duties: how a
  * screen is laid out is the device's look, not the account's logbook. A
@@ -92,32 +92,44 @@ const DEFAULT_ORDER: DashboardTile[] = [...DASHBOARD_TILES]
 /* ── Sizes ──────────────────────────────────────────────────────────────── */
 
 /**
- * Each tile's size by default, on the three-column grid (`packTiles`): the duty
+ * Each tile's size by default, on the six-column grid (`packTiles`): the duty
  * and the flights across the page, the weather a tall column (its wind dial
  * over the sky, the temperature and QNH) beside the destination, the
  * currency's 90-day dots and the limits under that.
  */
 export const DEFAULT_TILE_SIZES: Record<DashboardTile, TileSize> = {
-  duty: { cols: 3, rows: 1 },
-  flight: { cols: 3, rows: 1 },
-  weather: { cols: 1, rows: 2 },
-  destination: { cols: 2, rows: 1 },
-  currency: { cols: 1, rows: 1 },
-  limits: { cols: 1, rows: 1 },
+  duty: { cols: 6, rows: 2 },
+  flight: { cols: 6, rows: 2 },
+  weather: { cols: 2, rows: 4 },
+  destination: { cols: 4, rows: 2 },
+  currency: { cols: 2, rows: 2 },
+  limits: { cols: 2, rows: 2 },
 }
 
-/** The fewest columns a tile can take: the duty band and the day bar need two. */
+/** The fewest columns a tile can take: the duty strip and the day bar need two thirds of the row. */
 export const TILE_MIN_COLS: Record<DashboardTile, number> = {
-  duty: 2,
-  flight: 2,
-  weather: 1,
-  destination: 1,
-  currency: 1,
-  limits: 1,
+  duty: 4,
+  flight: 4,
+  weather: 2,
+  destination: 2,
+  currency: 2,
+  limits: 2,
 }
 
-// v3: the grid became three columns with row spans (widths in twelfths went).
-const SIZES_KEY = "ooo:dashboard-sizes:v3"
+// v4: the grid became six columns by up to six rows. A v3 size (three
+// columns, two rows) is carried across doubled, so a pilot's layout stays.
+const SIZES_KEY = "ooo:dashboard-sizes:v4"
+const SIZES_KEY_V3 = "ooo:dashboard-sizes:v3"
+
+/** A v3 size (on the 3 × 2 grid) on the 6 × 6 one. */
+export function sizesFromV3(stored: unknown): unknown {
+  if (!stored || typeof stored !== "object") return null
+  const out: Record<string, TileSize> = {}
+  for (const [id, v] of Object.entries(stored as Record<string, Partial<TileSize>>)) {
+    if (v && typeof v === "object") out[id] = { cols: (Number(v.cols) || 3) * 2, rows: (Number(v.rows) || 1) * 2 }
+  }
+  return out
+}
 
 /** Stored sizes, put right: an unknown tile or a size it may not take falls back to its default. */
 export function normaliseTileSizes(stored: unknown): Record<DashboardTile, TileSize> {
@@ -139,8 +151,9 @@ function hydrateSizes(): void {
   sizesHydrated = true
   try {
     const raw = window.localStorage.getItem(SIZES_KEY)
-    if (raw) {
-      sizes = normaliseTileSizes(JSON.parse(raw))
+    const old = raw ? null : window.localStorage.getItem(SIZES_KEY_V3)
+    if (raw || old) {
+      sizes = normaliseTileSizes(raw ? JSON.parse(raw) : sizesFromV3(JSON.parse(old!)))
       emit()
     }
   } catch {

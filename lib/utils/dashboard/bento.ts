@@ -1,9 +1,10 @@
 /**
  * The flight dashboard's BENTO: its tiles in the pilot's own order, placed on
- * a grid THREE columns wide (the owner, Nov 2026: "imagine a grid of 3 column
- * by 6 … a widget can occupy 2 vertical grids").
+ * a grid SIX columns wide, a tile up to six rows tall (the owner, Nov 2026:
+ * "make the bento grid 6x6 … more flexibility to widget size"; it was three
+ * columns by two rows).
  *
- * Each tile has a SIZE the pilot chose in Arrange — 1 to 3 columns, 1 or 2
+ * Each tile has a SIZE the pilot chose in Arrange — 1 to 6 columns, 1 to 6
  * rows. Tiles are placed in order, left to right and top to bottom, each in
  * the first place it fits from where the last one went (never back above it,
  * so the order reads as chosen). What is left empty is then given to a
@@ -14,13 +15,13 @@
  * Pure, so the packing is tested without the page.
  */
 
-export const GRID_COLUMNS = 3
-export const MAX_ROWS_SPAN = 2
+export const GRID_COLUMNS = 6
+export const MAX_ROWS_SPAN = 6
 
 export interface TileSize {
-  /** Columns of the 3 it spans. */
+  /** Columns of the 6 it spans. */
   cols: number
-  /** Rows it spans: 1 or 2. */
+  /** Rows it spans: 1 to 6. */
   rows: number
 }
 
@@ -43,6 +44,16 @@ export function clampSize(size: Partial<TileSize> | undefined, minCols = 1): Til
 }
 
 export function packTiles<T extends string>(order: readonly T[], sizes: Record<T, TileSize>): PlacedTile<T>[] {
+  // The order as chosen first; where that leaves a hole no neighbour can
+  // take (finer sizes on the six-column grid can), a pass that lets a tile
+  // drop back into an earlier gap — whichever leaves fewer holes.
+  const strict = pack(order, sizes, false)
+  if (strict.holes === 0) return strict.placed
+  const dense = pack(order, sizes, true)
+  return dense.holes < strict.holes ? dense.placed : strict.placed
+}
+
+function pack<T extends string>(order: readonly T[], sizes: Record<T, TileSize>, dense: boolean): { placed: PlacedTile<T>[]; holes: number } {
   const cells: (number | undefined)[][] = []
   const free = (r: number, c: number) => cells[r]?.[c] === undefined
   const take = (r: number, c: number, i: number) => {
@@ -61,8 +72,8 @@ export function packTiles<T extends string>(order: readonly T[], sizes: Record<T
   let cc = 0
   order.forEach((id, i) => {
     const { cols, rows } = clampSize(sizes[id])
-    let r = cr
-    let c = cc
+    let r = dense ? 0 : cr
+    let c = dense ? 0 : cc
     while (!fits(r, c, cols, rows)) {
       c += 1
       if (c >= GRID_COLUMNS) {
@@ -118,12 +129,38 @@ export function packTiles<T extends string>(order: readonly T[], sizes: Record<T
             above.rows += 1
             claim(above, placed.indexOf(above))
             changed = true
+            continue
+          }
+        }
+        // The tile below grows up into it, where its whole width is free here.
+        const below = at(r + 1, c)
+        if (below && below.row === r + 1) {
+          let fitsAbove = true
+          for (let x = below.col; x < below.col + below.cols; x++) if (!free(r, x)) fitsAbove = false
+          if (fitsAbove) {
+            below.row -= 1
+            below.rows += 1
+            claim(below, placed.indexOf(below))
+            changed = true
           }
         }
       }
     }
   }
-  return placed
+  let holes = 0
+  for (let r = 0; r <= lastRow; r++) for (let c = 0; c < GRID_COLUMNS; c++) if (free(r, c)) holes++
+  return { placed, holes }
+}
+
+/**
+ * A size as a FACE reads it: in thirds of the row and in the rows of the
+ * grid before (two of these rows each). Faces were written for a three-column
+ * grid — "a third of the row looks 90 days ahead", "a tile two rows tall
+ * stacks" — and the grid's finer steps fall between them (3 of 6 columns is
+ * a face 1.5 wide).
+ */
+export function faceSize(size: TileSize): TileSize {
+  return { cols: size.cols / 2, rows: size.rows / 2 }
 }
 
 /** "2 × 1" — a size as Arrange says it. */
