@@ -59,7 +59,7 @@ import { WeatherFace, type WeatherState } from "./flight/weather"
 import { WIDGET_TITLE, useWidgetCtx, widgetContent } from "./flight/details"
 import { BentoGrid } from "./flight/bento"
 import { setArranging, useArranging, useTileOrder, useTileSizes } from "@/hooks/use-dashboard-layout"
-import { packTiles, type TileSize } from "@/lib/utils/dashboard/bento"
+import { faceSize, packTiles, type TileSize } from "@/lib/utils/dashboard/bento"
 import { Widget, WidgetCard, WidgetLabel, WidgetSheet, type WidgetAnchor, type WidgetId } from "./flight/widget"
 import type { DutyChoice, FlightBrief } from "./flight/model"
 import type { DutyPeriod } from "@/types/entities/roster.types"
@@ -131,7 +131,7 @@ function useAirportsByIcao(icaos: readonly string[]): Map<string, Airport> {
   return found?.key === key ? found.map : NO_AIRPORTS
 }
 
-/** A card's header: the face at the card's full width. */
+/** A card's header: the face at the card's full width (in face units — thirds of the row). */
 const CARD_SIZE: TileSize = { cols: 3, rows: 1 }
 
 /**
@@ -146,7 +146,7 @@ function faceOf(id: WidgetId, brief: FlightBrief, size: TileSize, inCard = false
     case "flight":
       return <FlightFace brief={brief} size={size} inCard={inCard} />
     case "weather":
-      return <WeatherFace weather={brief.weather} code={brief.code} clock={brief.clock} station={brief.weatherStation} size={size} />
+      return <WeatherFace weather={brief.weather} code={brief.code} clock={brief.clock} station={brief.weatherStation} size={size} memory={String(brief.duty.atMs)} />
     case "destination":
       return <DestinationFace brief={brief} size={size} inCard={inCard} />
     case "currency":
@@ -331,6 +331,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       destinations,
       airports,
       airportInfo,
+      traffic: isActive && lookupsClose,
       weather,
       weatherStation,
       code: (icao: string, iata?: string) =>
@@ -339,7 +340,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       day: (ms: number) =>
         formatDayAt(ms, display?.useZuluTime === false ? zone : "UTC", { year: false }),
     }),
-    [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, margin, recency.lapseIso, crew, legCrew, currency, destinations, airports, airportInfo, weather, weatherStation, iataOf, pref, zone],
+    [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, margin, recency.lapseIso, crew, legCrew, currency, destinations, airports, airportInfo, weather, weatherStation, iataOf, pref, zone, isActive],
   )
 
   /* ── The header's duty menu ──────────────────────────────────────────── */
@@ -374,17 +375,18 @@ export function FlightDashboard({ className }: { className?: string }) {
   const sheet = isDesktop ? null : sheetState
   // Where each tile sits — a card opens from its tile at that size.
   const placedSizes = React.useMemo(
-    () => new Map<WidgetId, TileSize>(packTiles(order, sizes).map((p) => [p.id, { cols: p.cols, rows: p.rows }])),
+    () => new Map<WidgetId, TileSize>(packTiles(order, sizes).map((p) => [p.id, faceSize({ cols: p.cols, rows: p.rows })])),
     [order, sizes],
   )
+  const nav = useWidgetCtx()
   const open = React.useCallback(
     (id: WidgetId, anchor: WidgetAnchor) => {
       if (isDesktop) setSelectedId(`w:${id}`)
       else setSheet({ id, anchor, size: placedSizes.get(id) ?? CARD_SIZE })
+      nav.prefetchSection(id)
     },
-    [isDesktop, setSelectedId, placedSizes],
+    [isDesktop, setSelectedId, placedSizes, nav],
   )
-  const nav = useWidgetCtx()
   const ctx = React.useMemo(() => ({ ...nav, selectDuty }), [nav, selectDuty])
   // The panel beside the page shows the widget it was asked for: the same
   // card the phone lifts, its footer line under it.
@@ -425,7 +427,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       tone={tint[id] ?? null}
       className="flex-1"
     >
-      {faceOf(id, brief, size)}
+      {faceOf(id, brief, faceSize(size))}
     </Widget>
   )
   return (
@@ -439,7 +441,7 @@ export function FlightDashboard({ className }: { className?: string }) {
         arranging={arranging}
         label={(id) => WIDGET_TITLE[id]}
         tile={tile}
-        face={(id, size) => faceOf(id, brief, size)}
+        face={(id, size) => faceOf(id, brief, faceSize(size))}
       />
 
       {sheet && (

@@ -1,21 +1,15 @@
 import { describe, expect, it } from "vitest"
-import { GRID_COLUMNS, clampSize, moveTile, nudgeTile, packTiles, sizeLabel, type TileSize } from "../bento"
+import { GRID_COLUMNS, clampSize, faceSize, moveTile, nudgeTile, packTiles, sizeLabel, type TileSize } from "../bento"
+import { DEFAULT_TILE_SIZES, normaliseTileSizes, sizesFromV3 } from "@/hooks/use-dashboard-layout"
 
 type Id = "duty" | "flight" | "weather" | "destination" | "currency" | "limits"
 const DEFAULT_ORDER: Id[] = ["duty", "flight", "weather", "destination", "currency", "limits"]
-const DEFAULTS: Record<Id, TileSize> = {
-  duty: { cols: 3, rows: 1 },
-  flight: { cols: 3, rows: 1 },
-  weather: { cols: 1, rows: 2 },
-  destination: { cols: 2, rows: 1 },
-  currency: { cols: 1, rows: 1 },
-  limits: { cols: 1, rows: 1 },
-}
+const DEFAULTS: Record<Id, TileSize> = DEFAULT_TILE_SIZES
 const layout = (order: Id[], sizes: Record<Id, TileSize>) =>
   packTiles(order, sizes).map((p) => `${p.id}@${p.row},${p.col} ${p.cols}x${p.rows}`)
 
-/** Every cell of every row up to the last is owned by exactly one tile. */
-function expectFilled(order: Id[], sizes: Record<Id, TileSize>) {
+/** Every cell of every row up to the last is owned by exactly one tile (but for `allowedHoles`). */
+function expectFilled(order: Id[], sizes: Record<Id, TileSize>, allowedHoles = 0) {
   const placed = packTiles(order, sizes)
   const last = Math.max(...placed.map((p) => p.row + p.rows - 1))
   const owner = new Map<string, Id>()
@@ -25,26 +19,28 @@ function expectFilled(order: Id[], sizes: Record<Id, TileSize>) {
         expect(owner.has(`${r},${c}`)).toBe(false)
         owner.set(`${r},${c}`, p.id)
       }
-  for (let r = 0; r <= last; r++) for (let c = 0; c < GRID_COLUMNS; c++) expect(owner.has(`${r},${c}`)).toBe(true)
+  let holes = 0
+  for (let r = 0; r <= last; r++) for (let c = 0; c < GRID_COLUMNS; c++) if (!owner.has(`${r},${c}`)) holes++
+  expect(holes).toBeLessThanOrEqual(allowedHoles)
 }
 
-describe("packTiles", () => {
-  it("places the default layout: two full rows, a tall weather tile beside the rest", () => {
+describe("packTiles on the 6 × 6 grid", () => {
+  it("places the default layout: two full bands, a tall weather tile beside the rest", () => {
     expect(layout(DEFAULT_ORDER, DEFAULTS)).toEqual([
-      "duty@0,0 3x1",
-      "flight@1,0 3x1",
-      "weather@2,0 1x2",
-      "destination@2,1 2x1",
-      "currency@3,1 1x1",
-      "limits@3,2 1x1",
+      "duty@0,0 6x2",
+      "flight@2,0 6x2",
+      "weather@4,0 2x4",
+      "destination@4,2 4x2",
+      "currency@6,2 2x2",
+      "limits@6,4 2x2",
     ])
     expectFilled(DEFAULT_ORDER, DEFAULTS)
   })
 
-  it("gives a tile alone on its row the whole row", () => {
-    const sizes = { ...DEFAULTS, limits: { cols: 1, rows: 1 }, currency: { cols: 2, rows: 1 } }
+  it("gives a tile alone on its rows the whole width", () => {
+    const sizes = { ...DEFAULTS, currency: { cols: 4, rows: 2 } }
     const placed = packTiles(DEFAULT_ORDER, sizes)
-    expect(placed.find((p) => p.id === "limits")).toMatchObject({ row: 4, col: 0, cols: 3 })
+    expect(placed.find((p) => p.id === "limits")).toMatchObject({ col: 0, cols: 6 })
     expectFilled(DEFAULT_ORDER, sizes)
   })
 
@@ -58,22 +54,44 @@ describe("packTiles", () => {
     }
   })
 
-  it("fills the holes any choice of sizes leaves", () => {
-    const all: TileSize[] = []
-    for (let cols = 1; cols <= 3; cols++) for (let rows = 1; rows <= 2; rows++) all.push({ cols, rows })
-    // A sample across the sizes, every order of the last four tiles.
-    for (const w of all)
-      for (const c of all) {
+  it("fills every hole whole-step sizes leave (the 3 × 2 grid's, doubled)", () => {
+    const even: TileSize[] = []
+    for (const cols of [2, 4, 6]) for (const rows of [2, 4, 6]) even.push({ cols, rows })
+    for (const w of even)
+      for (const c of even) {
         const sizes = { ...DEFAULTS, weather: w, currency: c }
         expectFilled(DEFAULT_ORDER, sizes)
         expectFilled(["weather", "duty", "currency", "flight", "limits", "destination"], sizes)
       }
   })
 
+  it("leaves at most one cell empty for any other choice of sizes", () => {
+    const any: TileSize[] = []
+    for (let cols = 1; cols <= 6; cols++) for (let rows = 1; rows <= 6; rows++) any.push({ cols, rows })
+    for (const w of any)
+      for (const c of any) {
+        const sizes = { ...DEFAULTS, weather: w, currency: c }
+        expectFilled(DEFAULT_ORDER, sizes, 1)
+        expectFilled(["weather", "duty", "currency", "flight", "limits", "destination"], sizes, 1)
+      }
+  })
+
   it("clamps a size to the grid", () => {
-    expect(clampSize({ cols: 9, rows: 4 })).toEqual({ cols: 3, rows: 2 })
-    expect(clampSize({ cols: 1, rows: 1 }, 2)).toEqual({ cols: 2, rows: 1 })
+    expect(clampSize({ cols: 9, rows: 9 })).toEqual({ cols: 6, rows: 6 })
+    expect(clampSize({ cols: 1, rows: 0 }, 4)).toEqual({ cols: 4, rows: 1 })
     expect(sizeLabel({ cols: 2, rows: 1 })).toBe("2 × 1")
+  })
+
+  it("reads a size as a face does, in thirds of the row", () => {
+    expect(faceSize({ cols: 6, rows: 2 })).toEqual({ cols: 3, rows: 1 })
+    expect(faceSize({ cols: 3, rows: 4 })).toEqual({ cols: 1.5, rows: 2 })
+  })
+
+  it("carries a layout from the 3 × 2 grid across, doubled", () => {
+    const v4 = normaliseTileSizes(sizesFromV3({ weather: { cols: 2, rows: 2 }, duty: { cols: 3, rows: 1 } }))
+    expect(v4.weather).toEqual({ cols: 4, rows: 4 })
+    expect(v4.duty).toEqual({ cols: 6, rows: 2 })
+    expect(v4.limits).toEqual(DEFAULTS.limits)
   })
 })
 

@@ -70,6 +70,8 @@ export interface FlightBrief {
   airports: Map<string, Airport>
   /** Runways and frequencies for the destinations, by ICAO (undefined while asked, null when the source has none). */
   airportInfo: Record<string, AirportInfo | null>
+  /** Whether the live traffic at the destinations is read — the page on screen and the duty within the lookups' reach. */
+  traffic: boolean
   weather: WeatherState
   /** The airport the weather tile shows — where the duty goes next. */
   weatherStation: string | null

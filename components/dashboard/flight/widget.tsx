@@ -23,6 +23,7 @@
  */
 
 import * as React from "react"
+import { usePathname } from "next/navigation"
 import { createPortal } from "react-dom"
 import { motion } from "framer-motion"
 import { useBackDismiss } from "@/hooks/use-back-dismiss"
@@ -317,16 +318,46 @@ export function WidgetSheet({
   // back onto a tile that is no longer on screen.
   const [leaving, setLeaving] = React.useState(false)
   const closingRef = React.useRef(false)
+  // A card that LEADS somewhere stays where it is — the scrim under it, the
+  // tile still hidden — until the route has actually changed, and only then
+  // fades onto the page. It used to fade at once and close when the fade
+  // ended, so a page that took longer to arrive showed the dashboard and the
+  // tile for a moment between the card and the page (the owner's "flash"
+  // going to Currencies; the FDP page happened to arrive in time).
+  const pathname = usePathname()
+  const [startPath] = React.useState(pathname)
+  const arrived = pathname !== startPath
+  const fading = leaving && arrived
+  const leavingRef = React.useRef(false)
+  React.useEffect(() => {
+    leavingRef.current = leaving
+  }, [leaving])
   const finishClose = React.useCallback(() => {
     if (!closingRef.current) return
+    // Still waiting for the page: the route change below closes it.
+    if (leavingRef.current) return
     closingRef.current = false
     closeRef.current()
   }, [])
+  React.useEffect(() => {
+    if (!leaving || !arrived) return
+    // The fade (200ms) runs from the route change; then the card goes.
+    const t = window.setTimeout(() => {
+      leavingRef.current = false
+      finishClose()
+    }, 240)
+    return () => window.clearTimeout(t)
+  }, [leaving, arrived, finishClose])
   const startClose = React.useCallback(() => {
     if (closingRef.current) return
     closingRef.current = true
     setClosing(true)
     window.setTimeout(finishClose, 650)
+    // Never held for ever: a navigation that does not happen still closes it.
+    window.setTimeout(() => {
+      leavingRef.current = false
+      finishClose()
+    }, 4000)
   }, [finishClose])
   const requestClose = useBackDismiss(true, startClose)
 
@@ -404,7 +435,7 @@ export function WidgetSheet({
       <motion.div
         className={cn("absolute inset-0", SCRIM)}
         initial={{ opacity: 0 }}
-        animate={{ opacity: open ? 1 : 0 }}
+        animate={{ opacity: open || (leaving && !arrived) ? 1 : 0 }}
         transition={{ duration: closing ? 0.24 : 0.26, ease: EASE }}
         onPointerDown={() => {
           scrimPressRef.current = true
@@ -420,19 +451,19 @@ export function WidgetSheet({
           className={cn(
             "fixed overflow-hidden rounded-2xl border bg-card",
             leaving ? "pointer-events-none" : "pointer-events-auto",
-            (tone === "fail" || tone === "caution") && !open ? TONE_BORDER[tone] : "border-border",
+            (tone === "fail" || tone === "caution") && !open && !leaving ? TONE_BORDER[tone] : "border-border",
           )}
           initial={{ ...onTile, boxShadow: NO_SHADOW, scale: 1 }}
           animate={
             leaving
-              ? { ...rest, boxShadow: LIFT_SHADOW, scale: 0.97 }
+              ? { ...rest, boxShadow: LIFT_SHADOW, scale: fading ? 0.97 : 1 }
               : open
                 ? { ...rest, boxShadow: LIFT_SHADOW, scale: 1 }
                 : { ...onTile, boxShadow: NO_SHADOW, scale: 1 }
           }
           // Leaving fades on the compositor: the card goes where it is while
           // the next page comes up under it.
-          style={leaving ? { opacity: 0, transition: "opacity 200ms cubic-bezier(0.32, 0.72, 0, 1)" } : undefined}
+          style={fading ? { opacity: 0, transition: "opacity 200ms cubic-bezier(0.32, 0.72, 0, 1)" } : undefined}
           transition={leaving ? LEAVE : t}
           onAnimationComplete={() => {
             if (closingRef.current) finishClose()

@@ -134,7 +134,7 @@ export function widgetContent(
    */
   header: "face" | "label"
 } {
-  const fdp: WidgetAction = { id: "fdp", label: "FDP", run: () => ctx.go("/fdp") }
+  const fdp: WidgetAction = { id: "fdp", label: "FDP", run: () => ctx.go(WIDGET_HREF.duty!) }
   switch (id) {
     case "duty":
       return { header: "face", body: hasDutyBody(brief) ? <DutyBody brief={brief} /> : null, actions: [fdp] }
@@ -192,22 +192,38 @@ export function widgetContent(
       return {
         header: "label",
         body: <CurrencyBody brief={brief} />,
-        actions: [{ id: "cur", label: "Currencies", run: () => ctx.go("/currencies") }],
+        actions: [{ id: "cur", label: "Currencies", run: () => ctx.go(WIDGET_HREF.currency!) }],
       }
     case "limits":
       return { header: "face", body: <LimitsBody brief={brief} />, actions: [fdp] }
   }
 }
 
+/** The section each card's footer leads to — warmed when the card opens (`prefetchSection`). */
+export const WIDGET_HREF: Partial<Record<WidgetId, string>> = { duty: "/fdp", limits: "/fdp", currency: "/currencies" }
+
 /** The navigation every body needs, bound to the app's router and panel. */
-export function useWidgetCtx(): Omit<WidgetCtx, "selectDuty"> {
+export function useWidgetCtx(): Omit<WidgetCtx, "selectDuty"> & { prefetchSection: (id: WidgetId) => void } {
   const router = useRouter()
   const { setSelectedId } = useDetailPanel()
-  return React.useMemo(() => ({ openFlight: (id) => setSelectedId(id), go: (href) => router.push(href) }), [router, setSelectedId])
+  return React.useMemo(
+    () => ({
+      openFlight: (id) => setSelectedId(id),
+      go: (href) => router.push(href),
+      // The card's footer link, fetched while the card is read: tapped, the
+      // page is already here, so the card fades straight onto it.
+      prefetchSection: (id) => {
+        const href = WIDGET_HREF[id]
+        if (href) router.prefetch(href)
+      },
+    }),
+    [router, setSelectedId],
+  )
 }
 
 /** Anything the duty card's face does not already say. */
 function hasDutyBody(brief: FlightBrief): boolean {
+  if (brief.duty.index > 0) return !!brief.duty.period
   const { phase, active, rest, lastDuty, next } = brief.status.duty
   if (phase === "on_duty" && active) return active.maxFdpMinutes > 0
   return !!rest || !!lastDuty || !!next
@@ -222,11 +238,21 @@ function hasDutyBody(brief: FlightBrief): boolean {
 function DutyBody({ brief }: { brief: FlightBrief }) {
   const { status, clock, day } = brief
   const { active, rest, lastDuty, next } = status.duty
+  // When the chosen duty ends — free of all duties (it moved here from the flights card).
+  const w = brief.duty.period ? dutyWindow(brief.duty.period) : null
   const fdpSpare = brief.margin?.each.find((e) => e.limit === "FDP")?.minutes ?? null
   const spareFig =
     fdpSpare !== null ? (
       <Fig label="FDP Spare" value={<span className={marginTone(fdpSpare)}>+{marginText(fdpSpare)}</span>} />
     ) : null
+  if (brief.duty.index > 0) {
+    return w ? (
+      <Grid>
+        {spareFig}
+        <Fig label="Off Duty" value={clock(w.endMs)} />
+      </Grid>
+    ) : null
+  }
   if (status.duty.phase === "on_duty" && active) {
     if (active.maxFdpMinutes <= 0) return null
     return (
@@ -244,10 +270,11 @@ function DutyBody({ brief }: { brief: FlightBrief }) {
     <Grid>
       {rest && <Fig label="Rested" value={formatRestSpan(rest.elapsedMinutes)} />}
       {spare !== null && spare > 0 && <Fig label="Spare Before Report" value={formatRestSpan(spare)} />}
-      {next && next.maxFdpMinutes > 0 && brief.duty.index === 0 && (
+      {next && next.maxFdpMinutes > 0 && (
         <Fig label="Latest On-Blocks" value={clock(next.reportMs + next.maxFdpMinutes * 60_000)} />
       )}
-      {brief.duty.index === 0 && spareFig}
+      {w && next && <Fig label="Off Duty" value={clock(w.endMs)} />}
+      {spareFig}
       {lastDuty && (
         <Fig label={`Last Duty · ${day(lastDuty.debriefMs)}`} value={lastDuty.route || formatDutyClock(lastDuty.elapsedMinutes)} />
       )}
@@ -261,23 +288,17 @@ function DutyBody({ brief }: { brief: FlightBrief }) {
  * own date line, not here.
  */
 function FlightBody({ brief, ctx }: { brief: FlightBrief; ctx: WidgetCtx }) {
-  const { duty, code, clock, day } = brief
-  const w = duty.period ? dutyWindow(duty.period) : null
+  const { duty, code, clock } = brief
   const times = duty.times
   const inbound = duty.lookups?.inbound
   const lines =
     inbound?.status === "done" ? whereaboutsLines(inbound.whereabouts, brief.now, brief.display?.clockSeparator) : null
   return (
     <div>
-      {w && (
-        <Grid>
-          {/* The next duty's report is the duty card's; a later one's is new here. */}
-          {w && duty.index > 0 && <Fig label="Report" value={clock(w.startMs)} />}
-          {w && <Fig label="Off Duty" value={clock(w.endMs)} />}
-        </Grid>
-      )}
+      {/* Report and off duty are the Duty & FDP card's (the owner, Nov 2026);
+          this card is the flights. */}
       {duty.legs.length > 0 && (
-        <div className={cn(w && "mt-1.5 border-t border-border/70 pt-1")}>
+        <div>
           {duty.legs.map((f, i) => {
             const g = duty.lookups?.gates[f.id]
             const done = g?.status === "done" ? g.gates : null

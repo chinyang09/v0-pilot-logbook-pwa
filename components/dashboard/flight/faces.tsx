@@ -20,6 +20,8 @@ import { getAirportLocalTime, getAirportTimeInfo } from "@/lib/db/stores/referen
 import { formatTimezoneOffset } from "@/lib/utils/time"
 import { metarConditions } from "@/lib/weather/brief"
 import { favouredRunway, runwayEndsFrom, type WindOnRunway } from "@/lib/weather/runway-wind"
+import { runwayShown, type RunwayInUse } from "@/lib/weather/runway-in-use"
+import { useRunwayInUse } from "@/hooks/use-runway-in-use"
 import { CATEGORY_TEXT } from "./weather"
 import { greatCircleNm } from "@/lib/utils/geo"
 import { hasCoordinates } from "@/lib/utils/flight-calculations"
@@ -30,6 +32,8 @@ import { PILOT_ROLES, roleLabel, type LogbookAuthority } from "@/lib/utils/logbo
 import type { PilotRole } from "@/types/entities/flight.types"
 import { addDays, localDayKey, lookAheadFor, type LookAhead } from "@/lib/utils/dashboard/currency-dots"
 import { CurrencyDots } from "./currency-dots"
+import { Pager, useRememberedPage } from "./pager"
+import { whereaboutsLines } from "@/lib/lookup/aircraft-whereabouts"
 import * as React from "react"
 
 /** "18 Nov" — a stored day, as a tile has room for it. */
@@ -228,40 +232,57 @@ export function legNow(brief: FlightBrief): number {
   return i < 0 ? Math.max(0, brief.duty.legs.length - 1) : i
 }
 
-/** One leg as the flights tile has it: where, when, the gate and the aeroplane. */
+/**
+ * One leg as the flights tile has it (the owner, Nov 2026: "show aircraft in
+ * use, gate, essentially flight info"): the route large; the flight number
+ * and its times; the AEROPLANE (registration and type) and the GATE on a line
+ * of their own; then where the aeroplane is coming from, or what follows.
+ */
 function LegPage({ brief, i }: { brief: FlightBrief; i: number }) {
   const { duty, clock, code } = brief
   const f = duty.legs[i]
   const t = duty.times[i]
   const flown = !!f.inTime
-  const gate = duty.info?.legGates[i]?.dep ?? ""
+  const gates = duty.info?.legGates[i]
+  const gate = flown ? gates?.arr || "" : gates?.dep || ""
   const last = i === duty.legs.length - 1
   const rest = i === 0 ? restBeforeText(brief) : null
-  // The aeroplane line belongs to the leg it is about (the next to fly).
-  const line = i === legNow(brief) ? duty.info?.line : null
+  // The inbound aeroplane belongs to the leg still to fly next.
+  const inbound = i === legNow(brief) && !flown ? duty.lookups?.inbound : null
+  const whereabouts =
+    inbound?.status === "done" ? whereaboutsLines(inbound.whereabouts, brief.now, brief.display?.clockSeparator) : null
+  const reg = f.aircraftReg || (i === legNow(brief) ? duty.lookups?.inboundRegistration : "") || ""
+  const type = f.aircraftType || ""
+  const next = !last && !flown ? duty.legs[i + 1] : null
   return (
     <>
       <p className="truncate text-[17px] font-bold leading-tight tracking-tight text-foreground @[15rem]:text-[21px]">
         {code(f.departureIcao, f.departureIata)} – {code(f.arrivalIcao, f.arrivalIata)}
       </p>
-      <p className="mt-0.5 flex items-baseline justify-between gap-1.5 text-[12px] tabular-nums" suppressHydrationWarning>
-        <span className="min-w-0 truncate text-foreground">
-          <span className="font-semibold">{f.flightNumber || "Flight"}</span>
-          {t?.departMs != null && t?.arriveMs != null && ` · ${clock(t.departMs).replace(/Z$/, "")}–${clock(t.arriveMs)}`}
-        </span>
-        {gate && !flown && <span className="shrink-0 font-semibold text-foreground">Gate {gate}</span>}
+      <p className="mt-0.5 truncate text-[12px] leading-tight tabular-nums text-foreground" suppressHydrationWarning>
+        <span className="font-semibold">{f.flightNumber || "Flight"}</span>
+        {t?.departMs != null && t?.arriveMs != null && ` · ${clock(t.departMs).replace(/Z$/, "")}–${clock(t.arriveMs)}`}
+        {flown && <span className="text-muted-foreground"> · On blocks</span>}
       </p>
-      <p className={cn("mt-0.5 truncate text-[11px] leading-tight", rest?.short ? "text-destructive" : "text-muted-foreground")} suppressHydrationWarning>
+      <p className="flex items-baseline justify-between gap-2 text-[12px] leading-tight tabular-nums">
+        <span className="min-w-0 truncate">
+          <span className={cn("font-semibold", reg ? "text-foreground" : "text-muted-foreground")}>{reg || "Aircraft not yet assigned"}</span>
+          {reg && type && <span className="text-muted-foreground"> {type}</span>}
+        </span>
+        {gate && (
+          <span className="shrink-0 font-semibold text-foreground">
+            {flown ? "Arr " : ""}Gate {gate}
+          </span>
+        )}
+      </p>
+      <p className={cn("truncate text-[11px] leading-tight", rest?.short ? "text-destructive" : "text-muted-foreground")} suppressHydrationWarning>
         {[
-          flown ? "On blocks" : null,
-          // The aeroplane line names the registration itself.
-          line ? null : f.aircraftReg || null,
-          line,
-          !line && rest ? rest.text : null,
-          !last && !flown && duty.legs.length > 1 ? `then ${code(duty.legs[i + 1].departureIcao, duty.legs[i + 1].departureIata)}–${code(duty.legs[i + 1].arrivalIcao, duty.legs[i + 1].arrivalIata)}` : null,
+          whereabouts ? [whereabouts.flight, whereabouts.primary].filter(Boolean).join(" · ") : null,
+          !whereabouts && rest ? rest.text : null,
+          next ? `then ${code(next.departureIcao, next.departureIata)}–${code(next.arrivalIcao, next.arrivalIata)}` : null,
         ]
           .filter(Boolean)
-          .join(" · ") || " "}
+          .join(" · ") || "\u00a0"}
       </p>
     </>
   )
@@ -277,7 +298,7 @@ function LegPage({ brief, i }: { brief: FlightBrief; i: number }) {
  */
 export function FlightFace({ brief, size, inCard = false }: { brief: FlightBrief; size: TileSize; inCard?: boolean }) {
   const { duty, day } = brief
-  const crewAt = inCard ? null : size.cols >= 3 ? "side" : size.rows >= 2 ? "below" : null
+  const crewAt = inCard ? null : size.cols >= 2.5 ? "side" : size.rows >= 2 ? "below" : null
   const count = duty.legs.length
   const [page, setPage] = useRememberedPage(`flight:${duty.atMs}`, legNow(brief), count)
   if (duty.atMs === null) {
@@ -338,13 +359,29 @@ export function distanceInto(brief: FlightBrief, icao: string): number | null {
   return greatCircleNm({ lat: from.latitude, lon: from.longitude }, { lat: to.latitude, lon: to.longitude })
 }
 
-/** The runway the wind favours at a destination, from its runways and its METAR. */
+/** The runway the wind favours at a destination — the tile's tone (a tailwind) reads it. */
 export function favouredAt(brief: FlightBrief, icao: string): WindOnRunway | null {
   const info = brief.airportInfo[icao]
   const raw = brief.weather.briefs.find((b) => b.station === icao)?.metar?.raw
   if (!info || !raw) return null
   const c = metarConditions(raw)
   return favouredRunway(runwayEndsFrom(info.runways), c.windDir ?? null, c.windKt)
+}
+
+/**
+ * The runway shown at a destination: the one the live traffic is landing on
+ * (`useRunwayInUse`, read only while `brief.traffic`), else the one the wind
+ * favours — the card's rule, on the same cache, so the two agree.
+ */
+function useRunwayAt(brief: FlightBrief, icao: string): { wind: WindOnRunway | null; landing: RunwayInUse | null } {
+  const info = brief.airportInfo[icao]
+  const ends = React.useMemo(() => runwayEndsFrom(info?.runways ?? []), [info])
+  const a = brief.airports.get(icao)
+  const inUse = useRunwayInUse(a && hasCoordinates(a) ? a : null, ends, brief.traffic)
+  const raw = brief.weather.briefs.find((b) => b.station === icao)?.metar?.raw
+  if (!info || !raw) return { wind: null, landing: null }
+  const c = metarConditions(raw)
+  return runwayShown(ends, c.windDir ?? null, c.windKt, inUse)
 }
 
 /** "25R ↓13 →7" — the favoured runway, its head (or tail, amber) and crosswind. */
@@ -366,131 +403,12 @@ export function RunwayWind({ fav, className }: { fav: WindOnRunway; className?: 
   )
 }
 
-/**
- * The page a pager was left on, by a key — so a card opened from a tile
- * shows the page the tile was swiped to, and coming back to the page keeps
- * it. A key that changes (another duty) starts at `start`.
- */
-const PAGES = new Map<string, number>()
-export function useRememberedPage(key: string, start: number, count: number): [number, (i: number) => void] {
-  const [, rerender] = React.useReducer((n: number) => n + 1, 0)
-  const page = Math.max(0, Math.min(Math.max(0, count - 1), PAGES.get(key) ?? start))
-  const set = React.useCallback(
-    (i: number) => {
-      PAGES.set(key, i)
-      rerender()
-    },
-    [key],
-  )
-  return [page, set]
-}
-
-/**
- * Pages a tile can be SWIPED between (the owner: "allow the airport widget to
- * be swipable"), with a dot for each under them. A swipe is pointer events on
- * a transformed track, not a scroller — the tile is a button, and a scroller
- * inside one is not one every engine scrolls — and a swipe never opens the
- * card (its click is swallowed), nor starts the tile's long press. A vertical
- * move is left to the page. Controlled: `page` and `onPage`.
- */
-function Pager({
-  count,
-  page,
-  onPage,
-  children,
-}: {
-  count: number
-  page: number
-  onPage: (i: number) => void
-  children: (i: number) => React.ReactNode
-}) {
-  const track = React.useRef<HTMLDivElement>(null)
-  const drag = React.useRef<{ x0: number; y0: number; dx: number; w: number; active: boolean } | null>(null)
-  const swiped = React.useRef(false)
-  if (count < 2) return <>{children(0)}</>
-  const settle = (to: number) => {
-    const el = track.current
-    if (el) {
-      el.style.transition = ""
-      el.style.transform = `translateX(${-to * 100}%)`
-    }
-    onPage(to)
-  }
-  return (
-    <div
-      className="relative overflow-hidden"
-      data-pager
-      style={{ touchAction: "pan-y" }}
-      onPointerDown={(e) => {
-        swiped.current = false
-        drag.current = { x0: e.clientX, y0: e.clientY, dx: 0, w: e.currentTarget.getBoundingClientRect().width, active: false }
-      }}
-      onPointerMove={(e) => {
-        const d = drag.current
-        if (!d) return
-        const dx = e.clientX - d.x0
-        const dy = e.clientY - d.y0
-        if (!d.active) {
-          if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
-            d.active = true
-            e.currentTarget.setPointerCapture(e.pointerId)
-          } else if (Math.abs(dy) > 8) drag.current = null
-          return
-        }
-        // Past the first or last page it gives a little, no more.
-        const edge = (page === 0 && dx > 0) || (page === count - 1 && dx < 0)
-        d.dx = edge ? dx / 4 : dx
-        swiped.current = true
-        const el = track.current
-        if (el) {
-          el.style.transition = "none"
-          el.style.transform = `translateX(calc(${-page * 100}% + ${d.dx}px))`
-        }
-      }}
-      onPointerUp={() => {
-        const d = drag.current
-        drag.current = null
-        if (!d?.active) return
-        const next = d.dx < -d.w * 0.18 ? page + 1 : d.dx > d.w * 0.18 ? page - 1 : page
-        settle(Math.max(0, Math.min(count - 1, next)))
-      }}
-      onPointerCancel={() => {
-        if (drag.current?.active) settle(page)
-        drag.current = null
-      }}
-      onClickCapture={(e) => {
-        if (!swiped.current) return
-        swiped.current = false
-        e.preventDefault()
-        e.stopPropagation()
-      }}
-    >
-      <div
-        ref={track}
-        className="flex transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
-        style={{ transform: `translateX(${-page * 100}%)` }}
-      >
-        {Array.from({ length: count }, (_, i) => (
-          <div key={i} className="w-full shrink-0" aria-hidden={i !== page || undefined}>
-            {children(i)}
-          </div>
-        ))}
-      </div>
-      <div aria-hidden className="mt-1.5 flex justify-center gap-1">
-        {Array.from({ length: count }, (_, i) => (
-          <span key={i} className={cn("h-1.5 w-1.5 rounded-full transition-colors", i === page ? "bg-foreground" : "bg-foreground/25")} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
 /** One destination as the tile has it: code and category, place, local time and zone, distance and last visit, the favoured runway. */
 function DestinationPage({ brief, icao }: { brief: FlightBrief; icao: string }) {
   const d = brief.destinations.find((x) => x.icao === icao)
   const a = brief.airports.get(icao)
   const nm = distanceInto(brief, icao)
-  const fav = favouredAt(brief, icao)
+  const { wind: fav, landing } = useRunwayAt(brief, icao)
   const cat = brief.weather.briefs.find((b) => b.station === icao)?.metar?.category ?? null
   const local = a?.tz ? getAirportLocalTime(a.tz).split(" ")[0] : null
   const zone = a?.tz ? formatTimezoneOffset(getAirportTimeInfo(a.tz).offset) : null
@@ -523,6 +441,7 @@ function DestinationPage({ brief, icao }: { brief: FlightBrief; icao: string }) 
       {fav && (
         <p className="mt-1.5 text-[12px]" data-morph={`dest-rwy-${icao}`}>
           <RunwayWind fav={fav} />
+          {landing && <span className="ml-1.5 text-[11px] text-muted-foreground">landing</span>}
         </p>
       )}
     </>
