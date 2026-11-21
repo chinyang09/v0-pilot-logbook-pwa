@@ -21,20 +21,17 @@ import type { Requirement } from "@/lib/utils/dashboard/legality"
 import { cn } from "@/lib/utils"
 import { formatDay } from "@/lib/utils/date"
 import { REQ_TONE, STATE_ICON } from "./instruments"
-import { crewKey, crewRole, currenciesBySoonest, currencyRows, destinationsOf, distanceInto, limitsOf, marginText, marginTone, shortDay, shortName } from "./faces"
+import { crewKey, crewRole, currenciesBySoonest, currencyRows, limitsOf, marginText, marginTone, shortDay, shortName } from "./faces"
 import { CurrencyDots } from "./currency-dots"
 import { dotAt, dotLayout, localDayKey } from "@/lib/utils/dashboard/currency-dots"
-import { WeatherBody } from "./weather"
-import { AirportPanel } from "./airport"
-import { EnRoute, useDutyAlternates } from "./alternates"
+import { AirportBody } from "./airport-tile"
 import type { FlightBrief } from "./model"
 import type { WidgetAction, WidgetId } from "./widget"
 
 export const WIDGET_TITLE: Record<WidgetId, string> = {
   duty: "Duty & FDP",
   flight: "Flights",
-  weather: "Weather",
-  destination: "Destination",
+  airport: "Airport",
   currency: "Currency",
   limits: "Limits",
 }
@@ -160,15 +157,10 @@ export function widgetContent(
         ],
       }
     }
-    case "weather":
+    case "airport":
       return {
         header: "label",
-        body: (
-          <>
-            <WeatherBody weather={brief.weather} code={brief.code} clock={brief.clock} now={brief.now} station={brief.weatherStation} />
-            <EnRoute brief={brief} />
-          </>
-        ),
+        body: <AirportBody brief={brief} openFlight={ctx.openFlight} />,
         actions: brief.weather.asked
           ? [
               {
@@ -181,12 +173,6 @@ export function widgetContent(
               },
             ]
           : [],
-      }
-    case "destination":
-      return {
-        header: destinationsOf(brief).length ? "label" : "face",
-        body: destinationsOf(brief).length ? <DestinationBody brief={brief} openFlight={ctx.openFlight} /> : null,
-        actions: [],
       }
     case "currency":
       return {
@@ -379,48 +365,6 @@ function CrewBody({ brief, go }: { brief: FlightBrief; go: (href: string) => voi
           right={m.last ? shortDay(m.last.date) : "New"}
         />
       ))}
-    </div>
-  )
-}
-
-/**
- * Each destination as a picture of its weather and the wind on its runway
- * (`AirportPanel`), with its runways, frequencies and the aerodromes near it,
- * and when last there under it. The airport data and the alternates are asked
- * only now, while this card is open.
- */
-function DestinationBody({ brief, openFlight }: { brief: FlightBrief; openFlight: (id: string) => void }) {
-  const dests = destinationsOf(brief)
-  const info = brief.airportInfo
-  const alternates = useDutyAlternates(brief, true)
-  return (
-    <div className="divide-y divide-border/70">
-      {dests.map((d) => {
-        const metar = brief.weather.briefs.find((b) => b.station === d.icao)?.metar ?? null
-        const arrival = brief.duty.times.find((t) => t.arrivalIcao === d.icao)?.arriveMs ?? null
-        const to = brief.airports.get(d.icao)
-        const distanceNm = distanceInto(brief, d.icao)
-        const lastLine = [d.last ? `Last there ${shortDay(d.last.date)}` : "First time", d.year ? `${d.year}× this year` : null]
-          .filter(Boolean)
-          .join(" · ")
-        return (
-          <AirportPanel
-            key={d.icao}
-            icao={d.icao}
-            code={brief.code(d.icao)}
-            airport={to}
-            info={info[d.icao]}
-            metar={metar}
-            arrivalMs={arrival}
-            distanceNm={distanceNm}
-            weatherAsked={brief.weather.asked}
-            nearby={alternates.near.get(d.icao) ?? []}
-            codeOf={brief.code}
-            lastLine={lastLine}
-            onLast={d.last ? () => openFlight(d.last!.flightId) : undefined}
-          />
-        )
-      })}
     </div>
   )
 }

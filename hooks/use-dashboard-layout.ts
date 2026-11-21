@@ -15,11 +15,16 @@ import { clampSize, type TileSize } from "@/lib/utils/dashboard/bento"
  * client render agree.
  */
 
-// The crew is part of the flights tile (the owner's duty-and-crew widget, Nov 2026).
-export const DASHBOARD_TILES = ["duty", "flight", "weather", "destination", "currency", "limits"] as const
+// The crew is part of the flights tile (the owner's duty-and-crew widget, Nov
+// 2026), and the airport and its weather are one tile (the owner: "combine
+// airport and weather widget").
+export const DASHBOARD_TILES = ["duty", "flight", "airport", "currency", "limits"] as const
 export type DashboardTile = (typeof DASHBOARD_TILES)[number]
 
 const STORAGE_KEY = "ooo:dashboard-tiles"
+
+/** Tiles that became another: a stored order keeps the new one where the first of the old ones was. */
+const RENAMED: Record<string, string> = { weather: "airport", destination: "airport" }
 
 /** A stored order, put right: unknown ids dropped, duplicates removed, tiles added since appended. */
 export function normaliseTileOrder(stored: unknown): DashboardTile[] {
@@ -27,7 +32,8 @@ export function normaliseTileOrder(stored: unknown): DashboardTile[] {
   const seen = new Set<string>()
   const out: DashboardTile[] = []
   if (Array.isArray(stored)) {
-    for (const id of stored) {
+    for (const raw of stored) {
+      const id = typeof raw === "string" ? (RENAMED[raw] ?? raw) : raw
       if (typeof id === "string" && known.has(id) && !seen.has(id)) {
         seen.add(id)
         out.push(id as DashboardTile)
@@ -93,25 +99,23 @@ const DEFAULT_ORDER: DashboardTile[] = [...DASHBOARD_TILES]
 
 /**
  * Each tile's size by default, on the six-column grid (`packTiles`): the duty
- * and the flights across the page, the weather a tall column (its wind dial
- * over the sky, the temperature and QNH) beside the destination, the
- * currency's 90-day dots and the limits under that.
+ * and the flights across the page, the airport station half the row and four
+ * rows tall (its wind dial between the code and the sky), the currency's dots
+ * and the limits stacked beside it.
  */
 export const DEFAULT_TILE_SIZES: Record<DashboardTile, TileSize> = {
   duty: { cols: 6, rows: 2 },
   flight: { cols: 6, rows: 2 },
-  weather: { cols: 2, rows: 4 },
-  destination: { cols: 4, rows: 2 },
-  currency: { cols: 2, rows: 2 },
-  limits: { cols: 2, rows: 2 },
+  airport: { cols: 3, rows: 4 },
+  currency: { cols: 3, rows: 2 },
+  limits: { cols: 3, rows: 2 },
 }
 
 /** The fewest columns a tile can take: the duty strip and the day bar need two thirds of the row. */
 export const TILE_MIN_COLS: Record<DashboardTile, number> = {
   duty: 4,
   flight: 4,
-  weather: 2,
-  destination: 2,
+  airport: 2,
   currency: 2,
   limits: 2,
 }
@@ -137,6 +141,7 @@ export function normaliseTileSizes(stored: unknown): Record<DashboardTile, TileS
   if (stored && typeof stored === "object") {
     for (const id of DASHBOARD_TILES) {
       const v = (stored as Record<string, unknown>)[id]
+      // The airport tile keeps its default rather than the size of either tile it replaced.
       if (v && typeof v === "object") out[id] = clampSize(v as Partial<TileSize>, TILE_MIN_COLS[id])
     }
   }

@@ -19,3 +19,14 @@ export function ageText(atMs: number, nowMs: number): string {
   const h = Math.floor(min / 60)
   return h < 48 ? `${h}h ${min % 60}m ago` : `${Math.floor(h / 24)}d ago`
 }
+
+/**
+ * A cloud base as a phone reads it (the owner, Nov 2026): thousands as "k" —
+ * "1.1k", "30k" — and hundreds as they are, "800". One decimal only where
+ * it says something (1,500 → "1.5k", 2,000 → "2k").
+ */
+export function cloudBase(ft: number): string {
+  if (ft < 1000) return String(Math.round(ft))
+  const k = Math.round(ft / 100) / 10
+  return `${Number.isInteger(k) ? k : k.toFixed(1)}k`
+}

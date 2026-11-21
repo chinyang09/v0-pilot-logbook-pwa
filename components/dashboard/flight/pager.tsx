@@ -40,16 +40,34 @@ export function Pager({
   page,
   onPage,
   children,
+  fill = false,
 }: {
   count: number
   page: number
   onPage: (i: number) => void
   children: (i: number) => React.ReactNode
+  /** Fill the tile: each page its full height, the dots at its foot. */
+  fill?: boolean
 }) {
   const track = React.useRef<HTMLDivElement>(null)
   const drag = React.useRef<{ x0: number; y0: number; dx: number; w: number; active: boolean } | null>(null)
   const swiped = React.useRef(false)
-  if (count < 2) return <>{children(0)}</>
+  // Outside a fill (the airport card) each page is as tall as itself: the
+  // window takes the page on show's height, so a short page does not leave
+  // the tallest one's height under it. Read in a ResizeObserver, never in a commit.
+  const [height, setHeight] = React.useState<number | null>(null)
+  React.useEffect(() => {
+    if (fill || count < 2) return
+    const el = track.current?.children[page] as HTMLElement | undefined
+    if (!el) return
+    const ro = new ResizeObserver(([entry]) => {
+      const h = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height
+      setHeight((prev) => (prev !== null && Math.abs(prev - h) < 0.5 ? prev : h))
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [fill, count, page])
+  if (count < 2) return fill ? <div className="flex min-h-0 flex-1 flex-col">{children(0)}</div> : <>{children(0)}</>
   const settle = (to: number) => {
     const el = track.current
     if (el) {
@@ -60,7 +78,7 @@ export function Pager({
   }
   return (
     <div
-      className="relative overflow-hidden"
+      className={cn("relative overflow-hidden", fill && "flex min-h-0 flex-1 flex-col")}
       data-pager
       style={{ touchAction: "pan-y" }}
       onPointerDown={(e) => {
@@ -108,17 +126,22 @@ export function Pager({
       }}
     >
       <div
-        ref={track}
-        className="flex transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"
-        style={{ transform: `translateX(${-page * 100}%)` }}
+        className={fill ? "flex min-h-0 flex-1 flex-col" : "overflow-hidden transition-[height] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]"}
+        style={!fill && height !== null ? { height } : undefined}
       >
-        {Array.from({ length: count }, (_, i) => (
-          <div key={i} className="w-full shrink-0" aria-hidden={i !== page || undefined}>
-            {children(i)}
-          </div>
-        ))}
+        <div
+          ref={track}
+          className={cn("flex transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]", fill ? "min-h-0 flex-1" : "items-start")}
+          style={{ transform: `translateX(${-page * 100}%)` }}
+        >
+          {Array.from({ length: count }, (_, i) => (
+            <div key={i} className={cn("w-full shrink-0", fill && "flex flex-col")} aria-hidden={i !== page || undefined}>
+              {children(i)}
+            </div>
+          ))}
+        </div>
       </div>
-      <div aria-hidden className="mt-1.5 flex justify-center gap-1">
+      <div aria-hidden className={cn("flex justify-center gap-1", fill ? "pt-1.5" : "mt-1.5")}>
         {Array.from({ length: count }, (_, i) => (
           <span key={i} className={cn("h-1.5 w-1.5 rounded-full transition-colors", i === page ? "bg-foreground" : "bg-foreground/25")} />
         ))}

@@ -52,10 +52,11 @@ import { getAirportByIcao, getAirportsRevision, isAirportTableSeeded, onAirportS
 import type { Airport } from "@/types/entities/airport.types"
 import { cn } from "@/lib/utils"
 import { useTick } from "./flight/instruments"
-import { CurrencyFace, DestinationFace, DutyFace, FlightFace, LimitsFace, currencyRows, destinationsOf, favouredAt, limitsOf } from "./flight/faces"
+import { CurrencyFace, DutyFace, FlightFace, LimitsFace, currencyRows, destinationsOf, favouredAt, limitsOf } from "./flight/faces"
 import { dutyTone } from "./flight/duty-clock"
 import { setChosenDuty, useChosenDuty, publishDutyChoices } from "@/hooks/use-dashboard-duty"
-import { WeatherFace, type WeatherState } from "./flight/weather"
+import { type WeatherState } from "./flight/weather"
+import { AirportFace, airportsOf, stationPoor } from "./flight/airport-tile"
 import { WIDGET_TITLE, useWidgetCtx, widgetContent } from "./flight/details"
 import { BentoGrid } from "./flight/bento"
 import { setArranging, useArranging, useTileOrder, useTileSizes } from "@/hooks/use-dashboard-layout"
@@ -85,16 +86,13 @@ function worstOf(states: RequirementState[]): RequirementState | null {
  * attention, red for action. The reason is lit inside the tile.
  */
 function tileTones(brief: FlightBrief): Partial<Record<WidgetId, RequirementState | null>> {
-  const wx = brief.weather.briefs.find((b) => b.station === brief.weatherStation) ?? null
-  const poor = (c: string | null | undefined) => c === "IFR" || c === "LIFR"
-  const destPoor = destinationsOf(brief).some((d) => {
-    const b = brief.weather.briefs.find((x) => x.station === d.icao)
-    return poor(b?.metar?.category) || (favouredAt(brief, d.icao)?.headKt ?? 0) < 0
-  })
+  // The airport tile: an airport of the duty IFR or with a hazard over the
+  // duty's times there, or a destination whose favoured runway has a tailwind.
+  const airportPoor =
+    airportsOf(brief).some(stationPoor) || destinationsOf(brief).some((d) => (favouredAt(brief, d.icao)?.headKt ?? 0) < 0)
   return {
     duty: dutyTone(brief),
-    weather: wx && (poor(wx.worst) || wx.hazards.length > 0) ? "caution" : null,
-    destination: destPoor ? "caution" : null,
+    airport: airportPoor ? "caution" : null,
     currency: worstOf(currencyRows(brief).map((r) => r.state)),
     limits: worstOf(limitsOf(brief).map((r) => r.state)),
   }
@@ -145,10 +143,8 @@ function faceOf(id: WidgetId, brief: FlightBrief, size: TileSize, inCard = false
       return <DutyFace brief={brief} />
     case "flight":
       return <FlightFace brief={brief} size={size} inCard={inCard} />
-    case "weather":
-      return <WeatherFace weather={brief.weather} code={brief.code} clock={brief.clock} station={brief.weatherStation} size={size} memory={String(brief.duty.atMs)} />
-    case "destination":
-      return <DestinationFace brief={brief} size={size} inCard={inCard} />
+    case "airport":
+      return <AirportFace brief={brief} size={size} />
     case "currency":
       return <CurrencyFace brief={brief} size={size} />
     case "limits":
@@ -253,13 +249,9 @@ export function FlightDashboard({ className }: { className?: string }) {
   const currency = React.useMemo(() => currencySummary(currencies, dutyAtMs), [currencies, dutyAtMs])
   const stations = React.useMemo(() => dutyStations(legs), [legs])
   const airports = useAirportsByIcao(stations)
-  // Runways and frequencies for the destinations — the tile reads the
-  // favoured runway; kept on the device 30 days, so this is rarely a request.
-  const destIcaos = React.useMemo(
-    () => [...new Set(legs.map((l) => (l.arrivalIcao || "").toUpperCase()))].filter(Boolean),
-    [legs],
-  )
-  const airportInfo = useAirportInfo(destIcaos, isActive && destIcaos.length > 0)
+  // Runways for every airport of the duty — the airport card draws the one in
+  // use; kept on the device 30 days, so this is rarely a request.
+  const airportInfo = useAirportInfo(stations, isActive && stations.length > 0)
 
   /* ── Weather ─────────────────────────────────────────────────────────── */
   // Live, whatever the duty's distance (the owner: "pull real time weather
@@ -458,7 +450,7 @@ export function FlightDashboard({ className }: { className?: string }) {
             sheet.size.cols === 3 &&
             sheet.size.rows === 1 &&
             sheet.id !== "flight" &&
-            sheet.id !== "destination"
+            sheet.id !== "airport"
           }
           tone={tint[sheet.id] ?? null}
           // Anything in the card that goes somewhere closes it first.
