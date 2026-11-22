@@ -20,6 +20,7 @@ import type { SyncQueueItem, SyncMeta } from "@/types/sync/sync.types"
 import type { ScheduleEntry, Currency, Discrepancy } from "@/types/entities/roster.types"
 import type { UserSettingsRecord } from "@/types/entities/settings.types"
 import type { DevicePreferences } from "@/lib/settings/user-settings"
+import type { BriefingRecord, NotamRecord, BriefingNoteRecord } from "@/types/entities/briefing.types"
 
 class UserDatabase extends Dexie {
   flights!: Table<FlightLog, string>
@@ -29,6 +30,10 @@ class UserDatabase extends Dexie {
   preferences!: Table<UserPreferences | DevicePreferences, string>
   /** The user's synced settings — one row, id `settings`. */
   settings!: Table<UserSettingsRecord, string>
+  /** Briefing packages, the NOTAM register and route / airport notes (lib/briefing/). */
+  briefings!: Table<BriefingRecord, string>
+  notams!: Table<NotamRecord, string>
+  briefingNotes!: Table<BriefingNoteRecord, string>
   syncQueue!: Table<SyncQueueItem, string>
   syncMeta!: Table<SyncMeta, string>
   userSession!: Table<UserSession, string>
@@ -109,6 +114,14 @@ class UserDatabase extends Dexie {
     this.version(5).stores({
       settings: "id, syncStatus",
     })
+
+    // Version 6 (additive): briefing packages, the NOTAM register and the
+    // route / airport notes (lib/briefing/), synced like everything else.
+    this.version(6).stores({
+      briefings: "id, date, dep, arr, syncStatus",
+      notams: "id, location, syncStatus",
+      briefingNotes: "id, syncStatus",
+    })
   }
 
   /**
@@ -129,9 +142,15 @@ class UserDatabase extends Dexie {
         this.scheduleEntries,
         this.currencies,
         this.discrepancies,
+        this.briefings,
+        this.notams,
+        this.briefingNotes,
       ],
       async () => {
         await Promise.all([
+          this.briefings.clear(),
+          this.notams.clear(),
+          this.briefingNotes.clear(),
           this.flights.clear(),
           this.aircraft.clear(),
           this.personnel.clear(),
@@ -165,9 +184,15 @@ class UserDatabase extends Dexie {
         this.scheduleEntries,
         this.currencies,
         this.discrepancies,
+        this.briefings,
+        this.notams,
+        this.briefingNotes,
       ],
       async () => {
         await Promise.all([
+          this.briefings.clear(),
+          this.notams.clear(),
+          this.briefingNotes.clear(),
           this.flights.clear(),
           this.aircraft.clear(),
           this.personnel.clear(),
@@ -206,6 +231,9 @@ class UserDatabase extends Dexie {
       ["currencies", this.currencies],
       ["discrepancies", this.discrepancies],
       ["settings", this.settings],
+      ["briefings", this.briefings],
+      ["notams", this.notams],
+      ["briefingNotes", this.briefingNotes],
     ] as const
     await this.transaction("rw", [...tables.map(([, t]) => t), this.syncQueue], async () => {
       const queued = new Set((await this.syncQueue.toArray()).map((q) => `${q.collection}:${q.recordId ?? q.data?.id}`))

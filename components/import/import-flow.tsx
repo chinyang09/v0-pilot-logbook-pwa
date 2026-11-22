@@ -71,6 +71,10 @@ import type { FlightLog } from "@/types/entities/flight.types";
 import type { NormalizedDocument } from "@/lib/utils/parsers/types";
 import { ImportReviewModalV2 } from "./import-review-modal-v2";
 import { ImportStatusDialog, type ImportStage } from "./import-status-dialog";
+import { useRouter } from "next/navigation";
+import { showToast } from "@/lib/utils/undo-toast";
+import { importBriefingFile, isBriefingFile } from "@/lib/briefing/import";
+import { refreshBriefingCaches } from "@/hooks/data/use-briefings";
 import type { Personnel } from "@/types/entities/crew.types";
 import { nonPicPfRoleOf } from "@/lib/utils/roster/pilot-role";
 import type { ReportTotalsCheck } from "@/lib/utils/roster/report-totals-check";
@@ -108,6 +112,7 @@ function seatFromRank(rank: string): Pick<Personnel, "roles" | "defaultPIC" | "d
  * one tap in a hundred is no longer part of the logbook's first load.
  */
 export function ImportFlow({ context = "shared", onComplete, request, onBusyChange, onResetPicker }: Props) {
+  const router = useRouter();
   const [progress, setProgress] = useState<ImportStage | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [pendingPlan, setPendingPlan] = useState<PlannedImport | null>(null);
@@ -290,12 +295,50 @@ export function ImportFlow({ context = "shared", onComplete, request, onBusyChan
   );
 
   const handleFiles = useCallback(
-    async (files: File[]) => {
+    async (chosen: File[]) => {
+      let files = chosen;
       setSummary(null);
       setTotals(null);
       setErrorMsg(null);
-      setIsOpen(true);
       setBusy(true);
+
+      // ---- Briefing packages (lib/briefing/) ----
+      // The company's OFP + NOTAM package for a flight: read, kept and
+      // opened — nothing in it is reconciled against the logbook. Told apart
+      // by its first pages, BEFORE the status dialog opens: a briefing alone
+      // never shows it (it reads in a second, and the toast says so), and
+      // closing the dialog in the same step as the navigation let its back
+      // marker pop the briefing page straight off the history.
+      try {
+        const briefingFiles: File[] = [];
+        for (const f of files) if (await isBriefingFile(f)) briefingFiles.push(f);
+        if (briefingFiles.length > 0) {
+          let last: Awaited<ReturnType<typeof importBriefingFile>> | null = null;
+          for (const f of briefingFiles) last = await importBriefingFile(f);
+          await refreshBriefingCaches();
+          files = files.filter((f) => !briefingFiles.includes(f));
+          if (last) {
+            const r = last.record;
+            showToast(
+              `${r.flightNumber} ${r.dep}–${r.arr} briefing saved · ${last.notams} NOTAMs${last.newNotams ? `, ${last.newNotams} new` : ""}`,
+            );
+            if (files.length === 0) {
+              setBusy(false);
+              onResetPicker();
+              router.push(`/briefing?id=${encodeURIComponent(r.id)}`);
+              return;
+            }
+          }
+        }
+      } catch (error) {
+        setIsOpen(true);
+        setErrorMsg(error instanceof Error ? error.message : "The briefing could not be read");
+        setBusy(false);
+        onResetPicker();
+        return;
+      }
+
+      setIsOpen(true);
       setProgress({ percent: 5, stage: "Reading", detail: `${files.length} file(s)` });
 
       try {
@@ -637,7 +680,7 @@ export function ImportFlow({ context = "shared", onComplete, request, onBusyChan
         onResetPicker();
       }
     },
-    [handleExecute, runLogtenParse, onResetPicker]
+    [handleExecute, runLogtenParse, onResetPicker, router]
   );
 
   const confirmSubject = useCallback(async () => {

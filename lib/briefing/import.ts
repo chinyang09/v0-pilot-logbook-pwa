@@ -1,0 +1,38 @@
+/**
+ * Bringing a briefing PDF in, from wherever it is chosen — the logbook's
+ * import button (`import-flow.tsx`, which asks `isBriefingFile` first) or the
+ * flight's own Briefing row. Read on the device (`pdfToPages`, offline),
+ * parsed (`parseBriefing`), kept (`saveBriefing`), its NOTAMs folded into the
+ * register.
+ */
+
+import { pdfToPages } from "./pdf-lines"
+import { isBriefingPackage, parseBriefing } from "./parse"
+import { saveBriefing } from "@/lib/db/stores/user/briefings.store"
+import type { BriefingRecord } from "@/types/entities/briefing.types"
+
+/** Whether a chosen file is a company briefing package — read off its first pages only. */
+export async function isBriefingFile(file: File): Promise<boolean> {
+  if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") return false
+  try {
+    const head = await pdfToPages(new Uint8Array(await file.arrayBuffer()), 4)
+    return isBriefingPackage(head)
+  } catch {
+    return false
+  }
+}
+
+export interface BriefingImport {
+  record: BriefingRecord
+  notams: number
+  newNotams: number
+}
+
+export async function importBriefingFile(file: File): Promise<BriefingImport> {
+  const pages = await pdfToPages(new Uint8Array(await file.arrayBuffer()))
+  if (!isBriefingPackage(pages)) throw new Error(`${file.name} isn't a briefing package (no OFP found).`)
+  const briefing = parseBriefing(pages)
+  if (!briefing.flight.dep || !briefing.flight.date) throw new Error(`${file.name}: the OFP's flight could not be read.`)
+  const { record, newNotams } = await saveBriefing(briefing, file.name)
+  return { record, notams: briefing.notams.items.length, newNotams }
+}

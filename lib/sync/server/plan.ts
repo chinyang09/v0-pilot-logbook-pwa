@@ -95,6 +95,8 @@ export function validatePushItems(raw: unknown[]): {
  */
 function isRecreatable(item: PushItem): boolean {
   if (item.collection === "discrepancies") return true
+  // Briefings, NOTAMs and notes are keyed on what they are about (lib/briefing/ids.ts).
+  if (item.collection === "briefings" || item.collection === "notams" || item.collection === "briefingNotes") return true
   return item.collection === "scheduleEntries" && item.data.id.startsWith("duty:")
 }
 
