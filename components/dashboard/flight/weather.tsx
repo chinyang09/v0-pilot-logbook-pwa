@@ -12,7 +12,7 @@
  */
 
 import type * as React from "react"
-import { Cloud, CloudFog, CloudLightning, CloudRain, CloudSun, Sun, TriangleAlert } from "lucide-react"
+import { Cloud, CloudFog, CloudLightning, CloudRain, CloudSnow, CloudSun, Sun } from "lucide-react"
 import { ageText, cloudLayer } from "@/lib/weather/format"
 import { categoryOf, hazardLine, hazardsOf, metarConditions, type FlightCategory, type StationBrief, type StationWindow } from "@/lib/weather/brief"
 import { cn } from "@/lib/utils"
@@ -45,7 +45,9 @@ export interface WeatherState {
 export function skyOf(c: ReturnType<typeof metarConditions> | null, hazard: string | undefined) {
   if (hazard) {
     const word = hazard.replace(/^(TEMPO|PROB\d+) /, "")
-    return { Icon: /TS|CB/.test(word) ? CloudLightning : TriangleAlert, text: word, warn: true }
+    // The weather's own picture, never an alert icon: the colour says it is a hazard.
+    const Icon = /TS|CB/.test(word) ? CloudLightning : /FG|BR|HZ|FU|DU|SA|VA/.test(word) ? CloudFog : /SN|PL|GR|GS|FZ/.test(word) ? CloudSnow : /RA|DZ|SH/.test(word) ? CloudRain : Cloud
+    return { Icon, text: word, warn: true }
   }
   if (!c) return null
   const ceil = (c.clouds ?? []).filter((l) => l.cover === "BKN" || l.cover === "OVC" || l.cover === "VV")

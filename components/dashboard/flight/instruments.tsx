@@ -382,12 +382,10 @@ export function DutyBand({
   })()
 
   const tone = TONE[status.dutyState]
-  const StateIcon = tone.icon
   return (
     <section aria-label="Duty and rest">
       <div className="flex items-center justify-between gap-2">
         <p className={cn("flex shrink-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em]", tone.text)}>
-          {StateIcon && <StateIcon className="h-3 w-3" aria-hidden />}
           {view.state}
         </p>
         {view.chip && (
@@ -649,13 +647,12 @@ const LABEL_FITS_INSIDE = 0.28
  * neutral, the way a met currency cell carries no tint. All four bars were
  * status green, 3% used and 60% used alike: a band of green that said "fine"
  * four times and left an amber one less to stand out against. Colour arrives
- * with the state (close → amber, over → red), and so does the icon.
+ * with the state (close → amber, over → red) — on the bar and its figure; no icon.
  */
 const LIMIT_WITH_ROOM = { fill: "bg-muted-foreground", track: "bg-muted" }
 
 export function LimitRow({ requirement }: { requirement: Requirement }) {
   const tone = requirement.state === "ok" ? { ...REQ_TONE.ok, ...LIMIT_WITH_ROOM } : REQ_TONE[requirement.state]
-  const Icon = STATE_ICON[requirement.state]
   // "Duty 14d" → "14d": the pair's label already says which measure it is.
   const window = requirement.label.split(" ").slice(-1)[0]
   // "74 / 90h" → used "74", limit "90h".
@@ -691,10 +688,7 @@ export function LimitRow({ requirement }: { requirement: Requirement }) {
         )}
       </span>
 
-      {requirement.state !== "ok" && (
-        <Icon className={cn("h-3 w-3 shrink-0", tone.icon)} aria-hidden="true" />
-      )}
-      <span className="w-10 shrink-0 text-right text-[11px] font-semibold tabular-nums text-muted-foreground">
+      <span className={cn("w-10 shrink-0 text-right text-[11px] font-semibold tabular-nums", requirement.state === "ok" ? "text-muted-foreground" : tone.icon)}>
         {limit}
       </span>
     </div>

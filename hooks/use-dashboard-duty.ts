@@ -17,9 +17,10 @@ import type { MenuOption } from "@/components/ui/option-menu"
 
 export interface DutyMenu {
   options: Array<MenuOption<string>>
-  /** The button's two lines: "Next" over "21 Nov". */
+  /** The button's two lines: where the duty goes over its day — "WIII" over "21 Nov". */
   word: string
   day: string
+  dest: string
 }
 
 let chosen: number | null = null

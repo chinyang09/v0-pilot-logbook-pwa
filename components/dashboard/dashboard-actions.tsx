@@ -60,8 +60,12 @@ export function FlightDeckActions() {
             disabled={menu.options.length < 2}
             className={cn(MENU_BUTTON, "min-w-14")}
           >
-            <CalendarClock className="h-[15px] w-[15px]" aria-hidden />
-            <span className="mt-0.5 text-[10px] font-semibold leading-none tabular-nums" suppressHydrationWarning>
+            {menu.dest ? (
+              <span className="max-w-16 truncate text-[11px] font-bold leading-none tracking-tight">{menu.dest}</span>
+            ) : (
+              <CalendarClock className="h-[15px] w-[15px]" aria-hidden />
+            )}
+            <span className="mt-1 text-[10px] font-semibold leading-none tabular-nums" suppressHydrationWarning>
               {menu.day}
             </span>
           </ChoicePicker>

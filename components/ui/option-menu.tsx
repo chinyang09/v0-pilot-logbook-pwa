@@ -31,7 +31,6 @@ import { haptic } from "@/lib/utils/haptics"
 import { forwardRef, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { AnimatePresence, motion } from "framer-motion"
-import { Check } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useBackDismiss } from "@/hooks/use-back-dismiss"
 
@@ -555,16 +554,25 @@ function OptionMenu<T extends string>({
                   role="option"
                   aria-selected={selected}
                   onClick={() => choose(option.value)}
+                  // The chosen row is lit the way the nav lights its tab — the
+                  // selected-thing fill in a capsule inset from the menu's
+                  // edge — not ticked (the owner, Nov 2026: "instead of a
+                  // tick, uniformity same squircle highlight like nav bar").
                   className={cn(
-                    "relative z-[2] flex min-h-11 w-full items-center gap-3 px-4 text-left text-[15px] outline-none",
-                    "hover:bg-[var(--on-glass-fill-soft)] focus-visible:bg-[var(--on-glass-fill-soft)] active:bg-[var(--on-glass-fill)]"
+                    "relative z-[2] mx-1.5 flex min-h-11 w-[calc(100%-0.75rem)] items-center gap-3 rounded-[22px] px-3.5 text-left text-[15px] outline-none transition-colors",
+                    selected
+                      ? "bg-[var(--on-glass-active)] text-[var(--on-glass-active-fg)]"
+                      : "hover:bg-[var(--on-glass-fill-soft)] focus-visible:bg-[var(--on-glass-fill-soft)] active:bg-[var(--on-glass-fill)]",
                   )}
                 >
                   <span className="min-w-0 flex-1 py-2.5">
                     <span className={cn("block truncate", selected && "font-semibold")}>{option.label}</span>
-                    {option.hint && <span className="block truncate text-xs text-muted-foreground">{option.hint}</span>}
+                    {option.hint && (
+                      <span className={cn("block truncate text-xs", selected ? "text-[var(--on-glass-active-fg)] opacity-80" : "text-muted-foreground")}>
+                        {option.hint}
+                      </span>
+                    )}
                   </span>
-                  <Check className={cn("h-4 w-4 shrink-0 text-primary", !selected && "invisible")} aria-hidden />
                 </button>
               )
             })}

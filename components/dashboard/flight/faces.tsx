@@ -7,13 +7,12 @@
  * move as the answers land). The detail behind each is in `details.tsx`.
  */
 
-import { OctagonAlert, TriangleAlert } from "lucide-react"
 import type { Requirement } from "@/lib/utils/dashboard/legality"
 import type { SectorLeg } from "@/lib/utils/dashboard/duty-status"
 import { formatDay } from "@/lib/utils/date"
 import { cn } from "@/lib/utils"
 import { dutyWindow, formatDutyClock, formatRestSpan } from "@/lib/utils/dashboard/duty-status"
-import { REQ_TONE, STATE_ICON, TONE } from "./instruments"
+import { REQ_TONE, TONE } from "./instruments"
 import { DutyClockFace } from "./duty-clock"
 import { WidgetLabel } from "./widget"
 import { metarConditions } from "@/lib/weather/brief"
@@ -369,25 +368,21 @@ export function favouredAt(brief: FlightBrief, icao: string): WindOnRunway | nul
 
 /* ── Currency and limits ─────────────────────────────────────────────────── */
 
-function Tally({ rows }: { rows: Array<{ state: Requirement["state"] }> }) {
-  const requirements = rows
-  const fail = requirements.filter((r) => r.state === "fail").length
-  const caution = requirements.filter((r) => r.state === "caution" || r.state === "unknown").length
+/**
+ * What is flagged past the rows a tile names, as a word in the colour of the
+ * worst of it: "+2" — no icon (the owner, Nov 2026: "no need for alert icon …
+ * just highlight area of concern with color change"). Nothing when nothing is.
+ */
+function MoreFlagged({ rows }: { rows: Array<{ state: Requirement["state"] }> }) {
+  const flagged = rows.filter((r) => r.state !== "ok")
+  if (flagged.length === 0) return null
+  const fail = flagged.some((r) => r.state === "fail")
   return (
-    <span className="flex items-center gap-1.5 text-[10px] font-semibold tabular-nums">
-      {fail > 0 && (
-        <span className="inline-flex items-center gap-0.5 text-destructive">
-          <OctagonAlert className="h-2.5 w-2.5" aria-hidden />
-          {fail}
-        </span>
-      )}
-      {caution > 0 && (
-        <span className="inline-flex items-center gap-0.5 text-status-warning">
-          <TriangleAlert className="h-2.5 w-2.5" aria-hidden />
-          {caution}
-        </span>
-      )}
-      {/* Dark cockpit: all met lights nothing. */}
+    <span
+      className={cn("shrink-0 text-[10px] font-semibold tabular-nums", fail ? "text-destructive" : "text-status-warning")}
+      aria-label={`${flagged.length} more flagged`}
+    >
+      +{flagged.length}
     </span>
   )
 }
@@ -474,7 +469,7 @@ export function CurrencyFace({ brief, size }: { brief: FlightBrief; size: TileSi
     <>
       {/* A third of the row has no room for the tally beside the label: its
           edge and the dots' colours carry what is flagged. */}
-      <WidgetLabel right={third ? undefined : <Tally rows={all.slice(lines)} />}>
+      <WidgetLabel right={third ? undefined : <MoreFlagged rows={all.slice(lines)} />}>
         Currency
         {!third && <span className="font-medium normal-case tracking-normal"> · {AHEAD_SHORT[ahead]}</span>}
       </WidgetLabel>
@@ -487,10 +482,8 @@ export function CurrencyFace({ brief, size }: { brief: FlightBrief; size: TileSi
           </div>
           <ul className="space-y-1">
             {all.slice(0, lines).map((r) => {
-              const Icon = STATE_ICON[r.state]
               return (
-                // No gutter for an icon a met row does not have: the flag, when
-                // there is one, follows the figure.
+                // No icon: a flagged currency says so in its figure's colour.
                 <li key={r.key} className={cn("flex items-center gap-1 text-xs leading-tight", third && "flex-wrap")}>
                   <span className={cn("min-w-0 flex-1 truncate text-foreground", third && "basis-full")} data-morph={`cur-name-${r.key}`}>
                     {r.name}
@@ -501,7 +494,6 @@ export function CurrencyFace({ brief, size }: { brief: FlightBrief; size: TileSi
                   >
                     {r.figure.split(" · ")[0]}
                   </span>
-                  {r.state !== "ok" && <Icon className={cn("h-3 w-3 shrink-0", REQ_TONE[r.state].icon)} aria-label={r.state === "fail" ? "Not met" : "Attention"} />}
                 </li>
               )
             })}
@@ -542,7 +534,7 @@ export function LimitsFace({ brief, size }: { brief: FlightBrief; size?: TileSiz
   const narrow = (size?.cols ?? 3) < 2
   return (
     <>
-      <WidgetLabel right={<span data-morph="lim-tally"><Tally rows={limits} /></span>}>Limits</WidgetLabel>
+      <WidgetLabel>Limits</WidgetLabel>
       <ul className="space-y-1.5">
         {limits.map((r) => {
           // What is LEFT is the question ("how much more"); the bar shows what is used.
