@@ -8,24 +8,24 @@
  *
  * ```
  * WIII                       Q1012
- * 03:00                        IFR
- * UTC+7
- *            · · ◤ · ·
- *          ·   ═══▶   ·          the runways to scale, the ones in use lit
- *          ·  ═══     ·          (landing accent, departing ink), the wind
- *            · · · · ·            a wedge on the rim
- *          220° 15kt G25
- * ✈↓ 25L  ✈↑ 25R
- * ☁ BKN011                🌡 28°/24°
+ * ✈↓ 25L      · · ◤ · ·        IFR
+ * ✈↑ 25R    ·   ═══▶   ·   220° 15kt G25
+ *           ·  ═══     ·
+ *             · · · · ·
+ * ☁ BKN011                 🌡 28°/24°
  *               ● ○
  * ```
  *
- * The code with its local time under it and the zone under that; the QNH at
- * the top right, at the sky's size, with the category under it only below VFR
- * (dark cockpit); the runway diagram (`RunwayDiagram`) with the wind in words
- * under it; the runways in use; the sky as the METAR writes it bottom left,
- * temperature / dew point bottom right. No alert icon: a tile with cause for
- * concern says so with its edge and the reason's colour.
+ * The RUNWAY DIAGRAM (`RunwayDiagram`) takes the middle, as large as the
+ * tile allows clear of the text (`largestCircle` — the owner: "allow ring to
+ * occupy as much space as possible without any text covering it or it
+ * covering any text"), and the text sits in the corners: the code and the
+ * runways in use top left; the QNH, the category only below VFR (dark
+ * cockpit) and the wind top right; the LOW cloud bottom left (a layer at or
+ * below 3,000ft — `skyOf`; the owner: a layer at 30,000ft is no concern on
+ * the approach); temperature / dew point bottom right. No local time — the
+ * card has it. No alert icon: a tile with cause for concern says so with its
+ * edge and the reason's colour.
  *
  * The CARD is the same airport, swiped the same way (the page is shared): the
  * airport above (`AirportPanel` — place, time, distance, wind, temperature,
@@ -37,8 +37,7 @@
 import * as React from "react"
 import { PlaneLanding, PlaneTakeoff, Thermometer, Wind } from "lucide-react"
 import { metarConditions, metarReadings, type FlightCategory, type StationBrief } from "@/lib/weather/brief"
-import { getAirportLocalTime, getAirportTimeInfo } from "@/lib/db/stores/reference/airports.store"
-import { formatTimezoneOffset } from "@/lib/utils/time"
+import { largestCircle, type Circle } from "@/lib/utils/dashboard/largest-circle"
 import { cn } from "@/lib/utils"
 import { Pager, useRememberedPage } from "./pager"
 import { CATEGORY_TEXT, StationWeather, skyOf, weatherStatus } from "./weather"
@@ -68,13 +67,6 @@ export function stationPoor(b: StationBrief): boolean {
   return rank(b.worst) >= 2 || b.hazards.length > 0
 }
 
-/** The local time there now, and its zone. */
-function localAt(brief: FlightBrief, icao: string): { time: string | null; zone: string | null } {
-  const a = brief.airports.get(icao)
-  if (!a?.tz) return { time: null, zone: null }
-  return { time: getAirportLocalTime(a.tz).split(" ")[0], zone: formatTimezoneOffset(getAirportTimeInfo(a.tz).offset) }
-}
-
 /* ── The tile ────────────────────────────────────────────────────────────── */
 
 export function AirportFace({ brief, size }: { brief: FlightBrief; size?: { cols: number; rows: number } }) {
@@ -95,18 +87,61 @@ export function AirportFace({ brief, size }: { brief: FlightBrief; size?: { cols
   )
 }
 
-/** One airport as the tile has it. `lead`: the page on show — the shared morph's keys go on it only. */
+/** The text is kept this far from the ring. */
+const RING_GAP = 4
+/** Below this the ring says nothing legible and is left out. */
+const RING_MIN = 40
+
+/**
+ * The largest circle the tile holds clear of the text in its corners
+ * (`largestCircle`), re-read whenever the tile or any corner's text changes
+ * size. Layout values (`offset*`), never rects: the card's morph scales the
+ * tile, and a scaled rect is not where anything is laid out.
+ */
+function useRingRoom(box: React.RefObject<HTMLDivElement | null>): Circle | null {
+  const [room, setRoom] = React.useState<Circle | null>(null)
+  React.useEffect(() => {
+    const el = box.current
+    if (!el) return
+    const corners = () => [...el.querySelectorAll<HTMLElement>(":scope > [data-corner]")]
+    const ro = new ResizeObserver(() => {
+      const w = el.offsetWidth
+      const h = el.offsetHeight
+      if (w === 0 || h === 0) return
+      const avoid = corners()
+        .filter((c) => c.offsetWidth > 0 && c.offsetHeight > 0)
+        .map((c) => ({
+          left: c.offsetLeft - RING_GAP,
+          top: c.offsetTop - RING_GAP,
+          right: c.offsetLeft + c.offsetWidth + RING_GAP,
+          bottom: c.offsetTop + c.offsetHeight + RING_GAP,
+        }))
+      const next = largestCircle(w, h, avoid)
+      setRoom((prev) =>
+        prev && next && Math.abs(prev.x - next.x) < 0.5 && Math.abs(prev.y - next.y) < 0.5 && Math.abs(prev.r - next.r) < 0.5 ? prev : next,
+      )
+    })
+    ro.observe(el)
+    for (const c of corners()) ro.observe(c)
+    return () => ro.disconnect()
+  }, [box])
+  return room
+}
+
+/**
+ * One airport as the tile has it: the runway diagram as large as the tile
+ * allows, the text in its four corners. `lead`: the page on show — the
+ * shared morph's keys go on it only.
+ */
 function StationFace({ brief, b, size, lead }: { brief: FlightBrief; b: StationBrief; size?: { cols: number; rows: number }; lead: boolean }) {
   const icao = b.station
   const key = (k: string) => (lead ? `ap-${k}-${icao}` : undefined)
-  const { time, zone } = localAt(brief, icao)
   const c = b.metar ? metarConditions(b.metar.raw) : null
   const r = b.metar ? metarReadings(b.metar.raw) : null
   // The sky's own hazard (TS, FG…) — the wind's is on the dial.
   const sky = skyOf(c, b.metar?.hazards.find((h) => !/KT$/.test(h)))
   // Dark cockpit: VFR is not said; a category below it is, in its colour.
   const cat = b.metar?.category && b.metar.category !== "VFR" ? b.metar.category : null
-  const wide = (size?.cols ?? 1) >= 1.5
   const tall = (size?.rows ?? 1) >= 2
   const rwy = useAirportRunways(brief, icao, b.metar?.raw, lead)
   const wind = windWords(c?.windDir, c?.windKt)
@@ -118,103 +153,96 @@ function StationFace({ brief, b, size, lead }: { brief: FlightBrief; b: StationB
       : !b.metar
         ? "No report"
         : null
+  const box = React.useRef<HTMLDivElement>(null)
+  const room = useRingRoom(box)
+  const ring = room && room.r * 2 >= RING_MIN ? Math.floor(room.r * 2) : null
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      {/* The code, its time and zone; the QNH, and the category under it. */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-[21px] font-bold leading-none tracking-tight text-foreground" data-morph={key("code")}>
-            {brief.code(icao)}
-          </p>
-          {time && (
-            <p className="mt-1.5 text-[14px] font-semibold leading-none tabular-nums text-foreground" suppressHydrationWarning>
-              <span data-morph={key("time")}>{time}</span>
-            </p>
-          )}
-          {zone && <p className="mt-0.5 text-[10px] font-medium leading-tight text-muted-foreground">{zone}</p>}
-        </div>
-        <div className="shrink-0 text-right">
-          {r?.qnhHpa ? (
-            <p className="text-[12px] leading-none tabular-nums text-foreground" data-morph={key("qnh")}>
-              Q{r.qnhHpa}
-            </p>
-          ) : null}
-          {cat && (
-            <p className={cn("mt-1 text-[12px] font-semibold leading-none", CATEGORY_TEXT[cat])} data-morph={key("cat")}>
-              {cat}
-            </p>
-          )}
-        </div>
+    <div ref={box} className="relative min-h-0 flex-1 text-[12px] leading-tight tabular-nums">
+      {/* Top left: the airport, and the runways in use under it. */}
+      <div data-corner className="absolute left-0 top-0 flex flex-col items-start gap-1">
+        <p className="text-[18px] font-bold leading-none tracking-tight text-foreground" data-morph={key("code")}>
+          {brief.code(icao)}
+        </p>
+        {tall && <RunwaysInUse rwy={rwy} morph={key} />}
       </div>
-
-      {status ? (
-        <p className="flex flex-1 items-center justify-center py-3 text-xs text-muted-foreground">{status}</p>
-      ) : (
-        <>
-          {/* The runways and the wind, in the middle of the tile: the runways to
-              scale with the ones in use lit, the wind on the rim, in words under it. */}
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-0.5 py-0.5">
-            <RunwayDiagram
-              geometry={rwy.geometry}
-              fallback={fallbackRunway(rwy)}
-              landing={rwy.landing?.ident ?? null}
-              departing={rwy.departing?.ident ?? null}
-              favoured={rwy.favoured?.end.ident ?? null}
-              windDir={c?.windDir}
-              windKt={c?.windKt}
-              gust={c?.gustKt}
-              size={tall ? (wide ? 84 : 76) : 56}
-              morph={key("rwys")}
-            />
-            {wind && (
-              <p className="text-[12px] font-semibold leading-none tabular-nums text-foreground">
-                <span data-morph={key("wind")}>{wind}</span>
-                {c?.gustKt ? <span className="text-status-warning"> G{c.gustKt}</span> : null}
-              </p>
-            )}
-          </div>
-          {/* The runways in use — landing, departing — else the wind's. */}
-          {tall && <RunwaysLine rwy={rwy} morph={key} />}
-          {/* The sky bottom left, temperature / dew point bottom right — one line where there is room. */}
-          {/* Where both do not fit, the temperature takes its own line, still at the right — never a truncated sky. */}
-          <div className={cn("flex text-[12px] tabular-nums", wide ? "flex-wrap items-center justify-between gap-x-2 gap-y-0.5" : "flex-col gap-0.5")}>
-            {sky && (
-              <span className={cn("flex min-w-0 items-center gap-1 whitespace-nowrap", sky.warn ? "font-semibold text-status-warning" : "text-foreground")}>
-                <sky.Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                <span className={cn(!wide && "truncate")}>{sky.text}</span>
-              </span>
-            )}
-            {temp && (
-              <span className={cn("flex shrink-0 items-center gap-0.5 text-foreground", wide && "ml-auto")}>
-                <Thermometer className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                <span data-morph={key("temp")}>{temp}</span>
-              </span>
-            )}
-          </div>
-        </>
+      {/* Top right: QNH, the category below VFR, the wind. */}
+      <div data-corner className="absolute right-0 top-0 flex flex-col items-end gap-1 text-right">
+        {r?.qnhHpa ? (
+          <p className="leading-none text-foreground" data-morph={key("qnh")}>
+            Q{r.qnhHpa}
+          </p>
+        ) : null}
+        {cat && (
+          <p className={cn("font-semibold leading-none", CATEGORY_TEXT[cat])} data-morph={key("cat")}>
+            {cat}
+          </p>
+        )}
+        {wind && (
+          <p className="whitespace-nowrap font-semibold leading-none text-foreground">
+            <span data-morph={key("wind")}>{wind}</span>
+            {c?.gustKt ? <span className="text-status-warning"> G{c.gustKt}</span> : null}
+          </p>
+        )}
+      </div>
+      {/* Bottom left: the low cloud, or why there is no report. */}
+      <div data-corner className="absolute bottom-0 left-0">
+        {status ? (
+          <p className="text-muted-foreground">{status}</p>
+        ) : sky ? (
+          <p className={cn("flex items-center gap-1 whitespace-nowrap", sky.warn ? "font-semibold text-status-warning" : "text-foreground")}>
+            <sky.Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            {sky.text}
+          </p>
+        ) : null}
+      </div>
+      {/* Bottom right: temperature / dew point. */}
+      <div data-corner className="absolute bottom-0 right-0">
+        {temp && !status && (
+          <p className="flex items-center gap-0.5 whitespace-nowrap text-foreground">
+            <Thermometer className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span data-morph={key("temp")}>{temp}</span>
+          </p>
+        )}
+      </div>
+      {/* The runways and the wind, as large as the corners leave room for. */}
+      {room && ring && (
+        <div className="absolute" style={{ left: room.x - ring / 2, top: room.y - ring / 2 }}>
+          <RunwayDiagram
+            geometry={rwy.geometry}
+            fallback={fallbackRunway(rwy)}
+            landing={rwy.landing?.ident ?? null}
+            departing={rwy.departing?.ident ?? null}
+            favoured={rwy.favoured?.end.ident ?? null}
+            windDir={c?.windDir}
+            windKt={c?.windKt}
+            gust={c?.gustKt}
+            size={ring}
+            morph={key("rwys")}
+          />
+        </div>
       )}
     </div>
   )
 }
 
-/** "✈↓ 20C  ✈↑ 20R" — the runways the traffic is using; "≋ 02C ↓8" by the wind when it has said nothing. A tailwind is amber. */
-function RunwaysLine({ rwy, morph }: { rwy: AirportRunwayState; morph: (k: string) => string | undefined }) {
+/** "✈↓ 20C" over "✈↑ 20R" — the runways the traffic is using; "≋ 02C" by the wind when it has said nothing. A tailwind is amber. */
+function RunwaysInUse({ rwy, morph }: { rwy: AirportRunwayState; morph: (k: string) => string | undefined }) {
   const tail = (w: { headKt: number } | null | undefined) => !!w && w.headKt < 0
   const item = (Icon: typeof Wind, ident: string, k: string, warn: boolean, label: string) => (
-    <span className={cn("inline-flex items-center gap-1", warn ? "text-status-warning" : "text-foreground")}>
+    <p className={cn("flex items-center gap-1 leading-none", warn ? "text-status-warning" : "text-foreground")}>
       <Icon className={cn("h-3.5 w-3.5 shrink-0", !warn && "text-muted-foreground")} aria-label={label} />
       <span className="font-semibold" data-morph={morph(k)}>
         {ident}
       </span>
-    </span>
+    </p>
   )
   if (!rwy.landing && !rwy.departing && !rwy.favoured) return null
   return (
-    <p className="mb-0.5 flex min-w-0 flex-wrap items-center gap-x-3 text-[12px] tabular-nums">
+    <>
       {rwy.landing && item(PlaneLanding, rwy.landing.ident, "land", tail(rwy.landing.wind), "Landing")}
       {rwy.departing && item(PlaneTakeoff, rwy.departing.ident, "dep", tail(rwy.departing.wind), "Departing")}
       {rwy.favoured && item(Wind, rwy.favoured.end.ident, "fav", false, "Favoured by the wind")}
-    </p>
+    </>
   )
 }
 

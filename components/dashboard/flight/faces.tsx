@@ -535,7 +535,8 @@ export function LimitsFace({ brief, size }: { brief: FlightBrief; size?: TileSiz
   return (
     <>
       <WidgetLabel>Limits</WidgetLabel>
-      <ul className="space-y-1.5">
+      {/* The rows share the tile's height, so a tall tile has no empty foot. */}
+      <ul className="flex min-h-0 flex-1 flex-col justify-around gap-1.5">
         {limits.map((r) => {
           // What is LEFT is the question ("how much more"); the bar shows what is used.
           const left = (r.detail?.find((d) => d.label === "Remaining")?.value ?? "").replace(/h$/, "")

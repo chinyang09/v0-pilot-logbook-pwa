@@ -12,7 +12,7 @@
  */
 
 import type * as React from "react"
-import { Cloud, CloudFog, CloudLightning, CloudRain, CloudSnow, CloudSun, Sun } from "lucide-react"
+import { Cloud, CloudFog, CloudLightning, CloudRain, CloudSnow, CloudSun } from "lucide-react"
 import { ageText, cloudLayer } from "@/lib/weather/format"
 import { categoryOf, hazardLine, hazardsOf, metarConditions, type FlightCategory, type StationBrief, type StationWindow } from "@/lib/weather/brief"
 import { cn } from "@/lib/utils"
@@ -41,7 +41,17 @@ export interface WeatherState {
 }
 
 
-/** The sky as one word and an icon: a hazard first, else the ceiling, else the cloud, else clear. */
+/** Cloud above this is no concern on the approach, and the tile does not name it. */
+export const LOW_CLOUD_FT = 3000
+
+/**
+ * The sky as one word and an icon, as it matters on the approach: a hazard
+ * first; else the lowest ceiling (BKN / OVC / VV) at or below `LOW_CLOUD_FT`;
+ * else the lowest layer there; else poor visibility; else rain. Cloud higher
+ * up says nothing on the approach (the owner, Nov 2026: "at 30000, it is not
+ * of concern … 3k and below"), so a sky with only that is null — dark
+ * cockpit: nothing to say.
+ */
 export function skyOf(c: ReturnType<typeof metarConditions> | null, hazard: string | undefined) {
   if (hazard) {
     const word = hazard.replace(/^(TEMPO|PROB\d+) /, "")
@@ -50,76 +60,20 @@ export function skyOf(c: ReturnType<typeof metarConditions> | null, hazard: stri
     return { Icon, text: word, warn: true }
   }
   if (!c) return null
-  const ceil = (c.clouds ?? []).filter((l) => l.cover === "BKN" || l.cover === "OVC" || l.cover === "VV")
+  const low = (c.clouds ?? []).filter((l) => l.baseFt <= LOW_CLOUD_FT)
+  const lowest = (ls: typeof low) => ls.reduce((m, l) => (l.baseFt < m.baseFt ? l : m))
+  const ceil = low.filter((l) => l.cover === "BKN" || l.cover === "OVC" || l.cover === "VV")
   if (ceil.length) {
-    const low = ceil.reduce((m, l) => (l.baseFt < m.baseFt ? l : m))
-    return { Icon: Cloud, text: cloudLayer(low.cover, low.baseFt), warn: false }
+    const l = lowest(ceil)
+    return { Icon: Cloud, text: cloudLayer(l.cover, l.baseFt) + l.type, warn: false }
   }
-  if ((c.weather ?? []).some((w) => /RA|DZ|SH/.test(w))) return { Icon: CloudRain, text: "Rain", warn: false }
+  if (low.length) {
+    const l = lowest(low)
+    return { Icon: CloudSun, text: cloudLayer(l.cover, l.baseFt) + l.type, warn: false }
+  }
   if ((c.visM ?? 9999) < 5000) return { Icon: CloudFog, text: `Vis ${c.visM! >= 1000 ? `${Math.round(c.visM! / 1000)} km` : `${c.visM} m`}`, warn: false }
-  if ((c.clouds ?? []).length) {
-    const low = c.clouds!.reduce((m, l) => (l.baseFt < m.baseFt ? l : m))
-    return { Icon: CloudSun, text: cloudLayer(low.cover, low.baseFt), warn: false }
-  }
-  return { Icon: Sun, text: "Clear", warn: false }
-}
-
-/**
- * The wind as a dial (the owner's station widget): a ring of dots, a wedge on
- * the rim where the wind comes FROM, its direction and speed in the middle.
- * Ink when the wind is ordinary; amber from 25kt or a gust.
- */
-export function WindDial({
-  dir,
-  kt,
-  gust,
-  size = 84,
-  morph,
-}: {
-  dir: number | null | undefined
-  kt: number | undefined
-  gust?: number
-  size?: number
-  /** The shared morph's key — the dial flies into the card's wind. */
-  morph?: string
-}) {
-  const c = size / 2
-  const r = c - 4
-  const at = (deg: number, rr: number) => {
-    const rad = (deg * Math.PI) / 180
-    return [c + rr * Math.sin(rad), c - rr * Math.cos(rad)] as const
-  }
-  const strong = (kt ?? 0) >= 25 || (gust ?? 0) > 0
-  const wedge =
-    dir !== null && dir !== undefined && kt
-      ? (() => {
-          const [ox1, oy1] = at(dir - 14, r + 1)
-          const [ox2, oy2] = at(dir + 14, r + 1)
-          const [ix, iy] = at(dir, r - 12)
-          return `M ${ox1} ${oy1} A ${r + 1} ${r + 1} 0 0 1 ${ox2} ${oy2} L ${ix} ${iy} Z`
-        })()
-      : null
-  return (
-    <div className="relative shrink-0" style={{ width: size, height: size }} aria-hidden data-morph={morph}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="absolute inset-0">
-        {Array.from({ length: 24 }, (_, i) => {
-          const [x, y] = at(i * 15, r - 3)
-          return <circle key={i} cx={x} cy={y} r={1.1} className="fill-muted-foreground/50" />
-        })}
-        {wedge && <path d={wedge} className={strong ? "fill-status-warning" : "fill-foreground/70"} />}
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
-        <span className={cn("font-semibold tabular-nums text-foreground", size < 80 ? "text-[13px]" : size >= 100 ? "text-[18px]" : "text-[15px]")}>
-          {kt === undefined ? "—" : kt === 0 ? "Calm" : dir === null || dir === undefined ? "VRB" : `${String(dir).padStart(3, "0")}°`}
-        </span>
-        {kt ? (
-          <span className={cn("mt-1 font-medium tabular-nums text-foreground", size < 80 ? "text-[10px]" : size >= 100 ? "text-[13px]" : "text-[12px]")}>
-            {kt}kt{gust ? <span className="text-status-warning"> G{gust}</span> : null}
-          </span>
-        ) : null}
-      </div>
-    </div>
-  )
+  if ((c.weather ?? []).some((w) => /RA|DZ|SH/.test(w))) return { Icon: CloudRain, text: "Rain", warn: false }
+  return null
 }
 
 /** A hazard as a chip — "TS", "TEMPO CB". */
