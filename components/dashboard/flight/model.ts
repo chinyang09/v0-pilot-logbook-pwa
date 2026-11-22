@@ -15,6 +15,7 @@ import type { CrewMate, DestinationVisits } from "@/lib/utils/dashboard/flight-b
 import type { LegTimes } from "@/lib/weather/brief"
 import type { CurrencySummary } from "@/lib/utils/dashboard/currency-summary"
 import type { WeatherState } from "./weather"
+import type { RunwayGeo } from "@/lib/runways/parse"
 import type { AirportInfo } from "@/lib/weather/airport-info"
 import type { DelayMargin } from "@/lib/utils/dashboard/delay-margin"
 import type { LogbookAuthority } from "@/lib/utils/logbook-rules"
@@ -70,7 +71,9 @@ export interface FlightBrief {
   airports: Map<string, Airport>
   /** Runways and frequencies for the destinations, by ICAO (undefined while asked, null when the source has none). */
   airportInfo: Record<string, AirportInfo | null>
-  /** Whether the live traffic at the destinations is read — the page on screen and the duty within the lookups' reach. */
+  /** Runway geometry (thresholds, true headings) by ICAO — OurAirports; undefined while asked, null when it has none. */
+  runways: Record<string, RunwayGeo[] | null>
+  /** Whether the live traffic is read for the runways in use — the page on screen. */
   traffic: boolean
   weather: WeatherState
   /** The airport the weather tile shows — where the duty goes next. */

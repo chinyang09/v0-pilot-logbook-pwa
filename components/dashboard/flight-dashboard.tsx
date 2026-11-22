@@ -33,6 +33,7 @@ import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { useDutyLookups } from "@/hooks/use-duty-lookups"
 import { useAirportWeather } from "@/hooks/use-airport-weather"
+import { useRunways } from "@/hooks/use-runways"
 import { useAirportInfo } from "@/hooks/use-airport-info"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -252,6 +253,8 @@ export function FlightDashboard({ className }: { className?: string }) {
   // Runways for every airport of the duty — the airport card draws the one in
   // use; kept on the device 30 days, so this is rarely a request.
   const airportInfo = useAirportInfo(stations, isActive && stations.length > 0)
+  // Their thresholds, for telling the runway in USE from the traffic.
+  const runways = useRunways(stations, isActive && stations.length > 0)
 
   /* ── Weather ─────────────────────────────────────────────────────────── */
   // Live, whatever the duty's distance (the owner: "pull real time weather
@@ -323,7 +326,9 @@ export function FlightDashboard({ className }: { className?: string }) {
       destinations,
       airports,
       airportInfo,
-      traffic: isActive && lookupsClose,
+      runways,
+      // The runway in use is NOW, like the METAR — read whatever the duty's distance.
+      traffic: isActive,
       weather,
       weatherStation,
       code: (icao: string, iata?: string) =>
@@ -332,7 +337,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       day: (ms: number) =>
         formatDayAt(ms, display?.useZuluTime === false ? zone : "UTC", { year: false }),
     }),
-    [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, margin, recency.lapseIso, crew, legCrew, currency, destinations, airports, airportInfo, weather, weatherStation, iataOf, pref, zone, isActive],
+    [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, margin, recency.lapseIso, crew, legCrew, currency, destinations, airports, airportInfo, runways, weather, weatherStation, iataOf, pref, zone, isActive],
   )
 
   /* ── The header's duty menu ──────────────────────────────────────────── */

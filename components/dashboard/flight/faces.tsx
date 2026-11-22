@@ -118,7 +118,7 @@ function DayBar({ brief, focus }: { brief: FlightBrief; focus: number | null }) 
   const span = (a: number, b: number) => ({ left: pct(a), width: `calc(${pct(b)} - ${pct(a)})` })
   const hourOf = (ms: number) => (zulu ? new Date(ms).getUTCHours() : new Date(ms).getHours())
   return (
-    <div aria-hidden className="mb-1.5">
+    <div aria-hidden className="mb-1.5" data-morph="fl-day" data-morph-stretch>
       <div className="relative h-[18px]">
         {/* The six-hourly lines run through the strip, behind the duty. */}
         {[0, 6, 12, 18, 24].map((h) => (
@@ -251,26 +251,30 @@ function LegPage({ brief, i }: { brief: FlightBrief; i: number }) {
   const next = !last && !flown ? duty.legs[i + 1] : null
   return (
     <>
-      <p className="truncate text-[17px] font-bold leading-tight tracking-tight text-foreground @[15rem]:text-[21px]">
+      <p className="truncate text-[17px] font-bold leading-tight tracking-tight text-foreground @[15rem]:text-[21px]" data-morph={`fl-route-${i}`}>
         {code(f.departureIcao, f.departureIata)} – {code(f.arrivalIcao, f.arrivalIata)}
       </p>
-      <p className="mt-0.5 truncate text-[12px] leading-tight tabular-nums text-foreground" suppressHydrationWarning>
+      <p className="mt-0.5 truncate text-[12px] leading-tight tabular-nums text-foreground" suppressHydrationWarning data-morph={`fl-num-${i}`}>
         <span className="font-semibold">{f.flightNumber || "Flight"}</span>
         {t?.departMs != null && t?.arriveMs != null && ` · ${clock(t.departMs).replace(/Z$/, "")}–${clock(t.arriveMs)}`}
         {flown && <span className="text-muted-foreground"> · On blocks</span>}
       </p>
       <p className="flex items-baseline justify-between gap-2 text-[12px] leading-tight tabular-nums">
-        <span className="min-w-0 truncate">
+        <span className="min-w-0 truncate" data-morph={`fl-ac-${i}`}>
           <span className={cn("font-semibold", reg ? "text-foreground" : "text-muted-foreground")}>{reg || "Aircraft not yet assigned"}</span>
           {reg && type && <span className="text-muted-foreground"> {type}</span>}
         </span>
         {gate && (
-          <span className="shrink-0 font-semibold text-foreground">
+          <span className="shrink-0 font-semibold text-foreground" data-morph={`fl-gate-${i}`}>
             {flown ? "Arr " : ""}Gate {gate}
           </span>
         )}
       </p>
-      <p className={cn("truncate text-[11px] leading-tight", rest?.short ? "text-destructive" : "text-muted-foreground")} suppressHydrationWarning>
+      <p
+        className={cn("truncate text-[11px] leading-tight", rest?.short ? "text-destructive" : "text-muted-foreground")}
+        suppressHydrationWarning
+        data-morph={`fl-next-${i}`}
+      >
         {[
           whereabouts ? [whereabouts.flight, whereabouts.primary].filter(Boolean).join(" · ") : null,
           !whereabouts && rest ? rest.text : null,
@@ -312,18 +316,18 @@ export function FlightFace({ brief, size, inCard = false }: { brief: FlightBrief
       {/* A container: on a phone the crew panel leaves the route ~190px, and a
           three-stop route at 21px does not fit it (measured at 360). */}
       <div className={cn("@container flex min-w-0 flex-col", crewAt !== "below" && "flex-1")}>
-        <WidgetLabel right={count > 1 ? <span className="text-[10px] font-semibold tabular-nums text-muted-foreground">Leg {page + 1}/{count}</span> : undefined}>
+        <WidgetLabel right={count > 1 ? <span className="text-[10px] font-semibold tabular-nums text-muted-foreground" data-morph="fl-legn">Leg {page + 1}/{count}</span> : undefined}>
           <span suppressHydrationWarning>
             {dutyWord(brief)} · {day(duty.atMs)}
           </span>
         </WidgetLabel>
         <DayBar brief={brief} focus={count > 1 ? page : null} />
         {count === 0 ? (
-          <p className="truncate text-[17px] font-bold leading-tight tracking-tight text-foreground @[15rem]:text-[21px]">
+          <p className="truncate text-[17px] font-bold leading-tight tracking-tight text-foreground @[15rem]:text-[21px]" data-morph="fl-route">
             {stops.join(stops.length > 2 ? "–" : " – ") || "—"}
           </p>
         ) : (
-          <Pager count={count} page={page} onPage={setPage}>
+          <Pager count={count} page={page} onPage={setPage} morph="fl">
             {(i) => <LegPage brief={brief} i={i} />}
           </Pager>
         )}
@@ -478,7 +482,9 @@ export function CurrencyFace({ brief, size }: { brief: FlightBrief; size: TileSi
         <p className="text-xs leading-snug text-muted-foreground">None tracked</p>
       ) : (
         <>
-          <CurrencyDots today={localDayKey(brief.now)} ahead={ahead} marks={marks} closest={marks[0]?.key ?? null} className="mb-1" />
+          <div data-morph="cur-dots">
+            <CurrencyDots today={localDayKey(brief.now)} ahead={ahead} marks={marks} closest={marks[0]?.key ?? null} className="mb-1" />
+          </div>
           <ul className="space-y-1">
             {all.slice(0, lines).map((r) => {
               const Icon = STATE_ICON[r.state]
@@ -536,7 +542,7 @@ export function LimitsFace({ brief, size }: { brief: FlightBrief; size?: TileSiz
   const narrow = (size?.cols ?? 3) < 2
   return (
     <>
-      <WidgetLabel right={<Tally rows={limits} />}>Limits</WidgetLabel>
+      <WidgetLabel right={<span data-morph="lim-tally"><Tally rows={limits} /></span>}>Limits</WidgetLabel>
       <ul className="space-y-1.5">
         {limits.map((r) => {
           // What is LEFT is the question ("how much more"); the bar shows what is used.
@@ -546,13 +552,15 @@ export function LimitsFace({ brief, size }: { brief: FlightBrief; size?: TileSiz
           return (
             <li key={r.id} className="text-[11px] leading-none">
               <span className="flex items-baseline justify-between gap-1">
-                <span className="truncate text-muted-foreground">{r.label}</span>
-                <span className="shrink-0 tabular-nums">
+                <span className="truncate text-muted-foreground" data-morph={`lim-name-${r.id}`}>
+                  {r.label}
+                </span>
+                <span className="shrink-0 tabular-nums" data-morph={`lim-left-${r.id}`}>
                   <span className={cn("font-semibold", r.state === "ok" ? "text-foreground" : REQ_TONE[r.state].icon)}>{left}h</span>
                   {!narrow && <span className="text-muted-foreground"> left</span>}
                 </span>
               </span>
-              <span className="mt-1 block h-1 overflow-hidden rounded-full bg-muted">
+              <span className="mt-1 block h-1 overflow-hidden rounded-full bg-muted" data-morph={`lim-bar-${r.id}`} data-morph-stretch>
                 <span className={cn("block h-full rounded-full", fill)} style={{ width: `${fraction * 100}%` }} />
               </span>
             </li>

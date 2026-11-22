@@ -11,10 +11,15 @@
  * It is a reading of what the traffic is doing NOW, not the ATIS: say how
  * many arrivals it rests on, and nothing at all when none qualify.
  *
+ * This is the FALLBACK, for an airport whose thresholds are not placed in
+ * the runway data: the reading proper is `lib/runways/in-use.ts`, which puts
+ * the traffic on each runway's own centreline, departures as well.
+ *
  * Pure, on plain numbers, so it is tested without the network.
  */
 
 import { favouredRunway, windOn, type RunwayEnd, type WindOnRunway } from "./runway-wind"
+import type { RunwaysInUse } from "@/lib/runways/in-use"
 import type { LatLon } from "@/lib/utils/geo"
 import { greatCircleNm, initialCourse } from "@/lib/utils/geo"
 
@@ -117,24 +122,40 @@ export function boundsAround(p: LatLon, nm = FINAL_NM): string {
   return [f(p.lat + dLat), f(p.lat - dLat), f(p.lon - dLon), f(p.lon + dLon)].join(",")
 }
 
+/** A runway in use, with the wind's components on it. */
+export interface RunwayUse {
+  ident: string
+  /** Aeroplanes seen using it over the window. */
+  count: number
+  /** Null in a calm or variable wind. */
+  wind: WindOnRunway | null
+}
+
 /**
- * The runway a card or tile shows: the one the traffic is LANDING on, with the
- * wind's components on it, else the one the wind favours. `landing` says which.
+ * What a card or tile says about the runways: the one the traffic is
+ * LANDING on and the one it is DEPARTING from, each with the wind on it —
+ * else the one the wind favours (`favoured`, only when the traffic has said
+ * nothing).
  */
 export function runwayShown(
   ends: readonly RunwayEnd[],
   windDir: number | null | undefined,
   windKt: number | undefined,
-  inUse: readonly RunwayInUse[] | null | undefined,
-): { wind: WindOnRunway | null; landing: RunwayInUse | null } {
-  const landing = inUse?.[0] ?? null
-  const end = landing
-    ? ends.find((e) => e.ident === landing.ident) ?? ends.find((e) => e.ident.slice(0, 2) === landing.ident.slice(0, 2))
-    : undefined
-  if (end) {
-    const label = { ...end, ident: landing!.ident }
-    const wind = windDir !== null && windDir !== undefined && windKt ? windOn(label, windDir, windKt) : { end: label, headKt: 0, crossKt: 0, crossFrom: null }
-    return { wind, landing }
+  inUse: RunwaysInUse | null | undefined,
+): { landing: RunwayUse | null; departing: RunwayUse | null; favoured: WindOnRunway | null } {
+  const asUse = (a: RunwaysInUse["arrivals"][number] | undefined): RunwayUse | null => {
+    if (!a) return null
+    const end = ends.find((e) => e.ident === a.ident) ?? ends.find((e) => e.ident.slice(0, 2) === a.ident.slice(0, 2))
+    const label = end ? { ...end, ident: a.ident } : null
+    const wind = label && windDir !== null && windDir !== undefined && windKt ? windOn(label, windDir, windKt) : null
+    return { ident: a.ident, count: a.count, wind }
   }
-  return { wind: favouredRunway(ends, windDir, windKt), landing: null }
+  const landing = asUse(inUse?.arrivals[0])
+  const departing = asUse(inUse?.departures[0])
+  return { landing, departing, favoured: landing || departing ? null : favouredRunway(ends, windDir, windKt) }
+}
+
+/** The arrivals the reference-point reading finds, in the shape the threshold reading gives. */
+export function asInUse(found: readonly RunwayInUse[], now: number): RunwaysInUse {
+  return { arrivals: found.map((f) => ({ ident: f.ident, count: f.arrivals, lastMs: now })), departures: [] }
 }

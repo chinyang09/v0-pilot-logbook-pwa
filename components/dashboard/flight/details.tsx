@@ -427,6 +427,7 @@ function CurrencyBody({ brief }: { brief: FlightBrief }) {
   return (
     <div>
       {dated.length > 0 && (
+        <div data-morph="cur-dots">
         <CurrencyDots
           today={today}
           ahead="1y"
@@ -436,6 +437,7 @@ function CurrencyBody({ brief }: { brief: FlightBrief }) {
           onSelect={setSelected}
           className="mb-2"
         />
+        </div>
       )}
       {logbook.map((r) => {
         const shown = recencyRows.find((x) => x.key === r.id)

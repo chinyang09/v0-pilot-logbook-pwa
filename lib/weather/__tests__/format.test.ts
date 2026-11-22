@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { ageText, cloudBase, tafLines } from "../format"
+import { ageText, cloudLayer, tafLines } from "../format"
 
 describe("reading a report on a phone", () => {
   it("starts each TAF change group on its own line", () => {
@@ -21,14 +21,12 @@ describe("reading a report on a phone", () => {
   })
 })
 
-describe("cloudBase", () => {
-  it("writes thousands as k and keeps hundreds", () => {
-    expect(cloudBase(800)).toBe("800")
-    expect(cloudBase(1100)).toBe("1.1k")
-    expect(cloudBase(1500)).toBe("1.5k")
-    expect(cloudBase(2000)).toBe("2k")
-    expect(cloudBase(10000)).toBe("10k")
-    expect(cloudBase(30000)).toBe("30k")
-    expect(cloudBase(25000)).toBe("25k")
+describe("cloudLayer", () => {
+  it("writes a layer as the METAR does", () => {
+    expect(cloudLayer("SCT", 800)).toBe("SCT008")
+    expect(cloudLayer("BKN", 1100)).toBe("BKN011")
+    expect(cloudLayer("BKN", 30000)).toBe("BKN300")
+    expect(cloudLayer("OVC", 10000)).toBe("OVC100")
+    expect(cloudLayer("VV", 200)).toBe("VV002")
   })
 })

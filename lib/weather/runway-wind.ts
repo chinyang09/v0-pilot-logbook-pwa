@@ -69,6 +69,13 @@ export function runwayEndsFrom(runways: readonly { id: string; trueHeading: numb
   return out
 }
 
+/** Every end of the runway geometry, on its true heading (`lib/runways/parse.ts`). */
+export function runwayEndsFromGeo(runways: readonly { ends: readonly ({ ident: string; headingDeg: number } | null)[] }[]): RunwayEnd[] {
+  const out: RunwayEnd[] = []
+  for (const r of runways) for (const e of r.ends) if (e && !out.some((o) => o.ident === e.ident)) out.push({ ident: e.ident, headingDeg: e.headingDeg })
+  return out
+}
+
 /** The wind's head and cross components on one runway end. */
 export function windOn(end: RunwayEnd, windDir: number, windKt: number): WindOnRunway {
   // The angle from the runway's heading to where the wind comes FROM.
