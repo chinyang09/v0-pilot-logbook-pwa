@@ -36,6 +36,7 @@ import { toTimestamp } from "./authorship"
 import { getEntryType } from "@/lib/utils/entry-type"
 import { inferPilotFlying, inferPilotRole, inferMultiPilotTime } from "@/lib/utils/flight-evidence"
 import { SETTINGS_FIELD_KEYS } from "@/lib/settings/user-settings"
+import type { BriefingRecord, NotamRecord, BriefingNoteRecord } from "@/types/entities/briefing.types"
 
 /**
  * Bump when a field table below changes in a way the server must rewrite
@@ -71,6 +72,11 @@ export const SYNC_COLLECTIONS: readonly SyncCollection[] = [
   "currencies",
   "discrepancies",
   "flights",
+  // A flight's briefing package, the NOTAM register and the route / airport
+  // notes (lib/briefing/) — new, so no rewrite; nothing depends on them.
+  "briefingNotes",
+  "notams",
+  "briefings",
 ]
 
 export function isSyncCollection(v: unknown): v is SyncCollection {
@@ -345,6 +351,52 @@ const DISCREPANCY_FIELDS = {
  */
 const SETTINGS_FIELDS: Record<string, FieldDefault> = Object.fromEntries(SETTINGS_FIELD_KEYS.map((k) => [k, null]))
 
+/** A flight's briefing package as read (`lib/briefing/types.ts`), one object. */
+const BRIEFING_FIELDS = {
+  flightNumber: "",
+  date: "",
+  dep: "",
+  arr: "",
+  registration: "",
+  aircraftType: "",
+  ofpVersion: "",
+  generatedAt: opt("number"),
+  importedAt: 0,
+  fileName: "",
+  data: opt("object"),
+} satisfies FieldTable<BriefingRecord>
+
+/** One NOTAM the pilot has met, by what it says where (`lib/briefing/notams.ts`). */
+const NOTAM_FIELDS = {
+  key: "",
+  notamId: "",
+  location: "",
+  locationName: "",
+  category: "",
+  section: "",
+  fromMs: opt("number"),
+  toMs: opt("number"),
+  toText: "",
+  schedule: "",
+  limits: "",
+  text: "",
+  flagged: false,
+  firstBriefingId: "",
+  firstSeenAt: 0,
+  lastSeenAt: 0,
+} satisfies FieldTable<NotamRecord>
+
+/** A route's or an airport's notes — the pilot's and the community's. */
+const BRIEFING_NOTE_FIELDS = {
+  scope: "",
+  ref: "",
+  procedures: opt("object"),
+  frequencies: emptyArray,
+  company: "",
+  community: "",
+  notes: "",
+} satisfies FieldTable<BriefingNoteRecord>
+
 /**
  * Fields a table cannot give ONE default, because the right value follows from
  * another field — applied to every document written, so a collection never
@@ -380,6 +432,9 @@ export const SYNC_FIELDS: Record<SyncCollection, Record<string, FieldDefault>> =
   currencies: CURRENCY_FIELDS,
   discrepancies: DISCREPANCY_FIELDS,
   settings: SETTINGS_FIELDS,
+  briefings: BRIEFING_FIELDS,
+  notams: NOTAM_FIELDS,
+  briefingNotes: BRIEFING_NOTE_FIELDS,
 }
 
 export interface Envelope {

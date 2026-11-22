@@ -57,6 +57,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 | `lib/utils/__tests__/history-markers.test.ts` | overlay marker ordering — which dialog `history.back()` would actually take |
 | `lib/utils/parsers/logten/__tests__/` | the LogTen Pro migration, run against REAL exports in `fixtures/` — value coercion, the three parsers, UTC-vs-local detection + conversion, duplicate detection, and the cross-file pass |
 | `lib/ocr/__tests__/` | both OCR screenshot layouts from synthetic boxes, the engine's plumbing with stand-in models (boxes, CTC decode, the keypad never recognised), device-first routing with the server as the backstop, and SEVEN REAL MCDU PHOTOS (`fixtures/mcdu/`) — what the engine actually reads from each, on the server AND on the device, every slot checked; `OCR_ENGINE=1 pnpm test` runs the photos through the real server engine (`OCR_FIXTURE_WRITE=1` re-pins the reads) |
+| `lib/briefing/__tests__/` | the company's BRIEFING PDF read off two REAL packages (`fixtures/tr4*.pages.json` — the PDFs' text lines, a phone number redacted): sections, the flight, fuel, weights, alternates, SID/STAR, the nav log, OptiClimb, weather, every NOTAM (70 / 54) and INTAM, the owner's own journal card reproduced figure by figure, the FIR crossings; the NOTAM register — a re-issue under a new number or new dates is the same NOTAM, the flag never touched by an import, new / seen / flagged |
 | `lib/settings/__tests__/` | per-user settings — flat sparse fields, only moved keys written, the legacy carry-up seeding only non-default choices the account lacks, theme kept off the record |
 | `lib/runways/__tests__/` | OurAirports' runways read off a REAL excerpt (`fixtures/runways-sample.csv`) — closed and non-ICAO rows left out, thresholds, displaced thresholds, the true heading off the thresholds; the refresh against a map (a conditional 304, only changed airports rewritten, a page that is not the file refused, the lock); the runways in use on Changi's three parallels — final, climb-out, roll, lined up, bound elsewhere, the 20-minute window |
 | `lib/theme/__tests__/` | the palette generator — contrast and gamut for every preset in both modes and a sweep of custom seeds, and that globals.css carries the default palette exactly |
@@ -1064,6 +1065,51 @@ non-indexed fields for it — no Dexie migration, and nothing is populated unles
 a source supplies it. `normalizeAircraftFromServer` had to stop being an
 explicit allowlist for them to survive a round trip (the same trap
 `normalizeFlightFromServer` was rebuilt to avoid).
+
+### Briefing Packages — the company's OFP + NOTAM PDF (`lib/briefing/`, Nov 2026)
+
+The owner prepared every flight in a notes app from two company PDFs ("I can
+do away with my notes taking app and prepare with my PWA"). The package is ONE
+PDF per sector: a running header, then sections each opened by a title line —
+Important files, **OFP** (printed twice; the first copy is read),
+**OPTIFLIGHT BRIEFING**, Additional Info, **Airport WX List**, **NOTAM**,
+**INTAM**, ABD File, Additional Docs — then charts (pictures, no text, ignored).
+
+| | Rule |
+|---|---|
+| text | `pdfToPages` (`pdf-lines.ts`, the worker-free `unpdf`, on the device, offline): each page as LINES, the gaps as spaces by the page's own character width, so the monospaced OFP keeps its columns |
+| parse | `parseBriefing` (`parse.ts`, pure): sections by title (`splitSections`), every figure by a LABELLED regex with `\s+` between words (the spacing differs between prints — "STAR: WBGG/25  MOXUN1A"), never by position; the nav log as two-line records read from both ends of the line; NOTAMs by `====` section banners, a location line over a dashed rule, `++++ CAT ++++`, items `ID VALID: dd-MON-yy hhmm - to\|PERM\|UFN`, schedules folded (multi-line, DAILY, spaced dashes), F)/G) limits on ONE line |
+| the journal | `journalOf` (`journal.ts`) — the owner's card: INIT A (ALTN, TO, FLT NBR, TIME ZONE from "UTC VAR", DIST, CRZ FL, CRZ TEMP = the mean OAT at cruise, TROPO = the lowest TROP), INIT B (TAXI, TRIP, RTE RSV, ALTN, FINAL, MDF = alternate + ALTN HOLD, BLOCK, ZFW/TOW/LW against their max, AVG WIND), OFF/ON = the schedule, OPTI CLB. Tested against the owner's own card: TR439 matches it exactly; on TR438 the owner had copied two rows one line out (MDF 3159 confirms the OFP's) |
+| ids | DERIVED (`ids.ts`): a briefing `brief:<flight digits>:<UTC date of ETD>:<dep>` — the flight form finds it without a link, and the date is the one a flight is keyed on; a NOTAM `notam:<key>`; a note `note:route:WSSS-WBGG` / `note:airport:WBGG`. Written as UPDATE patches from base 0 when not held (the settings record's pattern), and recreatable on the server, so two devices importing one PDF merge |
+| collections | `briefings` (one per sector, replaced whole by a newer OFP, ~65KB), `notams` (the register), `briefingNotes` (route and airport notes) — synced, Dexie version 6 |
+
+**The NOTAM register** (`notams.ts`; the owner: flagged ones "remain" through
+a new PDF, "if there's an update of validity or period while info remains the
+same, it continues to be checked"; the rest "stowed away"; new ones
+"highlighted"; an airport flown TO may be another flight's ALTERNATE):
+
+| | Rule |
+|---|---|
+| identity | `notamKey` = the location + a hash of its WORDS without the NOTAM number, the VALIDITY line or the schedule — a re-issue under a new number or new dates is the SAME NOTAM, so its flag holds |
+| import | `registerChanges` creates what was never seen and patches only number, dates, schedule, limits and (daily) last-seen on what was; it NEVER writes the flag; a record a week past its validity is purged |
+| status | per briefing (`statusOf`): flagged, else NEW (not in the register, or first seen with THIS briefing), else seen. The page shows flagged and new in full (new with an accent stripe), folds "N seen before" per location, and a Flagged tab |
+
+**The page** (`/briefing?id=`, `components/briefing/briefing-view.tsx`; both
+panels' width on a tablet, two columns by container query): Flight Card,
+Procedures (TAXI / SID / STAR / APP / TAXI × OFP | Sector Info — the OFP's
+SID / STAR as the prompt) and FIR · WP · Freq (prompted from the nav log's FIR
+boundaries, `firCrossings`) — both written per ROUTE, so the next flight of
+that route has them; Airports — Company (green) and Community (pink) notes per
+AIRPORT, for every flight there, alternates folded; NOTAMs; INTAMs; Weather as
+briefed; Alternates with their routes; Route and the nav log (kept for a
+future map); Fuel · This Route (`fuelHistory`: trip and block across every
+briefing of the route on that type). Every note is `NoteText` — a draft while
+focused, committed on blur and after a pause.
+
+Reached by: the logbook's import button (`import-flow.tsx` tells a briefing
+apart by its first pages BEFORE the status dialog opens, saves it and opens
+the page), the flight form's **Briefing** section (`FlightBriefingRow`: the
+OFP and the NOTAM counts, or Import Briefing PDF), and the page's own import.
 
 ### The Pilot's Seat (`lib/utils/roster/pilot-role.ts`)
 
@@ -5151,6 +5197,7 @@ app's look:
 | `scheduleEntries` | Roster schedule | id, date, dutyType |
 | `currencies` | Certificate tracking | id, code, expiryDate, syncStatus |
 | `discrepancies` | Comparisons + import notes (`holding`, `acceptedAt`) | id, type, resolved |
+| `briefings` / `notams` / `briefingNotes` | Briefing packages, the NOTAM register, route + airport notes (`lib/briefing/`) | id, date, dep, arr / id, location / id |
 
 `scheduleEntries` holds **non-flight duties only** — standby, ground, leave,
 off. Flights live in `flights` and nowhere else. It is server-synced like every
@@ -5173,6 +5220,7 @@ other user collection.
 | `airportSubmissions` | User-submitted airports with enrichment status |
 | `sessions` | User sessions with TTL |
 | `deletions` | Tombstones (TTL 30d) for propagating deletes across devices |
+| `briefings`, `notams`, `briefingNotes` | Synced like every user collection (derived ids, recreatable): a parsed briefing package whole in `data`; the NOTAM register `{key, notamId, location, …, flagged, firstBriefingId, firstSeenAt, lastSeenAt}`; route / airport notes `{scope, ref, procedures, frequencies[{fir, wp, freq}], company, community, notes}` |
 | `feedback` | In-app bug / feature / tweak reports: `{userId, callsign, id, kind, area, title, details, context{route, build, userAgent, viewport, standalone, online}, writtenAt, status, createdAt, updatedAt, messages[{id, from: "pilot"\|"team", text, at, event?}], response? (legacy)}`. The pilot writes follow-ups and done / reopen; triage (`planned` / `wontfix`, replies) is written on the collection and shows in the report's conversation |
 | `runways` | OurAirports' runway geometry, one document per airport: `{_id: ICAO, h: fingerprint, runways: [{id, lengthFt, widthFt, surface, lighted, ends: [{ident, lat, lon, elevFt?, headingDeg, approx?, displacedFt?}, …]}]}`; `~meta` (ETag, Last-Modified, checkedAt, loadedAt, airports, per-airport fingerprints) and `~lock` beside them. Refreshed weekly by a conditional GET (`lib/runways/server.ts`) |
 | `weatherCache` | `{_id: "metar" \| "taf", fetchedAt, stations: {ICAO: report}}` — the whole world's current reports, replaced on demand at most every 10 minutes; `lock:<kind>` rows hold a refresh |
@@ -6032,6 +6080,10 @@ When making changes, be aware of these high-impact files:
 - Do not fix the tab bar at four tabs, or edit it as a list — it carries TWO to FOUR (`normaliseNavTabs`, `MIN_NAV_TABS`/`MAX_NAV_TABS`; a stored Roster tab still hands its slot on so an old bar keeps its size), chosen from the sidebar's destinations (`NAV_TAB_CHOICES` — FDP, Discrepancies and Bin included) in `components/nav-tab-config.ts`, the one table the nav and Settings both read. Settings › Navigation (`NavBarEditor`) is a COPY of the bar the device shows — the bottom bar on a phone, the top pill where the nav sits at the top (`useDesktopPill`) — whose tabs are dragged sideways to reorder, with a × each (down to two) and the rest as chips to add (up to four)
 - Do not size the phone's bottom bar to its tabs, or let it run the full width of a tablet — it is `MOBILE_PILL_WIDTH`, the screen less the panel gutter and 12px more each side (the same proportion of every phone), capped at 25rem so an iPad in portrait keeps a bar rather than a slab. The tabs are EQUAL columns (`grid-flow-col`: `minmax(0, 1fr)` in the fixed-width bar, `1fr` — the widest label — in the desktop pill, whose width is its content), so every tab and the highlight that slides between them is one width and the labels are evenly spaced; sized to their labels, "Dashboard" carried a wider highlight than "Crew". A label too long for its column truncates (an iPad Split View window of 320). The bar's HEIGHT is not scaled: an iPad window at "iPhone size" draws CSS px at ~132 px/inch against a phone's ~150–160, so everything there is physically ~20% larger — that is the device, and sizing per platform would break the one-look rule
 - Do not put per-row `measureElement` on ANY virtualised list of same-height rows (airports, aircraft, crew, logbook) — calibrate once with `useCalibratedRowHeight`, and keep the card one height by construction (truncate, reserve empty lines). And never pass `useVirtualizer` an inline `getItemKey`: its measurements are memoised on that function's identity, so a new arrow per render rebuilds every row's position on every scroll-driven render (29k rows on the airports list)
+- Do not hand SWR a `Map` or a `Set` as a fetcher's answer — its default compare (`dequal/lite`) sees no keys on one and calls any two equal, so a re-read after a write is dropped as "unchanged" (a flagged NOTAM stayed unflagged until a reload). Fetch an array or a plain object and index it in a `useMemo` (`useNotamRegister`)
+- Do not key a NOTAM by its number or its dates, or let an import write its flag — the register is keyed on what it SAYS where (`notamKey`), so a re-issue keeps its flag, and `registerChanges` never touches `flagged`
+- Do not read a briefing figure by column or line position — every one is labelled with `\s+` between its words; the spacing moves between prints
+- Do not close a dialog and navigate in the same step — the dialog's `useBackDismiss` marker release pops the new page. A briefing import skips the status dialog altogether
 - Do not hand-roll a suggestion list under a field — `SuggestionList` (`components/ui/suggestion-list.tsx`) is the one (an inset well, 44px rows, inset dividers), and `AircraftTypeSuggestions` and the add-aircraft / add-airport candidate lists all render through it; the aircraft form, panel and page each carried a bordered `hover:bg-accent` web dropdown
 - Do not ask an online lookup per keystroke or by itself on a form — a flight is looked up on the Lookup button (or Enter), a fleet on opening By fleet or on Find. And do not put Gates or Inbound back in the flight form: the form is for logging; they live on the dashboard's duty band and its panel (`useDutyLookups`, one cache). A lookup over an earlier one replaces what the EARLIER LOOKUP wrote (`lookupPatch`'s `previous`), never what the pilot entered — that is "Replace"
 - Do not take the first result of an aircraft or airport search as THE answer — a partial registration ("9VB") is a question. Only a candidate marked `exact` fills a form, an import or a submission by itself; anything else is listed for the pilot to choose, or is no match

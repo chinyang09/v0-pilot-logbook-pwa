@@ -29,6 +29,14 @@ import { normalizeScheduleEntryFromServer } from "@/lib/db/stores/user/schedule.
 import { normalizeCurrencyFromServer } from "@/lib/db/stores/user/currencies.store"
 import { normalizeDiscrepancyFromServer } from "@/lib/db/stores/user/discrepancies.store"
 import { normalizeSettingsFromServer, silentDeleteSettings } from "@/lib/db/stores/user/settings.store"
+import {
+  normalizeBriefingFromServer,
+  normalizeBriefingNoteFromServer,
+  normalizeNotamFromServer,
+  silentDeleteBriefing,
+  silentDeleteBriefingNote,
+  silentDeleteNotam,
+} from "@/lib/db/stores/user/briefings.store"
 import { referenceDb } from "@/lib/db/reference-db"
 import type { SyncQueueItem, SyncCollection, CollectionCursor } from "@/types/sync/sync.types"
 import { getSyncTriggerManager } from "./sync-trigger-manager"
@@ -120,6 +128,9 @@ const COLLECTION_HANDLERS: Record<
   currencies: { silentDelete: silentDeleteCurrency, normalize: normalizeCurrencyFromServer },
   discrepancies: { silentDelete: silentDeleteDiscrepancy, normalize: normalizeDiscrepancyFromServer },
   settings: { silentDelete: silentDeleteSettings, normalize: normalizeSettingsFromServer },
+  briefings: { silentDelete: silentDeleteBriefing, normalize: normalizeBriefingFromServer },
+  notams: { silentDelete: silentDeleteNotam, normalize: normalizeNotamFromServer },
+  briefingNotes: { silentDelete: silentDeleteBriefingNote, normalize: normalizeBriefingNoteFromServer },
 }
 
 /**

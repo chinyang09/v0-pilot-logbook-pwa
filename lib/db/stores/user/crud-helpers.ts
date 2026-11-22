@@ -64,6 +64,9 @@ export type SyncableTableName =
   | "currencies"
   | "discrepancies"
   | "settings"
+  | "briefings"
+  | "notams"
+  | "briefingNotes"
 
 /**
  * Generic add operation for syncable entities

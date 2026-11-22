@@ -141,6 +141,17 @@ export {
 } from "./stores/user/settings.store";
 
 export {
+  getBriefing,
+  getAllBriefings,
+  saveBriefing,
+  deleteBriefing,
+  getNotamRegister,
+  setNotamFlag,
+  getBriefingNote,
+  saveBriefingNote,
+} from "./stores/user/briefings.store";
+
+export {
   addToSyncQueue,
   getSyncQueue,
   getSyncQueueCount,
