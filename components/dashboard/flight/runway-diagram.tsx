@@ -123,7 +123,7 @@ export function RunwayDiagram({ geometry, fallback, landing, departing, favoured
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className={cn("shrink-0", className)} aria-hidden data-morph={morph}>
       {Array.from({ length: 24 }, (_, i) => {
         const [x, y] = at(i * 15, ringR - 1)
-        return <circle key={i} cx={x} cy={y} r={size >= 80 ? 1.1 : 0.9} className="fill-muted-foreground/50" />
+        return <circle key={i} cx={x} cy={y} r={Math.max(0.9, size * 0.012)} className="fill-muted-foreground/50" />
       })}
       {drawn.map((l) => (
         <line

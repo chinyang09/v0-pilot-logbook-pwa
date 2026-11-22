@@ -38,7 +38,6 @@ const shortDayOf = (d: string) => d.replace(/^\w+,?\s*/, "")
 interface DutyClockView {
   state: string
   stateTone: "current" | "warning" | "action_required" | "getting_started"
-  chip: string | null
   headline: string
   input: DutyClockInput
   slots: Array<{ value: string; label: string; live?: boolean; tone?: Ramp }>
@@ -51,7 +50,6 @@ export function dutyClockView(brief: FlightBrief): DutyClockView | null {
   const { phase, active, next, rest, standby } = status.duty
   const legs = duty.times.map((t, i) => ({ departMs: t.departMs, arriveMs: t.arriveMs, flown: !!duty.legs[i]?.inTime }))
   const lastArrive = legs.reduce<number | null>((m, l) => (l.arriveMs !== null && (m === null || l.arriveMs > m) ? l.arriveMs : m), null)
-  const max = (m: number) => (m > 0 ? `Max ${formatDutyClock(m)}` : null)
   const stateTone = status.dutyState
 
   /* A later duty, chosen in the header. */
@@ -67,7 +65,6 @@ export function dutyClockView(brief: FlightBrief): DutyClockView | null {
     return {
       state: "Later Duty",
       stateTone: short || over ? "action_required" : "current",
-      chip: max(dp.maxFdpMinutes),
       headline: short ? `Rest short by ${formatDutyClock(r!.requiredRestMinutes - r!.restMinutes)}` : `Report ${day(w.startMs)}`,
       input: {
         nowMs: now,
@@ -99,7 +96,6 @@ export function dutyClockView(brief: FlightBrief): DutyClockView | null {
     return {
       state: "On Duty",
       stateTone,
-      chip: max(active.maxFdpMinutes),
       headline: status.dutyAction.headline,
       input: {
         nowMs: now,
@@ -135,7 +131,6 @@ export function dutyClockView(brief: FlightBrief): DutyClockView | null {
     return {
       state: phase === "post_duty" ? "Duty Complete" : "Off Duty",
       stateTone,
-      chip: max(next.maxFdpMinutes),
       headline: status.dutyAction.headline,
       input: {
         nowMs: now,
@@ -173,7 +168,6 @@ export function dutyClockView(brief: FlightBrief): DutyClockView | null {
     return {
       state: phase === "post_duty" ? "Duty Complete" : "Off Duty",
       stateTone,
-      chip: null,
       headline: status.dutyAction.headline,
       input: { nowMs: now, rest: { startMs: restStart, legalMs: Number.isFinite(legal) ? legal : now }, duty: null, legs: [] },
       slots: [
@@ -270,16 +264,10 @@ export function DutyClockFace({ brief }: { brief: FlightBrief }) {
   const lit = view.stateTone === "action_required" ? "text-destructive" : view.stateTone === "warning" ? "text-status-warning" : "text-foreground"
   return (
     <section aria-label="Duty and FDP">
-      <div className="flex items-center justify-between gap-2">
-        <p className={cn("flex shrink-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em]", t.text)} data-morph="duty-state">
-          {view.state}
-        </p>
-        {view.chip && (
-          <p className="min-w-0 truncate text-[10px] font-medium tabular-nums text-muted-foreground" suppressHydrationWarning data-morph="duty-chip">
-            {view.chip}
-          </p>
-        )}
-      </div>
+      {/* The maximum is not said up here as well: the FDP / Max figure below carries it. */}
+      <p className={cn("flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em]", t.text)} data-morph="duty-state">
+        {view.state}
+      </p>
       {/* The reason, in its colour (dark cockpit: ink when all is well). */}
       <p className={cn("mt-1 truncate text-[20px] font-semibold leading-[1.15] tracking-tight", lit)} suppressHydrationWarning data-morph="duty-headline">
         {view.headline}
