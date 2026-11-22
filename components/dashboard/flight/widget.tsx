@@ -243,6 +243,15 @@ export function WidgetCard({
 }
 
 /** What the sheet draws, given the way to close it first (an action runs as the close's follow-up). */
+/**
+ * True from the moment a card starts to close (back onto its tile, or away to
+ * another page). A body with a selection of its own drops it then (the owner,
+ * Nov 2026: "deselect currencies before collapsing so there is no jank") —
+ * the shared morph copies what the card shows, and a selected currency's
+ * year of lit, sweeping dots was copied twice and animated through the close.
+ */
+export const SheetClosingContext = React.createContext(false)
+
 export interface SheetContent {
   header: React.ReactNode
   body: React.ReactNode | null
@@ -286,7 +295,7 @@ export function WidgetSheet({
   seamless: boolean
   tone?: "fail" | "caution" | "ok" | "unknown" | null
   /** The card's content, handed `dismiss(then?)` for anything that leaves it. */
-  render: (dismiss: (then?: () => void) => void) => SheetContent
+  render: (dismiss: (then?: () => void, opts?: { overlay?: boolean }) => void) => SheetContent
   onClose: () => void
 }) {
   const closeRef = React.useRef(onClose)
@@ -325,7 +334,12 @@ export function WidgetSheet({
   // going to Currencies; the FDP page happened to arrive in time).
   const pathname = usePathname()
   const [startPath] = React.useState(pathname)
-  const arrived = pathname !== startPath
+  // What it led to is an overlay on THIS page (a flight, in the dashboard's
+  // own detail panel): no route changes, so it has arrived once the overlay
+  // is asked for. Waiting for a route held the card up for the 4-second
+  // safety timer (the owner's report: "card stays visible for long").
+  const [overlaid, setOverlaid] = React.useState(false)
+  const arrived = pathname !== startPath || overlaid
   const fading = leaving && arrived
   const leavingRef = React.useRef(false)
   React.useEffect(() => {
@@ -395,9 +409,16 @@ export function WidgetSheet({
   }, [measuredNow, closing, leaving])
 
   const dismissCard = React.useCallback(
-    (then?: () => void) => {
+    (then?: () => void, opts?: { overlay?: boolean }) => {
       if (then) setLeaving(true)
-      requestClose(then)
+      requestClose(
+        then && opts?.overlay
+          ? () => {
+              then()
+              setOverlaid(true)
+            }
+          : then,
+      )
     },
     [requestClose],
   )
@@ -492,8 +513,10 @@ export function WidgetSheet({
             animate={{ opacity: crossfade ? (open || leaving ? 1 : 0) : 1 }}
             transition={open ? { duration: 0.2, delay: 0.06, ease: EASE } : { duration: 0.12, ease: EASE }}
           >
-            <div className="relative p-3">{content.header}</div>
-            {content.body && <div className="border-t border-border/70 px-3 pb-3 pt-2.5">{content.body}</div>}
+            <SheetClosingContext.Provider value={closing || leaving}>
+              <div className="relative p-3">{content.header}</div>
+              {content.body && <div className="border-t border-border/70 px-3 pb-3 pt-2.5">{content.body}</div>}
+            </SheetClosingContext.Provider>
             {/* A footer action that leads somewhere is already wrapped to close
                 the card first (`render`'s dismiss) — closing it again here
                 swallowed the navigation (the owner's report). */}

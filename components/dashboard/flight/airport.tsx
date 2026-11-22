@@ -36,7 +36,8 @@ import { metarConditions, metarReadings, type FlightCategory } from "@/lib/weath
 import type { WindOnRunway } from "@/lib/weather/runway-wind"
 import type { RunwayUse } from "@/lib/weather/runway-in-use"
 import type { RunwayGeo } from "@/lib/runways/parse"
-import type { AirportRunwayState } from "./runway-state"
+import { fallbackRunway, type AirportRunwayState } from "./runway-state"
+import { RunwayDiagram, windWords } from "./runway-diagram"
 import { isNight } from "@/lib/utils/night-time"
 import { hasCoordinates } from "@/lib/utils/flight-calculations"
 import { getAirportLocalTime, getAirportTimeInfo } from "@/lib/db/stores/reference/airports.store"
@@ -52,100 +53,6 @@ const CATEGORY_DOT: Record<Exclude<FlightCategory, "VFR">, string> = {
 }
 
 const fmtFt = (n: number) => `${Math.round(n).toLocaleString("en-US")}'`
-
-/**
- * The airport's runways as a picture, to scale and north up, off their real
- * thresholds: the one landing on in the accent, the one departing from in
- * ink, the rest muted, and the wind's arrow pointing where it blows. Without
- * the geometry, the one runway shown is drawn through the middle.
- */
-function RunwayPicture({
-  geometry,
-  heading,
-  landing,
-  departing,
-  windDir,
-}: {
-  geometry: RunwayGeo[] | null | undefined
-  /** Without geometry: the heading of the runway shown. */
-  heading: number | undefined
-  landing: string | null
-  departing: string | null
-  windDir: number | null
-}) {
-  const S = 64
-  const c = S / 2
-  const at = (deg: number, r: number) => {
-    const rad = (deg * Math.PI) / 180
-    return [c + r * Math.sin(rad), c - r * Math.cos(rad)] as const
-  }
-  // Every placed runway, in nm east / north of their middle, scaled to fit.
-  const lines = React.useMemo(() => {
-    const placed = (geometry ?? []).flatMap((r) => {
-      const [a, b] = r.ends
-      return a && b && a.lat !== null && a.lon !== null && b.lat !== null && b.lon !== null
-        ? [{ ends: [a.ident, b.ident], pts: [a, b].map((e) => [e.lon!, e.lat!] as const) }]
-        : []
-    })
-    if (placed.length === 0) return null
-    const lat0 = placed.reduce((s, p) => s + p.pts[0][1] + p.pts[1][1], 0) / (placed.length * 2)
-    const lon0 = placed.reduce((s, p) => s + p.pts[0][0] + p.pts[1][0], 0) / (placed.length * 2)
-    const k = Math.cos((lat0 * Math.PI) / 180)
-    const xy = placed.map((p) => ({ ends: p.ends, pts: p.pts.map(([lon, lat]) => [(lon - lon0) * 60 * k, (lat - lat0) * 60] as const) }))
-    const span = Math.max(0.5, ...xy.flatMap((p) => p.pts.map(([x, y]) => Math.max(Math.abs(x), Math.abs(y)))))
-    const scale = (S / 2 - 10) / span
-    return xy.map((p) => ({ ends: p.ends, pts: p.pts.map(([x, y]) => [c + x * scale, c - y * scale] as const) }))
-  }, [geometry, c])
-  const tone = (ends: string[]) =>
-    landing && ends.includes(landing) ? "text-primary" : departing && ends.includes(departing) ? "text-foreground" : "text-muted-foreground/60"
-  return (
-    <svg width={S} height={S} viewBox={`0 0 ${S} ${S}`} className="shrink-0 rounded-xl bg-muted" aria-hidden>
-      {lines
-        ? lines.map((l) => (
-            <line
-              key={l.ends.join()}
-              x1={l.pts[0][0]}
-              y1={l.pts[0][1]}
-              x2={l.pts[1][0]}
-              y2={l.pts[1][1]}
-              stroke="currentColor"
-              className={tone(l.ends)}
-              strokeWidth={4}
-              strokeLinecap="round"
-            />
-          ))
-        : heading !== undefined && (
-            <line
-              x1={at(heading + 180, 22)[0]}
-              y1={at(heading + 180, 22)[1]}
-              x2={at(heading, 22)[0]}
-              y2={at(heading, 22)[1]}
-              stroke="currentColor"
-              strokeOpacity={0.75}
-              strokeWidth={5}
-              strokeLinecap="round"
-            />
-          )}
-      {windDir !== null && (
-        <g className="text-primary">
-          <line
-            x1={at(windDir, 30)[0]}
-            y1={at(windDir, 30)[1]}
-            x2={at(windDir, 24)[0]}
-            y2={at(windDir, 24)[1]}
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeLinecap="round"
-          />
-          <polygon
-            points={[at(windDir, 19), at(windDir + 16, 25), at(windDir - 16, 25)].map(([x, y]) => `${x},${y}`).join(" ")}
-            fill="currentColor"
-          />
-        </g>
-      )}
-    </svg>
-  )
-}
 
 /** The wind's head (tail, amber) and cross components on one runway: "12kt↓ 6kt→". */
 function Components({ wind }: { wind: WindOnRunway }) {
@@ -179,8 +86,8 @@ function UseRow({ kind, use, morph }: { kind: "arr" | "dep"; use: RunwayUse; mor
         <span data-morph={morph}>{use.ident}</span>
       </span>
       {use.wind && <Components wind={use.wind} />}
-      <span className="ml-auto font-normal text-muted-foreground">
-        {use.count} {kind} · 20m
+      <span className="ml-auto whitespace-nowrap font-normal text-muted-foreground" title="Aeroplanes seen using it over the last 20 minutes">
+        {use.count} {kind}
       </span>
     </p>
   )
@@ -253,8 +160,7 @@ export function AirportPanel({
   const offset = airport?.tz ? formatTimezoneOffset(getAirportTimeInfo(airport.tz).offset) : null
   const place = airport?.city || airport?.name || ""
 
-  const windText =
-    c?.windKt === undefined ? null : c.windKt === 0 ? "Calm" : `${windDir === null ? "VRB" : String(windDir).padStart(3, "0") + "°"}/${c.windKt}kt`
+  const windText = windWords(windDir, c?.windKt)
   const temp =
     readings?.tempC !== null && readings?.tempC !== undefined ? `${readings.tempC}°${readings.dewC !== null ? `/${readings.dewC}°` : ""}` : null
 
@@ -298,22 +204,22 @@ export function AirportPanel({
       {/* The weather there, as a picture. */}
       {c ? (
         <div className="mt-2 flex items-center gap-3 border-t border-border/70 pt-2.5">
-          <RunwayPicture
+          <RunwayDiagram
             geometry={geometry}
-            heading={(landing?.wind ?? favoured)?.end.headingDeg}
+            fallback={fallbackRunway(rwy)}
             landing={landing?.ident ?? null}
             departing={departing?.ident ?? null}
+            favoured={favoured?.end.ident ?? null}
             windDir={windDir}
+            windKt={c.windKt}
+            gust={c.gustKt}
+            size={88}
+            morph={mk("rwys")}
           />
           <div className="min-w-0 flex-1 space-y-1">
             <p className="flex flex-wrap items-center gap-x-1.5 text-[15px] font-semibold tabular-nums text-foreground">
               <span data-morph={mk("wind")}>{windText ?? "Wind —"}</span>
-              {c.gustKt ? (
-                <span className="inline-flex items-center gap-0.5 text-status-warning">
-                  <Wind className="h-3.5 w-3.5" aria-hidden />
-                  {c.gustKt}kt
-                </span>
-              ) : null}
+              {c.gustKt ? <span className="text-status-warning">G{c.gustKt}</span> : null}
             </p>
             {(temp || readings?.qnhHpa) && (
               <p className="truncate text-[13px] tabular-nums text-muted-foreground">

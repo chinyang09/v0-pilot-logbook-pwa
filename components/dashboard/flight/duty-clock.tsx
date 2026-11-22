@@ -266,14 +266,12 @@ export function DutyClockFace({ brief }: { brief: FlightBrief }) {
   if (!view) return <DutyBand status={brief.status} now={brief.now} display={brief.display} />
   const c = dutyClock(view.input)
   const t = TONE[view.stateTone]
-  const Icon = t.icon
   const zulu = brief.display?.useZuluTime !== false
   const lit = view.stateTone === "action_required" ? "text-destructive" : view.stateTone === "warning" ? "text-status-warning" : "text-foreground"
   return (
     <section aria-label="Duty and FDP">
       <div className="flex items-center justify-between gap-2">
         <p className={cn("flex shrink-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em]", t.text)} data-morph="duty-state">
-          {Icon && <Icon className="h-3 w-3" aria-hidden />}
           {view.state}
         </p>
         {view.chip && (

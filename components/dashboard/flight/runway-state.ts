@@ -41,3 +41,11 @@ export function useAirportRunways(brief: FlightBrief, icao: string, metarRaw: st
   const shown = runwayShown(ends, c?.windDir ?? null, c?.windKt, inUse)
   return { geometry, ends, inUse, ...shown }
 }
+
+/** The runway a diagram without thresholds draws: the one in use, else the wind's. */
+export function fallbackRunway(rwy: AirportRunwayState): { ident: string; headingDeg: number } | null {
+  const ident = rwy.landing?.ident ?? rwy.departing?.ident ?? rwy.favoured?.end.ident
+  if (!ident) return null
+  const end = rwy.ends.find((e) => e.ident === ident) ?? rwy.ends.find((e) => e.ident.slice(0, 2) === ident.slice(0, 2))
+  return end ? { ident, headingDeg: end.headingDeg } : null
+}

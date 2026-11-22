@@ -56,6 +56,7 @@ import { useTick } from "./flight/instruments"
 import { CurrencyFace, DutyFace, FlightFace, LimitsFace, currencyRows, destinationsOf, favouredAt, limitsOf } from "./flight/faces"
 import { dutyTone } from "./flight/duty-clock"
 import { setChosenDuty, useChosenDuty, publishDutyChoices } from "@/hooks/use-dashboard-duty"
+import { destinationOfRoute } from "@/lib/utils/dashboard/destination"
 import { type WeatherState } from "./flight/weather"
 import { AirportFace, airportsOf, stationPoor } from "./flight/airport-tile"
 import { WIDGET_TITLE, useWidgetCtx, widgetContent } from "./flight/details"
@@ -341,24 +342,31 @@ export function FlightDashboard({ className }: { className?: string }) {
   )
 
   /* ── The header's duty menu ──────────────────────────────────────────── */
-  // The day leads (the menu is narrow on a phone); the report and the route
-  // are its second line. Published while the page is on screen.
+  // Where each duty GOES and when (the owner, Nov 2026: "I want to see
+  // destination and date of duty"): "WIII · Wed, 18 Nov", the report and
+  // whether it is the duty now or next under it. Published while the page is
+  // on screen.
+  const legRoute = legs.length ? [legs[0].departureIcao, ...legs.map((l) => l.arrivalIcao)].join("-") : ""
   React.useEffect(() => {
     if (!isActive) return
     publishDutyChoices(
       choices.length === 0 || dutyAtMs === null
         ? null
         : {
-            options: choices.map((c, i) => ({
-              value: String(c.atMs),
-              label: i === 0 ? `${current ? "Now" : "Next"} · ${brief.day(c.atMs)}` : brief.day(c.atMs),
-              hint: [`Report ${brief.clock(c.atMs)}`, (c.period?.route ?? "").replace(/-/g, " ")].filter(Boolean).join(" · "),
-            })),
+            options: choices.map((c, i) => {
+              const dest = destinationOfRoute(c.period?.route || (i === index ? legRoute : ""), brief.code)
+              return {
+                value: String(c.atMs),
+                label: [dest, brief.day(c.atMs)].filter(Boolean).join(" · "),
+                hint: [i === 0 ? (current ? "Now" : "Next") : null, `Report ${brief.clock(c.atMs)}`].filter(Boolean).join(" · "),
+              }
+            }),
             word: index === 0 ? (current ? "Now" : "Next") : "Later",
             day: brief.day(dutyAtMs).replace(/^\w+,?\s*/, ""),
+            dest: destinationOfRoute(choices[index]?.period?.route || legRoute, brief.code),
           },
     )
-  }, [isActive, choices, dutyAtMs, current, index, brief])
+  }, [isActive, choices, dutyAtMs, current, index, brief, legRoute])
 
   /* ── Opening a widget ────────────────────────────────────────────────── */
   const isDesktop = useIsDesktop()
@@ -461,7 +469,8 @@ export function FlightDashboard({ className }: { className?: string }) {
           // Anything in the card that goes somewhere closes it first.
           render={(dismiss) => {
             const sheetCtx = {
-              openFlight: (id: string) => dismiss(() => nav.openFlight(id)),
+              // A flight opens over this page, not on another route.
+              openFlight: (id: string) => dismiss(() => nav.openFlight(id), { overlay: true }),
               go: (href: string) => dismiss(() => nav.go(href)),
               selectDuty,
             }

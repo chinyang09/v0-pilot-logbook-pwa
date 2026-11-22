@@ -20,13 +20,13 @@ import { whereaboutsLines } from "@/lib/lookup/aircraft-whereabouts"
 import type { Requirement } from "@/lib/utils/dashboard/legality"
 import { cn } from "@/lib/utils"
 import { formatDay } from "@/lib/utils/date"
-import { REQ_TONE, STATE_ICON } from "./instruments"
+import { REQ_TONE } from "./instruments"
 import { crewKey, crewRole, currenciesBySoonest, currencyRows, limitsOf, marginText, marginTone, shortDay, shortName } from "./faces"
 import { CurrencyDots } from "./currency-dots"
 import { dotAt, dotLayout, localDayKey } from "@/lib/utils/dashboard/currency-dots"
 import { AirportBody } from "./airport-tile"
 import type { FlightBrief } from "./model"
-import type { WidgetAction, WidgetId } from "./widget"
+import { SheetClosingContext, type WidgetAction, type WidgetId } from "./widget"
 
 export const WIDGET_TITLE: Record<WidgetId, string> = {
   duty: "Duty & FDP",
@@ -384,7 +384,9 @@ function CurrencyBody({ brief }: { brief: FlightBrief }) {
   // The year ahead as dots, every expiry ink — a tap on a dot or a row
   // SELECTS its currency (the one dot in colour, the days up to it lit in
   // turn), a second tap deselects. The Currencies page is the footer's.
-  const [selected, setSelected] = React.useState<string | null>(null)
+  const [chosen, setSelected] = React.useState<string | null>(null)
+  // Closing, nothing is selected: the morph then copies a calendar at rest.
+  const selected = React.useContext(SheetClosingContext) ? null : chosen
   const toggle = (key: string) => setSelected((s) => (s === key ? null : key))
   const today = localDayKey(brief.now)
   const dated = React.useMemo(() => {
@@ -392,11 +394,6 @@ function CurrencyBody({ brief }: { brief: FlightBrief }) {
     return currenciesBySoonest(currencyRows(brief)).filter((r) => r.ymd !== null && dotAt(layout, r.ymd) !== null)
   }, [brief, today])
   if (logbook.length === 0 && attention.length === 0 && current.length === 0) return null
-  const flag = (state: Requirement["state"]) => {
-    if (state === "ok") return null
-    const Icon = STATE_ICON[state]
-    return <Icon className={cn("h-3.5 w-3.5 shrink-0", REQ_TONE[state].icon)} aria-label={state === "fail" ? "Not met" : "Attention"} />
-  }
   const tone = (state: Requirement["state"]) => (state === "ok" ? "text-foreground" : REQ_TONE[state].icon)
   const row = (key: string, name: string, sub: string, figure: string, state: Requirement["state"]) => {
     const isSel = selected === key
@@ -419,7 +416,6 @@ function CurrencyBody({ brief }: { brief: FlightBrief }) {
         <span className={cn("w-12 shrink-0 text-right text-[13px] font-semibold tabular-nums", tone(state))}>
           <span data-morph={`cur-fig-${key}`}>{figure}</span>
         </span>
-        <span className="flex w-3.5 shrink-0 self-center">{flag(state)}</span>
       </button>
     )
   }
