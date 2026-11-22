@@ -507,10 +507,11 @@ export function Scale({ slots }: { slots: Slot[] }) {
               slot.tone ? RAMP[slot.tone].text : "text-foreground",
             )}
             suppressHydrationWarning={slot.live}
+            data-morph={`slot-${i}-v`}
           >
             {slot.value}
           </span>
-          <span className="block truncate text-[9px] font-medium uppercase leading-tight tracking-wider text-muted-foreground">
+          <span className="block truncate text-[9px] font-medium uppercase leading-tight tracking-wider text-muted-foreground" data-morph={`slot-${i}-l`}>
             {slot.label}
           </span>
         </div>

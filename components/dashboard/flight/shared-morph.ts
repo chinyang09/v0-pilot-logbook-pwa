@@ -84,14 +84,18 @@ function textBoxIn(el: HTMLElement, layer: Element): Box | null {
   return { x: r.left - l.left, y: r.top - l.top, w: Math.max(0, right - r.left), h: r.height }
 }
 
-function firstByKey(root: Element, within?: DOMRect): Map<string, HTMLElement> {
+function firstByKey(root: Element, within?: DOMRect | null): Map<string, HTMLElement> {
   const out = new Map<string, HTMLElement>()
   for (const el of root.querySelectorAll<HTMLElement>("[data-morph]")) {
     const key = el.dataset.morph!
     if (out.has(key)) continue
-    if (within) {
+    // A page of a pager swiped out of view is clipped by the pager, not the
+    // layer: under the flights tile's crew panel, the next leg's page sits
+    // inside the layer's box and must still not fly.
+    const clip = el.closest("[data-pager]")?.getBoundingClientRect() ?? within
+    if (clip) {
       const r = el.getBoundingClientRect()
-      if (r.right <= within.left + 1 || r.left >= within.right - 1) continue
+      if (r.right <= clip.left + 1 || r.left >= clip.right - 1) continue
     }
     out.set(key, el)
   }
@@ -162,7 +166,7 @@ export function runSharedMorph({
   // A tile's page that is swiped out of view (the destination pager) is not
   // where anything comes from: the first VISIBLE element of a key is.
   const faceEls = firstByKey(face, faceBox)
-  const cardEls = firstByKey(card)
+  const cardEls = firstByKey(card, null)
   const cardBox = card.getBoundingClientRect()
   const hidden: HTMLElement[] = []
   const copies: HTMLElement[] = []
@@ -189,8 +193,13 @@ export function runSharedMorph({
       el.style.visibility = "hidden"
       hidden.push(el)
     }
+    // A picture tagged to STRETCH (a day bar, a limit's bar, a strip) takes
+    // the other's box in both directions; anything else scales evenly, so its
+    // text keeps its shape.
+    const stretch = !text && (f.hasAttribute("data-morph-stretch") || c.hasAttribute("data-morph-stretch")) && fb.w >= 1 && cb.w >= 1
     const toCard = cb.h / fb.h
     const toFace = fb.h / cb.h
+    const sx = stretch ? cb.w / fb.w : toCard
     const [from, to] = opening ? [fb, cb] : [cb, fb]
     // The tile's copy: at the tile's size where the tile has it.
     runs.push(
@@ -199,7 +208,8 @@ export function runSharedMorph({
         {
           x: [from.x, to.x],
           y: [from.y, to.y],
-          scale: opening ? [1, toCard] : [toCard, 1],
+          scaleX: opening ? [1, sx] : [sx, 1],
+          scaleY: opening ? [1, toCard] : [toCard, 1],
           opacity: opening ? [1, 0] : [0, 1],
         },
         { ...move, opacity: fade } as Transition,
@@ -212,7 +222,8 @@ export function runSharedMorph({
         {
           x: [from.x, to.x],
           y: [from.y, to.y],
-          scale: opening ? [toFace, 1] : [1, toFace],
+          scaleX: opening ? [1 / sx, 1] : [1, 1 / sx],
+          scaleY: opening ? [toFace, 1] : [1, toFace],
           opacity: opening ? [0, 1] : [1, 0],
         },
         { ...move, opacity: fade } as Transition,

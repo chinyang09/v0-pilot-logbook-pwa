@@ -13,7 +13,7 @@
 
 import type * as React from "react"
 import { Cloud, CloudFog, CloudLightning, CloudRain, CloudSun, Sun, TriangleAlert } from "lucide-react"
-import { ageText, cloudBase } from "@/lib/weather/format"
+import { ageText, cloudLayer } from "@/lib/weather/format"
 import { categoryOf, hazardLine, hazardsOf, metarConditions, type FlightCategory, type StationBrief, type StationWindow } from "@/lib/weather/brief"
 import { cn } from "@/lib/utils"
 
@@ -51,13 +51,13 @@ export function skyOf(c: ReturnType<typeof metarConditions> | null, hazard: stri
   const ceil = (c.clouds ?? []).filter((l) => l.cover === "BKN" || l.cover === "OVC" || l.cover === "VV")
   if (ceil.length) {
     const low = ceil.reduce((m, l) => (l.baseFt < m.baseFt ? l : m))
-    return { Icon: Cloud, text: `${low.cover} ${cloudBase(low.baseFt)}`, warn: false }
+    return { Icon: Cloud, text: cloudLayer(low.cover, low.baseFt), warn: false }
   }
   if ((c.weather ?? []).some((w) => /RA|DZ|SH/.test(w))) return { Icon: CloudRain, text: "Rain", warn: false }
   if ((c.visM ?? 9999) < 5000) return { Icon: CloudFog, text: `Vis ${c.visM! >= 1000 ? `${Math.round(c.visM! / 1000)} km` : `${c.visM} m`}`, warn: false }
   if ((c.clouds ?? []).length) {
     const low = c.clouds!.reduce((m, l) => (l.baseFt < m.baseFt ? l : m))
-    return { Icon: CloudSun, text: `${low.cover} ${cloudBase(low.baseFt)}`, warn: false }
+    return { Icon: CloudSun, text: cloudLayer(low.cover, low.baseFt), warn: false }
   }
   return { Icon: Sun, text: "Clear", warn: false }
 }
@@ -67,7 +67,20 @@ export function skyOf(c: ReturnType<typeof metarConditions> | null, hazard: stri
  * the rim where the wind comes FROM, its direction and speed in the middle.
  * Ink when the wind is ordinary; amber from 25kt or a gust.
  */
-export function WindDial({ dir, kt, gust, size = 84 }: { dir: number | null | undefined; kt: number | undefined; gust?: number; size?: number }) {
+export function WindDial({
+  dir,
+  kt,
+  gust,
+  size = 84,
+  morph,
+}: {
+  dir: number | null | undefined
+  kt: number | undefined
+  gust?: number
+  size?: number
+  /** The shared morph's key — the dial flies into the card's wind. */
+  morph?: string
+}) {
   const c = size / 2
   const r = c - 4
   const at = (deg: number, rr: number) => {
@@ -85,7 +98,7 @@ export function WindDial({ dir, kt, gust, size = 84 }: { dir: number | null | un
         })()
       : null
   return (
-    <div className="relative shrink-0" style={{ width: size, height: size }} aria-hidden>
+    <div className="relative shrink-0" style={{ width: size, height: size }} aria-hidden data-morph={morph}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="absolute inset-0">
         {Array.from({ length: 24 }, (_, i) => {
           const [x, y] = at(i * 15, r - 3)

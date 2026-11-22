@@ -41,7 +41,10 @@ export function Pager({
   onPage,
   children,
   fill = false,
+  morph,
 }: {
+  /** The shared morph's key for the dots — they fly between the tile and its card. */
+  morph?: string
   count: number
   page: number
   onPage: (i: number) => void
@@ -141,7 +144,7 @@ export function Pager({
           ))}
         </div>
       </div>
-      <div aria-hidden className={cn("flex justify-center gap-1", fill ? "pt-1.5" : "mt-1.5")}>
+      <div aria-hidden className={cn("flex justify-center gap-1", fill ? "pt-1.5" : "mt-1.5")} data-morph={morph ? `${morph}-dots` : undefined}>
         {Array.from({ length: count }, (_, i) => (
           <span key={i} className={cn("h-1.5 w-1.5 rounded-full transition-colors", i === page ? "bg-foreground" : "bg-foreground/25")} />
         ))}

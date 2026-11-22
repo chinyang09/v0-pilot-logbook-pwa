@@ -21,12 +21,10 @@ export function ageText(atMs: number, nowMs: number): string {
 }
 
 /**
- * A cloud base as a phone reads it (the owner, Nov 2026): thousands as "k" —
- * "1.1k", "30k" — and hundreds as they are, "800". One decimal only where
- * it says something (1,500 → "1.5k", 2,000 → "2k").
+ * A cloud layer as the METAR writes it (the owner, Nov 2026: "follow the
+ * metar reading eg. BKN300 or SCT008"): the cover and its base in hundreds of
+ * feet, three digits — 30,000ft BKN is "BKN300", 800ft SCT is "SCT008".
  */
-export function cloudBase(ft: number): string {
-  if (ft < 1000) return String(Math.round(ft))
-  const k = Math.round(ft / 100) / 10
-  return `${Number.isInteger(k) ? k : k.toFixed(1)}k`
+export function cloudLayer(cover: string, ft: number): string {
+  return `${cover}${String(Math.max(0, Math.round(ft / 100))).padStart(3, "0")}`
 }

@@ -29,13 +29,14 @@
  */
 
 import * as React from "react"
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronRight, Moon, Sun, Wind } from "lucide-react"
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronRight, Moon, PlaneLanding, PlaneTakeoff, Sun, Wind } from "lucide-react"
 import type { Airport } from "@/types/entities/airport.types"
 import type { AirportInfo } from "@/lib/weather/airport-info"
 import { metarConditions, metarReadings, type FlightCategory } from "@/lib/weather/brief"
-import { runwayEndsFrom, type WindOnRunway } from "@/lib/weather/runway-wind"
-import { runwayShown } from "@/lib/weather/runway-in-use"
-import { useRunwayInUse } from "@/hooks/use-runway-in-use"
+import type { WindOnRunway } from "@/lib/weather/runway-wind"
+import type { RunwayUse } from "@/lib/weather/runway-in-use"
+import type { RunwayGeo } from "@/lib/runways/parse"
+import type { AirportRunwayState } from "./runway-state"
 import { isNight } from "@/lib/utils/night-time"
 import { hasCoordinates } from "@/lib/utils/flight-calculations"
 import { getAirportLocalTime, getAirportTimeInfo } from "@/lib/db/stores/reference/airports.store"
@@ -52,47 +53,136 @@ const CATEGORY_DOT: Record<Exclude<FlightCategory, "VFR">, string> = {
 
 const fmtFt = (n: number) => `${Math.round(n).toLocaleString("en-US")}'`
 
-/** The runway and the wind on it, as a picture: north up, the wind's arrow pointing where it blows. */
-function RunwayPicture({ favoured, windDir }: { favoured: WindOnRunway | null; windDir: number | null }) {
-  const S = 60
+/**
+ * The airport's runways as a picture, to scale and north up, off their real
+ * thresholds: the one landing on in the accent, the one departing from in
+ * ink, the rest muted, and the wind's arrow pointing where it blows. Without
+ * the geometry, the one runway shown is drawn through the middle.
+ */
+function RunwayPicture({
+  geometry,
+  heading,
+  landing,
+  departing,
+  windDir,
+}: {
+  geometry: RunwayGeo[] | null | undefined
+  /** Without geometry: the heading of the runway shown. */
+  heading: number | undefined
+  landing: string | null
+  departing: string | null
+  windDir: number | null
+}) {
+  const S = 64
   const c = S / 2
   const at = (deg: number, r: number) => {
     const rad = (deg * Math.PI) / 180
     return [c + r * Math.sin(rad), c - r * Math.cos(rad)] as const
   }
-  const h = favoured?.end.headingDeg
+  // Every placed runway, in nm east / north of their middle, scaled to fit.
+  const lines = React.useMemo(() => {
+    const placed = (geometry ?? []).flatMap((r) => {
+      const [a, b] = r.ends
+      return a && b && a.lat !== null && a.lon !== null && b.lat !== null && b.lon !== null
+        ? [{ ends: [a.ident, b.ident], pts: [a, b].map((e) => [e.lon!, e.lat!] as const) }]
+        : []
+    })
+    if (placed.length === 0) return null
+    const lat0 = placed.reduce((s, p) => s + p.pts[0][1] + p.pts[1][1], 0) / (placed.length * 2)
+    const lon0 = placed.reduce((s, p) => s + p.pts[0][0] + p.pts[1][0], 0) / (placed.length * 2)
+    const k = Math.cos((lat0 * Math.PI) / 180)
+    const xy = placed.map((p) => ({ ends: p.ends, pts: p.pts.map(([lon, lat]) => [(lon - lon0) * 60 * k, (lat - lat0) * 60] as const) }))
+    const span = Math.max(0.5, ...xy.flatMap((p) => p.pts.map(([x, y]) => Math.max(Math.abs(x), Math.abs(y)))))
+    const scale = (S / 2 - 10) / span
+    return xy.map((p) => ({ ends: p.ends, pts: p.pts.map(([x, y]) => [c + x * scale, c - y * scale] as const) }))
+  }, [geometry, c])
+  const tone = (ends: string[]) =>
+    landing && ends.includes(landing) ? "text-primary" : departing && ends.includes(departing) ? "text-foreground" : "text-muted-foreground/60"
   return (
     <svg width={S} height={S} viewBox={`0 0 ${S} ${S}`} className="shrink-0 rounded-xl bg-muted" aria-hidden>
-      {h !== undefined && (
-        <line
-          x1={at(h + 180, 21)[0]}
-          y1={at(h + 180, 21)[1]}
-          x2={at(h, 21)[0]}
-          y2={at(h, 21)[1]}
-          stroke="currentColor"
-          strokeOpacity={0.75}
-          strokeWidth={5}
-          strokeLinecap="round"
-        />
-      )}
+      {lines
+        ? lines.map((l) => (
+            <line
+              key={l.ends.join()}
+              x1={l.pts[0][0]}
+              y1={l.pts[0][1]}
+              x2={l.pts[1][0]}
+              y2={l.pts[1][1]}
+              stroke="currentColor"
+              className={tone(l.ends)}
+              strokeWidth={4}
+              strokeLinecap="round"
+            />
+          ))
+        : heading !== undefined && (
+            <line
+              x1={at(heading + 180, 22)[0]}
+              y1={at(heading + 180, 22)[1]}
+              x2={at(heading, 22)[0]}
+              y2={at(heading, 22)[1]}
+              stroke="currentColor"
+              strokeOpacity={0.75}
+              strokeWidth={5}
+              strokeLinecap="round"
+            />
+          )}
       {windDir !== null && (
         <g className="text-primary">
           <line
-            x1={at(windDir, 27)[0]}
-            y1={at(windDir, 27)[1]}
-            x2={at(windDir, 9)[0]}
-            y2={at(windDir, 9)[1]}
+            x1={at(windDir, 30)[0]}
+            y1={at(windDir, 30)[1]}
+            x2={at(windDir, 24)[0]}
+            y2={at(windDir, 24)[1]}
             stroke="currentColor"
             strokeWidth={2}
             strokeLinecap="round"
           />
           <polygon
-            points={[at(windDir, 6), at(windDir + 22, 13), at(windDir - 22, 13)].map(([x, y]) => `${x},${y}`).join(" ")}
+            points={[at(windDir, 19), at(windDir + 16, 25), at(windDir - 16, 25)].map(([x, y]) => `${x},${y}`).join(" ")}
             fill="currentColor"
           />
         </g>
       )}
     </svg>
+  )
+}
+
+/** The wind's head (tail, amber) and cross components on one runway: "12kt↓ 6kt→". */
+function Components({ wind }: { wind: WindOnRunway }) {
+  return (
+    <>
+      <span className={cn("inline-flex items-center gap-0.5", wind.headKt < 0 && "text-status-warning")}>
+        {Math.abs(wind.headKt)}kt
+        {wind.headKt < 0 ? <ArrowUp className="h-3.5 w-3.5" aria-label="tailwind" /> : <ArrowDown className="h-3.5 w-3.5" aria-label="headwind" />}
+      </span>
+      {wind.crossKt > 0 && (
+        <span className="inline-flex items-center gap-0.5">
+          {wind.crossKt}kt
+          {wind.crossFrom === "L" ? (
+            <ArrowRight className="h-3.5 w-3.5" aria-label="crosswind from the left" />
+          ) : (
+            <ArrowLeft className="h-3.5 w-3.5" aria-label="crosswind from the right" />
+          )}
+        </span>
+      )}
+    </>
+  )
+}
+
+/** One runway in use: "✈↓ 20C  12kt↓ 6kt→  3 arr". */
+function UseRow({ kind, use, morph }: { kind: "arr" | "dep"; use: RunwayUse; morph?: string }) {
+  const Icon = kind === "arr" ? PlaneLanding : PlaneTakeoff
+  return (
+    <p className="flex items-center gap-2.5 rounded-lg bg-muted px-2.5 py-1 text-[13px] font-semibold tabular-nums text-foreground">
+      <span className="inline-flex items-center gap-1">
+        <Icon className={cn("h-3.5 w-3.5", kind === "arr" ? "text-primary" : "text-foreground")} aria-label={kind === "arr" ? "Landing" : "Departing"} />
+        <span data-morph={morph}>{use.ident}</span>
+      </span>
+      {use.wind && <Components wind={use.wind} />}
+      <span className="ml-auto font-normal text-muted-foreground">
+        {use.count} {kind} · 20m
+      </span>
+    </p>
   )
 }
 
@@ -119,13 +209,13 @@ export function AirportPanel({
   codeOf,
   lastLine,
   onLast,
-  traffic = true,
+  rwy,
   morph = true,
 }: {
   /** Whether this is the airport on show — the shared morph's keys go on it only. */
   morph?: boolean
-  /** Whether the live traffic is read for the runway in use. */
-  traffic?: boolean
+  /** Its runways and which are in use (`useAirportRunways`, shared with the tile). */
+  rwy: AirportRunwayState
   icao: string
   code: string
   airport: Airport | undefined
@@ -148,11 +238,13 @@ export function AirportPanel({
   const mk = (k: string) => (morph ? `ap-${k}-${icao}` : undefined)
   const c = React.useMemo(() => (metar ? metarConditions(metar.raw) : null), [metar])
   const readings = React.useMemo(() => (metar ? metarReadings(metar.raw) : null), [metar])
-  const ends = React.useMemo(() => runwayEndsFrom(info?.runways ?? []), [info])
   const windDir = c?.windDir ?? null
-  // The runway the traffic is landing on, else the one the wind favours.
-  const inUse = useRunwayInUse(airport && hasCoordinates(airport) ? airport : null, ends, traffic)
-  const { wind: favoured, landing } = c ? runwayShown(ends, windDir, c.windKt, inUse) : { wind: null, landing: null }
+  // The runways the traffic is landing on and departing from, else the one the wind favours.
+  const { landing, departing, favoured, geometry } = rwy
+  // The runways listed: the geometry's where there is one, else the airport data's.
+  const listed = geometry?.length
+    ? geometry.map((r) => ({ id: r.id, lengthFt: r.lengthFt }))
+    : (info?.runways ?? []).map((r) => ({ id: r.id, lengthFt: r.lengthFt }))
   const category = metar?.category ?? null
   const night =
     arrivalMs !== null && airport && hasCoordinates(airport) ? isNight(new Date(arrivalMs), airport.latitude, airport.longitude) : null
@@ -206,7 +298,13 @@ export function AirportPanel({
       {/* The weather there, as a picture. */}
       {c ? (
         <div className="mt-2 flex items-center gap-3 border-t border-border/70 pt-2.5">
-          <RunwayPicture favoured={favoured} windDir={windDir} />
+          <RunwayPicture
+            geometry={geometry}
+            heading={(landing?.wind ?? favoured)?.end.headingDeg}
+            landing={landing?.ident ?? null}
+            departing={departing?.ident ?? null}
+            windDir={windDir}
+          />
           <div className="min-w-0 flex-1 space-y-1">
             <p className="flex flex-wrap items-center gap-x-1.5 text-[15px] font-semibold tabular-nums text-foreground">
               <span data-morph={mk("wind")}>{windText ?? "Wind —"}</span>
@@ -224,39 +322,16 @@ export function AirportPanel({
                 {readings?.qnhHpa ? <span data-morph={mk("qnh")}>Q{readings.qnhHpa}</span> : null}
               </p>
             )}
+            {landing && <UseRow kind="arr" use={landing} morph={mk("land")} />}
+            {departing && <UseRow kind="dep" use={departing} morph={mk("dep")} />}
             {favoured && (
-              <p
-                className="flex items-center gap-3 rounded-lg bg-muted px-2.5 py-1 text-[13px] font-semibold tabular-nums text-foreground"
-                data-morph={mk("rwy")}
-              >
-                <span className={cn("inline-flex items-center gap-0.5", favoured.headKt < 0 && "text-status-warning")}>
-                  {Math.abs(favoured.headKt)}kt
-                  {favoured.headKt < 0 ? (
-                    <ArrowUp className="h-3.5 w-3.5" aria-label="tailwind" />
-                  ) : (
-                    <ArrowDown className="h-3.5 w-3.5" aria-label="headwind" />
-                  )}
+              <p className="flex items-center gap-2.5 rounded-lg bg-muted px-2.5 py-1 text-[13px] font-semibold tabular-nums text-foreground">
+                <span className="inline-flex items-center gap-1">
+                  <Wind className="h-3.5 w-3.5 text-muted-foreground" aria-label="Favoured by the wind" />
+                  <span data-morph={mk("fav")}>{favoured.end.ident}</span>
                 </span>
-                {favoured.crossKt > 0 && (
-                  <span className="inline-flex items-center gap-0.5">
-                    {favoured.crossKt}kt
-                    {favoured.crossFrom === "L" ? (
-                      <ArrowRight className="h-3.5 w-3.5" aria-label="crosswind from the left" />
-                    ) : (
-                      <ArrowLeft className="h-3.5 w-3.5" aria-label="crosswind from the right" />
-                    )}
-                  </span>
-                )}
-                <span className="ml-auto text-muted-foreground">
-                  {landing ? (
-                    <>
-                      Landing <span className="text-foreground">{landing.ident}</span>
-                      <span className="font-normal"> · {landing.arrivals} arr</span>
-                    </>
-                  ) : (
-                    <>Rwy {favoured.end.ident}</>
-                  )}
-                </span>
+                <Components wind={favoured} />
+                <span className="ml-auto font-normal text-muted-foreground">by wind</span>
               </p>
             )}
           </div>
@@ -269,9 +344,9 @@ export function AirportPanel({
 
       {/* The airport itself: its runways and what is near. */}
       <div className="mt-2 space-y-1">
-        {info && info.runways.length > 0 && (
+        {listed.length > 0 && (
           <Line label="Rwys">
-            {info.runways.map((r) => (
+            {listed.map((r) => (
               <span key={r.id} className="whitespace-nowrap">
                 <span className="font-semibold text-foreground">{r.id}</span>
                 {r.lengthFt ? <span className="text-muted-foreground"> {fmtFt(r.lengthFt)}</span> : null}

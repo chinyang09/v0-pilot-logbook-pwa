@@ -19,6 +19,7 @@ import { readEnvelope, setQuery } from "@/lib/fr24/envelope"
 import type { Fr24Result } from "@/lib/fr24/types"
 import type { EnrichedAirport, LookupRoute, LookupRoutes, PooledAircraft } from "./types"
 import type { WeatherAnswer } from "@/lib/weather/types"
+import type { RunwayGeo } from "@/lib/runways/parse"
 import type { AirportInfo } from "@/lib/weather/airport-info"
 import type { Alternate } from "@/lib/weather/alternates"
 
@@ -116,6 +117,9 @@ export const lookup = {
   /** Runways (true headings) and frequencies, kept 30 days — `/api/lookup/airport-info`, Node. */
   airportInfo: (ids: string[], signal?: AbortSignal) =>
     nodeGet<Record<string, AirportInfo | null>>(`/api/lookup/airport-info?ids=${encodeURIComponent(ids.join(","))}`, signal),
+  /** Runway thresholds and true headings (OurAirports), stored per airport — `/api/lookup/runways`, Node. `loaded` is false until the store has read the file. */
+  runways: (ids: string[], signal?: AbortSignal) =>
+    nodeGet<{ loaded: boolean; data: Record<string, RunwayGeo[] | null> }>(`/api/lookup/runways?ids=${encodeURIComponent(ids.join(","))}`, signal),
   /** The aerodromes near each destination and along each leg, with their weather — `/api/lookup/alternates`, Node. */
   alternates: (
     path: readonly { lat: number; lon: number }[],

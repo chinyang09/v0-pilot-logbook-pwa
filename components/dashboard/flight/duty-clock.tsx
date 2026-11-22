@@ -199,7 +199,7 @@ export function DutyClockStrip({ clock: c, zulu }: { clock: DutyClock; zulu: boo
   const { rest, duty } = c
   const over = duty && duty.maxEndMs !== null && duty.fdpEndMs > duty.maxEndMs
   return (
-    <div aria-hidden className="mt-2">
+    <div aria-hidden className="mt-2" data-morph="duty-strip" data-morph-stretch>
       <div className="relative h-[18px]">
         {ticks.filter((t) => t.major).map((t) => (
           <span key={t.ms} className="absolute inset-y-0 w-px bg-border" style={{ left: pct(t.ms) }} />
@@ -277,7 +277,7 @@ export function DutyClockFace({ brief }: { brief: FlightBrief }) {
           {view.state}
         </p>
         {view.chip && (
-          <p className="min-w-0 truncate text-[10px] font-medium tabular-nums text-muted-foreground" suppressHydrationWarning>
+          <p className="min-w-0 truncate text-[10px] font-medium tabular-nums text-muted-foreground" suppressHydrationWarning data-morph="duty-chip">
             {view.chip}
           </p>
         )}
