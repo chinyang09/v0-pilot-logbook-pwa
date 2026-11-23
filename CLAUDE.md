@@ -57,7 +57,7 @@ expensive to get wrong, kept next to its subject in `__tests__/`:
 | `lib/utils/__tests__/history-markers.test.ts` | overlay marker ordering — which dialog `history.back()` would actually take |
 | `lib/utils/parsers/logten/__tests__/` | the LogTen Pro migration, run against REAL exports in `fixtures/` — value coercion, the three parsers, UTC-vs-local detection + conversion, duplicate detection, and the cross-file pass |
 | `lib/ocr/__tests__/` | both OCR screenshot layouts from synthetic boxes, the engine's plumbing with stand-in models (boxes, CTC decode, the keypad never recognised), device-first routing with the server as the backstop, and SEVEN REAL MCDU PHOTOS (`fixtures/mcdu/`) — what the engine actually reads from each, on the server AND on the device, every slot checked; `OCR_ENGINE=1 pnpm test` runs the photos through the real server engine (`OCR_FIXTURE_WRITE=1` re-pins the reads) |
-| `lib/briefing/__tests__/` | the company's BRIEFING PDF read off two REAL packages (`fixtures/tr4*.pages.json` — the PDFs' text lines, a phone number redacted): sections, the flight, fuel, weights, alternates, SID/STAR, the nav log, OptiClimb, weather, every NOTAM (70 / 54) and INTAM, the owner's own journal card reproduced figure by figure, the FIR crossings; the NOTAM register — a re-issue under a new number or new dates is the same NOTAM, the flag never touched by an import, new / seen / flagged |
+| `lib/briefing/__tests__/` | the MCDU INIT A / INIT B pages slot by slot off both real OFPs, NOTAM titles; the company's BRIEFING PDF read off two REAL packages (`fixtures/tr4*.pages.json` — the PDFs' text lines, a phone number redacted): sections, the flight, fuel, weights, alternates, SID/STAR, the nav log, OptiClimb, weather, every NOTAM (70 / 54) and INTAM, the owner's own journal card reproduced figure by figure, the FIR crossings; the NOTAM register — a re-issue under a new number or new dates is the same NOTAM, the flag never touched by an import, new / seen / flagged |
 | `lib/settings/__tests__/` | per-user settings — flat sparse fields, only moved keys written, the legacy carry-up seeding only non-default choices the account lacks, theme kept off the record |
 | `lib/runways/__tests__/` | OurAirports' runways read off a REAL excerpt (`fixtures/runways-sample.csv`) — closed and non-ICAO rows left out, thresholds, displaced thresholds, the true heading off the thresholds; the refresh against a map (a conditional 304, only changed airports rewritten, a page that is not the file refused, the lock); the runways in use on Changi's three parallels — final, climb-out, roll, lined up, bound elsewhere, the 20-minute window |
 | `lib/theme/__tests__/` | the palette generator — contrast and gamut for every preset in both modes and a sweep of custom seeds, and that globals.css carries the default palette exactly |
@@ -1078,6 +1078,7 @@ Important files, **OFP** (printed twice; the first copy is read),
 | | Rule |
 |---|---|
 | text | `pdfToPages` (`pdf-lines.ts`, the worker-free `unpdf`, on the device, offline): each page as LINES, the gaps as spaces by the page's own character width, so the monospaced OFP keeps its columns |
+| weather | NOT kept: the WX list is read for its airports and their roles only (`stations`, `stationsOf` — version 1 called them `weather` and kept the printed METAR / TAF). The page asks LIVE weather for them (`useBriefingWeather` → `useAirportWeather`), newer than any the PDF printed (the owner) |
 | parse | `parseBriefing` (`parse.ts`, pure): sections by title (`splitSections`), every figure by a LABELLED regex with `\s+` between words (the spacing differs between prints — "STAR: WBGG/25  MOXUN1A"), never by position; the nav log as two-line records read from both ends of the line; NOTAMs by `====` section banners, a location line over a dashed rule, `++++ CAT ++++`, items `ID VALID: dd-MON-yy hhmm - to\|PERM\|UFN`, schedules folded (multi-line, DAILY, spaced dashes), F)/G) limits on ONE line |
 | the journal | `journalOf` (`journal.ts`) — the owner's card: INIT A (ALTN, TO, FLT NBR, TIME ZONE from "UTC VAR", DIST, CRZ FL, CRZ TEMP = the mean OAT at cruise, TROPO = the lowest TROP), INIT B (TAXI, TRIP, RTE RSV, ALTN, FINAL, MDF = alternate + ALTN HOLD, BLOCK, ZFW/TOW/LW against their max, AVG WIND), OFF/ON = the schedule, OPTI CLB. Tested against the owner's own card: TR439 matches it exactly; on TR438 the owner had copied two rows one line out (MDF 3159 confirms the OFP's) |
 | ids | DERIVED (`ids.ts`): a briefing `brief:<flight digits>:<UTC date of ETD>:<dep>` — the flight form finds it without a link, and the date is the one a flight is keyed on; a NOTAM `notam:<key>`; a note `note:route:WSSS-WBGG` / `note:airport:WBGG`. Written as UPDATE patches from base 0 when not held (the settings record's pattern), and recreatable on the server, so two devices importing one PDF merge |
@@ -1094,22 +1095,32 @@ same, it continues to be checked"; the rest "stowed away"; new ones
 | import | `registerChanges` creates what was never seen and patches only number, dates, schedule, limits and (daily) last-seen on what was; it NEVER writes the flag; a record a week past its validity is purged |
 | status | per briefing (`statusOf`): flagged, else NEW (not in the register, or first seen with THIS briefing), else seen. The page shows flagged and new in full (new with an accent stripe), folds "N seen before" per location, and a Flagged tab |
 
-**The page** (`/briefing?id=`, `components/briefing/briefing-view.tsx`; both
-panels' width on a tablet, two columns by container query): Flight Card,
-Procedures (TAXI / SID / STAR / APP / TAXI × OFP | Sector Info — the OFP's
-SID / STAR as the prompt) and FIR · WP · Freq (prompted from the nav log's FIR
-boundaries, `firCrossings`) — both written per ROUTE, so the next flight of
-that route has them; Airports — Company (green) and Community (pink) notes per
-AIRPORT, for every flight there, alternates folded; NOTAMs; INTAMs; Weather as
-briefed; Alternates with their routes; Route and the nav log (kept for a
-future map); Fuel · This Route (`fuelHistory`: trip and block across every
-briefing of the route on that type). Every note is `NoteText` — a draft while
-focused, committed on blur and after a pause.
+**The page** (`/briefing?id=`) is MAIN / DETAIL, as Settings (the owner:
+"scrolling of the briefing should be like the other pages" — it was one page
+scrolled to the bottom). The main panel lists the sections, each with a line of
+what it holds; a section opens in the detail panel (`BriefingSectionPanel` on
+`ReadingPanel`), the overlay on a phone. The order is the MCDU's preparation
+order, **DIFSRIP** (DATA, INIT A, F-PLN, SEC F-PLN, RAD NAV, INIT B, PERF —
+the OFP has nothing for DATA or RAD NAV), then the brief:
 
-Reached by: the logbook's import button (`import-flow.tsx` tells a briefing
-apart by its first pages BEFORE the status dialog opens, saves it and opens
-the page), the flight form's **Briefing** section (`FlightBriefingRow`: the
-OFP and the NOTAM counts, or Import Briefing PDF), and the page's own import.
+| section | holds |
+|---|---|
+| Init A, Init B | the MCDU's own pages, slot for slot (`mcdu.ts`, `McduScreen`; the owner: "mimic the layout so it is easy to compare and key into the MCDU"): six rows of label over value beside the line select keys, fuel in TONNES to one decimal, times HHMM, TRIP WIND HD/TL; cyan what is keyed, green a reference (time zone, distance, GND TEMP from the live METAR), dashes what the OFP cannot give (ZFW CG, the alternate's CO RTE). Always the dark screen, capped at 26rem. Init B adds the fuel in kg, its adjustments and the weights |
+| F-PLN | route, distances, Procedures (TAXI / SID / STAR / APP / TAXI × OFP · Sector Info) and FIR · WP · Freq — both per ROUTE — and the nav log |
+| Sec F-PLN | the alternates: runway, approach, minima, distance, FL, wind, time, fuel, route |
+| Perf | RTOW, flaps, runway condition, EOSID, OptiClimb, cost index |
+| NOTAMs | by the bulletin's `====` SECTION (Departure Airport, Destination Alternate(s), Extended Area …, a block each, open when it holds flagged or new), then airport, then `++++` CATEGORY (runway, approach procedure, airport); each NOTAM an ACCORDION row — number, NEW, validity and its title (`notamTitle`: past an AIP supplement's number, heading, aerodrome and VALIDITY lines; a line cut on a joining word carries on) collapsed, the whole text open; the flag a target of its own beside the row. Seen ones fold under "N seen before"; Review / Flagged |
+| INTAMs | an accordion row each |
+| Airports & Weather | departure, destination and alternates (each once), en route folded: LIVE METAR and TAF (`StationWeather`) with the flight's times there lit (an alternate at the arrival plus its diversion), and the Company (green) and Community (pink) notes per AIRPORT |
+| Fuel History | `fuelHistory`: trip and block across every briefing of the route on that type |
+
+Every note is `NoteText` — a draft while focused, committed on blur and after
+a pause. Reached by SWIPING THE FLIGHT CARD RIGHT in the logbook
+(`SwipeableCard`'s `leadingActions` — every operated flight with a number; a
+flight with no briefing opens the page that imports one), by the logbook's
+import button (`import-flow.tsx` tells a briefing apart by its first pages
+BEFORE the status dialog opens, saves it and opens the page), and by the
+page's own import. Not from the flight form (the owner).
 
 ### The Pilot's Seat (`lib/utils/roster/pilot-role.ts`)
 
@@ -3063,6 +3074,9 @@ re-renders).
   the field takes pointers again (`:focus`), so a tap moves the caret and a
   hold selects. `focus()` left a textarea's caret at the start, where nothing
   could move it, so remarks could not be deleted (the owner's report).
+- **Leading actions** (`leadingActions`): revealed by a swipe RIGHT, out of
+  the row's left edge — the flight card's Briefing. Same buttons and rules;
+  the drag's right constraint is their width.
 - **Multi-card:** opening/tapping one card closes others via the
   `swipe-card-close-others` window event.
 - **No full-swipe:** there is intentionally **no** "swipe past N% to auto-trigger
@@ -6083,6 +6097,8 @@ When making changes, be aware of these high-impact files:
 - Do not hand SWR a `Map` or a `Set` as a fetcher's answer — its default compare (`dequal/lite`) sees no keys on one and calls any two equal, so a re-read after a write is dropped as "unchanged" (a flagged NOTAM stayed unflagged until a reload). Fetch an array or a plain object and index it in a `useMemo` (`useNotamRegister`)
 - Do not key a NOTAM by its number or its dates, or let an import write its flag — the register is keyed on what it SAYS where (`notamKey`), so a re-issue keeps its flag, and `registerChanges` never touches `flagged`
 - Do not read a briefing figure by column or line position — every one is labelled with `\s+` between its words; the spacing moves between prints
+- Do not keep a briefing's printed METAR / TAF or show them — its airports' weather is asked live; and do not give the MCDU pages any order or format but the MCDU's (tonnes to one decimal, HHMM, HD/TL)
+- Do not put the briefing back on one long page, or a way to it back in the flight form — it is main / detail by section in DIFSRIP order, reached from the flight card's right swipe
 - Do not close a dialog and navigate in the same step — the dialog's `useBackDismiss` marker release pops the new page. A briefing import skips the status dialog altogether
 - Do not hand-roll a suggestion list under a field — `SuggestionList` (`components/ui/suggestion-list.tsx`) is the one (an inset well, 44px rows, inset dividers), and `AircraftTypeSuggestions` and the add-aircraft / add-airport candidate lists all render through it; the aircraft form, panel and page each carried a bordered `hover:bg-accent` web dropdown
 - Do not ask an online lookup per keystroke or by itself on a form — a flight is looked up on the Lookup button (or Enter), a fleet on opening By fleet or on Find. And do not put Gates or Inbound back in the flight form: the form is for logging; they live on the dashboard's duty band and its panel (`useDutyLookups`, one cache). A lookup over an earlier one replaces what the EARLIER LOOKUP wrote (`lookupPatch`'s `previous`), never what the pilot entered — that is "Replace"

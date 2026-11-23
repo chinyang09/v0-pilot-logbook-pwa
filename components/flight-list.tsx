@@ -27,7 +27,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { FlightCardBody } from "@/components/flight-card-body";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plane, Trash2, MoreHorizontal } from "lucide-react";
+import { Plane, Trash2, MoreHorizontal, FileText } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { isOperatedFlight } from "@/lib/utils/entry-type";
+import { briefingId } from "@/lib/briefing/ids";
 import { cn } from "@/lib/utils";
 import { SwipeableCard } from "@/components/swipeable-card";
 import { primeFlightCache } from "@/components/flight-form";
@@ -157,6 +160,8 @@ interface SwipeableFlightCardProps {
   onDelete: (flight: FlightLog) => void;
   onMore: (flight: FlightLog, at: QuickActionAnchor) => void;
   onHold: (flight: FlightLog, at: PreviewAnchor) => void;
+  /** Opens the flight's briefing — the leading (swipe-right) action. */
+  onBriefing: (flight: FlightLog) => void;
   isSelected?: boolean;
   /** This row is the one the context preview lifted — see below. */
   isPreviewing?: boolean;
@@ -169,6 +174,7 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
   onDelete,
   onMore,
   onHold,
+  onBriefing,
   isSelected = false,
   isPreviewing = false,
   displayPrefs,
@@ -270,6 +276,21 @@ const SwipeableFlightCard = memo(function SwipeableFlightCard({
         primeFlightCache(flight);
         onEdit(flight);
       }}
+      // Swipe RIGHT: the flight's briefing (the company's OFP + NOTAM package,
+      // `/briefing`) — found by its derived id, so every flight with a
+      // number offers it; one with none imported opens the page that imports it.
+      leadingActions={
+        isOperatedFlight(flight) && flight.flightNumber
+          ? [
+              {
+                icon: <FileText className="h-5 w-5" />,
+                ariaLabel: "Briefing",
+                onClick: () => onBriefing(flight),
+                variant: "secondary",
+              },
+            ]
+          : undefined
+      }
       actions={[
         {
           // `…` opens the rest of the card's actions as their own buttons,
@@ -793,6 +814,12 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
       setPreview({ flight, at });
     }, []);
 
+    const router = useRouter();
+    const handleBriefing = useCallback(
+      (flight: FlightLog) => router.push(`/briefing?id=${encodeURIComponent(briefingId(flight.flightNumber, flight.date, flight.departureIcao || ""))}`),
+      [router],
+    );
+
     const handleMore = useCallback((flight: FlightLog, at: QuickActionAnchor) => {
       if (Date.now() - closedAtRef.current < CASCADE_REOPEN_GUARD_MS) return;
       if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(6);
@@ -1043,6 +1070,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                               onDelete={performDelete}
                               onMore={handleMore}
                               onHold={handleHold}
+                              onBriefing={handleBriefing}
                               isSelected={selectedFlightId === row.key}
                               isPreviewing={preview?.flight.id === row.key}
                               displayPrefs={preferences.display}

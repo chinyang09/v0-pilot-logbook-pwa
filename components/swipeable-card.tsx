@@ -29,6 +29,7 @@ import { useMenuOpen } from "@/lib/utils/menu-lock"
 const UNARMED_STYLE = { touchAction: "pan-y" } as const
 
 const SWIPE_CLOSE_EVENT = "swipe-card-close-others"
+const NO_ACTIONS: SwipeAction[] = []
 
 /** Width of each revealed action button (px) */
 const BUTTON_WIDTH = 64
@@ -103,6 +104,11 @@ export interface SwipeAction {
 interface SwipeableCardProps {
   children: React.ReactNode
   actions?: SwipeAction[]
+  /**
+   * Actions revealed by swiping RIGHT, out of the row's leading edge — the
+   * flight card's Briefing. Same buttons, same rules as `actions`.
+   */
+  leadingActions?: SwipeAction[]
   onClick?: () => void
   /** Class applied to the moving content wrapper */
   className?: string
@@ -167,8 +173,9 @@ function SwipeActionButton({
   onClose: () => void
   onRequestConfirm: (action: SwipeAction) => void
 }) {
-  // 0 (hidden) → 1 (fully revealed) across this button's stagger window.
-  const reveal = useTransform(x, [endX, startX], [1, 0], { clamp: true })
+  // 0 (hidden) → 1 (fully revealed) across this button's stagger window —
+  // negative x for a trailing button, positive for a leading one.
+  const reveal = useTransform(x, (v) => Math.min(1, Math.max(0, (v - startX) / (endX - startX))))
   // Capped at 1: POP_SPRING overshoots (~10%), and a button that fills the
   // row's height grew past the panel's clip at the peak — its top and bottom
   // were sliced flat on every reveal. The pop is the rise from 0.4 and the
@@ -252,6 +259,7 @@ function SwipeActionButton({
 export function SwipeableCard({
   children,
   actions = [],
+  leadingActions = NO_ACTIONS,
   onClick,
   className,
   containerClassName,
@@ -274,7 +282,7 @@ export function SwipeableCard({
   const containerRef = useRef<HTMLDivElement>(null)
   const isCard = variant === "card"
 
-  const hasActions = actions.length > 0 && !disabled
+  const hasActions = (actions.length > 0 || leadingActions.length > 0) && !disabled
 
   /**
    * The row's gesture machinery is ARMED on first contact, not on mount.
@@ -385,11 +393,15 @@ export function SwipeableCard({
   const trailingIndex = count - 1
   const openWidth =
     count > 0 ? count * BUTTON_WIDTH + (count - 1) * GAP + PANEL_PAD : 0
+  const leadCount = leadingActions.length
+  const leadWidth =
+    leadCount > 0 ? leadCount * BUTTON_WIDTH + (leadCount - 1) * GAP + PANEL_PAD : 0
 
   // x drives the card translation; the panel width derives from it so the
   // buttons are revealed out of the trailing edge as you swipe.
   const x = useMotionValue(0)
   const panelWidth = useTransform(x, (v) => Math.max(0, -v))
+  const leadPanelWidth = useTransform(x, (v) => Math.max(0, v))
   // True while the row is swiped open or mid-gesture (drives the card morph).
   const [active, setActive] = useState(false)
 
@@ -442,6 +454,16 @@ export function SwipeableCard({
       settle(-openWidth)
     },
     [openWidth, settle, x]
+  )
+  const onLeadFocus = useCallback(
+    (e: React.FocusEvent) => {
+      if (!(e.target as HTMLElement).matches?.(":focus-visible")) return
+      if (x.get() >= leadWidth - 1) return
+      openedByFocusRef.current = true
+      window.dispatchEvent(new CustomEvent(SWIPE_CLOSE_EVENT, { detail: { id: cardId.current } }))
+      settle(leadWidth)
+    },
+    [leadWidth, settle, x]
   )
   const onActionsBlur = useCallback(
     (e: React.FocusEvent) => {
@@ -538,10 +560,15 @@ export function SwipeableCard({
     (_: unknown, info: PanInfo) => {
       const current = x.get()
       const velocity = info.velocity.x
-      const shouldOpen = -current > openWidth / 2 || velocity < -500
+      if (current > 0) {
+        const shouldOpenLead = leadWidth > 0 && (current > leadWidth / 2 || velocity > 500)
+        settle(shouldOpenLead ? leadWidth : 0, velocity)
+        return
+      }
+      const shouldOpen = openWidth > 0 && (-current > openWidth / 2 || velocity < -500)
       settle(shouldOpen ? -openWidth : 0, velocity)
     },
-    [openWidth, settle, x]
+    [openWidth, leadWidth, settle, x]
   )
 
   // Capture-phase guard: swallow the click synthesised at the end of a drag, and
@@ -650,7 +677,33 @@ export function SwipeableCard({
       {hasActions && !armed && (
         <button type="button" className="sr-only" aria-label="Show actions" data-swipe-stand-in="" />
       )}
-      {hasActions && armed && (
+      {hasActions && armed && leadCount > 0 && (
+        <motion.div
+          data-swipe-actions
+          onFocus={onLeadFocus}
+          onBlur={onActionsBlur}
+          className="absolute inset-y-0 left-0 flex items-stretch justify-start gap-2 overflow-hidden"
+          style={{ width: leadPanelWidth }}
+        >
+          {leadingActions.map((action, index) => {
+            // The one nearest the card comes first, as on the trailing side.
+            const lunit = leadWidth / leadCount
+            const startReveal = (leadCount - 1 - index) * lunit * 0.5
+            return (
+              <SwipeActionButton
+                key={action.label ?? action.ariaLabel ?? index}
+                action={action}
+                x={x}
+                startX={startReveal}
+                endX={startReveal + lunit}
+                onClose={close}
+                onRequestConfirm={requestConfirm}
+              />
+            )
+          })}
+        </motion.div>
+      )}
+      {hasActions && armed && count > 0 && (
         <motion.div
           ref={panelRef}
           // Marked so a consumer's own gesture can tell "the row" from "the
@@ -691,7 +744,7 @@ export function SwipeableCard({
         drag={armed && hasActions && !confirmingAction && !menuOpen ? "x" : false}
         dragControls={armed ? dragControls : undefined}
         dragDirectionLock
-        dragConstraints={{ left: -openWidth, right: 0 }}
+        dragConstraints={{ left: -openWidth, right: leadWidth }}
         dragElastic={DRAG_ELASTIC}
         dragMomentum={false}
         onDragStart={handleDragStart}

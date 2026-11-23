@@ -70,7 +70,6 @@ import {
   type BlockFollowingField,
 } from "@/lib/utils/flight-calculations";
 import { inferPilotFlying, inferPilotRole, isMultiPilotFlight, isSoloFlight, soloConflict } from "@/lib/utils/flight-evidence";
-import { FlightBriefingRow } from "@/components/briefing/flight-briefing-row";
 import { PILOT_ROLES, TIME_CATEGORIES, categoryLabel, leadsTimeSection, roleLabel, showsCategory } from "@/lib/utils/logbook-rules";
 import { calculateNightTimeComplete } from "@/lib/utils/night-time";
 import {
@@ -2504,11 +2503,6 @@ function FlightFormImpl({
             />
           </SwipeableRow>
         </div>
-
-        {/* BRIEFING — the company's PDF for this flight, found by its derived id */}
-        {entryKind === "flight" && (
-          <FlightBriefingRow flightNumber={formData.flightNumber || ""} date={formData.date || ""} dep={formData.departureIcao || ""} />
-        )}
 
         {/* CREW Section */}
         <div className="rounded-xl bg-card border border-border overflow-hidden">
