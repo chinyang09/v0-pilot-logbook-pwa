@@ -139,16 +139,11 @@ describe("TR438 WSSS–WBGG", () => {
     ])
   })
 
-  it("reads the weather list by role", () => {
-    const wbgg = b.weather.find((s) => s.icao === "WBGG")!
-    expect(wbgg).toMatchObject({ iata: "KCH", role: "destination" })
-    expect(wbgg.metar).toBe("METAR WBGG 221400Z 00000KT 9000 -RA FEW015CB SCT018 25/25 Q1014 NOSIG")
-    // A TAF carried over three lines.
-    expect(b.weather.find((s) => s.icao === "WBSB")!.taf).toBe(
-      "TAF WBSB 221100Z 2212/2318 04005KT 9999 FEW015 FEW016CB BECMG 2216/2218 FEW014 BECMG 2300/2302 20003KT FEW015",
-    )
-    expect(b.weather.filter((s) => s.role === "alternate").map((s) => s.icao)).toEqual(["WBSB", "WIDD", "WBKK"])
-    expect(b.weather.find((s) => s.icao === "WSSS")!.role).toBe("departure")
+  it("reads the weather list's airports by role, without their reports", () => {
+    const wbgg = b.stations.find((s) => s.icao === "WBGG")!
+    expect(wbgg).toEqual({ icao: "WBGG", iata: "KCH", name: expect.any(String), role: "destination" })
+    expect(b.stations.filter((s) => s.role === "alternate").map((s) => s.icao)).toEqual(["WBSB", "WIDD", "WBKK"])
+    expect(b.stations.find((s) => s.icao === "WSSS")!.role).toBe("departure")
   })
 
   it("reads EVERY NOTAM in the bulletin", () => {

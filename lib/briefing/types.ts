@@ -11,7 +11,7 @@
  * | OFP (9 pages, printed twice — once alone under "Important files") | route, fuel, weights, alternates, RTOW, SID / nav log / STAR, forecast winds | `flight`, `route`, `fuel`, `weights`, `alternates`, `rtow`, `sid`, `star`, `navlog`, `winds` |
  * | OPTIFLIGHT BRIEFING | OptiClimb speeds for the planned TOW | `optiClimb` |
  * | Additional Info | the dispatch line ("TR438 WSSS/WBGG") | the IATA flight number |
- * | Airport WX List | METAR (SA) and TAF (FT) by role, advisories | `weather` |
+ * | Airport WX List | the airports by role (its METAR / TAF are not kept — the page asks live) | `stations` |
  * | NOTAM (LIDO bulletin) | NOTAMs by section → location → category | `notams` |
  * | INTAM | company bulletins | `intams` |
  * | charts, ABD File, Additional Docs | pictures, or "NO DATA" | not read |
@@ -21,7 +21,7 @@
 
 export interface Briefing {
   /** Bumped when the shape changes — a stored briefing older than this is re-read from its source, never guessed at. */
-  version: 1
+  version: 2
   flight: BriefingFlight
   route: BriefingRoute
   fuel: BriefingFuel
@@ -33,9 +33,8 @@ export interface Briefing {
   navlog: NavPoint[]
   winds: WindsAloft
   optiClimb: OptiClimb | null
-  weather: StationReport[]
-  /** AIRMET / SIGMET / advisory text, by heading, where the list gives any. */
-  advisories: { heading: string; text: string }[]
+  /** The airports of the flight by role — their weather is asked live. */
+  stations: BriefingStation[]
   notams: NotamBulletin
   intams: Intam[]
 }
@@ -93,6 +92,8 @@ export interface BriefingFuel {
   trip: FuelLine
   /** The route reserve — "5% CONT". */
   contingency: FuelLine
+  /** Its percentage of the trip — the 5 of "5% CONT" (MCDU RTE RSV/%). */
+  contingencyPct: number | null
   alternate: FuelLine
   /** Final reserve — "ALTN HOLD". */
   finalReserve: FuelLine
@@ -213,14 +214,20 @@ export interface OptiClimb {
 
 export type StationRole = "departure" | "destination" | "alternate" | "enroute"
 
-export interface StationReport {
+export interface BriefingStation {
   icao: string
   iata: string
   name: string
   role: StationRole
-  /** The METAR as printed, without its "SA" tag; "" when the list gives none. */
-  metar: string
-  taf: string
+}
+
+/**
+ * The stations of a briefing whatever version stored it — version 1 kept
+ * them, with their printed reports, as `weather`.
+ */
+export function stationsOf(b: Briefing): BriefingStation[] {
+  const legacy = (b as unknown as { weather?: BriefingStation[] }).weather
+  return b.stations ?? legacy ?? []
 }
 
 export interface NotamBulletin {

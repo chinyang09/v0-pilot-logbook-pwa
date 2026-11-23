@@ -35,6 +35,25 @@ export function useBriefing(id: string | null) {
   return { briefing: data as BriefingRecord | null | undefined, isLoading, refresh: () => mutate() }
 }
 
+/**
+ * The briefings of several flights by id — the dashboard's duty, for the
+ * alternates its OFPs plan. Read by key, never the whole table (each is ~65KB).
+ */
+export function useBriefingsByIds(ids: readonly string[]): BriefingRecord[] {
+  const { isReady } = useDBReady()
+  const { data } = useSWR(
+    isReady && ids.length > 0 ? `idb:briefing:some:${ids.join("|")}` : null,
+    async () => {
+      if (!(await checkDBReady())) return []
+      const found = await Promise.all(ids.map((id) => getBriefing(id)))
+      return found.filter((r): r is BriefingRecord => !!r)
+    },
+    OPTS,
+  )
+  return data ?? NO_BRIEFINGS
+}
+const NO_BRIEFINGS: BriefingRecord[] = []
+
 export function useAllBriefings() {
   const { isReady } = useDBReady()
   const { data } = useSWR(isReady ? BRIEFING_KEYS.all : null, async () => ((await checkDBReady()) ? getAllBriefings() : []), OPTS)

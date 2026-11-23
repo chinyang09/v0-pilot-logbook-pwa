@@ -31,7 +31,7 @@ import type {
   NotamBulletin,
   OptiClimb,
   Procedure,
-  StationReport,
+  BriefingStation,
   StationRole,
   WindsAloft,
 } from "./types"
@@ -154,7 +154,8 @@ function readFuel(lines: string[]): BriefingFuel {
   }
   return {
     trip: fuelLine(lines, "BURNOFF"),
-    contingency: fuelLine(lines, "5% CONT"),
+    contingency: fuelLine(lines, "\\d+(?:\\.\\d)?% CONT"),
+    contingencyPct: num(find(lines, /(\d+(?:\.\d)?)%\s+CONT/)?.[1]),
     alternate,
     finalReserve,
     topup60: fuelLine(lines, "60 MIN TOPUP FUEL"),
@@ -338,68 +339,32 @@ const ROLES: [RegExp, StationRole][] = [
   [/^ENROUTE AIRPORT/, "enroute"],
 ]
 
-function readWeather(lines: string[]): { stations: StationReport[]; advisories: { heading: string; text: string }[] } {
-  const stations: StationReport[] = []
-  const advisories: { heading: string; text: string }[] = []
+/**
+ * The airports the list names, by role — departure, destination, the
+ * alternates, en route. Their METAR and TAF are NOT kept: the briefing shows
+ * live weather for them (`/api/lookup/weather`), which is newer than any the
+ * PDF printed (the owner, Nov 2026). The list is read for who is who.
+ */
+function readStations(lines: string[]): BriefingStation[] {
+  const stations: BriefingStation[] = []
   let role: StationRole | null = null
-  let station: StationReport | null = null
-  let report: { kind: "SA" | "FT"; text: string } | null = null
-  let advisory: { heading: string; text: string } | null = null
-  const closeReport = () => {
-    if (station && report) {
-      const body = report.text.replace(/=\s*$/, "").replace(/\s+/g, " ").trim()
-      const [time, ...rest] = body.split(" ")
-      const formatted = `${station.icao} ${time}Z ${rest.join(" ")}`
-      if (report.kind === "SA") station.metar = `METAR ${formatted}`
-      else station.taf = `TAF ${formatted}`
-    }
-    report = null
-  }
   for (const raw of lines) {
     const l = raw.trim()
     if (!l || /^AIRPORTLIST ENDED/.test(l)) continue
     const r = ROLES.find(([re]) => re.test(l))
     if (r) {
-      closeReport()
       role = r[1]
-      advisory = null
-      continue
-    }
-    if (!role && /:$/.test(l)) {
-      advisory = { heading: l.replace(/:$/, ""), text: "" }
-      advisories.push(advisory)
-      continue
-    }
-    if (!role && advisory) {
-      advisory.text = advisory.text ? `${advisory.text} ${l}` : l
       continue
     }
     const st = l.match(/^([A-Z]{4})\/([A-Z0-9]{3})\s+(.+)$/)
-    if (st && role) {
-      closeReport()
-      station = { icao: st[1], iata: st[2], name: titleCase(st[3]), role, metar: "", taf: "" }
-      stations.push(station)
+    if (st && role && !stations.some((x) => x.icao === st[1])) {
+      stations.push({ icao: st[1], iata: st[2], name: titleCase(st[3]), role })
       continue
     }
-    const rep = l.match(/^(SA|SP|FT)\s+(.+)$/)
-    if (rep && station) {
-      closeReport()
-      report = { kind: rep[1] === "FT" ? "FT" : "SA", text: rep[2] }
-      if (/=$/.test(l)) closeReport()
-      continue
-    }
-    if (report) {
-      report.text += ` ${l}`
-      if (/=$/.test(l)) closeReport()
-    } else if (/:$/.test(l)) {
-      // An advisory heading after the stations ("Space Weather Advisory:").
-      role = null
-      advisory = { heading: l.replace(/:$/, ""), text: "" }
-      advisories.push(advisory)
-    }
+    // An advisory heading after the stations ("Space Weather Advisory:") ends them.
+    if (/:$/.test(l) && !/^(SA|SP|FT)\s/.test(l)) role = null
   }
-  closeReport()
-  return { stations, advisories: advisories.filter((a) => a.text && !/^(NIL|No Wx data available)$/i.test(a.text)) }
+  return stations
 }
 
 /* ── NOTAMs ──────────────────────────────────────────────────────────────── */
@@ -620,8 +585,8 @@ export function parseBriefing(pages: string[][]): Briefing {
 
   const dep = routeText?.[1] ?? ""
   const arr = routeText?.[4] ?? ""
-  const weather = readWeather(of("Airport WX List"))
-  const iataOf = (icao: string, fallback: string) => weather.stations.find((s) => s.icao === icao)?.iata ?? fallback
+  const stations = readStations(of("Airport WX List"))
+  const iataOf = (icao: string, fallback: string) => stations.find((s) => s.icao === icao)?.iata ?? fallback
 
   const rtowHead = find(ofp, /^\s*([A-Z]{4})\s+RWY\s+(\w+)\s+STD\s+RATING:\s*(.+?)\s*$/)
   const rtow = rtowHead
@@ -646,7 +611,7 @@ export function parseBriefing(pages: string[][]): Briefing {
   const airNm = num(find(ofp, /AIR\s+MILES\s+(\d+)/)?.[1])
 
   return {
-    version: 1,
+    version: 2,
     flight: {
       number: iata ? `${iata[1]}${iata[2]}` : flightLine ? `${flightLine[2]}${flightLine[3]}` : "",
       callsign: flightLine ? `${flightLine[2]}${flightLine[3]}` : "",
@@ -689,8 +654,7 @@ export function parseBriefing(pages: string[][]): Briefing {
     navlog: readNavlog(ofp),
     winds,
     optiClimb: readOptiClimb(of("OPTIFLIGHT BRIEFING")),
-    weather: weather.stations,
-    advisories: weather.advisories,
+    stations,
     notams: readNotams(bulletin),
     intams: readIntams(of("INTAM")),
   }

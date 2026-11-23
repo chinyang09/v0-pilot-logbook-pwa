@@ -260,9 +260,18 @@ export function AirportPanel({
             ))}
           </Line>
         )}
-        {nearby.length > 0 && (
+        {nearby.some((a) => a.planned) && (
+          <Line label="Altn">
+            {nearby
+              .filter((a) => a.planned)
+              .map((a) => (
+                <AlternateChip key={a.alt.icao} a={a} code={codeOf} showWeather={weatherAsked} />
+              ))}
+          </Line>
+        )}
+        {nearby.some((a) => !a.planned) && (
           <Line label="Near">
-            {nearby.map((a) => (
+            {nearby.filter((a) => !a.planned).map((a) => (
               <AlternateChip key={a.alt.icao} a={a} code={codeOf} showWeather={weatherAsked} />
             ))}
           </Line>
