@@ -267,6 +267,15 @@ function DisplaySection({ preferences, updateDisplay }: {
             { value: "dms", label: "DMS (1°21'8\"N)" },
           ]}
         />
+        <SelectRow<DisplayPreferences["runwayLength"]>
+          label="Runway Length"
+          value={preferences.display.runwayLength ?? "ft"}
+          onValueChange={(value) => updateDisplay({ runwayLength: value })}
+          options={[
+            { value: "ft", label: "Feet (10,499')" },
+            { value: "m", label: "Metres (3,200m)" },
+          ]}
+        />
       </FormSection>
     </ReadingPanel>
   )

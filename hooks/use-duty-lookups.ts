@@ -74,7 +74,7 @@ async function fetchDutyLookups(legs: FlightLog[]): Promise<DutyLookups> {
   }
 }
 
-export function useDutyLookups(atMs: number | null, opts: { active: boolean }) {
+export function useDutyLookups(atMs: number | null, opts: { active: boolean; fast?: boolean }) {
   const { flights } = useFlights()
   const legs = useMemo(() => (atMs === null ? NO_FLIGHTS : dutyFlights(flights ?? NO_FLIGHTS, atMs)), [flights, atMs])
   // The key names what is asked, so a leg renumbered, re-tailed or pushed
@@ -92,9 +92,11 @@ export function useDutyLookups(atMs: number | null, opts: { active: boolean }) {
   const { data, isValidating, mutate } = useSWR(key, () => fetchDutyLookups(legs), {
     revalidateOnFocus: false,
     revalidateOnReconnect: false,
-    dedupingInterval: 5 * 60_000,
-    // A gate is published late: ask again every quarter hour while on screen.
-    refreshInterval: 15 * 60_000,
+    dedupingInterval: (opts.fast ? 2 : 5) * 60_000,
+    // A gate is published late: ask again every quarter hour while on screen —
+    // every five minutes within three hours of the duty and on it, where a
+    // delay (the estimated IN, `FlightGates.times`) moves by the minute.
+    refreshInterval: (opts.fast ? 5 : 15) * 60_000,
   })
   const refresh = useCallback(() => void mutate(), [mutate])
   return {

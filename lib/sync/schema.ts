@@ -59,8 +59,9 @@ import type { BriefingRecord, NotamRecord, BriefingNoteRecord } from "@/types/en
  *   rewrite: `entryType` was already an optional string.)
  * 6 adds a flight's `cabinCrew` (the schedule report's cabin crew, for the
  *   Flight Deck; never a seat).
+ * 7 adds the settings' `display_runwayLength` (feet or metres; null until chosen).
  */
-export const SYNC_SCHEMA_VERSION = 6
+export const SYNC_SCHEMA_VERSION = 7
 
 /**
  * Push/pull order: dependency-light collections first, so a flight never

@@ -24,7 +24,7 @@
 import { callFr24Worker } from "@/lib/fr24/worker-client"
 import type { Fr24Flight, Fr24Result } from "@/lib/fr24/types"
 import { normalizeRegistration } from "@/lib/utils/string"
-import { findOnBoard, normalizeFlightNumber, pickFlightOnDate, suggestFlight, type FlightGates } from "./flight-suggest"
+import { findOnBoard, normalizeFlightNumber, pickFlightOnDate, suggestFlight, type FlightGates, type FlightTimesLive } from "./flight-suggest"
 import { fetchChangiFlights, singaporeDate, type ChangiFlight } from "./changi"
 import { movementOf, pickWhereabouts } from "./aircraft-whereabouts"
 import { aircraftCandidates, airportCandidates } from "./search-candidates"
@@ -175,6 +175,17 @@ async function flightGatesRoute(query: Query): Promise<Fr24Result<LookupRoutes["
       ...(atArr?.stand ? { stand: atArr.stand } : {}),
     }
     const fromAirport = !!(atDep?.gate || atDep?.stand || atArr?.gate || atArr?.stand)
+    // The live times: the airport's record at a Singapore end, the tracked
+    // flight (or the board's row, or the list's) otherwise.
+    const tracked = (k: "estimatedDeparture" | "actualDeparture" | "estimatedArrival" | "actualArrival") =>
+      (k.endsWith("Departure") ? dep : arr)?.[k] ?? row[k] ?? null
+    const times: FlightTimesLive = {
+      estimatedDeparture: atDep?.estimated ?? tracked("estimatedDeparture"),
+      actualDeparture: atDep?.actual ?? tracked("actualDeparture"),
+      estimatedArrival: atArr?.estimated ?? tracked("estimatedArrival"),
+      actualArrival: atArr?.actual ?? tracked("actualArrival"),
+      source: atDep?.estimated || atDep?.actual || atArr?.estimated || atArr?.actual ? "airport" : "tracker",
+    }
     return {
       ok: true as const,
       status: 200,
@@ -190,6 +201,7 @@ async function flightGatesRoute(query: Query): Promise<Fr24Result<LookupRoutes["
         source: fromAirport ? ("airport" as const) : source,
         inboundFlight: atDep?.linkedFlight ?? "",
         onwardFlight: atArr?.linkedFlight ?? "",
+        times,
       },
     }
   }

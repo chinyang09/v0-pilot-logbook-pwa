@@ -339,7 +339,10 @@ export function BentoGrid({
               >
                 {/* Dimmed while arranging: the tile is being placed, not read,
                     and its width chip sits over the middle of it. */}
-                <div className={cn("transition-opacity", lifted ? "opacity-20" : "opacity-45")}>{face(id, size)}</div>
+                {/* A flex column like the tile's own button: a face that fills the tile
+                    (the airport's station, its corners laid out absolutely)
+                    otherwise collapsed to nothing — the owner's "blank" tile. */}
+                <div className={cn("flex min-h-0 flex-1 flex-col transition-opacity", lifted ? "opacity-20" : "opacity-45")}>{face(id, size)}</div>
               </div>
               {active !== id && (
                 <span

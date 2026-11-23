@@ -30,7 +30,11 @@ import { RECENCY_CAUTION_DAYS } from "@/lib/utils/dashboard/legality"
 import { CurrencyDots } from "./currency-dots"
 import { Pager, useRememberedPage } from "./pager"
 import { onwardLines, whereaboutsLines } from "@/lib/lookup/aircraft-whereabouts"
+import { MIN_TURN_MIN } from "@/lib/utils/dashboard/estimated-in"
 import * as React from "react"
+import { ChevronRight, Plane } from "lucide-react"
+import { formatClockDisplay } from "@/lib/utils/time"
+import { flightInstantMs } from "@/lib/airports/code-changes"
 
 /** "18 Nov" — a stored day, as a tile has room for it. */
 export const shortDay = (ymd: string) => formatDay(ymd, { weekday: false, year: false })
@@ -234,7 +238,7 @@ export function legNow(brief: FlightBrief): number {
  * them. Nothing else: not the rest before the duty (the duty card's), not
  * the leg after (the pilot flies it).
  */
-export function legLine(brief: FlightBrief, i: number): { kind: "inbound" | "onward"; text: string } | null {
+export function legLine(brief: FlightBrief, i: number): { kind: "inbound" | "onward"; text: string; late?: boolean } | null {
   const { duty } = brief
   const f = duty.legs[i]
   if (!f) return null
@@ -244,7 +248,7 @@ export function legLine(brief: FlightBrief, i: number): { kind: "inbound" | "onw
     const w = inbound?.status === "done" ? whereaboutsLines(inbound.whereabouts, brief.now, sep) : null
     // The flight number only — where it came from is the card's; the time it
     // landed is what decides the engines' idle and the APU on the turn.
-    if (w) return { kind: "inbound", text: [w.flight.split(" ")[0], w.primary].filter(Boolean).join(" · ") }
+    if (w) return { kind: "inbound", text: [w.flight.split(" ")[0], w.primary].filter(Boolean).join(" · "), late: inboundLate(brief, i) }
   }
   if (i === duty.legs.length - 1) {
     const onward = duty.lookups?.onward
@@ -255,6 +259,45 @@ export function legLine(brief: FlightBrief, i: number): { kind: "inbound" | "onw
     if (viaAirport) return { kind: "onward", text: `Next ${viaAirport}` }
   }
   return null
+}
+
+/**
+ * The inbound aeroplane lands too late for leg `i` to leave on time: its
+ * arrival plus a turnaround (`MIN_TURN_MIN`) past the leg's scheduled OUT —
+ * the line under the leg turns amber (the owner, Nov 2026: react to
+ * real-time changes, grab attention only where it belongs).
+ */
+export function inboundLate(brief: FlightBrief, i: number): boolean {
+  const f = brief.duty.legs[i]
+  const w = brief.duty.lookups?.inbound
+  if (!f || f.outTime || w?.status !== "done" || brief.duty.lookups?.inboundFlightId !== f.id) return false
+  const arrival = w.whereabouts.inbound?.arrival ? Date.parse(w.whereabouts.inbound.arrival) : NaN
+  const out = f.scheduledOut && /^\d{1,2}:\d{2}$/.test(f.scheduledOut) ? Date.parse(`${f.date}T${f.scheduledOut.padStart(5, "0")}:00Z`) : NaN
+  return Number.isFinite(arrival) && Number.isFinite(out) && arrival + MIN_TURN_MIN * 60_000 > out
+}
+
+/**
+ * How late leg `i` is now expected to leave, in minutes — from the sources'
+ * estimate, the inbound's arrival or the leg before (`estimateDutyIn`) — or
+ * null when it is on schedule, has left, or nothing live is known.
+ */
+export function legDelay(brief: FlightBrief, i: number): number | null {
+  const f = brief.duty.legs[i]
+  const e = brief.duty.estimate?.legs[i]
+  if (!f || !e || f.outTime || e.outKind === "scheduled" || e.outMs === null) return null
+  const sched = f.scheduledOut && /^\d{1,2}:\d{2}$/.test(f.scheduledOut) ? Date.parse(`${f.date}T${f.scheduledOut.padStart(5, "0")}:00Z`) : NaN
+  if (!Number.isFinite(sched)) return null
+  const late = Math.round((e.outMs - sched) / 60_000)
+  return late >= DELAY_SAID_MIN ? late : null
+}
+
+/** A delay under this is not said — a few minutes either way is the schedule. */
+const DELAY_SAID_MIN = 10
+
+/** "+0:40" in amber, beside a leg's times. */
+function DelayChip({ minutes }: { minutes: number | null }) {
+  if (minutes === null) return null
+  return <span className="font-semibold text-status-warning"> +{formatDutyClock(minutes)}</span>
 }
 
 /**
@@ -282,6 +325,7 @@ function LegPage({ brief, i }: { brief: FlightBrief; i: number }) {
         <span className="font-semibold">{f.flightNumber || "Flight"}</span>
         {t?.departMs != null && t?.arriveMs != null && ` · ${clock(t.departMs).replace(/Z$/, "")}–${clock(t.arriveMs)}`}
         {flown && <span className="text-muted-foreground"> · On blocks</span>}
+        <DelayChip minutes={legDelay(brief, i)} />
       </p>
       <p className="flex items-baseline justify-between gap-2 text-[12px] leading-tight tabular-nums">
         <span className="min-w-0 truncate" data-morph={`fl-ac-${i}`}>
@@ -294,7 +338,11 @@ function LegPage({ brief, i }: { brief: FlightBrief; i: number }) {
           </span>
         )}
       </p>
-      <p className="truncate text-[11px] leading-tight text-muted-foreground" suppressHydrationWarning data-morph={`fl-next-${i}`}>
+      <p
+        className={cn("truncate text-[11px] leading-tight", line?.late ? "font-semibold text-status-warning" : "text-muted-foreground")}
+        suppressHydrationWarning
+        data-morph={`fl-next-${i}`}
+      >
         {line?.text || "\u00a0"}
       </p>
     </>
@@ -347,6 +395,205 @@ export function FlightFace({ brief, size, inCard = false }: { brief: FlightBrief
         )}
       </div>
       {crewAt && <CrewPanel brief={brief} crew={crew} below={crewAt === "below"} />}
+    </div>
+  )
+}
+
+/** A row of a card's table: what it is on the left, the value on the right. */
+export interface CardRow {
+  label: string
+  value: React.ReactNode
+  sub?: string
+  tone?: "caution" | "fail"
+  /** The tile's element this value is — it flies there from the face. */
+  morph?: string
+}
+
+/** The rows as a two-column table — the duty card's shape, shared. */
+export function CardTable({ rows }: { rows: CardRow[] }) {
+  if (rows.length === 0) return null
+  return (
+    <dl>
+      {rows.map((r, i) => (
+        <div key={r.label} className={cn("flex items-baseline justify-between gap-4 py-2", i < rows.length - 1 && "border-b border-border/50")}>
+          <dt className="shrink-0 text-[13px] text-muted-foreground">{r.label}</dt>
+          <dd className="min-w-0 text-right">
+            <span
+              className={cn(
+                "text-[15px] font-semibold tabular-nums",
+                r.tone === "fail" ? "text-destructive" : r.tone === "caution" ? "text-status-warning" : "text-foreground",
+              )}
+              suppressHydrationWarning
+              data-morph={r.morph}
+            >
+              {r.value}
+            </span>
+            {r.sub && <span className="block text-[11px] text-muted-foreground" suppressHydrationWarning>{r.sub}</span>}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+/** "00:05" − "22:30" across midnight → "1:35"; "" without both. */
+export function plannedBlock(out?: string, inn?: string): string {
+  if (!out || !inn) return ""
+  const m = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5))
+  if (!/^\d\d:\d\d$/.test(out) || !/^\d\d:\d\d$/.test(inn)) return ""
+  const d = (m(inn) - m(out) + 1440) % 1440
+  return d ? `${Math.floor(d / 60)}:${String(d % 60).padStart(2, "0")}` : ""
+}
+
+/**
+ * Leg `i` in the flights CARD, in the order it runs (the owner, Nov 2026:
+ * "a revamp on the contents between the timeline and crew. No repetition.
+ * Content from widget move to position"): the route and number as the tile
+ * has them, then a table — the inbound aeroplane, our aeroplane, the
+ * departure gate, the OUT and IN where they are not the schedule (actual, or
+ * the live estimate), the arrival gate, the block, the flight after ours —
+ * each of the tile's lines flying into its row. Nothing the number line says
+ * is said again.
+ */
+function CardLeg({ brief, i, openFlight }: { brief: FlightBrief; i: number; openFlight: (id: string) => void }) {
+  const { duty, clock, code } = brief
+  const f = duty.legs[i]
+  const t = duty.times[i]
+  const sep = brief.display?.clockSeparator
+  const flown = !!f.inTime
+  const g = duty.lookups?.gates[f.id]
+  const gates = g?.status === "done" ? g.gates : null
+  const line = legLine(brief, i)
+  const reg = f.aircraftReg || (i === legNow(brief) ? duty.lookups?.inboundRegistration : "") || gates?.flight.registration || ""
+  const e = duty.estimate?.legs[i]
+  const rows: CardRow[] = []
+  // The aeroplane coming in, on the leg the pilot takes it over for.
+  const inbound = duty.lookups?.inbound
+  const w = line?.kind === "inbound" && inbound?.status === "done" ? whereaboutsLines(inbound.whereabouts, brief.now, sep) : null
+  if (line?.kind === "inbound") {
+    rows.push({
+      label: "Inbound",
+      value: line.text,
+      sub: [w?.flight.split(" ").slice(1).join(" "), w?.std, w?.gate && `Arr ${w.gate}`].filter(Boolean).join(" · ") || undefined,
+      tone: line.late ? "caution" : undefined,
+      morph: `fl-next-${i}`,
+    })
+  } else if (gates?.inboundFlight && !flown && !f.outTime) {
+    rows.push({ label: "Inbound", value: gates.inboundFlight })
+  }
+  rows.push({
+    label: "Aircraft",
+    value: reg ? `${reg}${f.aircraftType ? ` ${f.aircraftType}` : ""}` : "TBA",
+    morph: `fl-ac-${i}`,
+  })
+  const terminalStand = (x: { terminal: string; stand?: string } | undefined) =>
+    [x?.terminal && `Terminal ${x.terminal.replace(/^T/i, "")}`, x?.stand && `Stand ${x.stand}`].filter(Boolean).join(" · ") || undefined
+  if (gates?.departure.gate || gates?.departure.stand) {
+    rows.push({
+      label: "Departure",
+      value: gates.departure.gate ? `Gate ${gates.departure.gate}` : `Stand ${gates.departure.stand}`,
+      sub: gates.departure.gate ? terminalStand(gates.departure) : undefined,
+      morph: flown ? undefined : `fl-gate-${i}`,
+    })
+  }
+  // The times where they are NOT what the number line says: what flew
+  // against the schedule, or the live estimate against it.
+  const sched = (hhmm?: string) => (hhmm && /^\d{1,2}:\d{2}$/.test(hhmm) ? `${formatClockDisplay(hhmm, sep)}Z` : "")
+  const versus = (ms: number | null, hhmm: string | undefined, after?: string) => {
+    const s0 = hhmm && /^\d{1,2}:\d{2}$/.test(hhmm) ? flightInstantMs(f.date, hhmm, after ?? null) : null
+    if (ms === null || s0 === null) return ""
+    const d = Math.round((ms - s0) / 60_000)
+    return Math.abs(d) < 5 ? "On time" : d > 0 ? `${formatDutyClock(d)} late` : `${formatDutyClock(-d)} early`
+  }
+  if (f.outTime) {
+    // The number line says what flew; the schedule it flew against, once.
+    const range = sched(f.scheduledOut) && sched(f.scheduledIn) ? `${sched(f.scheduledOut).replace(/Z$/, "")}–${sched(f.scheduledIn)}` : ""
+    const sub = [
+      versus(t?.departMs ?? null, f.scheduledOut) && `OUT ${versus(t?.departMs ?? null, f.scheduledOut).toLowerCase()}`,
+      f.inTime && versus(t?.arriveMs ?? null, f.scheduledIn, f.scheduledOut) && `IN ${versus(t?.arriveMs ?? null, f.scheduledIn, f.scheduledOut).toLowerCase()}`,
+    ].filter(Boolean).join(" · ")
+    if (range) rows.push({ label: "Scheduled", value: range, sub: sub || undefined })
+    // Off blocks, not yet on: where it is now expected in.
+    if (!f.inTime && e && e.inMs !== null) rows.push({ label: "Est. IN", value: clock(e.inMs), sub: versus(e.inMs, f.scheduledIn, f.scheduledOut) || undefined })
+  } else if (e && e.outKind !== "scheduled" && e.outMs !== null) {
+    // Not yet off: the number line is the schedule; the live estimate against it.
+    const late = legDelay(brief, i) !== null
+    rows.push({ label: "Est. OUT", value: clock(e.outMs), sub: versus(e.outMs, f.scheduledOut) || undefined, tone: late ? "caution" : undefined })
+    if (e.inMs !== null) rows.push({ label: "Est. IN", value: clock(e.inMs), sub: versus(e.inMs, f.scheduledIn, f.scheduledOut) || undefined, tone: late ? "caution" : undefined })
+  }
+  if (gates?.arrival.gate || gates?.arrival.stand) {
+    rows.push({
+      label: "Arrival",
+      value: gates.arrival.gate ? `Gate ${gates.arrival.gate}` : `Stand ${gates.arrival.stand}`,
+      sub: gates.arrival.gate ? terminalStand(gates.arrival) : undefined,
+      morph: flown ? `fl-gate-${i}` : undefined,
+    })
+  }
+  const block = flown && f.blockTime && f.blockTime !== "00:00" ? f.blockTime : plannedBlock(f.scheduledOut, f.scheduledIn)
+  if (block) rows.push({ label: flown ? "Block" : "Planned Block", value: block })
+  // The flight that takes the aeroplane over after ours.
+  if (line?.kind === "onward") {
+    const onward = duty.lookups?.onward
+    const o = onward?.status === "done" ? onwardLines(onward.whereabouts, sep) : null
+    rows.push({
+      label: "Next Flight",
+      value: line.text.replace(/^Next /, ""),
+      sub: [o?.flight.split(" ").slice(1).join(" "), o?.std].filter(Boolean).join(" · ") || undefined,
+      morph: `fl-next-${i}`,
+    })
+  }
+  return (
+    <>
+      <p className="truncate text-[21px] font-bold leading-tight tracking-tight text-foreground" data-morph={`fl-route-${i}`}>
+        {code(f.departureIcao, f.departureIata)} – {code(f.arrivalIcao, f.arrivalIata)}
+      </p>
+      <p className="mt-0.5 truncate text-[12px] leading-tight tabular-nums text-foreground" suppressHydrationWarning data-morph={`fl-num-${i}`}>
+        <span className="font-semibold">{f.flightNumber || "Flight"}</span>
+        {t?.departMs != null && t?.arriveMs != null && ` · ${clock(t.departMs).replace(/Z$/, "")}–${clock(t.arriveMs)}`}
+        {flown && <span className="text-muted-foreground"> · On blocks</span>}
+      </p>
+      <div className="mt-1.5">
+        <CardTable rows={rows} />
+      </div>
+      <button
+        type="button"
+        onClick={() => openFlight(f.id)}
+        className="-mx-1.5 mt-0.5 flex w-[calc(100%+0.75rem)] items-center gap-2.5 rounded-lg px-1.5 py-2 text-left transition-colors active:bg-muted/60"
+      >
+        <Plane className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-foreground">Open {f.flightNumber || "Flight"}</span>
+        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+      </button>
+    </>
+  )
+}
+
+/**
+ * The flights CARD above its crew: the duty on its day, then a leg a page —
+ * swiped as the tile is, the dots under the leg's Open row (the owner).
+ */
+export function FlightCardLegs({ brief, openFlight }: { brief: FlightBrief; openFlight: (id: string) => void }) {
+  const { duty, day } = brief
+  const count = duty.legs.length
+  const [page, setPage] = useRememberedPage(`flight:${duty.atMs}`, legNow(brief), count)
+  if (duty.atMs === null) return <p className="py-1 text-[13px] text-muted-foreground">Nothing rostered</p>
+  return (
+    <div>
+      <WidgetLabel right={count > 1 ? <span className="text-[10px] font-semibold tabular-nums text-muted-foreground" data-morph="fl-legn">Leg {page + 1}/{count}</span> : undefined}>
+        <span suppressHydrationWarning>
+          {dutyWord(brief)} · {day(duty.atMs)}
+        </span>
+      </WidgetLabel>
+      <DayBar brief={brief} focus={count > 1 ? page : null} />
+      {count === 0 ? (
+        <p className="truncate text-[21px] font-bold leading-tight tracking-tight text-foreground" data-morph="fl-route">
+          {(chainOf(brief).route ?? "").split("-").filter(Boolean).join(" – ") || "—"}
+        </p>
+      ) : (
+        <Pager count={count} page={page} onPage={setPage} morph="fl">
+          {(i) => <CardLeg brief={brief} i={i} openFlight={openFlight} />}
+        </Pager>
+      )}
     </div>
   )
 }
@@ -484,7 +731,7 @@ export function CurrencyFace({ brief, size }: { brief: FlightBrief; size: TileSi
     <>
       {/* A third of the row has no room for the tally beside the label: its
           edge and the dots' colours carry what is flagged. */}
-      <WidgetLabel right={third ? undefined : <MoreFlagged rows={all.slice(lines)} />}>
+      <WidgetLabel title right={third ? undefined : <MoreFlagged rows={all.slice(lines)} />}>
         Currency
         {/* Forecast to a later duty, the day it is judged on; else how far the dots look. */}
         {!third && (
@@ -555,7 +802,7 @@ export function LimitsFace({ brief, size }: { brief: FlightBrief; size?: TileSiz
   const narrow = (size?.cols ?? 3) < 2
   return (
     <>
-      <WidgetLabel>Limits</WidgetLabel>
+      <WidgetLabel title>Limits</WidgetLabel>
       {/* The rows share the tile's height, so a tall tile has no empty foot. */}
       <ul className="flex min-h-0 flex-1 flex-col justify-around gap-1.5">
         {limits.map((r) => {

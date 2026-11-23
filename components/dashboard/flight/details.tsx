@@ -12,31 +12,28 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { ChevronRight, Plane, RefreshCw } from "lucide-react"
+import { RefreshCw } from "lucide-react"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { dutyWindow, formatDutyClock, formatRestSpan } from "@/lib/utils/dashboard/duty-status"
-import { gateLabel } from "@/lib/utils/dashboard/duty-line"
-import { onwardLines, whereaboutsLines } from "@/lib/lookup/aircraft-whereabouts"
 import type { Requirement } from "@/lib/utils/dashboard/legality"
 import { cn } from "@/lib/utils"
 import { formatDay } from "@/lib/utils/date"
-import { formatClockDisplay } from "@/lib/utils/time"
 import { REQ_TONE } from "./instruments"
 import { fdpMinutesOf } from "@/lib/utils/roster/fdp-calculator"
 import { PIC_FDP_DISCRETION_MIN } from "@/lib/utils/roster/regulation-definitions"
-import { crewKey, crewRole, currenciesBySoonest, currencyRows, legLine, legNow, limitsOf, marginText, marginTone, shortDay, shortName } from "./faces"
+import { CardTable, FlightCardLegs, crewKey, crewRole, currenciesBySoonest, currencyRows, legNow, limitsOf, marginText, marginTone, shortDay, shortName } from "./faces"
 import { CurrencyDots } from "./currency-dots"
 import { dotAt, dotLayout, localDayKey } from "@/lib/utils/dashboard/currency-dots"
 import { AirportBody } from "./airport-tile"
 import type { FlightBrief } from "./model"
-import { pageOf, useRememberedPage } from "./pager"
+import { pageOf } from "./pager"
 import { briefingId } from "@/lib/briefing/ids"
 import { SheetClosingContext, type WidgetAction, type WidgetId } from "./widget"
 
 export const WIDGET_TITLE: Record<WidgetId, string> = {
-  duty: "Duty & FDP",
-  flight: "Flights",
-  airport: "Airport",
+  duty: "Duty",
+  flight: "Flight & Crew",
+  airport: "Airport & Weather",
   currency: "Currency",
   limits: "Limits",
 }
@@ -143,8 +140,8 @@ export function widgetContent(
     case "flight": {
       const legs = brief.duty.legs
       return {
-        header: "face",
-        body: legs.length || brief.crew.length ? <FlightBody brief={brief} ctx={ctx} /> : null,
+        header: "label",
+        body: <FlightBody brief={brief} ctx={ctx} />,
         // Each leg opens from its own row; what to DO is ask again, and read
         // the briefing of the leg the tile is on.
         actions: [
@@ -243,33 +240,49 @@ const MIN_MS = 60_000
  * The duty card's rows, in the order the day RUNS (the owner, Nov 2026: "2
  * columns, left are headers, right are values. In chronological order"):
  * the duty rested from, the rest before the report (FORECAST to it, not as of
- * now), the report, the FDP, the scheduled IN that ends it, the spare to its
- * maximum, the latest IN that maximum allows, and past it the commander's
- * discretion (para 13: up to 3:00, on the day, reported) with the IN it
- * reaches. The face's three figures are rows here, and fly into them.
+ * now), the report, the scheduled IN that ends the FDP and the FDP itself,
+ * then where the duty is actually heading — the ESTIMATED IN, from what the
+ * logbook recorded and the sources say now — against the latest IN its
+ * maximum allows, and past that the commander's discretion (para 13: up to
+ * 3:00, on the day, reported) with the IN it reaches. The face's three
+ * figures are rows here, and fly into them.
  */
 export function dutyRows(brief: FlightBrief): DutyRow[] {
   const { status, duty, clock, day } = brief
   const { phase, active, next, lastDuty, rest } = status.duty
   const lastArrive = duty.times.reduce<number | null>((m, t) => (t.arriveMs !== null && (m === null || t.arriveMs > m) ? t.arriveMs : m), null)
   const span = (min: number) => formatDutyClock(Math.max(0, Math.round(min)))
-  const signed = (min: number) => `${min < 0 ? "−" : "+"}${span(Math.abs(min))}`
-  /** Scheduled IN → spare → latest IN → discretion → its IN. */
+  /** Scheduled IN, then the FDP row the caller hands in. */
+  const head = (schedInMs: number, fdp: DutyRow[]): DutyRow[] => [{ label: "Scheduled IN", value: clock(schedInMs) }, ...fdp]
+  /** Estimated IN → latest IN → discretion → its IN. */
   const tail = (fdpStartMs: number, schedInMs: number, maxMin: number, latestSlot?: number): DutyRow[] => {
-    if (maxMin <= 0) return [{ label: "Scheduled IN", value: clock(schedInMs) }]
-    const latest = fdpStartMs + maxMin * MIN_MS
-    const spare = (latest - schedInMs) / MIN_MS
-    return [
-      { label: "Scheduled IN", value: clock(schedInMs) },
-      { label: "Spare", value: signed(spare), tone: spare < 0 ? "fail" : undefined },
-      { label: "Latest IN", value: clock(latest), sub: "FDP maximum", slot: latestSlot },
-      // Past it, only the commander's discretion — on the day, for the
-      // unforeseen, and the company's approval asked (the owner: "flag to
-      // request for approval as per fifth schedule").
-      { label: "Further Delay", value: `+${span(PIC_FDP_DISCRETION_MIN)} max`, sub: "Request approval · para 13", tone: spare < 60 ? "caution" : undefined },
-      { label: "Waiver Max IN", value: clock(latest + PIC_FDP_DISCRETION_MIN * MIN_MS), sub: "With PIC discretion" },
-    ]
+    const latest = maxMin > 0 ? fdpStartMs + maxMin * MIN_MS : null
+    const rows: DutyRow[] = []
+    const est = estimateRow(brief, schedInMs, latest)
+    if (est) rows.push(est)
+    if (latest === null) return rows
+    const estMs = duty.estimate?.ms ?? schedInMs
+    const room = (latest - estMs) / MIN_MS
+    rows.push({ label: "Latest IN", value: clock(latest), sub: "FDP maximum", slot: latestSlot })
+    // Past it, only the commander's discretion — on the day, for the
+    // unforeseen, and the company's approval asked (the owner: "flag to
+    // request for approval as per fifth schedule").
+    rows.push({
+      label: "Further Delay",
+      value: `+${span(PIC_FDP_DISCRETION_MIN)} max`,
+      sub: "Request approval · para 13",
+      tone: room < 0 ? "fail" : room < 60 ? "caution" : undefined,
+    })
+    rows.push({ label: "Waiver Max IN", value: clock(latest + PIC_FDP_DISCRETION_MIN * MIN_MS), sub: "With PIC discretion" })
+    return rows
   }
+  const fdpRow = (planned: number, max: number, slot?: number): DutyRow => ({
+    label: "FDP",
+    value: planned > 0 ? `${formatDutyClock(planned)}${max > 0 ? ` / ${formatDutyClock(max)}` : ""}` : "—",
+    sub: "Scheduled / max",
+    tone: max > 0 && planned > max ? "fail" : undefined,
+    slot,
+  })
   const last: DutyRow[] = lastDuty
     ? [{ label: "Last Duty", value: lastDuty.route || formatDutyClock(lastDuty.elapsedMinutes), sub: `Off ${clock(lastDuty.debriefMs)} · ${day(lastDuty.debriefMs)}` }]
     : []
@@ -281,13 +294,14 @@ export function dutyRows(brief: FlightBrief): DutyRow[] {
     if (!w) return []
     const planned = fdpMinutesOf(dp)
     const r = dp.restBefore
+    const schedIn = w.startMs + planned * MIN_MS
     return [
       ...(r
         ? [{ label: "Rest", value: formatRestSpan(r.restMinutes), sub: `Min ${formatDutyClock(r.requiredRestMinutes)}`, tone: r.compliant ? undefined : ("fail" as const), slot: 0 }]
         : []),
       { label: "Report", value: clock(w.startMs), sub: day(w.startMs), slot: 1 },
-      { label: "FDP", value: `${formatDutyClock(planned)}${dp.maxFdpMinutes > 0 ? ` / ${formatDutyClock(dp.maxFdpMinutes)}` : ""}`, sub: "Scheduled / max", tone: dp.maxFdpMinutes > 0 && planned > dp.maxFdpMinutes ? "fail" : undefined, slot: 2 },
-      ...tail(w.startMs, w.startMs + planned * MIN_MS, dp.maxFdpMinutes),
+      ...head(schedIn, [fdpRow(planned, dp.maxFdpMinutes, 2)]),
+      ...tail(w.startMs, schedIn, dp.maxFdpMinutes),
     ]
   }
 
@@ -296,18 +310,21 @@ export function dutyRows(brief: FlightBrief): DutyRow[] {
     if (active.maxFdpMinutes <= 0) return []
     const fdpOpen = active.startMs - (active.fdpElapsedMinutes - active.elapsedMinutes) * MIN_MS
     const left = active.maxFdpMinutes - active.fdpElapsedMinutes
+    const schedIn = lastArrive ?? active.endMs
     return [
       { label: "Report", value: clock(active.startMs), sub: day(active.startMs) },
-      { label: "FDP", value: `${formatDutyClock(active.fdpElapsedMinutes)} / ${formatDutyClock(active.maxFdpMinutes)}`, sub: "So far / max", tone: active.exceeded ? "fail" : undefined, slot: 1 },
-      { label: active.exceeded ? "FDP Over" : "FDP Left", value: span(Math.abs(left)), tone: active.exceeded ? "fail" : undefined, slot: 0 },
-      ...tail(fdpOpen, lastArrive ?? active.endMs, active.maxFdpMinutes, 2),
+      ...head(schedIn, [
+        { label: "FDP", value: `${formatDutyClock(active.fdpElapsedMinutes)} / ${formatDutyClock(active.maxFdpMinutes)}`, sub: "So far / max", tone: active.exceeded ? "fail" : undefined, slot: 1 },
+        { label: active.exceeded ? "FDP Over" : "FDP Left", value: span(Math.abs(left)), tone: active.exceeded ? "fail" : undefined, slot: 0 },
+      ]),
+      ...tail(fdpOpen, schedIn, active.maxFdpMinutes, 2),
     ]
   }
 
   /* Off duty, the next duty ahead: its rest worked back from its report. */
   if (next && next.restRequiredMinutes > 0) {
     const short = next.legalAtReport === false
-    const over = next.maxFdpMinutes > 0 && next.plannedFdpMinutes > next.maxFdpMinutes
+    const schedIn = next.reportMs + next.plannedFdpMinutes * MIN_MS
     return [
       ...last,
       {
@@ -318,14 +335,9 @@ export function dutyRows(brief: FlightBrief): DutyRow[] {
         slot: 0,
       },
       { label: "Report", value: clock(next.reportMs), sub: day(next.reportMs), slot: 1 },
-      {
-        label: "FDP",
-        value: next.plannedFdpMinutes > 0 ? `${formatDutyClock(next.plannedFdpMinutes)}${next.maxFdpMinutes > 0 ? ` / ${formatDutyClock(next.maxFdpMinutes)}` : ""}` : "—",
-        sub: "Scheduled / max",
-        tone: over ? "fail" : undefined,
-        slot: 2,
-      },
-      ...(next.plannedFdpMinutes > 0 ? tail(next.reportMs, next.reportMs + next.plannedFdpMinutes * MIN_MS, next.maxFdpMinutes) : []),
+      ...(next.plannedFdpMinutes > 0
+        ? [...head(schedIn, [fdpRow(next.plannedFdpMinutes, next.maxFdpMinutes, 2)]), ...tail(next.reportMs, schedIn, next.maxFdpMinutes)]
+        : [fdpRow(0, next.maxFdpMinutes, 2)]),
     ]
   }
 
@@ -342,122 +354,58 @@ export function dutyRows(brief: FlightBrief): DutyRow[] {
 }
 
 /**
+ * The ESTIMATED IN row: the duty's last on-blocks as the logbook and the
+ * sources have it now — how late against the schedule, and how much of the
+ * maximum is left after it. Red past the latest IN, amber within the hour.
+ */
+export function estimateRow(brief: FlightBrief, schedInMs: number, latestMs: number | null): DutyRow | null {
+  const e = brief.duty.estimate
+  if (!e) return null
+  const late = e.delayMin ?? Math.round((e.ms - schedInMs) / MIN_MS)
+  const room = latestMs === null ? null : Math.round((latestMs - e.ms) / MIN_MS)
+  const delay =
+    e.kind === "actual" ? "On blocks" : late >= 5 ? `${formatDutyClock(late)} late` : late <= -5 ? `${formatDutyClock(-late)} early` : "On time"
+  // Nothing asked of the sources yet (more than 18h out): it is the schedule.
+  const basis = e.kind === "scheduled" && !brief.duty.lookups ? "As scheduled" : delay
+  const margin = room === null ? null : room < 0 ? `${formatDutyClock(-room)} past latest` : `${formatDutyClock(room)} to latest`
+  return {
+    label: e.kind === "actual" ? "Actual IN" : "Estimated IN",
+    value: brief.clock(e.ms),
+    sub: [basis, margin].filter(Boolean).join(" · "),
+    tone: room === null ? undefined : room < 0 ? "fail" : room < 60 ? "caution" : undefined,
+  }
+}
+
+/**
  * The duty card's body: `dutyRows` as a two-column table — what it is on the
  * left, its value on the right, read top to bottom as the day runs.
  */
 function DutyBody({ brief }: { brief: FlightBrief }) {
   const rows = dutyRows(brief)
-  if (rows.length === 0) return null
   return (
-    <dl>
-      {rows.map((r, i) => (
-        // One line a row, one rule under it: label left, value right.
-        <div key={r.label} className={cn("flex items-baseline justify-between gap-4 py-2", i < rows.length - 1 && "border-b border-border/50")}>
-          <dt className="shrink-0 text-[13px] text-muted-foreground" data-morph={r.slot !== undefined ? `slot-${r.slot}-l` : undefined}>
-            {r.label}
-          </dt>
-          <dd className="min-w-0 text-right">
-            <span
-              className={cn(
-                "text-[15px] font-semibold tabular-nums",
-                r.tone === "fail" ? "text-destructive" : r.tone === "caution" ? "text-status-warning" : "text-foreground",
-              )}
-              suppressHydrationWarning
-              data-morph={r.slot !== undefined ? `slot-${r.slot}-v` : undefined}
-            >
-              {r.value}
-            </span>
-            {r.sub && <span className="block text-[11px] text-muted-foreground" suppressHydrationWarning>{r.sub}</span>}
-          </dd>
-        </div>
-      ))}
-    </dl>
+    <CardTable
+      rows={rows.map((r) => ({ label: r.label, value: r.value, sub: r.sub, tone: r.tone, morph: r.slot !== undefined ? `slot-${r.slot}-v` : undefined }))}
+    />
   )
 }
 
 /**
- * The flights card under its header — the tile's face, the leg on show with
- * its route, number, times, aeroplane, gate and inbound line. The body says
- * only what that face does not (the owner, Nov 2026: no duplicate info), for
- * the SAME leg, following the header's pager: the gates at both ends with
- * terminal and stand, the schedule where it differs from what flew, the block,
- * the inbound's STD and arrival gate, the flight the aeroplane goes on to.
- * Then a row that opens the flight, and the crew.
+ * The flights card: the duty on its day, a leg a page — the leg's own table
+ * and a row that opens it, the dots under them (`FlightCardLegs`) — then the
+ * crew, flight and cabin.
  */
 function FlightBody({ brief, ctx }: { brief: FlightBrief; ctx: WidgetCtx }) {
-  const { duty } = brief
-  const count = duty.legs.length
-  const [page] = useRememberedPage(`flight:${duty.atMs}`, legNow(brief), count)
-  const f = duty.legs[page]
-  const figs: Array<{ label: string; value: string }> = []
-  if (f) {
-    const sep = brief.display?.clockSeparator
-    const g = duty.lookups?.gates[f.id]
-    const done = g?.status === "done" ? g.gates : null
-    // What the header (the tile's face) already says on its last line.
-    const shown = legLine(brief, page)
-    // In the order the day runs: the aeroplane coming in, this leg, the flight after it.
-    const inbound = page === legNow(brief) && !f.inTime && !f.outTime ? duty.lookups?.inbound : null
-    const lines = inbound?.status === "done" ? whereaboutsLines(inbound.whereabouts, brief.now, sep) : null
-    if (lines?.std) figs.push({ label: "Inbound", value: lines.std })
-    if (lines?.gate) figs.push({ label: "Inbound Arr", value: lines.gate })
-    if (done?.inboundFlight && !lines) figs.push({ label: "Inbound", value: done.inboundFlight })
-    const dep = done ? gateLabel(done.departure.gate, done.departure.terminal, done.departure.stand) : ""
-    const arr = done ? gateLabel(done.arrival.gate, done.arrival.terminal, done.arrival.stand) : ""
-    // The face names one gate; the card both ends, with terminal and stand.
-    if (dep) figs.push({ label: "Departure", value: dep })
-    if (arr) figs.push({ label: "Arrival", value: arr })
-    // The face's times are what flew; the schedule only where it differs.
-    const sched = f.scheduledOut && f.scheduledIn ? `${formatClockDisplay(f.scheduledOut, sep)}–${formatClockDisplay(f.scheduledIn, sep)}Z` : ""
-    if (sched && (f.outTime || f.inTime)) figs.push({ label: "Scheduled", value: sched })
-    const block = f.inTime && f.blockTime && f.blockTime !== "00:00" ? f.blockTime : planned(f.scheduledOut, f.scheduledIn)
-    if (block) figs.push({ label: f.inTime ? "Block" : "Planned Block", value: block })
-    if (page === duty.legs.length - 1) {
-      const onward = duty.lookups?.onward
-      const o = onward?.status === "done" ? onwardLines(onward.whereabouts, sep) : null
-      if (o) {
-        figs.push({ label: "Next Flight", value: [o.flight, o.std].filter(Boolean).join(" · ") })
-        // The header names the crew's report when it carries the onward line.
-        if (o.crew && shown?.kind !== "onward") figs.push({ label: "Next Crew at Aircraft", value: o.crew.replace(/^crew /, "") })
-      } else if (done?.onwardFlight && shown?.kind !== "onward") figs.push({ label: "Next Flight", value: done.onwardFlight })
-    }
-  }
   return (
     <div>
-      {/* Report and off duty are the Duty & FDP card's (the owner, Nov 2026);
-          this card is the flights. */}
-      {figs.length > 0 && (
-        <Grid>
-          {figs.map((x) => (
-            <Fig key={x.label} label={x.label} value={x.value} />
-          ))}
-        </Grid>
-      )}
-      {f && (
-        <TapRow
-          onClick={() => ctx.openFlight(f.id)}
-          lead={<Plane className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />}
-          title={`Open ${f.flightNumber || "Flight"}`}
-          right={<ChevronRight className="h-4 w-4" aria-hidden />}
-        />
-      )}
+      <FlightCardLegs brief={brief} openFlight={ctx.openFlight} />
       {/* The crew is part of this card (the owner's duty-and-crew widget). */}
       {brief.crew.length > 0 && (
-        <div className="mt-1.5 border-t border-border/70 pt-1">
+        <div className="mt-2 border-t border-border/70 pt-1">
           <CrewBody brief={brief} go={ctx.go} />
         </div>
       )}
     </div>
   )
-}
-
-/** "00:05" − "22:30" across midnight → "1:35"; "" without both. */
-function planned(out?: string, inn?: string): string {
-  if (!out || !inn) return ""
-  const m = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5))
-  if (!/^\d\d:\d\d$/.test(out) || !/^\d\d:\d\d$/.test(inn)) return ""
-  const d = (m(inn) - m(out) + 1440) % 1440
-  return d ? `${Math.floor(d / 60)}:${String(d % 60).padStart(2, "0")}` : ""
 }
 
 /** Who, and when last together — a tap opens their card. */

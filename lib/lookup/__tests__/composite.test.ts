@@ -249,6 +249,21 @@ describe("flight/suggest and flight/gates", () => {
     expect(calls).toContain("/icargo/do/searchFlight")
   })
 
+  it("carries the live times: the tracker's, and the airport's own for a Singapore end", async () => {
+    answers["flight/details"] = () =>
+      json({ ok: true, source: "clickhandler", data: flight({ origin: end("SIN", "WSSS", { gate: "D40" }), estimatedArrival: "2026-10-30T09:20:00.000Z", actualDeparture: "2026-10-30T02:50:00.000Z" }) })
+    answers.flight = () => page([flight({ live: true })])
+    expect(await runCompositeRoute("flight/gates", { number: "TR288", date: "2026-10-30" })).toMatchObject({
+      ok: true,
+      data: { times: { actualDeparture: "2026-10-30T02:50:00.000Z", estimatedArrival: "2026-10-30T09:20:00.000Z", source: "tracker" } },
+    })
+    const changiPage = readFileSync(path.join(__dirname, "fixtures/changi/tr288-departure-17nov.html"), "utf8")
+    answers["icargo/do/searchFlight"] = () => new Response(changiPage, { status: 200 })
+    answers.flight = () => page([flight()])
+    const answer = await runCompositeRoute("flight/gates", { number: "TR288", date: "2026-10-30" })
+    expect(answer.ok && answer.data.times?.source).toBe("airport")
+  })
+
   it("is an answer with no gate when none is published — and a failure when no board could be read", async () => {
     answers["airport/schedule:departures"] = () => page([])
     answers["airport/schedule:arrivals"] = () => page([])

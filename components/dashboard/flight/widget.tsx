@@ -175,25 +175,46 @@ export function Widget({
 }
 
 /**
- * True inside a CARD's header. Every card has the same shell (the owner, Nov
- * 2026: "the cards don't follow a uniform shell — some have a header, some
- * don't"): its label as a TITLE BAR with a hairline under it, then what it
- * holds, then the footer line. A face's label row is that bar in the card.
+ * True inside a CARD. Every card has the same shell (the owner, Nov 2026:
+ * "the cards don't follow a uniform shell — some have a header, some
+ * don't"; then "header: Duty, Flight and Crew, Currency, Airport and
+ * Weather, Limits"): the section's NAME as a title bar with a hairline under
+ * it, then what it holds, then the footer line. A face's own label is an
+ * eyebrow under the bar — or, where it is the section's name, the bar itself.
  */
 export const CardShellContext = React.createContext(false)
 
-/** The classes that make a face's label row the card's title bar. */
-export const CARD_TITLE_BAR = "-mx-3 mb-3 min-h-5 border-b border-border/70 px-3 pb-2.5 last:mb-0"
+/** The card's title bar: the section's name. */
+export const CARD_TITLE_BAR = "-mx-3 mb-3 border-b border-border/70 px-3 pb-2.5"
 
-/** A tile's small heading, with what it says at a glance on the right. */
-export function WidgetLabel({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) {
+/**
+ * A tile's small heading, with what it says at a glance on the right. `title`:
+ * it IS the section's name ("Limits") — in a card the title bar says it, and
+ * the label flies there; otherwise it is an eyebrow ("Next · Wed, 25 Nov").
+ */
+export function WidgetLabel({ children, right, title = false }: { children: React.ReactNode; right?: React.ReactNode; title?: boolean }) {
   const inCard = React.useContext(CardShellContext)
+  if (inCard && title) return null
   return (
-    <div className={cn("mb-1 flex items-center justify-between gap-2", inCard && CARD_TITLE_BAR)}>
-      <span className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground" data-morph="label">
+    <div className="mb-1 flex items-center justify-between gap-2">
+      <span
+        className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+        data-morph={title ? "label" : "eyebrow"}
+      >
         {children}
       </span>
       {right}
+    </div>
+  )
+}
+
+/** The bar every card opens with — the section's name (`WIDGET_TITLE`). */
+function CardTitle({ title }: { title: string }) {
+  return (
+    <div className={CARD_TITLE_BAR}>
+      <h2 className="truncate text-[15px] font-semibold leading-tight tracking-tight text-foreground">
+        <span data-morph="label">{title}</span>
+      </h2>
     </div>
   )
 }
@@ -245,10 +266,10 @@ export function WidgetCard({
   body: React.ReactNode | null
   actions?: WidgetAction[]
 }) {
+  // The panel's own title is the section's name: no bar under it.
   return (
     <div className="relative overflow-hidden rounded-2xl border border-border bg-card">
-      {face && <CardShell header={face} body={body} />}
-      {!face && body && <div className="p-3">{body}</div>}
+      {(face || body) && <CardShell header={face} body={body} />}
       <WidgetFooter actions={actions} run={(a) => a.run()} />
     </div>
   )
@@ -259,11 +280,14 @@ export function WidgetCard({
  * the header (its label the title bar — `CardShellContext`), then the body
  * straight under it, then the footer line (drawn by the caller).
  */
-function CardShell({ header, body }: { header: React.ReactNode; body: React.ReactNode | null }) {
+function CardShell({ title, header, body }: { title?: string; header: React.ReactNode | null; body: React.ReactNode | null }) {
   return (
     <div className="relative p-3">
-      <CardShellContext.Provider value>{header}</CardShellContext.Provider>
-      {body && <div className="mt-3">{body}</div>}
+      <CardShellContext.Provider value>
+        {title && <CardTitle title={title} />}
+        {header}
+        {body && <div className={cn(header ? "mt-3" : undefined)}>{body}</div>}
+      </CardShellContext.Provider>
     </div>
   )
 }
@@ -279,7 +303,8 @@ function CardShell({ header, body }: { header: React.ReactNode; body: React.Reac
 export const SheetClosingContext = React.createContext(false)
 
 export interface SheetContent {
-  header: React.ReactNode
+  /** What sits under the title bar before the body — the tile's face, or nothing. */
+  header: React.ReactNode | null
   body: React.ReactNode | null
   actions: WidgetAction[]
 }
@@ -540,7 +565,7 @@ export function WidgetSheet({
             transition={open ? { duration: 0.2, delay: 0.06, ease: EASE } : { duration: 0.12, ease: EASE }}
           >
             <SheetClosingContext.Provider value={closing || leaving}>
-              <CardShell header={content.header} body={content.body} />
+              <CardShell title={title} header={content.header} body={content.body} />
             </SheetClosingContext.Provider>
             {/* A footer action that leads somewhere is already wrapped to close
                 the card first (`render`'s dismiss) — closing it again here

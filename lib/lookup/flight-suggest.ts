@@ -69,6 +69,23 @@ export interface FlightGates {
    */
   inboundFlight?: string
   onwardFlight?: string
+  /**
+   * The flight's movement as the sources see it NOW, ISO UTC or null: the
+   * airport's own record for a Singapore end (Changi's estimated / actual
+   * block times), else the tracker's. What makes the dashboard react to a
+   * delay — an estimated arrival later than the schedule moves the duty's
+   * estimated IN (`estimateDutyIn`).
+   */
+  times?: FlightTimesLive
+}
+
+export interface FlightTimesLive {
+  estimatedDeparture: string | null
+  actualDeparture: string | null
+  estimatedArrival: string | null
+  actualArrival: string | null
+  /** Who said it: the airport's record, or the tracker. */
+  source: "airport" | "tracker"
 }
 
 /** `TR0288`, `tr 288` and `TR288` are one flight number. */

@@ -44,6 +44,8 @@ import { describeDuty } from "@/lib/utils/dashboard/duty-line"
 import { dutyWindow } from "@/lib/utils/dashboard/duty-status"
 import { fdpMinutesOf } from "@/lib/utils/roster/fdp-calculator"
 import { delayMargin } from "@/lib/utils/dashboard/delay-margin"
+import { estimateDutyIn } from "@/lib/utils/dashboard/estimated-in"
+import type { FlightTimesLive } from "@/lib/lookup/flight-suggest"
 import { crewOnDuty, destinationVisits, dutyStations, legTimes } from "@/lib/utils/dashboard/flight-brief"
 import { briefStations, stationWindows } from "@/lib/weather/brief"
 import { getAirportDisplayCode } from "@/lib/utils/airport-display"
@@ -53,7 +55,7 @@ import { getAirportByIcao, getAirportsRevision, isAirportTableSeeded, onAirportS
 import type { Airport } from "@/types/entities/airport.types"
 import { cn } from "@/lib/utils"
 import { useTick } from "./flight/instruments"
-import { CurrencyFace, DutyFace, FlightFace, LimitsFace, currencyRows, destinationsOf, favouredAt, limitsOf } from "./flight/faces"
+import { CurrencyFace, DutyFace, FlightFace, LimitsFace, currencyRows, destinationsOf, favouredAt, inboundLate, legDelay, limitsOf } from "./flight/faces"
 import { dutyTone } from "./flight/duty-clock"
 import { setChosenDuty, useChosenDuty, publishDutyChoices } from "@/hooks/use-dashboard-duty"
 import { destinationOfRoute } from "@/lib/utils/dashboard/destination"
@@ -65,7 +67,7 @@ import { WIDGET_TITLE, useWidgetCtx, widgetContent } from "./flight/details"
 import { BentoGrid } from "./flight/bento"
 import { setArranging, useArranging, useTileOrder, useTileSizes } from "@/hooks/use-dashboard-layout"
 import { faceSize, packTiles, type TileSize } from "@/lib/utils/dashboard/bento"
-import { Widget, WidgetCard, WidgetLabel, WidgetSheet, type WidgetAnchor, type WidgetId } from "./flight/widget"
+import { Widget, WidgetCard, WidgetSheet, type WidgetAnchor, type WidgetId } from "./flight/widget"
 import type { DutyChoice, FlightBrief } from "./flight/model"
 import type { DutyPeriod } from "@/types/entities/roster.types"
 import type { RequirementState } from "@/lib/utils/dashboard/legality"
@@ -94,8 +96,12 @@ function tileTones(brief: FlightBrief): Partial<Record<WidgetId, RequirementStat
   // duty's times there, or a destination whose favoured runway has a tailwind.
   const airportPoor =
     airportsOf(brief).some(stationPoor) || destinationsOf(brief).some((d) => (favouredAt(brief, d.icao)?.headKt ?? 0) < 0)
+  // The flights tile: a leg still to fly that the sources now expect late,
+  // or whose inbound aeroplane lands too late to turn round in time.
+  const flightLate = brief.duty.legs.some((_, i) => legDelay(brief, i) !== null || inboundLate(brief, i))
   return {
     duty: dutyTone(brief),
+    flight: flightLate ? "caution" : null,
     airport: airportPoor ? "caution" : null,
     currency: worstOf(currencyRows(brief).map((r) => r.state)),
     limits: worstOf(limitsOf(brief).map((r) => r.state)),
@@ -227,7 +233,20 @@ export function FlightDashboard({ className }: { className?: string }) {
   const legs = React.useMemo(() => (dutyAtMs === null ? [] : dutyFlights(flights, dutyAtMs)), [flights, dutyAtMs])
   const times = React.useMemo(() => legs.map(legTimes), [legs])
   const lookupsClose = dutyAtMs !== null && Math.abs(dutyAtMs - now) <= LOOKUP_WINDOW_MS
-  const lookups = useDutyLookups(lookupsClose ? dutyAtMs : null, { active: isActive })
+  // Within three hours of it, or on it, a delay moves by the minute: ask more often.
+  const lookupsFast = dutyAtMs !== null && (current || Math.abs(dutyAtMs - now) <= 3 * 3600_000)
+  const lookups = useDutyLookups(lookupsClose ? dutyAtMs : null, { active: isActive, fast: lookupsFast })
+  // The duty's estimated IN: the logbook's times, then the sources' live ones.
+  const estimate = React.useMemo(() => {
+    const live: Record<string, FlightTimesLive | null> = {}
+    const gates = lookupsClose ? lookups.lookups?.gates : undefined
+    for (const [id, g] of Object.entries(gates ?? {})) live[id] = g.status === "done" ? (g.gates.times ?? null) : null
+    // The aeroplane coming in for the next leg to fly: its arrival holds that leg back.
+    const w = lookupsClose && lookups.lookups?.inbound?.status === "done" ? lookups.lookups.inbound.whereabouts : null
+    const arrivalMs = w?.inbound?.arrival ? Date.parse(w.inbound.arrival) : NaN
+    const inbound = lookups.lookups?.inboundFlightId && Number.isFinite(arrivalMs) ? { legId: lookups.lookups.inboundFlightId, arrivalMs } : null
+    return estimateDutyIn(legs, live, inbound)
+  }, [legs, lookupsClose, lookups.lookups])
   const info = React.useMemo(
     () =>
       lookupsClose && lookups.legs.length > 0
@@ -325,6 +344,7 @@ export function FlightDashboard({ className }: { className?: string }) {
         info,
         lookupsLoading: lookups.loading,
         refreshLookups: lookups.refresh,
+        estimate,
       },
       margin,
       recencyLapseIso: recency.lapseIso,
@@ -346,7 +366,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       day: (ms: number) =>
         formatDayAt(ms, display?.useZuluTime === false ? zone : "UTC", { year: false }),
     }),
-    [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, margin, recency.lapseIso, currencyAsOfMs, crew, legCrew, currency, destinations, airports, airportInfo, runways, weather, weatherStation, iataOf, pref, zone, isActive],
+    [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, estimate, margin, recency.lapseIso, currencyAsOfMs, crew, legCrew, currency, destinations, airports, airportInfo, runways, weather, weatherStation, iataOf, pref, zone, isActive],
   )
   // The airport card's alternates, asked while the page is up (the route reads
   // the stored TAF snapshot — no request to the source): asked only when the
@@ -493,7 +513,7 @@ export function FlightDashboard({ className }: { className?: string }) {
             }
             const { body, actions, header } = widgetContent(sheet.id, brief, sheetCtx)
             return {
-              header: header === "face" ? faceOf(sheet.id, brief, CARD_SIZE, true) : <WidgetLabel>{WIDGET_TITLE[sheet.id]}</WidgetLabel>,
+              header: header === "face" ? faceOf(sheet.id, brief, CARD_SIZE, true) : null,
               body,
               actions,
             }
