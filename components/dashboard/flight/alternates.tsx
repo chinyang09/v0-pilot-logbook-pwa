@@ -6,6 +6,11 @@
  * TAF aerodromes near each destination and along each leg (`pickAlternates`,
  * server side), each read over the time it matters (`alternateWindows`).
  *
+ * Where a leg's briefing has been imported, the alternates its OFP PLANS come
+ * first (`planned`), with their live weather over the arrival — the guessed
+ * ones follow, without repeating them (the owner: "we need the alternates +
+ * origin + destination for latest weather").
+ *
  * Asked only while a card that lists them is open. Dark cockpit: an alternate
  * whose weather is fine shows its code and distance and nothing lit; one
  * below VFR or with a hazard says so in its colour.
@@ -13,6 +18,9 @@
 
 import * as React from "react"
 import { useAlternates } from "@/hooks/use-alternates"
+import { useAirportWeather } from "@/hooks/use-airport-weather"
+import { useBriefingsByIds } from "@/hooks/data/use-briefings"
+import { briefingId } from "@/lib/briefing/ids"
 import { alternateWindows, type Alternate } from "@/lib/weather/alternates"
 import { briefStations, hazardLine, type StationBrief } from "@/lib/weather/brief"
 import { cn } from "@/lib/utils"
@@ -23,6 +31,8 @@ import type { FlightBrief } from "./model"
 export interface AlternateBrief {
   alt: Alternate
   brief: StationBrief | null
+  /** The OFP's own alternate for that destination, from an imported briefing. */
+  planned?: boolean
 }
 
 /** The duty's alternates, briefed — near each destination (by ICAO) and along the way. */
@@ -46,18 +56,49 @@ export function useDutyAlternates(brief: FlightBrief, enabled: boolean) {
     [destIcaos, path],
   )
   const { alternates, weather, loading, failed } = useAlternates(path, dests, enabled && path.length > 1)
+
+  // The OFPs' planned alternates, per destination.
+  const ids = React.useMemo(
+    () => (enabled ? legs.filter((l) => l.flightNumber).map((l) => briefingId(l.flightNumber, l.date, l.departureIcao || "")) : []),
+    [legs, enabled],
+  )
+  const briefings = useBriefingsByIds(ids)
+  const planned = React.useMemo(() => {
+    const out: Alternate[] = []
+    for (const r of briefings) {
+      const b = r.data
+      if (!b) continue
+      const of = dests.findIndex((d) => d.icao === b.flight.arr.toUpperCase())
+      if (of < 0) continue
+      for (const a of b.alternates) {
+        const icao = a.icao.toUpperCase()
+        if (out.some((x) => x.icao === icao && x.of === of)) continue
+        const at = brief.airports.get(icao)
+        out.push({ icao, lat: at?.latitude ?? 0, lon: at?.longitude ?? 0, kind: "near", of, distNm: a.distNm ?? 0 })
+      }
+    }
+    return out
+  }, [briefings, dests, brief.airports])
+  const plannedIds = React.useMemo(() => [...new Set(planned.map((a) => a.icao))].sort(), [planned])
+  const { weather: plannedWx } = useAirportWeather(plannedIds, enabled)
+
   return React.useMemo(() => {
-    const windows = alternateWindows(alternates, times, dests.map((d) => d.icao))
+    const windows = alternateWindows([...planned, ...alternates], times, dests.map((d) => d.icao))
     const briefs = weather ? briefStations(alternates.map((a) => a.icao), windows, weather) : []
+    const plannedBriefs = plannedWx ? briefStations(plannedIds, windows, plannedWx) : []
+    const plannedAll: AlternateBrief[] = planned.map((alt) => ({ alt, brief: plannedBriefs.find((b) => b.station === alt.icao) ?? null, planned: true }))
     const all: AlternateBrief[] = alternates.map((alt) => ({ alt, brief: briefs.find((b) => b.station === alt.icao) ?? null }))
     const near = new Map<string, AlternateBrief[]>()
-    for (const a of all) {
+    for (const a of [...plannedAll, ...all]) {
       if (a.alt.kind !== "near") continue
       const icao = dests[a.alt.of]?.icao
-      if (icao) near.set(icao, [...(near.get(icao) ?? []), a])
+      if (!icao) continue
+      const list = near.get(icao) ?? []
+      if (list.some((x) => x.alt.icao === a.alt.icao)) continue
+      near.set(icao, [...list, a])
     }
-    return { near, route: all.filter((a) => a.alt.kind === "route"), loading, failed, weatherAsked: !!weather }
-  }, [alternates, weather, times, dests, loading, failed])
+    return { near, route: all.filter((a) => a.alt.kind === "route"), loading, failed, weatherAsked: !!weather || !!plannedWx }
+  }, [alternates, weather, planned, plannedIds, plannedWx, times, dests, loading, failed])
 }
 
 /** One alternate on a line: code, how far, and — only when it matters — its weather. */
