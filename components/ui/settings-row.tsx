@@ -1,7 +1,6 @@
 "use client"
 
 import { CODE_INPUT_PROPS } from "@/lib/utils/input-props"
-import type React from "react"
 import { useId, useRef } from "react"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"

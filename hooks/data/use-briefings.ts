@@ -9,7 +9,7 @@
 
 import { useMemo } from "react"
 import useSWR, { mutate as globalMutate } from "swr"
-import { getAllBriefings, getBriefing, getBriefingNote, getNotamRegister } from "@/lib/db"
+import { getBriefing, getBriefingNote, getNotamRegister } from "@/lib/db"
 import { checkDBReady, useDBReady } from "./use-db"
 import { noteId } from "@/lib/briefing/ids"
 import type { BriefingNoteRecord, BriefingRecord, NotamRecord } from "@/types/entities/briefing.types"
@@ -19,7 +19,6 @@ const EMPTY_REGISTER: ReadonlyMap<string, NotamRecord> = new Map()
 
 export const BRIEFING_KEYS = {
   one: (id: string) => `idb:briefing:${id}`,
-  all: "idb:briefings",
   register: "idb:notams",
   note: (scope: "route" | "airport", ref: string) => `idb:${noteId(scope, ref)}`,
 }
@@ -53,12 +52,6 @@ export function useBriefingsByIds(ids: readonly string[]): BriefingRecord[] {
   return data ?? NO_BRIEFINGS
 }
 const NO_BRIEFINGS: BriefingRecord[] = []
-
-export function useAllBriefings() {
-  const { isReady } = useDBReady()
-  const { data } = useSWR(isReady ? BRIEFING_KEYS.all : null, async () => ((await checkDBReady()) ? getAllBriefings() : []), OPTS)
-  return data
-}
 
 /**
  * The register, by record id. Fetched as an ARRAY and indexed here: SWR

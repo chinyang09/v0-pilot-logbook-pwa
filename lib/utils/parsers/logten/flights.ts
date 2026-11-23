@@ -78,7 +78,6 @@ import {
 } from "./time-reference";
 import { flightInstantMs, pickAirportAt } from "@/lib/airports/code-changes";
 import type {
-  LogtenFlightOperation,
   LogtenFlightPlan,
   LogtenParseOptions,
   ResolvedAircraft,

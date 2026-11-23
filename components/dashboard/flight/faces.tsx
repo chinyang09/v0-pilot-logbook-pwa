@@ -11,14 +11,12 @@ import type { Requirement } from "@/lib/utils/dashboard/legality"
 import type { SectorLeg } from "@/lib/utils/dashboard/duty-status"
 import { formatDay } from "@/lib/utils/date"
 import { cn } from "@/lib/utils"
-import { dutyWindow, formatDutyClock, formatRestSpan } from "@/lib/utils/dashboard/duty-status"
+import { dutyWindow, formatDutyClock } from "@/lib/utils/dashboard/duty-status"
 import { REQ_TONE, TONE } from "./instruments"
 import { DutyClockFace, HourLines } from "./duty-clock"
 import { WidgetLabel } from "./widget"
 import { metarConditions } from "@/lib/weather/brief"
 import { favouredRunway, runwayEndsFrom, type WindOnRunway } from "@/lib/weather/runway-wind"
-import { greatCircleNm } from "@/lib/utils/geo"
-import { hasCoordinates } from "@/lib/utils/flight-calculations"
 import type { FlightBrief } from "./model"
 import type { CrewMate } from "@/lib/utils/dashboard/flight-brief"
 import type { TileSize } from "@/lib/utils/dashboard/bento"
@@ -486,8 +484,9 @@ function CardLeg({ brief, i, openFlight }: { brief: FlightBrief; i: number; open
     value: reg ? `${reg}${f.aircraftType ? ` ${f.aircraftType}` : ""}` : "TBA",
     morph: `fl-ac-${i}`,
   })
-  const terminalStand = (x: { terminal: string; stand?: string } | undefined) =>
-    [x?.terminal && `Terminal ${x.terminal.replace(/^T/i, "")}`, x?.stand && `Stand ${x.stand}`].filter(Boolean).join(" · ") || undefined
+  // A contact stand named like its gate is the gate said twice.
+  const terminalStand = (x: { gate: string; terminal: string; stand?: string } | undefined) =>
+    [x?.terminal && `Terminal ${x.terminal.replace(/^T/i, "")}`, x?.stand && x.stand !== x.gate && `Stand ${x.stand}`].filter(Boolean).join(" · ") || undefined
   if (gates?.departure.gate || gates?.departure.stand) {
     rows.push({
       label: "Departure",
@@ -515,10 +514,12 @@ function CardLeg({ brief, i, openFlight }: { brief: FlightBrief; i: number; open
     if (range) rows.push({ label: "Scheduled", value: range, sub: sub || undefined })
     // Off blocks, not yet on: where it is now expected in.
     if (!f.inTime && e && e.inMs !== null) rows.push({ label: "Est. IN", value: clock(e.inMs), sub: versus(e.inMs, f.scheduledIn, f.scheduledOut) || undefined })
-  } else if (e && e.outKind !== "scheduled" && e.outMs !== null) {
-    // Not yet off: the number line is the schedule; the live estimate against it.
+  } else if (e && (e.outKind !== "scheduled" || e.inKind !== "scheduled")) {
+    // Not yet off: the number line is the schedule; the live estimate against it
+    // (a source may give the arrival and not the departure).
     const late = legDelay(brief, i) !== null
-    rows.push({ label: "Est. OUT", value: clock(e.outMs), sub: versus(e.outMs, f.scheduledOut) || undefined, tone: late ? "caution" : undefined })
+    if (e.outKind !== "scheduled" && e.outMs !== null)
+      rows.push({ label: "Est. OUT", value: clock(e.outMs), sub: versus(e.outMs, f.scheduledOut) || undefined, tone: late ? "caution" : undefined })
     if (e.inMs !== null) rows.push({ label: "Est. IN", value: clock(e.inMs), sub: versus(e.inMs, f.scheduledIn, f.scheduledOut) || undefined, tone: late ? "caution" : undefined })
   }
   if (gates?.arrival.gate || gates?.arrival.stand) {

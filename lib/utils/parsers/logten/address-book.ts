@@ -26,7 +26,7 @@
 import type { Personnel, PersonnelRole } from "@/types/entities/crew.types";
 import { bindRows, type LogtenRow } from "./header-map";
 import { text, toBool, upper } from "./values";
-import type { LogtenCrewPlan, LogtenCrewPlanRow, LogtenIssue } from "./types";
+import type { LogtenCrewPlan, LogtenCrewPlanRow } from "./types";
 import type { NormalizedDocument } from "../types";
 import { normalize } from "../shared/name-normalize";
 

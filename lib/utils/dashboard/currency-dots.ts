@@ -39,7 +39,6 @@ export function addMonths(ymd: string, months: number): string {
 /** The look-ahead a tile of `cols` (of three) shows: 90 days, six months, a year. */
 export type LookAhead = "90d" | "6m" | "1y"
 export const lookAheadFor = (cols: number): LookAhead => (cols >= 3 ? "1y" : cols >= 2 ? "6m" : "90d")
-export const LOOK_AHEAD_LABEL: Record<LookAhead, string> = { "90d": "90 days", "6m": "6 months", "1y": "1 year" }
 
 /** How many days, today included, a look-ahead covers from `today`. */
 export function lookAheadDays(today: string, ahead: LookAhead): number {

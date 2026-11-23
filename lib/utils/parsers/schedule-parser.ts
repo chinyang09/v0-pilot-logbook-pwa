@@ -35,7 +35,6 @@ import {
   getAirportByIata,
   getAirportTimeInfo,
   getAllPersonnel,
-  getCurrentUserPersonnel,
   getLoggingProfile,
   getUserPreferences,
   DEFAULT_IMPORT_DEFAULTS,

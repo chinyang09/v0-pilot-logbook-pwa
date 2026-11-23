@@ -457,7 +457,6 @@ export function FlightDashboard({ className }: { className?: string }) {
     return <Skeleton className={cn("h-full min-h-[24rem] rounded-3xl", className)} />
   }
 
-  const reqs = status.legality.requirements
   // Every tile with cause for concern says so with its EDGE (the owner:
   // "instead of just an alert icon, the border … amber or red"), and its
   // reason in the same colour inside it.

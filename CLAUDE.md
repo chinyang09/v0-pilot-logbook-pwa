@@ -2037,17 +2037,11 @@ separation exists to avoid.
 
 #### The duty band and the sector chain
 
-The band shows the timeline, its three captions, and a chain of stops
-(`deriveSectorLegs`) — filled dot on blocks, ringed dot for the leg being
-flown, hollow still to come, with the airport codes beneath.
-
-**The chain shows THIS duty on duty, and the NEXT duty otherwise.** Off duty the
-reader is looking ahead, and a route squeezed into a label is four small words
-where a chain is a picture. The last duty stays a line above it: context, not
-the question being asked. A duty is up to
-four sectors across several airports, and "where am I in the pattern" is what a
-generic recent-flights list could never answer: it showed history, not this
-duty. That list is gone.
+The band shows the timeline and its three captions. The chain of stops it
+used to carry (`SectorChain`) is GONE (removed Nov 2026, dead since the
+Flight Deck's tiles): where the pilot is in a duty is the flights tile's day
+bar and its leg pages. `deriveSectorLegs` survives as the active duty's
+`legs`, which the flights tile reads when the logbook has none.
 
 **The bar's tone is STATED by the caller, never derived from how full it is.** A
 nearly full FDP bar is a warning; a nearly full REST bar is good news. Deriving

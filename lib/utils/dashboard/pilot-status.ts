@@ -76,17 +76,6 @@ const VERDICT_TO_STATE: Record<RequirementState, AnnunciatorState> = {
   fail: "action_required",
 }
 
-/**
- * ECAM vocabulary, because that is the vocabulary the reader already has:
- * amber is a CAUTION, red demands an action before dispatch.
- */
-export const ANNUNCIATOR_WORD: Record<AnnunciatorState, string> = {
-  current: "CURRENT",
-  warning: "CAUTION",
-  action_required: "ACTION REQUIRED",
-  getting_started: "NO FLIGHTS YET",
-}
-
 /** "1:20" — a duration, for a shortfall the reader has to act on. */
 function hoursMinutes(minutes: number): string {
   const safe = Math.max(0, Math.round(minutes))

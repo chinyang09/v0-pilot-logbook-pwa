@@ -22,7 +22,6 @@
  * report to legal; an FDP past its maximum is red past the mark.
  */
 
-import * as React from "react"
 import { cn } from "@/lib/utils"
 import { dutyWindow, formatDutyClock, formatRestSpan, restMinimumText } from "@/lib/utils/dashboard/duty-status"
 import { fdpMinutesOf } from "@/lib/utils/roster/fdp-calculator"

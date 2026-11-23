@@ -28,7 +28,6 @@ import {
   Trash2,
   PenLine,
   Lock,
-  X,
   Search,
   Loader2,
 } from "lucide-react";
