@@ -3,24 +3,24 @@
 /**
  * A flight's BRIEFING in sections, read the way the pilot prepares the
  * aeroplane — DIFSRIP, the Airbus MCDU order (DATA, INIT A, F-PLN, SEC F-PLN,
- * RAD NAV, INIT B, PERF) — then the NOTAMs, INTAMs, the airports with their
- * LIVE weather, and the fuel this route has taken before. The page lists the
- * sections (`BRIEFING_SECTIONS`) and each opens in the detail panel, as a
- * Settings section does (the owner, Nov 2026: "scrolling of the briefing
- * should be like the other pages").
+ * RAD NAV, INIT B, PERF) — then the NOTAMs, INTAMs, the airports and their
+ * LIVE weather. The page lists the sections (`BRIEFING_SECTIONS`) and each
+ * opens in the detail panel, as a Settings section does (the owner, Nov 2026:
+ * "scrolling of the briefing should be like the other pages").
  *
  * | section | from | the pilot |
  * |---|---|---|
- * | INIT A, INIT B | the OFP as the MCDU's own pages (`mcdu.ts`) | keys it |
- * | F-PLN | route, SID / STAR, procedures (OFP · sector info), FIR · WP · freq, nav log | writes sector info and frequencies, per ROUTE |
- * | SEC F-PLN | the alternates, their routes, approaches and fuel | reads |
- * | PERF | RTOW, flaps, EOSID, OptiClimb, cost index | reads |
- * | NOTAMs | the bulletin by section → airport → category, a row each (`notamTitle`) | flags |
- * | Airports & Weather | live METAR / TAF (`useAirportWeather`), company and community notes per AIRPORT | writes notes |
+ * | INIT A, INIT B | the OFP as the MCDU's own pages (`mcdu.ts`); INIT B's fuel and its breakdown, folded | keys it |
+ * | F-PLN | the route with its nav log folded under it; procedures (OFP · sector info), FIR · WP · freq | writes sector info and frequencies, per ROUTE |
+ * | Alternates | runway, approach, minima, distance, time, fuel, route — and what the TAF brings over the time it could be needed (`alternateConcerns`) | reads |
+ * | PERF | the weights against their maxima, OptiClimb | reads |
+ * | NOTAMs | the bulletin by section → airport → category, a row each, its words reflowed and its keywords marked (`notam-text.ts`) | flags |
+ * | Airports | each airport's runways and the company and community notes per AIRPORT | writes notes |
+ * | Weather | live METAR / TAF (`useAirportWeather`) with the flight's times lit | reads |
  */
 
 import * as React from "react"
-import { ChevronDown, Flag, Plus, RefreshCw, X } from "lucide-react"
+import { Bookmark, ChevronDown, Plus, RefreshCw, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatDay } from "@/lib/utils/date"
 import { formatInstant } from "@/lib/utils/tz-format"
@@ -28,13 +28,16 @@ import { FormSection } from "@/components/ui/form-section"
 import { SegmentedTabs } from "@/components/ui/segmented-tabs"
 import { ReadingPanel } from "@/components/ui/detail-form-panel"
 import { NoteText } from "./note-text"
-import { firCrossings, fuelHistory } from "@/lib/briefing/journal"
+import { firCrossings } from "@/lib/briefing/journal"
 import { hhmm, initA, initB, tonnes, type McduPage } from "@/lib/briefing/mcdu"
-import { groupNotams, notamCounts, notamTitle, type NotamGroup, type NotamView } from "@/lib/briefing/notams"
+import { groupNotams, notamCounts, type NotamGroup, type NotamView } from "@/lib/briefing/notams"
+import { highlightSpans, notamBody, notamTitle, reflowLines, type TextBlock } from "@/lib/briefing/notam-text"
+import { alternateConcerns, type AlternateConcern } from "@/lib/briefing/alternate-wx"
 import { routeRef } from "@/lib/briefing/ids"
 import { stationsOf, type Briefing, type BriefingStation } from "@/lib/briefing/types"
 import { saveBriefingNote, setNotamFlag } from "@/lib/db"
-import { refreshBriefingCaches, useAllBriefings, useBriefingNote, useNotamRegister } from "@/hooks/data/use-briefings"
+import { refreshBriefingCaches, useBriefingNote, useNotamRegister } from "@/hooks/data/use-briefings"
+import { useAirportInfo } from "@/hooks/use-airport-info"
 import { useAirportWeather } from "@/hooks/use-airport-weather"
 import { briefStations, metarReadings, stationWindows, WINDOW_MS, type StationWindow } from "@/lib/weather/brief"
 import { StationWeather } from "@/components/dashboard/flight/weather"
@@ -43,7 +46,7 @@ import type { BriefingNoteRecord, BriefingRecord, FrequencyNote, ProcedureRow } 
 
 /* ── the sections ────────────────────────────────────────────────────────── */
 
-export type BriefingSectionKey = "init-a" | "fpln" | "sec" | "init-b" | "perf" | "notams" | "intams" | "airports" | "fuel"
+export type BriefingSectionKey = "init-a" | "fpln" | "sec" | "init-b" | "perf" | "notams" | "intams" | "airports" | "weather"
 
 export interface BriefingSectionDef {
   key: BriefingSectionKey
@@ -56,19 +59,18 @@ export interface BriefingSectionDef {
 export const BRIEFING_SECTIONS: BriefingSectionDef[] = [
   { key: "init-a", letter: "I", label: "Init A", title: "INIT A" },
   { key: "fpln", letter: "F", label: "F-PLN", title: "Flight Plan" },
-  { key: "sec", letter: "S", label: "Sec F-PLN", title: "Alternates" },
+  { key: "sec", letter: "S", label: "Alternates", title: "Alternates" },
   { key: "init-b", letter: "I", label: "Init B", title: "INIT B · Fuel Pred" },
   { key: "perf", letter: "P", label: "Perf", title: "Performance" },
   { key: "notams", label: "NOTAMs", title: "NOTAMs" },
   { key: "intams", label: "INTAMs", title: "INTAMs" },
-  { key: "airports", label: "Airports & Weather", title: "Airports & Weather" },
-  { key: "fuel", label: "Fuel History", title: "Fuel · This Route" },
+  { key: "airports", label: "Airports", title: "Airports" },
+  { key: "weather", label: "Weather", title: "Weather" },
 ]
 
 /* ── shared pieces ───────────────────────────────────────────────────────── */
 
 const kg = (n: number | null | undefined) => (n === null || n === undefined ? "—" : n.toLocaleString("en-GB"))
-const signedKt = (n: number | null) => (n === null ? "—" : `${n > 0 ? "+" : ""}${n}kt`)
 
 /** A disclosure that needs no measuring: a grid row going 0fr → 1fr. */
 function Fold({ open, children }: { open: boolean; children: React.ReactNode }) {
@@ -220,70 +222,88 @@ export function useBriefingWeather(b: Briefing) {
 
 function InitASection({ b }: { b: Briefing }) {
   const wx = useBriefingWeather(b)
-  const depMetar = wx.briefs.find((s) => s.station === b.flight.dep)?.metar?.raw
-  const gnd = depMetar ? metarReadings(depMetar).tempC : null
+  return <McduScreen page={initA(b, groundTempOf(b, wx.briefs))} />
+}
+
+/** The departure's temperature off its live METAR — GND TEMP, to check against the ATIS. */
+export function groundTempOf(b: Briefing, briefs: ReturnType<typeof useBriefingWeather>["briefs"]): number | null {
+  const raw = briefs.find((s) => s.station === b.flight.dep)?.metar?.raw
+  return raw ? metarReadings(raw).tempC : null
+}
+
+/**
+ * The fuel as a table — kilograms in one column, time in the next, so the
+ * figures tabulate (the owner, Nov 2026) — folded under the screen until
+ * asked for: the screen already says what is keyed.
+ */
+function FuelTable({ b }: { b: Briefing }) {
+  const f = b.fuel
+  const [open, setOpen] = React.useState(false)
+  const rows: { label: string; kg: number | null | undefined; time?: string | null; strong?: boolean }[] = [
+    { label: "Trip", kg: f.trip.kg, time: f.trip.time },
+    { label: `Route Reserve${f.contingencyPct !== null ? ` ${f.contingencyPct}%` : ""}`, kg: f.contingency.kg, time: f.contingency.time },
+    { label: "Alternate", kg: f.alternate.kg, time: f.alternate.time },
+    { label: "Final Reserve", kg: f.finalReserve.kg, time: f.finalReserve.time },
+    { label: "Additional", kg: f.additional.kg, time: f.additional.time },
+    { label: "60 Min Top-Up", kg: f.topup60.kg, time: f.topup60.time },
+    { label: "Extra", kg: f.extra.kg ?? 0, time: f.extra.time },
+    { label: "Taxi", kg: f.taxi.kg },
+    { label: "Block", kg: f.inTanks.kg, time: f.inTanks.time, strong: true },
+    { label: "Min Diversion", kg: f.mdf },
+  ]
+  const adjustments = [
+    ...(f.burnPerTonneZfw !== null ? [{ label: "ZFW +1t", value: `+${f.burnPerTonneZfw}` }] : []),
+    ...(f.burn2000Below !== null ? [{ label: "2,000ft Below", value: `+${f.burn2000Below}` }] : []),
+    ...f.additionalReasons.filter((r) => r.kg).map((r) => ({ label: r.reason, value: kg(r.kg) })),
+  ]
   return (
-    <div className="space-y-3">
-      <McduScreen page={initA(b, gnd)} />
-      <p className="mx-auto max-w-[26rem] px-1 text-[12px] leading-snug text-muted-foreground">
-        Cyan is what you key. Green is for reference — GND TEMP is the {b.flight.dep} METAR&apos;s, to check against the ATIS.
-      </p>
-    </div>
+    <FormSection>
+      <FoldButton open={open} onClick={() => setOpen((o) => !o)}>
+        Fuel · Block {kg(f.inTanks.kg)} kg
+      </FoldButton>
+      <Fold open={open}>
+        {open && (
+          <div className="border-t border-border/70 pb-1 text-[14px] tabular-nums">
+            <div className="grid grid-cols-[minmax(0,1fr)_5rem_3.5rem] gap-x-3 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              <span />
+              <span className="text-right">kg</span>
+              <span className="text-right">Time</span>
+            </div>
+            {rows.map((r) => (
+              <div key={r.label} className={cn("grid grid-cols-[minmax(0,1fr)_5rem_3.5rem] gap-x-3 px-4 py-1.5", r.strong && "font-semibold")}>
+                <span className={cn("truncate", !r.strong && "text-muted-foreground")}>{r.label}</span>
+                <span className="text-right text-foreground">{kg(r.kg)}</span>
+                <span className="text-right text-muted-foreground">{r.time ? hhmm(r.time) : ""}</span>
+              </div>
+            ))}
+            {adjustments.length > 0 && (
+              <div className="mt-1 border-t border-border/70 pt-1">
+                {adjustments.map((a) => (
+                  <div key={a.label} className="grid grid-cols-[minmax(0,1fr)_5rem_3.5rem] gap-x-3 px-4 py-1.5">
+                    <span className="truncate text-muted-foreground">{a.label}</span>
+                    <span className="text-right text-foreground">{a.value}</span>
+                    <span />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </Fold>
+    </FormSection>
   )
 }
 
 function InitBSection({ b }: { b: Briefing }) {
-  const f = b.fuel
-  const [open, setOpen] = React.useState(false)
   return (
     <div className="space-y-3">
       <McduScreen page={initB(b)} />
-      <FormSection title="Fuel · kg">
-        <Line label="Trip">{kg(f.trip.kg)} <span className="text-muted-foreground">· {hhmm(f.trip.time)}</span></Line>
-        <Line label={`Route Reserve ${f.contingencyPct ?? ""}%`}>{kg(f.contingency.kg)}</Line>
-        <Line label="Alternate">{kg(f.alternate.kg)} <span className="text-muted-foreground">· {hhmm(f.alternate.time)}</span></Line>
-        <Line label="Final Reserve">{kg(f.finalReserve.kg)}</Line>
-        <Line label="Min Diversion">{kg(f.mdf)}</Line>
-        <Line label="Additional">{kg(f.additional.kg)}</Line>
-        <Line label="60 Min Top-Up">{kg(f.topup60.kg)}</Line>
-        <Line label="Extra">{kg(f.extra.kg ?? 0)}</Line>
-        <Line label="Taxi">{kg(f.taxi.kg)}</Line>
-        <Line label="Block">
-          <span className="font-semibold">{kg(f.inTanks.kg)}</span>
-        </Line>
-        {(f.additionalReasons.length > 0 || f.burnPerTonneZfw !== null || f.burn2000Below !== null) && (
-          <>
-            <FoldButton open={open} onClick={() => setOpen((o) => !o)}>
-              Adjustments
-            </FoldButton>
-            <Fold open={open}>
-              {open && (
-                <div className="pb-1">
-                  {f.burnPerTonneZfw !== null && <Line label="ZFW +1t">+{f.burnPerTonneZfw} burn</Line>}
-                  {f.burn2000Below !== null && <Line label="2,000ft Below">+{f.burn2000Below} burn</Line>}
-                  {f.additionalReasons.map((r) => (
-                    <Line key={r.reason} label={r.reason}>
-                      {kg(r.kg)}
-                    </Line>
-                  ))}
-                </div>
-              )}
-            </Fold>
-          </>
-        )}
-      </FormSection>
-      <FormSection title="Weights · kg">
-        <div className="grid grid-cols-3 divide-x divide-border/70">
-          <Fig label="ZFW" value={kg(b.weights.zfw.planned)} sub={`Max ${kg(b.weights.zfw.max)}`} />
-          <Fig label="TOW" value={kg(b.weights.tow.planned)} sub={`Max ${kg(b.weights.tow.max)}`} />
-          <Fig label="LW" value={kg(b.weights.lw.planned)} sub={`Max ${kg(b.weights.lw.max)}`} />
-        </div>
-      </FormSection>
+      <FuelTable b={b} />
     </div>
   )
 }
 
-/* ── F-PLN: route, procedures, frequencies (per route) ───────────────────── */
+/* ── F-PLN: route with its nav log, procedures, frequencies (per route) ──── */
 
 const PROC_ROWS: { row: ProcedureRow; label: string }[] = [
   { row: "taxiOut", label: "Taxi" },
@@ -362,10 +382,12 @@ function Frequencies({ b, note, route }: { b: Briefing; note: BriefingNoteRecord
   )
 }
 
+
+/** The nav log, folded under the route it is the detail of. */
 function NavLog({ b }: { b: Briefing }) {
   const [open, setOpen] = React.useState(false)
   return (
-    <FormSection>
+    <div className="border-t border-border/70">
       <FoldButton open={open} onClick={() => setOpen((s) => !s)}>
         Nav Log · {b.navlog.length} points
       </FoldButton>
@@ -393,7 +415,7 @@ function NavLog({ b }: { b: Briefing }) {
           </div>
         )}
       </Fold>
-    </FormSection>
+    </div>
   )
 }
 
@@ -406,45 +428,101 @@ function FplnSection({ b }: { b: Briefing }) {
         <p data-selectable className="px-4 pt-3 text-[14px] font-medium leading-snug text-foreground">
           {b.route.text}
         </p>
-        <div className="grid grid-cols-3 divide-x divide-border/70">
+        <div className="grid grid-cols-2 divide-x divide-border/70">
           <Fig label="Distance" value={b.route.groundNm !== null ? `${b.route.groundNm}nm` : "—"} sub={b.route.airNm !== null ? `${b.route.airNm}nm air` : undefined} />
-          <Fig label="Cruise" value={b.route.cruiseFl !== null ? `FL${b.route.cruiseFl}` : "—"} sub={signedKt(b.route.avgWindKt)} />
           <Fig label="Trip Time" value={b.route.tripTime || "—"} sub={`${b.route.schedDep}–${b.route.schedArr}Z`} />
         </div>
+        <NavLog b={b} />
       </FormSection>
       <Procedures b={b} note={note} route={route} />
       <Frequencies b={b} note={note} route={route} />
-      <NavLog b={b} />
     </div>
   )
 }
 
-/* ── SEC F-PLN: the alternates ───────────────────────────────────────────── */
+/* ── Alternates ──────────────────────────────────────────────────────────── */
+
+/**
+ * What each alternate's TAF brings over the time the flight could need it —
+ * the arrival plus its diversion, ± an hour (`useBriefingWeather`'s window).
+ */
+export function useAlternateConcerns(b: Briefing, wx: ReturnType<typeof useBriefingWeather>): Map<string, AlternateConcern[] | null> {
+  return React.useMemo(() => {
+    const out = new Map<string, AlternateConcern[] | null>()
+    for (const a of b.alternates) {
+      const brief = wx.briefs.find((s) => s.station === a.icao)
+      const w = brief?.windows.find((x) => x.label === "ALTN") ?? brief?.windows[0]
+      out.set(a.icao, brief?.taf && w ? alternateConcerns(brief.taf, w.fromMs, w.toMs, a.minima) : null)
+    }
+    return out
+  }, [b, wx.briefs])
+}
+
+/** The worst of the alternates' concerns, for the section's line on the page. */
+export function concernTone(concerns: Map<string, AlternateConcern[] | null>): "unsuitable" | "caution" | null {
+  let tone: "unsuitable" | "caution" | null = null
+  for (const list of concerns.values())
+    for (const c of list ?? []) {
+      if (c.severity === "unsuitable") return "unsuitable"
+      tone = "caution"
+    }
+  return tone
+}
+
+function ConcernLine({ c, clock }: { c: AlternateConcern; clock: (ms: number) => string }) {
+  return (
+    <p className={cn("text-[13px] font-medium tabular-nums", c.severity === "unsuitable" ? "text-destructive" : "text-status-warning")}>
+      {[c.tag, ...c.words].filter(Boolean).join(" ")}
+      <span className="font-normal text-muted-foreground">
+        {" "}
+        · {clock(c.fromMs)}–{clock(c.toMs)}
+        {c.severity === "unsuitable" ? " · below minima" : ""}
+      </span>
+    </p>
+  )
+}
 
 function SecSection({ b }: { b: Briefing }) {
+  const wx = useBriefingWeather(b)
+  const concerns = useAlternateConcerns(b, wx)
+  const { preferences } = usePreferences()
+  const clock = React.useCallback((ms: number) => formatInstant(ms, { ...preferences.display, useZuluTime: true }), [preferences.display])
   if (b.alternates.length === 0) return <p className="px-1 text-[14px] text-muted-foreground">The OFP names no alternate.</p>
   return (
     <FormSection>
-      {b.alternates.map((a, i) => (
-        <div key={a.icao} className="row-divider px-4 py-3">
-          <p className="flex flex-wrap items-baseline gap-x-2 text-[15px] tabular-nums">
-            <span className="font-semibold text-foreground">
-              {a.icao}/{a.runway}
-            </span>
-            {i === 0 && <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-primary">INIT A</span>}
-            <span className="text-foreground">{a.approach}</span>
-            <span className="text-muted-foreground">{a.minima}</span>
-          </p>
-          <p className="mt-0.5 text-[13px] tabular-nums text-muted-foreground">
-            {a.distNm}nm · FL{a.fl} · {signedKt(a.windKt)} · {a.time} · {kg(a.fuelKg)}kg
-          </p>
-          {a.route && (
-            <p data-selectable className="mt-0.5 text-[13px] leading-snug text-foreground/80">
-              {a.route}
+      {b.alternates.map((a) => {
+        const list = concerns.get(a.icao)
+        return (
+          <div key={a.icao} className="row-divider px-4 py-3">
+            <p className="flex flex-wrap items-baseline gap-x-2 text-[15px] tabular-nums">
+              <span className="font-semibold text-foreground">
+                {a.icao}/{a.runway}
+              </span>
+              <span className="text-foreground">{a.approach}</span>
+              <span className="text-muted-foreground">{a.minima}</span>
             </p>
-          )}
-        </div>
-      ))}
+            <p className="mt-0.5 text-[13px] tabular-nums text-muted-foreground">
+              {[a.distNm !== null ? `${a.distNm}nm` : "", a.time ?? "", a.fuelKg !== null ? `${kg(a.fuelKg)}kg` : ""].filter(Boolean).join(" • ")}
+            </p>
+            {a.route && (
+              <p data-selectable className="mt-0.5 text-[13px] leading-snug text-foreground/80">
+                {a.route}
+              </p>
+            )}
+            <div className="mt-1.5 space-y-0.5">
+              {list === undefined || (list === null && wx.loading) ? (
+                <p className="text-[12px] text-muted-foreground">Getting the TAF…</p>
+              ) : list === null ? (
+                <p className="text-[12px] text-muted-foreground">No TAF</p>
+              ) : list.length === 0 ? (
+                <p className="text-[12px] text-muted-foreground">Nothing in the TAF for this flight&apos;s times</p>
+              ) : (
+                list.map((c, i) => <ConcernLine key={i} c={c} clock={clock} />)
+              )}
+            </div>
+          </div>
+        )
+      })}
     </FormSection>
   )
 }
@@ -452,21 +530,16 @@ function SecSection({ b }: { b: Briefing }) {
 /* ── PERF ────────────────────────────────────────────────────────────────── */
 
 function PerfSection({ b }: { b: Briefing }) {
-  const r = b.rtow
+  const w = b.weights
   return (
     <div className="space-y-3">
-      {r && (
-        <FormSection title={`Takeoff · ${r.airport} RWY ${r.runway}`}>
-          <div className="grid grid-cols-3 divide-x divide-border/70 border-b border-border/70">
-            <Fig label="RTOW" value={kg(r.rtowKg)} sub={r.limit ? `${r.limit} limit` : undefined} />
-            <Fig label="Flaps" value={r.flaps || "—"} sub={r.rating || undefined} />
-            <Fig label="RWY Cond" value={r.condition || "—"} />
-          </div>
-          {r.eosid && <Line label="EOSID">{r.eosid}</Line>}
-          {r.perfKg !== null && <Line label="Perf / Land / Struct">{[r.perfKg, r.landKg, r.structKg].map(kg).join(" / ")}</Line>}
-          {r.excessKg !== null && <Line label="Excess Available">{kg(r.excessKg)}</Line>}
-        </FormSection>
-      )}
+      <FormSection title="Weights · kg">
+        <div className="grid grid-cols-3 divide-x divide-border/70">
+          <Fig label="Max ZFW" value={kg(w.zfw.max)} sub={`Plan ${kg(w.zfw.planned)}`} />
+          <Fig label="Max TOW" value={kg(w.tow.max)} sub={`Plan ${kg(w.tow.planned)}`} />
+          <Fig label="Max LW" value={kg(w.lw.max)} sub={`Plan ${kg(w.lw.planned)}`} />
+        </div>
+      </FormSection>
       {b.optiClimb && (
         <FormSection title="OptiClimb">
           {b.optiClimb.steps.map((s, i) => (
@@ -477,15 +550,11 @@ function PerfSection({ b }: { b: Briefing }) {
           {b.optiClimb.maxTowKg !== null && <Line label="Use up to TOW">{kg(b.optiClimb.maxTowKg)}</Line>}
         </FormSection>
       )}
-      <FormSection title="Cruise">
-        <Line label="Cost Index">{b.route.costIndex ?? "—"}</Line>
-        <Line label="Rules">{b.route.rules || "—"}</Line>
-      </FormSection>
     </div>
   )
 }
 
-/* ── NOTAMs ──────────────────────────────────────────────────────────────── */
+/* ── NOTAMs and INTAMs: words reflowed, keywords marked ──────────────────── */
 
 const validity = (n: NotamView["notam"]) => {
   if (n.toMs === null) return n.toText === "UFN" ? "UFN" : "PERM"
@@ -493,15 +562,77 @@ const validity = (n: NotamView["notam"]) => {
   return `to ${formatDay(d.toISOString().slice(0, 10), { weekday: false })} ${String(d.getUTCHours()).padStart(2, "0")}${String(d.getUTCMinutes()).padStart(2, "0")}Z`
 }
 
+/** A line with its facilities in bold and what closes them in the caution colour. */
+function Marked({ text }: { text: string }) {
+  return (
+    <>
+      {highlightSpans(text).map((s, i) =>
+        s.tone === "status" ? (
+          <strong key={i} className="font-semibold text-status-warning">
+            {s.text}
+          </strong>
+        ) : s.tone === "facility" ? (
+          <strong key={i} className="font-semibold text-foreground">
+            {s.text}
+          </strong>
+        ) : (
+          <React.Fragment key={i}>{s.text}</React.Fragment>
+        ),
+      )}
+    </>
+  )
+}
+
+/** Reflowed blocks: paragraphs, items hung on their marker, headings, rules. */
+function Blocks({ blocks }: { blocks: TextBlock[] }) {
+  return (
+    <div data-selectable className="space-y-1.5 text-[13px] leading-snug text-foreground/85">
+      {blocks.map((bl, i) =>
+        bl.kind === "rule" ? (
+          <hr key={i} className="border-border/70" />
+        ) : bl.kind === "heading" ? (
+          <p key={i} className="pt-1 text-[12px] font-semibold text-foreground">
+            <Marked text={bl.text} />
+          </p>
+        ) : bl.kind === "item" ? (
+          <ItemLine key={i} text={bl.text} />
+        ) : (
+          <p key={i}>
+            <Marked text={bl.text} />
+          </p>
+        ),
+      )}
+    </div>
+  )
+}
+
+/** "- TEXT", "A) TEXT", "2.1 TEXT": the marker in a gutter so the lines under it align. */
+function ItemLine({ text }: { text: string }) {
+  const m = text.match(/^(\S+)\s+([\s\S]*)$/) ?? text.match(/^(\d+\.)([\s\S]*)$/)
+  if (!m) return <p><Marked text={text} /></p>
+  const marker = m[1] === "-" || m[1] === "*" ? "•" : m[1]
+  return (
+    <p className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2">
+      <span className="min-w-3 tabular-nums text-muted-foreground">{marker}</span>
+      <span>
+        <Marked text={m[2]} />
+      </span>
+    </p>
+  )
+}
+
 /**
  * One NOTAM as an ACCORDION row (the owner, Nov 2026: "ID or header or
  * title, with validity shown when collapsed, then expanded for fine
- * details"). The flag is its own target beside the row, never inside it.
+ * details"). The bookmark is its own target beside the row, never inside it;
+ * a NOTAM whose title is all of it does not expand.
  */
 function NotamRow({ v }: { v: NotamView }) {
   const [open, setOpen] = React.useState(false)
   const n = v.notam
   const flagged = v.status === "flagged"
+  const body = React.useMemo(() => notamBody(n), [n])
+  const more = body.length > 0 || v.ids.length > 1 || !!n.limits
   return (
     <div className={cn("relative border-b border-border/60 last:border-b-0", v.status === "new" && "before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-primary")}>
       <div className="flex items-stretch">
@@ -512,34 +643,43 @@ function NotamRow({ v }: { v: NotamView }) {
           onClick={() => void setNotamFlag(n.key, !flagged).then(refreshBriefingCaches)}
           className="flex w-11 shrink-0 items-start justify-center pt-3"
         >
-          <Flag className={cn("h-[18px] w-[18px]", flagged ? "fill-status-warning text-status-warning" : "text-muted-foreground/70")} />
+          <Bookmark className={cn("h-[18px] w-[18px]", flagged ? "fill-status-warning text-status-warning" : "text-muted-foreground/60")} />
         </button>
-        <button type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)} className="flex min-h-12 min-w-0 flex-1 items-start gap-2 py-2.5 pr-3 text-left">
+        <button
+          type="button"
+          aria-expanded={more ? open : undefined}
+          disabled={!more}
+          onClick={() => setOpen((o) => !o)}
+          className="flex min-h-12 min-w-0 flex-1 items-start gap-2 py-2.5 pr-3 text-left disabled:cursor-default"
+        >
           <span className="min-w-0 flex-1">
             <span className="flex flex-wrap items-baseline gap-x-2 text-[11px] tabular-nums text-muted-foreground">
               <span className="font-semibold text-foreground">{v.ids[0]}</span>
               {v.status === "new" && <span className="font-semibold uppercase tracking-[0.08em] text-primary">New</span>}
               <span>{validity(n)}</span>
-              {n.schedule && <span className="truncate">· {n.schedule.split(/\s+/).slice(0, 3).join(" ")}…</span>}
+              {n.schedule && <span className="truncate">· {n.schedule}</span>}
             </span>
-            <span className={cn("mt-0.5 block text-[13px] leading-snug text-foreground", !open && "line-clamp-2")}>{notamTitle(n)}</span>
+            <span className={cn("mt-0.5 block text-[13px] leading-snug text-foreground", !open && "line-clamp-2")}>
+              <Marked text={notamTitle(n)} />
+            </span>
           </span>
-          <ChevronDown className={cn("mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200", open && "rotate-180")} aria-hidden />
+          {more && <ChevronDown className={cn("mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200", open && "rotate-180")} aria-hidden />}
         </button>
       </div>
-      <Fold open={open}>
-        {open && (
-          <div className="pb-3 pl-11 pr-4">
-            {v.ids.length > 1 && <p className="text-[11px] tabular-nums text-muted-foreground">Also {v.ids.slice(1).join(" · ")}</p>}
-            {(n.schedule || n.limits) && (
-              <p className="text-[12px] tabular-nums text-muted-foreground">{[n.schedule, n.limits].filter(Boolean).join(" · ")}</p>
-            )}
-            <p data-selectable className="mt-1 whitespace-pre-line text-[13px] leading-snug text-foreground">
-              {n.text}
-            </p>
-          </div>
-        )}
-      </Fold>
+      {more && (
+        <Fold open={open}>
+          {open && (
+            <div className="space-y-1.5 pb-3 pl-11 pr-4">
+              {(v.ids.length > 1 || n.limits) && (
+                <p className="text-[11px] tabular-nums text-muted-foreground">
+                  {[v.ids.length > 1 ? `Also ${v.ids.slice(1).join(" · ")}` : "", n.limits].filter(Boolean).join(" · ")}
+                </p>
+              )}
+              <Blocks blocks={body} />
+            </div>
+          )}
+        </Fold>
+      )}
     </div>
   )
 }
@@ -602,9 +742,10 @@ function NotamSectionBlock({ section, groups, mode }: { section: string; groups:
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{section}</span>
           <span className="block truncate text-[12px] tabular-nums text-muted-foreground">
-            {groups.map((g) => g.location).join(" ")} ·{" "}
-            <span className={cn(c.flagged > 0 && "text-status-warning")}>{c.flagged} flagged</span> ·{" "}
-            <span className={cn(c.new > 0 && "text-primary")}>{c.new} new</span> · {c.known} seen
+            {groups.map((g) => g.location).join(" • ")}
+            {c.flagged > 0 && <span className="text-status-warning"> · {c.flagged} flagged</span>}
+            {c.new > 0 && <span className="text-primary"> · {c.new} new</span>}
+            {c.known > 0 && <span> · {c.known} seen</span>}
           </span>
         </span>
         <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200", open && "rotate-180")} aria-hidden />
@@ -663,8 +804,6 @@ function NotamsSection({ record }: { record: BriefingRecord }) {
   )
 }
 
-/* ── INTAMs ──────────────────────────────────────────────────────────────── */
-
 function IntamsSection({ b }: { b: Briefing }) {
   const [open, setOpen] = React.useState<string | null>(null)
   if (b.intams.length === 0) return <p className="px-1 text-[14px] text-muted-foreground">No INTAMs in this package.</p>
@@ -681,10 +820,10 @@ function IntamsSection({ b }: { b: Briefing }) {
           </button>
           <Fold open={open === i.id}>
             {open === i.id && (
-              <p data-selectable className="whitespace-pre-line px-4 pb-3 text-[13px] leading-snug text-foreground">
-                {i.body}
-                {i.auth ? <span className="mt-1 block text-[11px] text-muted-foreground">Auth: {i.auth}</span> : null}
-              </p>
+              <div className="space-y-1.5 px-4 pb-3">
+                <Blocks blocks={reflowLines(i.body.split("\n"))} />
+                {i.auth ? <p className="text-[11px] text-muted-foreground">Auth: {i.auth}</p> : null}
+              </div>
             )}
           </Fold>
         </div>
@@ -693,101 +832,125 @@ function IntamsSection({ b }: { b: Briefing }) {
   )
 }
 
-/* ── Airports & Weather (per airport, every flight there) ────────────────── */
+/* ── the airports: who they are and what pilots say ──────────────────────── */
 
 const ROLE_NAME = { departure: "Departure", destination: "Destination", alternate: "Alternate", enroute: "En Route" } as const
 
-function AirportBlock({ station, wx, clock, now }: { station: BriefingStation; wx: ReturnType<typeof useBriefingWeather>; clock: (ms: number) => string; now: number }) {
-  const note = useBriefingNote("airport", station.icao)
-  const brief = wx.briefs.find((s) => s.station === station.icao)
-  const save = (patch: Partial<Pick<BriefingNoteRecord, "company" | "community">>) => void saveBriefingNote("airport", station.icao, patch).then(refreshBriefingCaches)
-  return (
-    <FormSection>
-      <div className="flex items-baseline justify-between gap-2 px-4 pb-1 pt-3">
-        <p className="min-w-0 truncate text-[15px] font-semibold text-foreground">
-          {station.icao}
-          {station.name ? <span className="font-normal text-muted-foreground"> · {station.name}</span> : null}
-        </p>
-        <p className="shrink-0 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">{ROLE_NAME[station.role]}</p>
-      </div>
-      <div className="px-4 pb-3">
-        {brief ? <StationWeather b={brief} clock={clock} now={now} /> : <p className="text-[12px] text-muted-foreground">{wx.loading ? "Getting the weather…" : "No weather"}</p>}
-      </div>
-      <div className="mx-3 mb-2 rounded-lg bg-emerald-500/10 px-3 py-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-emerald-700 dark:text-emerald-400">Company</p>
-        <NoteText label={`${station.icao} company notes`} value={note?.company ?? ""} placeholder="The company's airport briefing, summarised" onCommit={(t) => save({ company: t })} />
-      </div>
-      <div className="mx-3 mb-3 rounded-lg bg-rose-500/10 px-3 py-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-rose-700 dark:text-rose-400">Community</p>
-        <NoteText label={`${station.icao} community notes`} value={note?.community ?? ""} placeholder="What other pilots say to look out for" onCommit={(t) => save({ community: t })} />
-      </div>
-    </FormSection>
-  )
-}
-
-function AirportsSection({ b }: { b: Briefing }) {
-  const wx = useBriefingWeather(b)
-  const { preferences } = usePreferences()
-  const clock = React.useCallback((ms: number) => formatInstant(ms, { ...preferences.display, useZuluTime: true }), [preferences.display])
-  const [showEnroute, setShowEnroute] = React.useState(false)
-  // The reports' ages are read against when the section opened.
-  const [now] = React.useState(Date.now)
+/** The departure, destination and alternates once each, then what the WX list adds en route. */
+export function briefingAirports(b: Briefing): { main: BriefingStation[]; enroute: BriefingStation[] } {
   const all = stationsOf(b)
   const named = (icao: string, role: BriefingStation["role"]): BriefingStation => all.find((s) => s.icao === icao) ?? { icao, iata: "", name: "", role }
   // An airport once — the departure is often the first alternate too.
   const main = [named(b.flight.dep, "departure"), named(b.flight.arr, "destination"), ...b.alternates.map((a) => named(a.icao, "alternate"))].filter(
     (s, i, xs) => xs.findIndex((x) => x.icao === s.icao) === i,
   )
-  const enroute = all.filter((s) => !main.some((m) => m.icao === s.icao))
+  return { main, enroute: all.filter((s) => !main.some((m) => m.icao === s.icao)) }
+}
+
+function AirportHeader({ station }: { station: BriefingStation }) {
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2 px-1">
-        <p className="text-[12px] text-muted-foreground">
-          {wx.refreshing ? "Getting the latest…" : wx.failed ? "Weather unavailable" : "Live METAR and TAF, the flight's times lit"}
-        </p>
-        <button type="button" onClick={wx.refresh} className="control-surface flex h-9 items-center gap-1.5 rounded-full px-3 text-[13px]" aria-label="Refresh weather">
-          <RefreshCw className={cn("h-3.5 w-3.5", wx.refreshing && "animate-spin")} /> Refresh
-        </button>
-      </div>
-      {main.map((s) => (
-        <AirportBlock key={s.icao} station={s} wx={wx} clock={clock} now={now} />
-      ))}
-      {enroute.length > 0 && (
-        <FormSection>
-          <FoldButton open={showEnroute} onClick={() => setShowEnroute((s) => !s)}>
-            En route · {enroute.map((s) => s.icao).join(" ")}
-          </FoldButton>
-        </FormSection>
-      )}
-      {showEnroute && enroute.map((s) => <AirportBlock key={s.icao} station={s} wx={wx} clock={clock} now={now} />)}
+    <div className="flex items-baseline justify-between gap-2 px-4 pb-1 pt-3">
+      <p className="min-w-0 truncate text-[15px] font-semibold text-foreground">
+        {station.icao}
+        {station.name ? <span className="font-normal text-muted-foreground"> · {station.name}</span> : null}
+      </p>
+      <p className="shrink-0 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">{ROLE_NAME[station.role]}</p>
     </div>
   )
 }
 
-/* ── Fuel history ────────────────────────────────────────────────────────── */
+function NoteRow({ label, value, placeholder, onCommit }: { label: string; value: string; placeholder: string; onCommit: (t: string) => void }) {
+  return (
+    <div className="row-divider px-4 py-2.5">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{label}</p>
+      <NoteText label={label} value={value} placeholder={placeholder} onCommit={onCommit} />
+    </div>
+  )
+}
 
-function FuelSection({ record }: { record: BriefingRecord }) {
-  const all = useAllBriefings()
-  const b = record.data!
-  if (!all) return null
-  const h = fuelHistory(record, all)
-  if (h.count === 0)
-    return (
-      <p className="px-1 text-[14px] leading-snug text-muted-foreground">
-        The first briefing of {b.flight.dep}–{b.flight.arr} on the {b.flight.aircraftType.slice(0, 4)}. Each one you import adds to this, so you can see what the route usually takes.
-      </p>
-    )
+function AirportInfoBlock({ station, info }: { station: BriefingStation; info: ReturnType<typeof useAirportInfo>[string] | undefined }) {
+  const note = useBriefingNote("airport", station.icao)
+  const save = (patch: Partial<Pick<BriefingNoteRecord, "company" | "community">>) => void saveBriefingNote("airport", station.icao, patch).then(refreshBriefingCaches)
+  const runways = info?.runways ?? []
   return (
     <FormSection>
-      <div className="grid grid-cols-3 divide-x divide-border/70">
-        <Fig label="Earlier" value={h.count} sub={h.sameRegistration ? `${h.sameRegistration} on ${record.registration}` : undefined} />
-        <Fig label="Trip" value={h.trip ? kg(h.trip.avg) : "—"} sub={h.trip ? `${kg(h.trip.min)}–${kg(h.trip.max)}` : undefined} />
-        <Fig label="Block" value={h.block ? kg(h.block.avg) : "—"} sub={h.block ? `${kg(h.block.min)}–${kg(h.block.max)}` : undefined} />
+      <AirportHeader station={station} />
+      {runways.length > 0 && (
+        <p className="px-4 pb-2 text-[13px] tabular-nums text-muted-foreground">
+          {runways.map((r) => `${r.id}${r.lengthFt ? ` ${Math.round(r.lengthFt * 0.3048).toLocaleString("en-GB")}m` : ""}`).join(" • ")}
+        </p>
+      )}
+      <div className="border-t border-border/70">
+        <NoteRow label={`Company`} value={note?.company ?? ""} placeholder="The company's airport briefing, summarised" onCommit={(t) => save({ company: t })} />
+        <NoteRow label={`Community`} value={note?.community ?? ""} placeholder="What other pilots say to look out for" onCommit={(t) => save({ community: t })} />
       </div>
-      <p className="border-t border-border/70 px-4 py-2 text-[12px] text-muted-foreground">
-        This one: trip {kg(b.fuel.trip.kg)} · block {kg(b.fuel.inTanks.kg)}
-      </p>
     </FormSection>
+  )
+}
+
+function AirportsSection({ b }: { b: Briefing }) {
+  const { main, enroute } = briefingAirports(b)
+  const [showEnroute, setShowEnroute] = React.useState(false)
+  const info = useAirportInfo(
+    main.map((s) => s.icao),
+    true,
+  )
+  return (
+    <div className="space-y-3">
+      {main.map((s) => (
+        <AirportInfoBlock key={s.icao} station={s} info={info[s.icao]} />
+      ))}
+      {enroute.length > 0 && (
+        <FormSection>
+          <FoldButton open={showEnroute} onClick={() => setShowEnroute((o) => !o)}>
+            En route · {enroute.map((s) => s.icao).join(" • ")}
+          </FoldButton>
+        </FormSection>
+      )}
+      {showEnroute && enroute.map((s) => <AirportInfoBlock key={s.icao} station={s} info={undefined} />)}
+    </div>
+  )
+}
+
+/* ── the weather: live, for every airport of the flight ──────────────────── */
+
+function WeatherSection({ b }: { b: Briefing }) {
+  const wx = useBriefingWeather(b)
+  const { preferences } = usePreferences()
+  const clock = React.useCallback((ms: number) => formatInstant(ms, { ...preferences.display, useZuluTime: true }), [preferences.display])
+  const [showEnroute, setShowEnroute] = React.useState(false)
+  // The reports' ages are read against when the section opened.
+  const [now] = React.useState(Date.now)
+  const { main, enroute } = briefingAirports(b)
+  const block = (s: BriefingStation) => {
+    const brief = wx.briefs.find((x) => x.station === s.icao)
+    return (
+      <FormSection key={s.icao}>
+        <AirportHeader station={s} />
+        <div className="px-4 pb-3">
+          {brief ? <StationWeather b={brief} clock={clock} now={now} /> : <p className="text-[12px] text-muted-foreground">{wx.loading ? "Getting the weather…" : "No weather"}</p>}
+        </div>
+      </FormSection>
+    )
+  }
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2 px-1">
+        <p className="text-[12px] text-muted-foreground">{wx.refreshing ? "Getting the latest…" : wx.failed ? "Weather unavailable" : "The flight's times lit"}</p>
+        <button type="button" onClick={wx.refresh} className="control-surface flex h-9 items-center gap-1.5 rounded-full px-3 text-[13px]" aria-label="Refresh weather">
+          <RefreshCw className={cn("h-3.5 w-3.5", wx.refreshing && "animate-spin")} /> Refresh
+        </button>
+      </div>
+      {main.map(block)}
+      {enroute.length > 0 && (
+        <FormSection>
+          <FoldButton open={showEnroute} onClick={() => setShowEnroute((o) => !o)}>
+            En route · {enroute.map((s) => s.icao).join(" • ")}
+          </FoldButton>
+        </FormSection>
+      )}
+      {showEnroute && enroute.map(block)}
+    </div>
   )
 }
 
@@ -807,31 +970,44 @@ export function BriefingSectionPanel({ record, section }: { record: BriefingReco
       {section === "notams" && <NotamsSection record={record} />}
       {section === "intams" && <IntamsSection b={b} />}
       {section === "airports" && <AirportsSection b={b} />}
-      {section === "fuel" && <FuelSection record={record} />}
+      {section === "weather" && <WeatherSection b={b} />}
     </ReadingPanel>
   )
 }
 
-/** The one-line summary under each section's row on the page. */
-export function sectionSummary(key: BriefingSectionKey, b: Briefing, notams?: { total: number; flagged: number; new: number }): string {
+export interface SummaryContext {
+  notams?: { flagged: number; new: number }
+  groundTempC?: number | null
+}
+
+/** The one-line summary under each section's row on the page, its parts set apart by "•". */
+export function sectionSummary(key: BriefingSectionKey, b: Briefing, ctx: SummaryContext = {}): string {
+  const join = (parts: (string | null | false | undefined)[]) => parts.filter(Boolean).join(" • ")
   switch (key) {
     case "init-a":
-      return [b.flight.routeNumber, `${b.flight.dep}/${b.flight.arr}`, b.route.costIndex !== null ? `CI ${b.route.costIndex}` : ""].filter(Boolean).join(" · ")
+      return join([
+        b.flight.number,
+        b.route.cruiseFl !== null ? `FL${b.route.cruiseFl}/${b.winds.cruiseOat !== null ? `${b.winds.cruiseOat}°` : "---°"}` : "",
+        b.winds.tropopause !== null ? `TROPO ${b.winds.tropopause * 100}` : "",
+        ctx.groundTempC !== null && ctx.groundTempC !== undefined ? `GND ${ctx.groundTempC}°` : "",
+      ])
     case "fpln":
-      return [`${b.sid?.name ?? b.flight.dep} … ${b.star?.name ?? b.flight.arr}`, b.route.groundNm !== null ? `${b.route.groundNm}nm` : "", b.route.cruiseFl ? `FL${b.route.cruiseFl}` : ""].filter(Boolean).join(" · ")
+      return join([`${b.sid?.name ?? b.flight.dep} … ${b.star?.name ?? b.flight.arr}`, b.route.groundNm !== null ? `${b.route.groundNm}nm` : "", b.route.tripTime])
     case "sec":
-      return b.alternates.map((a) => a.icao).join(" · ") || "None"
+      return join(b.alternates.map((a) => a.icao)) || "None"
     case "init-b":
-      return `Block ${tonnes(b.fuel.inTanks.kg)} · Trip ${tonnes(b.fuel.trip.kg)} · MDF ${tonnes(b.fuel.mdf)}`
+      return join([`Block ${tonnes(b.fuel.inTanks.kg)}`, `Trip ${tonnes(b.fuel.trip.kg)}`, `MDF ${tonnes(b.fuel.mdf)}`])
     case "perf":
-      return b.rtow ? `RWY ${b.rtow.runway} · Flaps ${b.rtow.flaps} · RTOW ${tonnes(b.rtow.rtowKg)}` : "OptiClimb"
-    case "notams":
-      return notams ? `${notams.total} · ${notams.flagged} flagged · ${notams.new} new` : `${b.notams.items.length}`
+      return b.optiClimb?.steps.length ? join(b.optiClimb.steps.map((s) => `IAS ${s.ias} to FL${s.fl}`)) : "No OptiClimb"
+    case "notams": {
+      const n = ctx.notams
+      if (!n) return `${b.notams.items.length}`
+      return n.flagged + n.new === 0 ? "Nothing flagged or new" : join([n.flagged ? `${n.flagged} flagged` : "", n.new ? `${n.new} new` : ""])
+    }
     case "intams":
-      return b.intams.length ? `${b.intams.length} · ${b.intams[0].title}` : "None"
+      return b.intams.length ? join([`${b.intams.length}`, b.intams[0].title]) : "None"
     case "airports":
-      return `${[...new Set([b.flight.dep, b.flight.arr, ...b.alternates.map((a) => a.icao)])].join(" ")} · live weather`
-    case "fuel":
-      return `${b.flight.dep}–${b.flight.arr} on the ${b.flight.aircraftType.slice(0, 4)}`
+    case "weather":
+      return join(briefingAirports(b).main.map((s) => s.icao))
   }
 }

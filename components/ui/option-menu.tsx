@@ -558,8 +558,11 @@ function OptionMenu<T extends string>({
                   // selected-thing fill in a capsule inset from the menu's
                   // edge — not ticked (the owner, Nov 2026: "instead of a
                   // tick, uniformity same squircle highlight like nav bar").
+                  // A STADIUM at any height: a row with a hint under it (the
+                  // duty chooser's two lines) kept a 22px corner and read
+                  // squarer than every other highlight (the owner's report).
                   className={cn(
-                    "relative z-[2] mx-1.5 flex min-h-11 w-[calc(100%-0.75rem)] items-center gap-3 rounded-[22px] px-3.5 text-left text-[15px] outline-none transition-colors",
+                    "relative z-[2] mx-1.5 flex min-h-11 w-[calc(100%-0.75rem)] items-center gap-3 rounded-full px-4 text-left text-[15px] outline-none transition-colors",
                     selected
                       ? "bg-[var(--on-glass-active)] text-[var(--on-glass-active-fg)]"
                       : "hover:bg-[var(--on-glass-fill-soft)] focus-visible:bg-[var(--on-glass-fill-soft)] active:bg-[var(--on-glass-fill)]",

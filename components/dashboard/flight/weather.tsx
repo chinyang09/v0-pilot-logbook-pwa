@@ -12,7 +12,7 @@
  */
 
 import type * as React from "react"
-import { Cloud, CloudFog, CloudLightning, CloudRain, CloudSnow, CloudSun } from "lucide-react"
+import { Cloud, CloudFog, CloudLightning, CloudRain, CloudSnow, CloudSun, Sun } from "lucide-react"
 import { ageText, cloudLayer } from "@/lib/weather/format"
 import { categoryOf, hazardLine, hazardsOf, metarConditions, type FlightCategory, type StationBrief, type StationWindow } from "@/lib/weather/brief"
 import { cn } from "@/lib/utils"
@@ -42,15 +42,16 @@ export interface WeatherState {
 
 
 /** Cloud above this is no concern on the approach, and the tile does not name it. */
-export const LOW_CLOUD_FT = 3000
+export const LOW_CLOUD_FT = 3500
 
 /**
  * The sky as one word and an icon, as it matters on the approach: a hazard
- * first; else the lowest ceiling (BKN / OVC / VV) at or below `LOW_CLOUD_FT`;
- * else the lowest layer there; else poor visibility; else rain. Cloud higher
- * up says nothing on the approach (the owner, Nov 2026: "at 30000, it is not
- * of concern … 3k and below"), so a sky with only that is null — dark
- * cockpit: nothing to say.
+ * first; else CAVOK, said as the METAR says it (the owner, Nov 2026); else the
+ * lowest ceiling (BKN / OVC / VV) at or below `LOW_CLOUD_FT` (3,500ft — the
+ * owner's revision); else the lowest layer there; else poor visibility; else
+ * rain. Cloud higher up says nothing on the approach (the owner: "at 30000,
+ * it is not of concern"), so a sky with only that is null — dark cockpit:
+ * nothing to say.
  */
 export function skyOf(c: ReturnType<typeof metarConditions> | null, hazard: string | undefined) {
   if (hazard) {
@@ -60,6 +61,7 @@ export function skyOf(c: ReturnType<typeof metarConditions> | null, hazard: stri
     return { Icon, text: word, warn: true }
   }
   if (!c) return null
+  if (c.cavok) return { Icon: Sun, text: "CAVOK", warn: false }
   const low = (c.clouds ?? []).filter((l) => l.baseFt <= LOW_CLOUD_FT)
   const lowest = (ls: typeof low) => ls.reduce((m, l) => (l.baseFt < m.baseFt ? l : m))
   const ceil = low.filter((l) => l.cover === "BKN" || l.cover === "OVC" || l.cover === "VV")
@@ -139,7 +141,9 @@ export function StationWeather({ b, clock, now }: { b: StationBrief; clock: (ms:
           const cat = categoryOf(p.conditions)
           const flagged = !!covers && (hazardsOf(own).length > 0 || cat === "IFR" || cat === "LIFR")
           return (
-            <div key={i} className={cn("rounded-md px-2 py-1", covers ? (flagged ? "bg-chart-4/15" : "bg-primary/10") : "")}>
+            // No indent (the owner, Nov 2026): a lit period's wash reaches past
+            // the text, the text stays in line with the METAR's.
+            <div key={i} className={cn("-mx-2 rounded-md px-2 py-0.5", covers ? (flagged ? "bg-chart-4/15" : "bg-primary/10") : "")}>
               <p className={cn("break-words text-[12px] leading-snug tabular-nums", covers ? "text-foreground" : "text-muted-foreground")}>
                 {p.text.replace(/^TAF (AMD |COR )?/, "")}
               </p>

@@ -52,3 +52,8 @@ export function useMenuOpen(): boolean {
     () => false
   )
 }
+
+/** The lock read outside React — a document listener deciding whether a menu owns the tap. */
+export function isMenuOpen(): boolean {
+  return open
+}

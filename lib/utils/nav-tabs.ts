@@ -18,6 +18,7 @@ const KNOWN: ReadonlySet<BottomNavTab> = new Set<BottomNavTab>([
   "fdp",
   "discrepancies",
   "bin",
+  "import",
 ])
 
 /** Who fills a slot when fewer than two tabs survive. */

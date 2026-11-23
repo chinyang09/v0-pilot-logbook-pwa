@@ -15,7 +15,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { ChevronLeft, ChevronRight, CloudSun, FileText, FileUp, Flag, Fuel, MapPinned } from "lucide-react"
+import { Building2, ChevronLeft, ChevronRight, CloudSun, FileText, FileUp, MapPinned, ScrollText } from "lucide-react"
 import { PageContainer } from "@/components/page-container"
 import { GlassIconButton } from "@/components/ui/glass-icon-button"
 import { useRegisterMainActions } from "@/hooks/use-page-actions"
@@ -23,7 +23,17 @@ import { PageLoading } from "@/components/ui/page-loading"
 import { EmptyState } from "@/components/ui/empty-state"
 import { Button } from "@/components/ui/button"
 import { FormSection } from "@/components/ui/form-section"
-import { BRIEFING_SECTIONS, BriefingSectionPanel, sectionSummary, type BriefingSectionKey } from "@/components/briefing/briefing-view"
+import {
+  BRIEFING_SECTIONS,
+  BriefingSectionPanel,
+  concernTone,
+  groundTempOf,
+  sectionSummary,
+  useAlternateConcerns,
+  useBriefingWeather,
+  type BriefingSectionKey,
+} from "@/components/briefing/briefing-view"
+import type { Briefing } from "@/lib/briefing/types"
 import { refreshBriefingCaches, useBriefing, useNotamRegister } from "@/hooks/data/use-briefings"
 import { importBriefingFile } from "@/lib/briefing/import"
 import { groupNotams, notamCounts } from "@/lib/briefing/notams"
@@ -35,10 +45,10 @@ import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { cn } from "@/lib/utils"
 
 const ICONS: Partial<Record<BriefingSectionKey, React.ComponentType<{ className?: string }>>> = {
-  notams: Flag,
+  notams: ScrollText,
   intams: FileText,
-  airports: CloudSun,
-  fuel: Fuel,
+  airports: Building2,
+  weather: CloudSun,
 }
 
 const isSection = (s: string | null): s is BriefingSectionKey => !!s && BRIEFING_SECTIONS.some((x) => x.key === s)
@@ -121,25 +131,7 @@ function BriefingPage() {
             {formatDay(b.flight.date)} · {b.route.schedDep}–{b.route.schedArr}Z · {b.flight.registration} {b.flight.aircraftType} · OFP{" "}
             {b.flight.ofpVersion}
           </p>
-          <SectionList
-            title="Prepare · DIFSRIP"
-            keys={BRIEFING_SECTIONS.filter((s) => s.letter).map((s) => s.key)}
-            render={(key) => sectionSummary(key, b, counts)}
-            selected={isDesktop ? selectedId : null}
-            onSelect={(k) => setSelectedId(k)}
-          />
-          <SectionList
-            title="Brief"
-            keys={BRIEFING_SECTIONS.filter((s) => !s.letter).map((s) => s.key)}
-            render={(key) => sectionSummary(key, b, counts)}
-            selected={isDesktop ? selectedId : null}
-            onSelect={(k) => setSelectedId(k)}
-            tone={(key) => (key === "notams" && counts ? (counts.flagged ? "text-status-warning" : counts.new ? "text-primary" : undefined) : undefined)}
-          />
-          <p className="pb-2 text-center text-[11px] text-muted-foreground">
-            {briefing.fileName}
-            {b.flight.captain ? ` · Capt ${b.flight.captain}` : ""}
-          </p>
+          <BriefingSectionLists b={b} counts={counts} selected={isDesktop ? selectedId : null} onSelect={(k) => setSelectedId(k)} />
         </div>
       ) : (
         <EmptyState
@@ -154,6 +146,55 @@ function BriefingPage() {
         />
       )}
     </PageContainer>
+  )
+}
+
+/**
+ * The two lists — what is keyed (DIFSRIP) and what is read — each row a
+ * Settings row: a muted glyph, the section, one line of what it holds. The
+ * line takes a tone only where something asks for attention: a flagged
+ * NOTAM, a new one, an alternate whose TAF brings weather over the flight's
+ * time there.
+ */
+function BriefingSectionLists({
+  b,
+  counts,
+  selected,
+  onSelect,
+}: {
+  b: Briefing
+  counts: { flagged: number; new: number } | undefined
+  selected: string | null
+  onSelect: (key: BriefingSectionKey) => void
+}) {
+  const wx = useBriefingWeather(b)
+  const concerns = useAlternateConcerns(b, wx)
+  const ctx = { notams: counts, groundTempC: groundTempOf(b, wx.briefs) }
+  const altTone = concernTone(concerns)
+  const tone = (key: BriefingSectionKey) => {
+    if (key === "notams" && counts) return counts.flagged ? "text-status-warning" : counts.new ? "text-primary" : undefined
+    if (key === "sec" && altTone) return altTone === "unsuitable" ? "text-destructive" : "text-status-warning"
+    return undefined
+  }
+  return (
+    <>
+      <SectionList
+        title="Prepare · DIFSRIP"
+        keys={BRIEFING_SECTIONS.filter((s) => s.letter).map((s) => s.key)}
+        render={(key) => sectionSummary(key, b, ctx)}
+        selected={selected}
+        onSelect={onSelect}
+        tone={tone}
+      />
+      <SectionList
+        title="Brief"
+        keys={BRIEFING_SECTIONS.filter((s) => !s.letter).map((s) => s.key)}
+        render={(key) => sectionSummary(key, b, ctx)}
+        selected={selected}
+        onSelect={onSelect}
+        tone={tone}
+      />
+    </>
   )
 }
 
@@ -184,27 +225,22 @@ function SectionList({
             type="button"
             onClick={() => onSelect(key)}
             className={cn(
-              "row-divider flex min-h-14 w-full items-center gap-3 px-4 py-2.5 text-left transition-colors",
-              active ? "bg-primary/10" : "hover:bg-secondary/50 active:bg-secondary/50",
+              "row-divider flex w-full items-center px-4 py-3.5 text-left transition-colors",
+              active ? "bg-primary/10 text-primary" : "hover:bg-secondary/50 active:bg-secondary/50",
             )}
           >
             {def.letter ? (
-              <span
-                aria-hidden
-                className={cn(
-                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#101318] text-[13px] font-semibold text-cyan-300",
-                )}
-              >
+              <span aria-hidden className={cn("mr-3 w-4 shrink-0 text-center text-[13px] font-semibold", active ? "text-primary" : "text-muted-foreground")}>
                 {def.letter}
               </span>
             ) : Icon ? (
-              <Icon className={cn("h-4 w-4 shrink-0 mx-1.5", active ? "text-primary" : "text-muted-foreground")} />
+              <Icon className={cn("mr-3 h-4 w-4 shrink-0", active ? "text-primary" : "text-muted-foreground")} />
             ) : null}
             <span className="min-w-0 flex-1">
-              <span className={cn("block text-[15px] font-medium", active && "text-primary")}>{def.label}</span>
-              <span className={cn("block truncate text-[12px] tabular-nums text-muted-foreground", tone?.(key))}>{render(key)}</span>
+              <span className="block text-sm font-medium">{def.label}</span>
+              <span className={cn("block truncate text-xs tabular-nums text-muted-foreground", tone?.(key))}>{render(key)}</span>
             </span>
-            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <ChevronRight className="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
           </button>
         )
       })}

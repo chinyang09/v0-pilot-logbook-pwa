@@ -22,7 +22,7 @@ describe("the MCDU pages, as keyed", () => {
     expect(flat(initA(load("tr438-wsss-wbgg"), 25))).toEqual([
       ["CO RTE=SINKCH01", "FROM/TO=WSSS/WBGG"],
       ["ALTN/CO RTE=WSSS/----------", null],
-      ["FLT NBR=TR438", "TIME ZONE=UTC+8"],
+      ["FLT NBR=TR438", null],
       ["DIST=423NM", null],
       ["COST INDEX=20", "TROPO=54700"],
       ["CRZ FL/TEMP=FL290/-26°", "GND TEMP=25°"],
@@ -49,6 +49,14 @@ describe("the MCDU pages, as keyed", () => {
       ["FINAL/TIME=0.7/0030", "TRIP WIND=TL010"],
       ["MIN DEST FOB=1.5", "EXTRA/TIME=0.0/0000"],
     ])
+  })
+
+  it("draws what the FMS computes itself in green — TRIP, TOW / LW, EXTRA", () => {
+    const refs = initB(load("tr438-wsss-wbgg"))
+      .rows.flat()
+      .filter((s) => s?.ref)
+      .map((s) => s!.label)
+    expect(refs).toEqual(["TRIP/TIME", "TOW/LW", "EXTRA/TIME"])
   })
 
   it("leaves GND TEMP as dashes without a live METAR", () => {

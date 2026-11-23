@@ -110,7 +110,6 @@ export function AirportPanel({
   info,
   metar,
   arrivalMs,
-  distanceNm,
   weatherAsked,
   nearby,
   codeOf,
@@ -131,8 +130,6 @@ export function AirportPanel({
   metar: { raw: string; category: FlightCategory | null } | null
   /** When the duty arrives there, for day or night on arrival. */
   arrivalMs: number | null
-  /** The leg's great-circle distance into it. */
-  distanceNm: number | null
   /** Whether the weather is asked at all — the duty is within a TAF's reach. */
   weatherAsked: boolean
   /** The aerodromes near it, for a diversion. */
@@ -184,11 +181,6 @@ export function AirportPanel({
               </span>
             )}
             {Arrive && <Arrive className="h-3.5 w-3.5" aria-label={night ? "Arrive by night" : "Arrive by day"} />}
-            {distanceNm !== null && (
-              <span>
-                · <span data-morph={mk("dist")}>{Math.round(distanceNm).toLocaleString("en-US")}nm</span>
-              </span>
-            )}
           </p>
         </div>
         {category && category !== "VFR" && (
@@ -217,17 +209,23 @@ export function AirportPanel({
             morph={mk("rwys")}
           />
           <div className="min-w-0 flex-1 space-y-1">
-            <p className="flex flex-wrap items-center gap-x-1.5 text-[15px] font-semibold tabular-nums text-foreground">
+            {/* Wind • temperature • QNH on one line (the owner, Nov 2026). */}
+            <p className="flex flex-wrap items-baseline gap-x-1.5 text-[15px] font-semibold tabular-nums text-foreground">
               <span data-morph={mk("wind")}>{windText ?? "Wind —"}</span>
               {c.gustKt ? <span className="text-status-warning">G{c.gustKt}</span> : null}
+              {temp && (
+                <>
+                  <span className="font-normal text-muted-foreground">•</span>
+                  <span data-morph={mk("temp")}>{temp}</span>
+                </>
+              )}
+              {readings?.qnhHpa ? (
+                <>
+                  <span className="font-normal text-muted-foreground">•</span>
+                  <span data-morph={mk("qnh")}>Q{readings.qnhHpa}</span>
+                </>
+              ) : null}
             </p>
-            {(temp || readings?.qnhHpa) && (
-              <p className="truncate text-[13px] tabular-nums text-muted-foreground">
-                {temp && <span data-morph={mk("temp")}>{temp}</span>}
-                {temp && readings?.qnhHpa ? " · " : null}
-                {readings?.qnhHpa ? <span data-morph={mk("qnh")}>Q{readings.qnhHpa}</span> : null}
-              </p>
-            )}
             {landing && <UseRow kind="arr" use={landing} morph={mk("land")} />}
             {departing && <UseRow kind="dep" use={departing} morph={mk("dep")} />}
             {favoured && (
