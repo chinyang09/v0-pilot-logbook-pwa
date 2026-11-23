@@ -1,7 +1,7 @@
 "use client"
 
 import { useSyncExternalStore } from "react"
-import { clampSize, type TileSize } from "@/lib/utils/dashboard/bento"
+import { clampSize, columnsOf, type GridKind, type TileSize } from "@/lib/utils/dashboard/bento"
 
 /**
  * The flight dashboard's TILES in the pilot's own order, and whether they are
@@ -111,7 +111,23 @@ export const DEFAULT_TILE_SIZES: Record<DashboardTile, TileSize> = {
   limits: { cols: 3, rows: 2 },
 }
 
-/** The fewest columns a tile can take: the duty strip and the day bar need two thirds of the row. */
+/**
+ * The WIDE grid's (twelve columns — a desktop's full width): the duty and the
+ * flights side by side, then the airport (its airports side by side) beside
+ * the currency over the limits — each tile about a phone and a half wide at
+ * 1,100px, so a face lays out more rather than the same thing larger.
+ */
+export const DEFAULT_WIDE_TILE_SIZES: Record<DashboardTile, TileSize> = {
+  duty: { cols: 6, rows: 2 },
+  flight: { cols: 6, rows: 2 },
+  airport: { cols: 6, rows: 4 },
+  currency: { cols: 6, rows: 2 },
+  limits: { cols: 6, rows: 2 },
+}
+
+const DEFAULTS: Record<GridKind, Record<DashboardTile, TileSize>> = { narrow: DEFAULT_TILE_SIZES, wide: DEFAULT_WIDE_TILE_SIZES }
+
+/** The fewest columns a tile can take: the duty strip and the day bar need two thirds of a phone's row. */
 export const TILE_MIN_COLS: Record<DashboardTile, number> = {
   duty: 4,
   flight: 4,
@@ -120,10 +136,25 @@ export const TILE_MIN_COLS: Record<DashboardTile, number> = {
   limits: 2,
 }
 
+/** The same on the wide grid: a column there is about the narrow grid's at 760px, more beyond it. */
+const TILE_MIN_COLS_WIDE: Record<DashboardTile, number> = {
+  duty: 4,
+  flight: 4,
+  airport: 3,
+  currency: 3,
+  limits: 3,
+}
+
+export function minColsOf(id: DashboardTile, grid: GridKind): number {
+  return (grid === "wide" ? TILE_MIN_COLS_WIDE : TILE_MIN_COLS)[id]
+}
+
 // v4: the grid became six columns by up to six rows. A v3 size (three
 // columns, two rows) is carried across doubled, so a pilot's layout stays.
+// The wide grid keeps its sizes apart: a desktop's arrangement is not a phone's.
 const SIZES_KEY = "ooo:dashboard-sizes:v4"
 const SIZES_KEY_V3 = "ooo:dashboard-sizes:v3"
+const WIDE_SIZES_KEY = "ooo:dashboard-sizes-wide:v1"
 
 /** A v3 size (on the 3 × 2 grid) on the 6 × 6 one. */
 export function sizesFromV3(stored: unknown): unknown {
@@ -136,19 +167,19 @@ export function sizesFromV3(stored: unknown): unknown {
 }
 
 /** Stored sizes, put right: an unknown tile or a size it may not take falls back to its default. */
-export function normaliseTileSizes(stored: unknown): Record<DashboardTile, TileSize> {
-  const out = { ...DEFAULT_TILE_SIZES }
+export function normaliseTileSizes(stored: unknown, grid: GridKind = "narrow"): Record<DashboardTile, TileSize> {
+  const out = { ...DEFAULTS[grid] }
   if (stored && typeof stored === "object") {
     for (const id of DASHBOARD_TILES) {
       const v = (stored as Record<string, unknown>)[id]
       // The airport tile keeps its default rather than the size of either tile it replaced.
-      if (v && typeof v === "object") out[id] = clampSize(v as Partial<TileSize>, TILE_MIN_COLS[id])
+      if (v && typeof v === "object") out[id] = clampSize(v as Partial<TileSize>, minColsOf(id, grid), columnsOf(grid))
     }
   }
   return out
 }
 
-let sizes: Record<DashboardTile, TileSize> = DEFAULT_TILE_SIZES
+const sizes: Record<GridKind, Record<DashboardTile, TileSize>> = { narrow: DEFAULT_TILE_SIZES, wide: DEFAULT_WIDE_TILE_SIZES }
 let sizesHydrated = false
 
 function hydrateSizes(): void {
@@ -157,10 +188,17 @@ function hydrateSizes(): void {
   try {
     const raw = window.localStorage.getItem(SIZES_KEY)
     const old = raw ? null : window.localStorage.getItem(SIZES_KEY_V3)
+    let changed = false
     if (raw || old) {
-      sizes = normaliseTileSizes(raw ? JSON.parse(raw) : sizesFromV3(JSON.parse(old!)))
-      emit()
+      sizes.narrow = normaliseTileSizes(raw ? JSON.parse(raw) : sizesFromV3(JSON.parse(old!)), "narrow")
+      changed = true
     }
+    const wide = window.localStorage.getItem(WIDE_SIZES_KEY)
+    if (wide) {
+      sizes.wide = normaliseTileSizes(JSON.parse(wide), "wide")
+      changed = true
+    }
+    if (changed) emit()
   } catch {
     // The defaults stand.
   }
@@ -172,20 +210,21 @@ function subscribeSizes(listener: () => void): () => void {
   return () => listeners.delete(listener)
 }
 
-export function setTileSize(id: DashboardTile, next: TileSize): void {
-  const size = clampSize(next, TILE_MIN_COLS[id])
-  if (sizes[id].cols === size.cols && sizes[id].rows === size.rows) return
-  sizes = { ...sizes, [id]: size }
+export function setTileSize(id: DashboardTile, next: TileSize, grid: GridKind = "narrow"): void {
+  const size = clampSize(next, minColsOf(id, grid), columnsOf(grid))
+  const cur = sizes[grid][id]
+  if (cur.cols === size.cols && cur.rows === size.rows) return
+  sizes[grid] = { ...sizes[grid], [id]: size }
   try {
-    window.localStorage.setItem(SIZES_KEY, JSON.stringify(sizes))
+    window.localStorage.setItem(grid === "wide" ? WIDE_SIZES_KEY : SIZES_KEY, JSON.stringify(sizes[grid]))
   } catch {
     // Kept for this session only.
   }
   emit()
 }
 
-export function useTileSizes(): Record<DashboardTile, TileSize> {
-  return useSyncExternalStore(subscribeSizes, () => sizes, () => DEFAULT_TILE_SIZES)
+export function useTileSizes(grid: GridKind = "narrow"): Record<DashboardTile, TileSize> {
+  return useSyncExternalStore(subscribeSizes, () => sizes[grid], () => DEFAULTS[grid])
 }
 
 export function useTileOrder(): DashboardTile[] {

@@ -46,6 +46,7 @@ import { AirportPanel } from "./airport"
 import { EnRoute, useDutyAlternates, type AlternateBrief } from "./alternates"
 import { fallbackRunway, useAirportRunways, type AirportRunwayState } from "./runway-state"
 import { shortDay } from "./faces"
+import { FACE_WIDE_COLS } from "@/lib/utils/dashboard/bento"
 import type { FlightBrief } from "./model"
 
 const RANK: Record<FlightCategory, number> = { VFR: 0, MVFR: 1, IFR: 2, LIFR: 3 }
@@ -80,12 +81,26 @@ export function AirportFace({ brief, size }: { brief: FlightBrief; size?: { cols
       </div>
     )
   }
+  // A WIDE tile (a desktop's full width) shows its airports side by side —
+  // each about a phone's station — rather than one station across it.
+  const per = (size?.cols ?? 0) >= FACE_WIDE_COLS ? Math.max(1, Math.min(stations.length, Math.floor((size?.cols ?? 0) / STATION_COLS))) : 1
+  const first = Math.floor(page / per) * per
   return (
-    <Pager count={stations.length} page={page} onPage={setPage} fill morph="ap">
-      {(i) => <StationFace brief={brief} b={stations[i]} size={size} lead={i === page} />}
+    <Pager count={stations.length} page={page} onPage={setPage} fill morph="ap" perPage={per}>
+      {(i) => (
+        <StationFace
+          brief={brief}
+          b={stations[i]}
+          size={per > 1 ? { cols: (size?.cols ?? 0) / per, rows: size?.rows ?? 1 } : size}
+          lead={i >= first && i < first + per}
+        />
+      )}
     </Pager>
   )
 }
+
+/** The width one airport takes side by side on a wide tile, in thirds of a phone's row. */
+const STATION_COLS = 2.2
 
 /** The text is kept this far from the ring. */
 const RING_GAP = 4

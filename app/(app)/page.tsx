@@ -10,6 +10,7 @@ import { useAuth } from "@/components/providers/auth-provider"
 import { CACHE_KEYS, refreshAllData } from "@/hooks/data"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
+import { useMainPanelFullWidth } from "@/lib/layout/panel-mode"
 import { FlightForm } from "@/components/flight-form"
 import { syncService } from "@/lib/sync"
 
@@ -45,12 +46,16 @@ export default function Dashboard() {
   const dashboardActions = useMemo(() => <FlightDeckActions />, [])
   useRegisterMainActions(dashboardActions, isActive)
 
-  // MAIN / DETAIL: a flight opens in the detail panel (an "Open Flight" in a
-  // card); a widget (`w:<id>`) is
-  // written by that page itself, which holds the model it comes from. This effect owns everything else —
-  // including clearing the panel, since the dashboard now has one.
+  // The WHOLE WIDTH on a desktop, like the FDP chart (the owner, Nov 2026):
+  // the tiles are the page, and a card grows out of its tile over it. The
+  // detail panel comes back only for a flight opened from a card (Open
+  // TR438), and goes again when it is closed.
   const { selectedId, setSelectedId, setDetailContent } = useDetailPanel()
   const isDesktop = useIsDesktop()
+  // `w:<id>` was a widget's card in the panel, before the page took the
+  // whole width — a selection remembered from then is no flight.
+  const flightId = selectedId && !selectedId.startsWith("w:") ? selectedId : null
+  useMainPanelFullWidth(isActive && !flightId)
   // The pathname moves in the same render as the selection; the active-route
   // store a commit later. Gating on both stops a navigation away from writing
   // the ARRIVING page's selection into this page's panel for a frame.
@@ -58,8 +63,10 @@ export default function Dashboard() {
   useEffect(() => {
     // Keep-alive: a hidden dashboard must not write the panel another page owns.
     if (!isActive || !onDashboard) return
-    // `w:` is the flight page's own.
-    if (selectedId?.startsWith("w:")) return
+    if (selectedId?.startsWith("w:")) {
+      setSelectedId(null, { explicit: false })
+      return
+    }
     setDetailContent(
       selectedId ? (
         <div className="h-full overflow-hidden bg-background">

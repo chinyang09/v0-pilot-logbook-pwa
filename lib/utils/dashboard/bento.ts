@@ -18,6 +18,28 @@
 export const GRID_COLUMNS = 6
 export const MAX_ROWS_SPAN = 6
 
+/**
+ * A WIDE grid has twelve columns (the owner, Nov 2026: on a desktop the
+ * Flight Deck takes the whole width, "else widgets will end up very huge
+ * wasting good space"). Six columns across a 1,100px page made every tile
+ * twice a phone's width with a phone's content in it; on twelve, a tile is
+ * placed at about a phone's width per six columns, and a face given more
+ * than that lays out more (`faceSizeOn`).
+ */
+export const WIDE_GRID_COLUMNS = 12
+/** The grid's width from which it is the wide grid, px. */
+export const WIDE_GRID_MIN_PX = 760
+
+export type GridKind = "narrow" | "wide"
+
+export function columnsOf(grid: GridKind): number {
+  return grid === "wide" ? WIDE_GRID_COLUMNS : GRID_COLUMNS
+}
+
+export function gridKindFor(widthPx: number): GridKind {
+  return widthPx >= WIDE_GRID_MIN_PX ? "wide" : "narrow"
+}
+
 export interface TileSize {
   /** Columns of the 6 it spans. */
   cols: number
@@ -36,24 +58,29 @@ export interface PlacedTile<T extends string> {
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(n)))
 
-export function clampSize(size: Partial<TileSize> | undefined, minCols = 1): TileSize {
+export function clampSize(size: Partial<TileSize> | undefined, minCols = 1, columns = GRID_COLUMNS): TileSize {
   return {
-    cols: clamp(size?.cols ?? GRID_COLUMNS, minCols, GRID_COLUMNS),
+    cols: clamp(size?.cols ?? columns, minCols, columns),
     rows: clamp(size?.rows ?? 1, 1, MAX_ROWS_SPAN),
   }
 }
 
-export function packTiles<T extends string>(order: readonly T[], sizes: Record<T, TileSize>): PlacedTile<T>[] {
+export function packTiles<T extends string>(order: readonly T[], sizes: Record<T, TileSize>, columns = GRID_COLUMNS): PlacedTile<T>[] {
   // The order as chosen first; where that leaves a hole no neighbour can
   // take (finer sizes on the six-column grid can), a pass that lets a tile
   // drop back into an earlier gap — whichever leaves fewer holes.
-  const strict = pack(order, sizes, false)
+  const strict = pack(order, sizes, false, columns)
   if (strict.holes === 0) return strict.placed
-  const dense = pack(order, sizes, true)
+  const dense = pack(order, sizes, true, columns)
   return dense.holes < strict.holes ? dense.placed : strict.placed
 }
 
-function pack<T extends string>(order: readonly T[], sizes: Record<T, TileSize>, dense: boolean): { placed: PlacedTile<T>[]; holes: number } {
+function pack<T extends string>(
+  order: readonly T[],
+  sizes: Record<T, TileSize>,
+  dense: boolean,
+  columns: number,
+): { placed: PlacedTile<T>[]; holes: number } {
   const cells: (number | undefined)[][] = []
   const free = (r: number, c: number) => cells[r]?.[c] === undefined
   const take = (r: number, c: number, i: number) => {
@@ -61,7 +88,7 @@ function pack<T extends string>(order: readonly T[], sizes: Record<T, TileSize>,
     cells[r][c] = i
   }
   const fits = (r: number, c: number, cols: number, rows: number) => {
-    if (c + cols > GRID_COLUMNS) return false
+    if (c + cols > columns) return false
     for (let y = r; y < r + rows; y++) for (let x = c; x < c + cols; x++) if (!free(y, x)) return false
     return true
   }
@@ -71,12 +98,12 @@ function pack<T extends string>(order: readonly T[], sizes: Record<T, TileSize>,
   let cr = 0
   let cc = 0
   order.forEach((id, i) => {
-    const { cols, rows } = clampSize(sizes[id])
+    const { cols, rows } = clampSize(sizes[id], 1, columns)
     let r = dense ? 0 : cr
     let c = dense ? 0 : cc
     while (!fits(r, c, cols, rows)) {
       c += 1
-      if (c >= GRID_COLUMNS) {
+      if (c >= columns) {
         c = 0
         r += 1
       }
@@ -104,7 +131,7 @@ function pack<T extends string>(order: readonly T[], sizes: Record<T, TileSize>,
   while (changed) {
     changed = false
     for (let r = 0; r <= lastRow; r++) {
-      for (let c = 0; c < GRID_COLUMNS; c++) {
+      for (let c = 0; c < columns; c++) {
         if (!free(r, c)) continue
         const left = c > 0 ? at(r, c - 1) : undefined
         if (left && left.col + left.cols === c && column(left, c)) {
@@ -113,7 +140,7 @@ function pack<T extends string>(order: readonly T[], sizes: Record<T, TileSize>,
           changed = true
           continue
         }
-        const right = c < GRID_COLUMNS - 1 ? at(r, c + 1) : undefined
+        const right = c < columns - 1 ? at(r, c + 1) : undefined
         if (right && right.col === c + 1 && column(right, c)) {
           right.col -= 1
           right.cols += 1
@@ -148,7 +175,7 @@ function pack<T extends string>(order: readonly T[], sizes: Record<T, TileSize>,
     }
   }
   let holes = 0
-  for (let r = 0; r <= lastRow; r++) for (let c = 0; c < GRID_COLUMNS; c++) if (free(r, c)) holes++
+  for (let r = 0; r <= lastRow; r++) for (let c = 0; c < columns; c++) if (free(r, c)) holes++
   return { placed, holes }
 }
 
@@ -162,6 +189,33 @@ function pack<T extends string>(order: readonly T[], sizes: Record<T, TileSize>,
 export function faceSize(size: TileSize): TileSize {
   return { cols: size.cols / 2, rows: size.rows / 2 }
 }
+
+/** The grid's gap, px (`gap-2`). */
+export const GRID_GAP_PX = 8
+/**
+ * A third of a phone's row, px, gap included: a 366px grid (a 390 phone less
+ * its gutters) is three of these. A face reads its width in these units.
+ */
+const PHONE_THIRD_PX = (366 + GRID_GAP_PX) / 3
+
+/**
+ * A size as a face reads it on either grid. The narrow (phone) grid is
+ * `faceSize` exactly, so a phone lays out as it always has. On the WIDE grid
+ * the columns are read off the tile's real width — in thirds of a phone's
+ * row — so a tile a phone's width is a face 3 wide, and one half again as
+ * wide is a face 4.5 wide, which lays out more (every leg side by side,
+ * several airports, the limits in pairs). Rows are the grid's, as before.
+ */
+export function faceSizeOn(size: TileSize, grid: GridKind, gridPx: number): TileSize {
+  if (grid === "narrow" || !(gridPx > 0)) return faceSize(size)
+  const columns = WIDE_GRID_COLUMNS
+  const col = (gridPx - GRID_GAP_PX * (columns - 1)) / columns
+  const px = size.cols * col + (size.cols - 1) * GRID_GAP_PX
+  return { cols: Math.round(((px + GRID_GAP_PX) / PHONE_THIRD_PX) * 4) / 4, rows: size.rows / 2 }
+}
+
+/** A face this wide (in thirds of a phone's row) has room for more than a phone shows. */
+export const FACE_WIDE_COLS = 4.25
 
 /** "2 × 1" — a size as Arrange says it. */
 export function sizeLabel(size: TileSize): string {

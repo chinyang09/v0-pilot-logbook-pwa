@@ -1618,11 +1618,34 @@ instead (`header: "label"`), so no name appears twice.
   dismiss, and the footer only ever closed the card (the owner's report). The card
   scrolls only vertically, without a bar (`overflow-x-hidden scrollbar-hide`).
   Scrim, Escape and back close it. No title bar, no close button.
-- **A tablet / desktop: main + detail** — a tile opens the same card in the
-  detail panel (`w:<id>`, ringed tile; `WidgetCard` with the same footer line,
-  no label under the panel's own title), and with nothing chosen the panel
-  opens the duty's flights (`explicit: false`). A flight opens in the
-  dashboard's own panel (a flight id), as the summary rows do.
+- **A tablet / desktop: the WHOLE WIDTH, like the FDP chart** (the owner, Nov
+  2026: "on desktop view, I want it to go full width … else widgets will end
+  up very huge wasting good space that can provide information"). The page
+  holds `useMainPanelFullWidth` while it is on screen, and a tile opens the
+  SAME card a phone does, growing out of it over the page (`WidgetSheet`: a
+  tile wider than a card narrows to `CARD_MAX_PX`, centred over the tile).
+  The detail panel comes back only for a flight opened from a card (Open
+  TR438) and goes again when it is closed. `w:<id>` (a card in the panel)
+  is gone; a remembered one is cleared.
+- **The WIDE grid** — from a grid 760px wide (`WIDE_GRID_MIN_PX`) the bento
+  has TWELVE columns (`WIDE_GRID_COLUMNS`) with sizes of its own
+  (`ooo:dashboard-sizes-wide:v1`, `DEFAULT_WIDE_TILE_SIZES`: duty and flights
+  6 × 2 side by side, the airport 6 × 4 beside the currency over the limits),
+  and its ROWS SHARE THE PAGE'S HEIGHT (auto rows stretched, never below
+  their content). A face is told its REAL width (`faceSizeOn` — in thirds of a
+  phone's row, so a tile a phone wide is still 3), and from `FACE_WIDE_COLS`
+  (4.25) lays out more rather than the same thing larger: the legs side by
+  side (`Pager`'s `perPage`, "Legs 1–2/3"), the airports side by side (each
+  a station, each reading its runways in use), the currency's list beside its
+  year of dots, the limits in pairs with used / limit. And every tile on the
+  wide grid fills its height with the next rows its card holds, as many as
+  FIT and never one cut in half (`TileRows`, laid out over the room under the
+  face so it adds no height): the duty's timetable (less the face's three
+  figures), each leg's rows the face has not said, every currency, "If This
+  Duty Runs Late". The grid is chosen in a ResizeObserver and its first
+  answer rendered before paint (`flushSync`). Measured at 1180×820,
+  1440×900 and 820×1180: no scroll, no sideways overflow; a phone (six
+  columns, `faceSize`) is unchanged to the pixel.
 - Measured at 4× on the owner's logbook: a card opens in one task of 54–77ms;
   an idle dashboard runs nothing.
 - **Fit:** measured at 390×844, 360×780 and 1180×820: the default grid is 592px with

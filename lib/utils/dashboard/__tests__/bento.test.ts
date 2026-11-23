@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { GRID_COLUMNS, clampSize, faceSize, moveTile, nudgeTile, packTiles, sizeLabel, type TileSize } from "../bento"
-import { DEFAULT_TILE_SIZES, normaliseTileOrder, normaliseTileSizes, sizesFromV3 } from "@/hooks/use-dashboard-layout"
+import { GRID_COLUMNS, WIDE_GRID_COLUMNS, clampSize, faceSize, faceSizeOn, gridKindFor, moveTile, nudgeTile, packTiles, sizeLabel, type TileSize } from "../bento"
+import { DEFAULT_TILE_SIZES, DEFAULT_WIDE_TILE_SIZES, normaliseTileOrder, normaliseTileSizes, sizesFromV3 } from "@/hooks/use-dashboard-layout"
 
 type Id = "duty" | "flight" | "airport" | "currency" | "limits"
 const DEFAULT_ORDER: Id[] = ["duty", "flight", "airport", "currency", "limits"]
@@ -109,5 +109,37 @@ describe("normaliseTileOrder", () => {
   it("puts the airport tile where the weather or destination tile was", () => {
     expect(normaliseTileOrder(["duty", "weather", "flight", "destination", "limits", "currency"])).toEqual(["duty", "airport", "flight", "limits", "currency"])
     expect(normaliseTileOrder(["destination", "duty"])).toEqual(["airport", "duty", "flight", "currency", "limits"])
+  })
+})
+
+describe("the wide grid (a desktop's full width)", () => {
+  it("is twelve columns from 760px", () => {
+    expect(gridKindFor(759)).toBe("narrow")
+    expect(gridKindFor(760)).toBe("wide")
+  })
+
+  it("packs its defaults edge to edge on twelve columns", () => {
+    const placed = packTiles(DEFAULT_ORDER, DEFAULT_WIDE_TILE_SIZES, WIDE_GRID_COLUMNS)
+    expect(placed.map((p) => `${p.id}@${p.row},${p.col} ${p.cols}x${p.rows}`)).toEqual([
+      "duty@0,0 6x2",
+      "flight@0,6 6x2",
+      "airport@2,0 6x4",
+      "currency@2,6 6x2",
+      "limits@4,6 6x2",
+    ])
+  })
+
+  it("reads a narrow grid's face as before, and a wide one's off its real width", () => {
+    expect(faceSizeOn({ cols: 3, rows: 4 }, "narrow", 366)).toEqual(faceSize({ cols: 3, rows: 4 }))
+    // Half of a 760px grid is about a phone's row; half of 1,150px half again more.
+    expect(faceSizeOn({ cols: 6, rows: 2 }, "wide", 760).cols).toBeCloseTo(3, 0)
+    expect(faceSizeOn({ cols: 6, rows: 2 }, "wide", 1150).cols).toBeGreaterThanOrEqual(4.25)
+    expect(faceSizeOn({ cols: 6, rows: 2 }, "wide", 1150).rows).toBe(1)
+  })
+
+  it("keeps a wide size apart from a narrow one, clamped to twelve columns", () => {
+    expect(normaliseTileSizes({ duty: { cols: 10, rows: 2 } }, "wide").duty).toEqual({ cols: 10, rows: 2 })
+    expect(normaliseTileSizes({ duty: { cols: 10, rows: 2 } }, "narrow").duty).toEqual({ cols: 6, rows: 2 })
+    expect(normaliseTileSizes({ duty: { cols: 20, rows: 2 } }, "wide").duty.cols).toBe(12)
   })
 })

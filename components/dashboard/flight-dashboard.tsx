@@ -9,8 +9,10 @@
  *
  * | | A phone | A tablet / desktop |
  * |---|---|---|
- * | layout | ONE SCREEN, NO SCROLL — tiles laid out to the height | the same tiles, two columns where the panel is wide |
- * | a tap on a tile | the tile GROWS into a sheet over the page (`WidgetSheet`) | its detail opens in the DETAIL panel beside the page (`w:<id>`) |
+ * | layout | ONE SCREEN, NO SCROLL — tiles laid out to the height, six columns | the WHOLE width (the page holds `useMainPanelFullWidth`), twelve columns from 760px, each face given its real width (`faceSizeOn`) so a wide tile lays out more |
+ * | a tap on a tile | the tile GROWS into a card over the page (`WidgetSheet`) | the same |
+ *
+ * The detail panel comes back only for a flight opened from a card.
  *
  * Every figure comes from ONE model (`FlightBrief`) built once a minute, so a
  * tile, its sheet and the panel cannot disagree. Gates, the inbound aeroplane
@@ -20,7 +22,6 @@
  */
 
 import * as React from "react"
-import { usePathname } from "next/navigation"
 import { useFlights } from "@/hooks/data/use-flights"
 import { usePersonnel } from "@/hooks/data/use-crew"
 import { useCurrencies } from "@/hooks/data/use-currencies"
@@ -29,15 +30,13 @@ import { useFDPData } from "@/hooks/data/use-fdp-data"
 import { usePilotStatus } from "@/hooks/data/use-pilot-status"
 import { usePageActive } from "@/hooks/use-page-active"
 import { useDayKey } from "@/hooks/use-day-key"
-import { useDetailPanel } from "@/hooks/use-detail-panel"
-import { useIsDesktop } from "@/hooks/use-is-desktop"
+import { flushSync } from "react-dom"
 import { useDutyLookups } from "@/hooks/use-duty-lookups"
 import { useAirportWeather } from "@/hooks/use-airport-weather"
 import { useRunways } from "@/hooks/use-runways"
 import { useAirportInfo } from "@/hooks/use-airport-info"
 import { usePreferences } from "@/components/providers/preferences-provider"
 import { Skeleton } from "@/components/ui/skeleton"
-import { ReadingPanel } from "@/components/ui/detail-form-panel"
 import { ninetyDayRecency } from "@/lib/utils/dashboard-aggregate"
 import { dutyFlights } from "@/lib/utils/dashboard/duty-flights"
 import { describeDuty } from "@/lib/utils/dashboard/duty-line"
@@ -55,7 +54,8 @@ import { getAirportByIcao, getAirportsRevision, isAirportTableSeeded, onAirportS
 import type { Airport } from "@/types/entities/airport.types"
 import { cn } from "@/lib/utils"
 import { useTick } from "./flight/instruments"
-import { CurrencyFace, DutyFace, FlightFace, LimitsFace, currencyRows, destinationsOf, favouredAt, inboundLate, legDelay, limitsOf } from "./flight/faces"
+import { CurrencyFace, DutyFace, FlightFace, LimitsFace, currencyRows, destinationsOf, favouredAt, inboundLate, legDelay, limitsOf, marginText } from "./flight/faces"
+import { TileRows } from "./flight/tile-rows"
 import { dutyTone } from "./flight/duty-clock"
 import { setChosenDuty, useChosenDuty, publishDutyChoices } from "@/hooks/use-dashboard-duty"
 import { destinationOfRoute } from "@/lib/utils/dashboard/destination"
@@ -63,11 +63,11 @@ import { briefingId } from "@/lib/briefing/ids"
 import { type WeatherState } from "./flight/weather"
 import { useDutyAlternates } from "./flight/alternates"
 import { AirportFace, airportsOf, stationPoor } from "./flight/airport-tile"
-import { WIDGET_TITLE, useWidgetCtx, widgetContent } from "./flight/details"
+import { WIDGET_TITLE, dutyRows, useWidgetCtx, widgetContent } from "./flight/details"
 import { BentoGrid } from "./flight/bento"
 import { setArranging, useArranging, useTileOrder, useTileSizes } from "@/hooks/use-dashboard-layout"
-import { faceSize, packTiles, type TileSize } from "@/lib/utils/dashboard/bento"
-import { Widget, WidgetCard, WidgetSheet, type WidgetAnchor, type WidgetId } from "./flight/widget"
+import { columnsOf, faceSizeOn, gridKindFor, packTiles, type GridKind, type TileSize } from "@/lib/utils/dashboard/bento"
+import { Widget, WidgetSheet, type WidgetAnchor, type WidgetId } from "./flight/widget"
 import type { DutyChoice, FlightBrief } from "./flight/model"
 import type { DutyPeriod } from "@/types/entities/roster.types"
 import type { RequirementState } from "@/lib/utils/dashboard/legality"
@@ -147,18 +147,52 @@ const CARD_SIZE: TileSize = { cols: 3, rows: 1 }
  * tile sits on the grid (a face lays itself out for it: the currency's dots
  * look 90 days, six months or a year ahead); `inCard`, the card's header.
  */
-function faceOf(id: WidgetId, brief: FlightBrief, size: TileSize, inCard = false): React.ReactNode {
+function faceOf(id: WidgetId, brief: FlightBrief, size: TileSize, inCard = false, fill = false): React.ReactNode {
+  // On the WIDE grid the rows share the page's height, and a tile says more
+  // under its face — as many rows as its height holds, the next facts its
+  // card holds (`TileRows`).
+  const wide = !inCard && fill
   switch (id) {
     case "duty":
-      return <DutyFace brief={brief} inCard={inCard} />
+      return (
+        <>
+          <DutyFace brief={brief} inCard={inCard} />
+          {/* The duty card's timetable, less the face's three figures. */}
+          {wide && (
+            <TileRows
+              rows={dutyRows(brief)
+                .filter((r) => r.slot === undefined)
+                .map((r) => ({ key: r.label, label: r.label, value: r.value, sub: r.sub, tone: r.tone }))}
+            />
+          )}
+        </>
+      )
     case "flight":
-      return <FlightFace brief={brief} size={size} inCard={inCard} />
+      return <FlightFace brief={brief} size={size} inCard={inCard} fill={wide} />
     case "airport":
       return <AirportFace brief={brief} size={size} />
     case "currency":
-      return <CurrencyFace brief={brief} size={size} />
+      return <CurrencyFace brief={brief} size={size} fill={wide} />
     case "limits":
-      return <LimitsFace brief={brief} size={size} />
+      return (
+        <>
+          <LimitsFace brief={brief} size={size} fill={wide} />
+          {/* How much later the duty can run inside each window (the card's). */}
+          {wide && brief.margin && (
+            <TileRows
+              caption="If This Duty Runs Late"
+              rows={brief.margin.each
+                .filter((e) => e.limit !== "FDP")
+                .map((e) => ({
+                  key: e.limit,
+                  label: e.limit,
+                  value: `+${marginText(e.minutes)}`,
+                  tone: e.minutes <= 0 ? "fail" : e.minutes < 60 ? "caution" : undefined,
+                }))}
+            />
+          )}
+        </>
+      )
   }
 }
 
@@ -171,7 +205,26 @@ export function FlightDashboard({ className }: { className?: string }) {
     setArranging(false)
   })
   const order = useTileOrder()
-  const sizes = useTileSizes()
+  // The grid's width decides six columns or twelve, and gives each face its
+  // real width. Read in a ResizeObserver; the first answer is rendered before
+  // the frame paints (flushSync), so a desktop never shows the phone's grid.
+  const [gridBox, setGridBox] = React.useState<{ grid: GridKind; px: number }>({ grid: "narrow", px: 0 })
+  const roRef = React.useRef<ResizeObserver | null>(null)
+  const gridRef = React.useCallback((el: HTMLDivElement | null) => {
+    roRef.current?.disconnect()
+    roRef.current = null
+    if (!el) return
+    const ro = new ResizeObserver(([entry]) => {
+      const px = Math.round(entry.contentBoxSize?.[0]?.inlineSize ?? entry.contentRect.width)
+      const grid = gridKindFor(px)
+      flushSync(() => setGridBox((b) => (b.grid === grid && Math.abs(b.px - px) < 1 ? b : { grid, px })))
+    })
+    ro.observe(el)
+    roRef.current = ro
+  }, [])
+  const { grid, px: gridPx } = gridBox
+  const sizes = useTileSizes(grid)
+  const faceSizeOf = React.useCallback((size: TileSize) => faceSizeOn(size, grid, gridPx), [grid, gridPx])
   const arranging = useArranging()
   const now = useTick(isActive)
   const { preferences } = usePreferences()
@@ -409,50 +462,29 @@ export function FlightDashboard({ className }: { className?: string }) {
   }, [isActive, choices, dutyAtMs, current, index, brief, legRoute, legBriefings, legNowIndex])
 
   /* ── Opening a widget ────────────────────────────────────────────────── */
-  const isDesktop = useIsDesktop()
-  const { selectedId, setSelectedId, setDetailContent } = useDetailPanel()
-  const onDashboard = usePathname() === "/"
-  const panelWidget = selectedId?.startsWith("w:") ? (selectedId.slice(2) as WidgetId) : null
   // The tile is hidden for its card's whole life: the card's surface covers
-  // it exactly when it opens and when it has gone back.
-  const [sheetState, setSheet] = React.useState<{ id: WidgetId; anchor: WidgetAnchor; size: TileSize } | null>(null)
-  // A phone that turns into a tablet leaves its sheet behind: the panel is the detail there.
-  const sheet = isDesktop ? null : sheetState
+  // it exactly when it opens and when it has gone back. On a desktop too —
+  // the page takes the whole width, and the detail panel comes back only
+  // for a flight opened from a card.
+  const [sheet, setSheet] = React.useState<{ id: WidgetId; anchor: WidgetAnchor; size: TileSize } | null>(null)
   // Where each tile sits — a card opens from its tile at that size.
   const placedSizes = React.useMemo(
-    () => new Map<WidgetId, TileSize>(packTiles(order, sizes).map((p) => [p.id, faceSize({ cols: p.cols, rows: p.rows })])),
-    [order, sizes],
+    () =>
+      new Map<WidgetId, TileSize>(
+        packTiles(order, sizes, columnsOf(grid)).map((p) => [p.id, faceSizeOf({ cols: p.cols, rows: p.rows })]),
+      ),
+    [order, sizes, grid, faceSizeOf],
   )
   const nav = useWidgetCtx()
   const open = React.useCallback(
     (id: WidgetId, anchor: WidgetAnchor) => {
-      if (isDesktop) setSelectedId(`w:${id}`)
-      else setSheet({ id, anchor, size: placedSizes.get(id) ?? CARD_SIZE })
+      setSheet({ id, anchor, size: placedSizes.get(id) ?? CARD_SIZE })
       nav.prefetchSection(id)
     },
-    [isDesktop, setSelectedId, placedSizes, nav],
+    [placedSizes, nav],
   )
-  const ctx = React.useMemo(() => ({ ...nav, selectDuty }), [nav, selectDuty])
-  // The panel beside the page shows the widget it was asked for: the same
-  // card the phone lifts, its footer line under it.
-  React.useEffect(() => {
-    if (!isActive || !onDashboard || !panelWidget || !WIDGET_TITLE[panelWidget]) return
-    const { body, actions, header } = widgetContent(panelWidget, brief, ctx)
-    setDetailContent(
-      <ReadingPanel key={panelWidget} title={WIDGET_TITLE[panelWidget]}>
-        <WidgetCard face={header === "face" ? faceOf(panelWidget, brief, CARD_SIZE, true) : null} body={body} actions={actions} />
-      </ReadingPanel>,
-    )
-  }, [isActive, onDashboard, panelWidget, brief, ctx, setDetailContent])
 
-  // Beside the page, the panel is never left saying "Select…": with nothing
-  // chosen it opens the duty's flights, else the currency list.
   const loading = flightsLoading || statusLoading
-  React.useEffect(() => {
-    if (!isDesktop || !isActive || !onDashboard || loading || selectedId) return
-    setSelectedId(dutyAtMs !== null ? "w:flight" : "w:duty", { explicit: false })
-  }, [isDesktop, isActive, onDashboard, loading, selectedId, dutyAtMs, setSelectedId])
-
   if (loading) {
     return <Skeleton className={cn("h-full min-h-[24rem] rounded-3xl", className)} />
   }
@@ -465,34 +497,35 @@ export function FlightDashboard({ className }: { className?: string }) {
     <Widget
       id={id}
       label={WIDGET_TITLE[id]}
-      open={isDesktop && panelWidget === id}
       hidden={sheet?.id === id}
       onOpen={open}
       tone={tint[id] ?? null}
       className="flex-1"
     >
-      {faceOf(id, brief, faceSize(size))}
+      {faceOf(id, brief, faceSizeOf(size), false, grid === "wide")}
     </Widget>
   )
   return (
-    <div className={cn("@container flex max-h-full min-h-0 flex-col", className)}>
+    <div className={cn("@container flex max-h-full min-h-0 flex-col", grid === "wide" && "flex-1", className)}>
       {/* Scrolls only as a LAST RESORT: every tile fits a phone held upright
           (measured: 360×780 and up). Held sideways it is ~390px tall, and the
           tiles scroll rather than being squeezed out of sight. */}
       <BentoGrid
+        grid={grid}
+        gridRef={gridRef}
         order={order}
         sizes={sizes}
         arranging={arranging}
         label={(id) => WIDGET_TITLE[id]}
         tile={tile}
-        face={(id, size) => faceOf(id, brief, faceSize(size))}
+        face={(id, size) => faceOf(id, brief, faceSizeOf(size), false, grid === "wide")}
       />
 
       {sheet && (
         <WidgetSheet
           anchor={sheet.anchor}
           title={WIDGET_TITLE[sheet.id]}
-          face={faceOf(sheet.id, brief, sheet.size)}
+          face={faceOf(sheet.id, brief, sheet.size, false, grid === "wide")}
           // The tile opens straight down only where its face IS the card's
           // header: a full-width, one-row tile whose face does not change in
           // the card (the flights face drops its crew panel there; the
