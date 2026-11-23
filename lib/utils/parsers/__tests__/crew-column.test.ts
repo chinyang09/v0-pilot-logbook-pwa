@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { parseCrewColumn, isSimulatorDuty } from "../schedule-parser";
+import { parseCabinCrew, parseCrewColumn, isSimulatorDuty } from "../schedule-parser";
 
 describe("isSimulatorDuty", () => {
   it("classifies EBT duty codes as simulator", () => {
@@ -105,5 +105,28 @@ describe("parseCrewColumn", () => {
     ].join("\n");
     const crew = parseCrewColumn(cell);
     expect(crew[0].name).toBe("Khong Hui Gin Eugene");
+  });
+});
+
+describe("parseCabinCrew", () => {
+  it("keeps the cabin crew apart from the seats, in the report's order, a wrapped name joined", () => {
+    const cell = [
+      "CPT - PIC - 2644 - Prorok Andriy",
+      "FO - 9766 - Lim Chin Yang",
+      "CL - 4021 - Ng Wei Ling",
+      "CC - 9966 - Camelia Shome Binte",
+      "Abdul Rahman",
+      "CIC - 3095 - Tan Shi Yun",
+    ].join("\n");
+    expect(parseCrewColumn(cell).map((c) => c.role)).toEqual(["CPT", "FO"]);
+    expect(parseCabinCrew(cell)).toEqual([
+      { role: "CL", crewId: "4021", name: "Ng Wei Ling" },
+      { role: "CC", crewId: "9966", name: "Camelia Shome Binte Abdul Rahman" },
+      { role: "CIC", crewId: "3095", name: "Tan Shi Yun" },
+    ]);
+  });
+
+  it("is empty for a cell with pilots only", () => {
+    expect(parseCabinCrew("CPT - PIC - 2644 - Prorok Andriy\nFO - 9766 - Lim Chin Yang")).toEqual([]);
   });
 });

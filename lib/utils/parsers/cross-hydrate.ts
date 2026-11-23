@@ -263,6 +263,11 @@ export function crossHydrate(
       actualOut: base.actualOut ?? sched.actualOut,
       actualIn: base.actualIn ?? sched.actualIn,
       crew: mergeCrew(log, sched.crew ?? []),
+      // What only the schedule carries: the cabin crew, and the duty's report
+      // as the company recorded it (it was dropped here, so a cross-hydrated
+      // import took the duty from the rostered default).
+      ...(sched.cabinCrew?.length ? { cabinCrew: sched.cabinCrew } : {}),
+      ...(sched.reportTime ? { reportTime: sched.reportTime } : {}),
     });
   });
 

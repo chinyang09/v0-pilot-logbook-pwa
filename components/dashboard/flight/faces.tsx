@@ -13,7 +13,7 @@ import { formatDay } from "@/lib/utils/date"
 import { cn } from "@/lib/utils"
 import { dutyWindow, formatDutyClock, formatRestSpan } from "@/lib/utils/dashboard/duty-status"
 import { REQ_TONE, TONE } from "./instruments"
-import { DutyClockFace } from "./duty-clock"
+import { DutyClockFace, HourLines } from "./duty-clock"
 import { WidgetLabel } from "./widget"
 import { metarConditions } from "@/lib/weather/brief"
 import { favouredRunway, runwayEndsFrom, type WindOnRunway } from "@/lib/weather/runway-wind"
@@ -46,7 +46,7 @@ export const shortName = (name: string) => name.split(",")[0].trim()
  * card's to say — it used to lead this one ("Tightest 90-Day Recency") and
  * then said it again two cards down.
  */
-export function DutyFace({ brief }: { brief: FlightBrief }) {
+export function DutyFace({ brief, inCard = false }: { brief: FlightBrief; inCard?: boolean }) {
   return (
     <>
       <div
@@ -54,7 +54,7 @@ export function DutyFace({ brief }: { brief: FlightBrief }) {
         className={cn("pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b to-transparent", TONE[brief.status.dutyState].glow)}
       />
       <div className="relative">
-        <DutyClockFace brief={brief} />
+        <DutyClockFace brief={brief} inCard={inCard} />
       </div>
     </>
   )
@@ -117,39 +117,29 @@ function DayBar({ brief, focus }: { brief: FlightBrief; focus: number | null }) 
     // tile's padding. An inset in px would scale with the stretched copy in
     // the morph and part the tile's labels from the card's.
     <div aria-hidden className="mb-1.5" data-morph="fl-day" data-morph-stretch>
-      <div className="relative h-[18px]">
-        {/* The six-hourly lines run through the strip, behind the duty. */}
-        {[0, 6, 12, 18, 24].map((h) => (
-          <span key={h} className="absolute inset-y-0 w-px bg-border" style={{ left: pct(from + h * H) }} />
-        ))}
-        <span className="absolute inset-y-0 rounded-[3px] border border-foreground/30 bg-muted" style={span(start0, end0)} />
-        {legs.map((t, i) =>
-          t.departMs !== null && t.arriveMs !== null ? (
-            <span
-              key={i}
-              className={cn(
-                "absolute inset-y-[3px] rounded-[2px] transition-opacity",
-                duty.legs[i]?.inTime ? "bg-foreground/55" : "bg-primary",
-                // The leg the page is about stands out; the others are context.
-                focus !== null && focus !== i && "opacity-35",
-              )}
-              style={span(t.departMs, t.arriveMs)}
-            />
-          ) : null,
-        )}
-        {now > from && now < to && <span className="absolute -inset-y-0.5 w-0.5 rounded-full bg-foreground" style={{ left: pct(now) }} />}
+      <div className="relative h-6">
+        {/* A line each hour, all one height, every sixth bold — the duty strip's. */}
+        <HourLines ticks={Array.from({ length: 25 }, (_, h) => ({ ms: from + h * H, major: h % 6 === 0 }))} pct={pct} />
+        <div className="absolute inset-x-0 top-0 h-[18px]">
+          <span className="absolute inset-y-0 rounded-[3px] border border-foreground/30 bg-muted" style={span(start0, end0)} />
+          {legs.map((t, i) =>
+            t.departMs !== null && t.arriveMs !== null ? (
+              <span
+                key={i}
+                className={cn(
+                  "absolute inset-y-[3px] rounded-[2px] transition-opacity",
+                  duty.legs[i]?.inTime ? "bg-foreground/55" : "bg-primary",
+                  // The leg the page is about stands out; the others are context.
+                  focus !== null && focus !== i && "opacity-35",
+                )}
+                style={span(t.departMs, t.arriveMs)}
+              />
+            ) : null,
+          )}
+          {now > from && now < to && <span className="absolute -inset-y-0.5 w-0.5 rounded-full bg-foreground" style={{ left: pct(now) }} />}
+        </div>
       </div>
-      {/* A tick each hour, the six-hourly ones taller. */}
-      <div className="relative h-1.5">
-        {Array.from({ length: 25 }, (_, h) => (
-          <span
-            key={h}
-            className={cn("absolute top-0 w-px", h % 6 === 0 ? "h-1.5 bg-foreground/45" : "h-1 bg-foreground/20")}
-            style={{ left: pct(from + h * H) }}
-          />
-        ))}
-      </div>
-      <div className="relative h-3 text-[9px] tabular-nums text-muted-foreground">
+      <div className="relative mt-0.5 h-3 text-[9px] tabular-nums text-muted-foreground">
         {[0, 6, 12, 18].map((h) => (
           // Centred on its tick, as the duty strip's hours are.
           <span key={h} data-anchor="center" className="absolute -translate-x-1/2" style={{ left: pct(from + h * H) }}>
@@ -178,7 +168,9 @@ export const crewKey = (m: { personId?: string | null; name: string }) => (m.per
  * bottom), or under the leg in a narrower tile two rows tall.
  */
 function CrewPanel({ brief, crew, below = false }: { brief: FlightBrief; crew: CrewMate[]; below?: boolean }) {
-  const shown = crew.slice(0, 3)
+  // The flight crew: the cabin is the card's (there is no room for nine).
+  const flightCrew = crew.filter((m) => !m.cabin)
+  const shown = flightCrew.slice(0, 3)
   const role = (r: string) => crewRole(r, brief.authority)
   return (
     <div
@@ -216,7 +208,7 @@ function CrewPanel({ brief, crew, below = false }: { brief: FlightBrief; crew: C
           </div>
         ))
       )}
-      {crew.length > shown.length && <p className="pl-7 text-[11px] text-muted-foreground">+ {crew.length - shown.length} more</p>}
+      {flightCrew.length > shown.length && <p className="pl-7 text-[11px] text-muted-foreground">+ {flightCrew.length - shown.length} more</p>}
     </div>
   )
 }

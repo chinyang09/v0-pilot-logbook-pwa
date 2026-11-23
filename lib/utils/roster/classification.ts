@@ -19,6 +19,7 @@ const SAFE_FIELDS = new Set<keyof FlightLog>([
   "sicName",
   "sicId",
   "additionalCrew",
+  "cabinCrew",
   "flightNumber",
   "departureIcao",
   "arrivalIcao",

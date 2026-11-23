@@ -230,6 +230,7 @@ async function hydrateFlightFromSector(
     sicId,
     sicName,
     additionalCrew,
+    ...(sector.cabinCrew?.length ? { cabinCrew: sector.cabinCrew } : {}),
     pilotFlying,
     pilotRole,
     picTime: "00:00",

@@ -174,10 +174,22 @@ export function Widget({
   )
 }
 
+/**
+ * True inside a CARD's header. Every card has the same shell (the owner, Nov
+ * 2026: "the cards don't follow a uniform shell — some have a header, some
+ * don't"): its label as a TITLE BAR with a hairline under it, then what it
+ * holds, then the footer line. A face's label row is that bar in the card.
+ */
+export const CardShellContext = React.createContext(false)
+
+/** The classes that make a face's label row the card's title bar. */
+export const CARD_TITLE_BAR = "-mx-3 mb-3 min-h-5 border-b border-border/70 px-3 pb-2.5 last:mb-0"
+
 /** A tile's small heading, with what it says at a glance on the right. */
 export function WidgetLabel({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) {
+  const inCard = React.useContext(CardShellContext)
   return (
-    <div className="mb-1 flex items-center justify-between gap-2">
+    <div className={cn("mb-1 flex items-center justify-between gap-2", inCard && CARD_TITLE_BAR)}>
       <span className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground" data-morph="label">
         {children}
       </span>
@@ -235,9 +247,23 @@ export function WidgetCard({
 }) {
   return (
     <div className="relative overflow-hidden rounded-2xl border border-border bg-card">
-      {face && <div className="relative p-3 pb-2">{face}</div>}
-      {body && <div className={cn("px-3 pb-3 pt-2.5", face && "border-t border-border/70")}>{body}</div>}
+      {face && <CardShell header={face} body={body} />}
+      {!face && body && <div className="p-3">{body}</div>}
       <WidgetFooter actions={actions} run={(a) => a.run()} />
+    </div>
+  )
+}
+
+/**
+ * Every card's shell, on the phone's sheet and in the tablet's panel alike:
+ * the header (its label the title bar — `CardShellContext`), then the body
+ * straight under it, then the footer line (drawn by the caller).
+ */
+function CardShell({ header, body }: { header: React.ReactNode; body: React.ReactNode | null }) {
+  return (
+    <div className="relative p-3">
+      <CardShellContext.Provider value>{header}</CardShellContext.Provider>
+      {body && <div className="mt-3">{body}</div>}
     </div>
   )
 }
@@ -514,8 +540,7 @@ export function WidgetSheet({
             transition={open ? { duration: 0.2, delay: 0.06, ease: EASE } : { duration: 0.12, ease: EASE }}
           >
             <SheetClosingContext.Provider value={closing || leaving}>
-              <div className="relative p-3">{content.header}</div>
-              {content.body && <div className="border-t border-border/70 px-3 pb-3 pt-2.5">{content.body}</div>}
+              <CardShell header={content.header} body={content.body} />
             </SheetClosingContext.Provider>
             {/* A footer action that leads somewhere is already wrapped to close
                 the card first (`render`'s dismiss) — closing it again here

@@ -11,7 +11,7 @@
 import type { FlightLog } from "@/types/entities/flight.types"
 import type { Personnel } from "@/types/entities/crew.types"
 import { flightInstantMs } from "@/lib/airports/code-changes"
-import { crewCardResolver, crewFlyingHistory, type FlightTogether } from "@/lib/utils/crew-history"
+import { cabinKey, crewCardResolver, crewFlyingHistory, type FlightTogether } from "@/lib/utils/crew-history"
 import { isFlownFlight } from "@/lib/utils/flight-calculations"
 import { getEntryType } from "@/lib/utils/entry-type"
 import { hhmmToMinutes } from "@/lib/utils/time"
@@ -57,6 +57,8 @@ export interface CrewMate {
   last: FlightTogether | null
   /** Flights flown together before this duty. */
   count: number
+  /** A cabin crew member (the report's role code in `role`) — the card lists them; the tile and the logbook do not. */
+  cabin?: boolean
 }
 
 /**
@@ -92,6 +94,17 @@ export function crewOnDuty(
       seen.add(key)
       const h = card ? history.get(card) : undefined
       out.push({ personId: card, name, role, last: h?.last ?? null, count: h?.count ?? 0 })
+    }
+  }
+  // Then the cabin, as the schedule report lists them (the owner: the card
+  // shows ALL the crew; the logbook keeps the flight crew only).
+  for (const leg of legs) {
+    for (const c of leg.cabinCrew ?? []) {
+      const key = c.crewId ? cabinKey(c.crewId) : `cabin-name:${normalize(c.name)}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      const h = c.crewId ? history.get(key) : undefined
+      out.push({ personId: null, name: c.name, role: c.role, last: h?.last ?? null, count: h?.count ?? 0, cabin: true })
     }
   }
   return out

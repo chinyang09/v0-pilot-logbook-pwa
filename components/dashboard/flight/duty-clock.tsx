@@ -29,6 +29,7 @@ import { fdpMinutesOf } from "@/lib/utils/roster/fdp-calculator"
 import { clockTicks, dutyClock, type DutyClock, type DutyClockInput } from "@/lib/utils/dashboard/duty-clock"
 import { DutyBand, Scale, TONE, type Ramp } from "./instruments"
 import type { FlightBrief } from "./model"
+import { CARD_TITLE_BAR } from "./widget"
 import type { RequirementState } from "@/lib/utils/dashboard/legality"
 
 const MIN = 60_000
@@ -181,8 +182,28 @@ export function dutyClockView(brief: FlightBrief): DutyClockView | null {
 }
 
 /**
- * The strip: rest, duty, legs and the maximum on one scale in time, a tick
- * each hour (three on a long one), labelled every few in the pilot's clock.
+ * The hour lines a time strip is drawn over (the owner's reference, Nov
+ * 2026: "all lines are of same height, in 1hr interval, with 6, 12, 18, 24
+ * as bolded lines"): one line an hour, every one the strip's full height, the
+ * sixth hours darker and a hair wider. The bars are laid over them.
+ */
+export function HourLines({ ticks, pct }: { ticks: Array<{ ms: number; major: boolean }>; pct: (ms: number) => string }) {
+  return (
+    <>
+      {ticks.map((t) => (
+        <span
+          key={t.ms}
+          className={cn("absolute inset-y-0 -translate-x-1/2", t.major ? "w-[1.5px] bg-foreground/45" : "w-px bg-foreground/15")}
+          style={{ left: pct(t.ms) }}
+        />
+      ))}
+    </>
+  )
+}
+
+/**
+ * The strip: rest, duty, legs and the maximum on one scale in time, over a
+ * line each hour (`HourLines`), labelled every few in the pilot's clock.
  */
 export function DutyClockStrip({ clock: c, zulu }: { clock: DutyClock; zulu: boolean }) {
   const span = c.toMs - c.fromMs
@@ -194,10 +215,10 @@ export function DutyClockStrip({ clock: c, zulu }: { clock: DutyClock; zulu: boo
   const over = duty && duty.maxEndMs !== null && duty.fdpEndMs > duty.maxEndMs
   return (
     <div aria-hidden className="mt-2" data-morph="duty-strip" data-morph-stretch>
-      <div className="relative h-[18px]">
-        {ticks.filter((t) => t.major).map((t) => (
-          <span key={t.ms} className="absolute inset-y-0 w-px bg-border" style={{ left: pct(t.ms) }} />
-        ))}
+      <div className="relative h-6">
+        <HourLines ticks={ticks} pct={pct} />
+        {/* The bars over the lines' top 18px; the lines run on 6px below them. */}
+        <div className="absolute inset-x-0 top-0 h-[18px]">
         {rest && (
           <>
             {/* The rest: its minimum solid, the rest beyond it lighter. */}
@@ -228,13 +249,9 @@ export function DutyClockStrip({ clock: c, zulu }: { clock: DutyClock; zulu: boo
         )}
         {c.legs.length === 0 && rest && !duty && <span className="absolute -inset-y-1 w-0.5 -translate-x-1/2 bg-foreground/70" style={{ left: pct(rest.legalMs) }} />}
         <NowMark c={c} pct={pct} />
+        </div>
       </div>
-      <div className="relative mt-1 h-1.5">
-        {ticks.map((t) => (
-          <span key={t.ms} className={cn("absolute top-0 w-px", t.major ? "h-1.5 bg-foreground/45" : "h-1 bg-foreground/20")} style={{ left: pct(t.ms) }} />
-        ))}
-      </div>
-      <div className="relative h-3 text-[9px] tabular-nums text-muted-foreground">
+      <div className="relative mt-0.5 h-3 text-[9px] tabular-nums text-muted-foreground">
         {ticks
           // Clear of both ends: the "Z" at the right, the strip's edge at the left.
           .filter((t) => t.label && t.ms < c.toMs - c.labelHours * 3_600_000 * 0.4 && t.ms > c.fromMs + c.labelHours * 3_600_000 * 0.15)
@@ -256,7 +273,7 @@ function NowMark({ c, pct }: { c: DutyClock; pct: (ms: number) => string }) {
 }
 
 /** The tile: the state and its line, the strip, the three figures. */
-export function DutyClockFace({ brief }: { brief: FlightBrief }) {
+export function DutyClockFace({ brief, inCard = false }: { brief: FlightBrief; inCard?: boolean }) {
   const view = dutyClockView(brief)
   if (!view) return <DutyBand status={brief.status} now={brief.now} display={brief.display} />
   const c = dutyClock(view.input)
@@ -266,15 +283,18 @@ export function DutyClockFace({ brief }: { brief: FlightBrief }) {
   return (
     <section aria-label="Duty and FDP">
       {/* The maximum is not said up here as well: the FDP / Max figure below carries it. */}
-      <p className={cn("flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em]", t.text)} data-morph="duty-state">
-        {view.state}
-      </p>
+      <div className={cn(inCard && CARD_TITLE_BAR)}>
+        <p className={cn("flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em]", t.text)} data-morph="duty-state">
+          {view.state}
+        </p>
+      </div>
       {/* The reason, in its colour (dark cockpit: ink when all is well). */}
       <p className={cn("mt-1 truncate text-[20px] font-semibold leading-[1.15] tracking-tight", lit)} suppressHydrationWarning data-morph="duty-headline">
         {view.headline}
       </p>
       {c && <DutyClockStrip clock={c} zulu={zulu} />}
-      <Scale slots={view.slots} />
+      {/* In the card the three figures are rows of its table, and fly there. */}
+      {!inCard && <Scale slots={view.slots} />}
     </section>
   )
 }

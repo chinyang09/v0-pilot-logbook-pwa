@@ -104,9 +104,20 @@ interface StyleSnap {
   props: Array<[string, string]>
   display: string
   textOverflow: string
+  /** Each text leaf's own computed line-height, in document order (a container's copy). */
+  leafLines: string[] | null
 }
-function snapOf(cs: CSSStyleDeclaration): StyleSnap {
-  return { props: COPIED.map((p) => [p, cs.getPropertyValue(p)]), display: cs.display, textOverflow: cs.textOverflow }
+const isTextLeaf = (el: Element) => el.childElementCount === 0 && !!el.textContent?.trim()
+function snapOf(el: HTMLElement, cs: CSSStyleDeclaration): StyleSnap {
+  return {
+    props: COPIED.map((p) => [p, cs.getPropertyValue(p)]),
+    display: cs.display,
+    textOverflow: cs.textOverflow,
+    leafLines:
+      el.childElementCount > 0
+        ? [...el.querySelectorAll("*")].filter(isTextLeaf).map((leaf) => getComputedStyle(leaf).lineHeight)
+        : null,
+  }
 }
 
 function copyOf(el: HTMLElement, box: Box, text: boolean, cs: StyleSnap): HTMLElement {
@@ -114,6 +125,19 @@ function copyOf(el: HTMLElement, box: Box, text: boolean, cs: StyleSnap): HTMLEl
   copy.removeAttribute("data-morph")
   copy.removeAttribute("id")
   for (const [p, v] of cs.props) copy.style.setProperty(p, v)
+  // A container's text keeps ITS OWN line height. The root's is copied as a
+  // computed px value, and a label below it that inherited a UNITLESS height
+  // (1.5 × its own 9px) inherits that px value in the copy instead — a taller
+  // line, so the hours of a time axis sat 5px low for the whole morph and
+  // snapped up as the copy was dropped (the owner's "numbers jump down a
+  // little, then back", on a Pixel; measured in a mobile emulation).
+  if (cs.leafLines) {
+    const leaves = [...copy.querySelectorAll<HTMLElement>("*")].filter(isTextLeaf)
+    leaves.forEach((leaf, i) => {
+      const lh = cs.leafLines![i]
+      if (lh) leaf.style.lineHeight = lh
+    })
+  }
   // An INLINE element's box is its font's content area, not its line: taken
   // out of its line as a block of that height with the line's own
   // line-height, its glyphs sat half the leading lower (or higher, under
@@ -149,6 +173,9 @@ function copyOf(el: HTMLElement, box: Box, text: boolean, cs: StyleSnap): HTMLEl
 
 const lerp = (a: number, b: number, p: number) => a + (b - a) * p
 
+/** By when a morph has landed whatever its animations report — well past any card's open or close. */
+const SETTLE_BY_MS = 1200
+
 /** The copies of a pair at progress `p` (0 = where they start, 1 = where they land). */
 function place(
   pair: { fc: HTMLElement; cc: HTMLElement; from: Box; to: Box; f0: [number, number]; f1: [number, number]; c0: [number, number]; c1: [number, number]; texts: HTMLElement[] },
@@ -180,8 +207,7 @@ function place(
  * states it (`data-anchor="end" | "center"`), else as its computed style says.
  */
 function originsOf(original: HTMLElement): string[] {
-  const leaf = (el: Element) => el.childElementCount === 0 && !!el.textContent?.trim()
-  return [...original.querySelectorAll<HTMLElement>("*")].filter(leaf).map((o) => {
+  return [...original.querySelectorAll<HTMLElement>("*")].filter(isTextLeaf).map((o) => {
     // Stated by the label where it can be (`data-anchor`): WebKit and Blink
     // spell a computed `translate` differently ("calc(-50%)" / "-50%"), and a
     // centred label read as left-anchored drifts through the morph and snaps.
@@ -195,8 +221,7 @@ function originsOf(original: HTMLElement): string[] {
 
 /** The text a stretched copy carries, each set to scale about its own anchor. */
 function textLeaves(copy: HTMLElement, origins: string[]): HTMLElement[] {
-  const leaf = (el: Element) => el.childElementCount === 0 && !!el.textContent?.trim()
-  const copies = [...copy.querySelectorAll<HTMLElement>("*")].filter(leaf)
+  const copies = [...copy.querySelectorAll<HTMLElement>("*")].filter(isTextLeaf)
   copies.forEach((el, i) => {
     el.style.transformOrigin = origins[i] ?? "0% 50%"
   })
@@ -293,8 +318,8 @@ export function runSharedMorph({
       fb,
       cb,
       stretch,
-      fs: snapOf(fcs),
-      cs: snapOf(ccs),
+      fs: snapOf(f, fcs),
+      cs: snapOf(c, ccs),
       fo: stretch ? originsOf(f) : [],
       co: stretch ? originsOf(c) : [],
     })
@@ -350,9 +375,15 @@ export function runSharedMorph({
   }
 
   let settled = false
+  // The landing is never left to the animations alone: one whose `finished`
+  // never comes (a tab sent to the background mid-flight, a clock that
+  // stalls) left the copies over the card and its ORIGINALS hidden — a crew
+  // row with no visible name, to the eye and to a screen reader.
+  const safety = typeof window !== "undefined" ? window.setTimeout(() => settle(), SETTLE_BY_MS) : 0
   const settle = () => {
     if (settled) return
     settled = true
+    window.clearTimeout(safety)
     for (const r of runs) r.stop()
     for (const c of copies) c.remove()
     for (const el of hidden) el.style.visibility = ""

@@ -22,6 +22,8 @@ import { cn } from "@/lib/utils"
 import { formatDay } from "@/lib/utils/date"
 import { formatClockDisplay } from "@/lib/utils/time"
 import { REQ_TONE } from "./instruments"
+import { fdpMinutesOf } from "@/lib/utils/roster/fdp-calculator"
+import { PIC_FDP_DISCRETION_MIN } from "@/lib/utils/roster/regulation-definitions"
 import { crewKey, crewRole, currenciesBySoonest, currencyRows, legLine, legNow, limitsOf, marginText, marginTone, shortDay, shortName } from "./faces"
 import { CurrencyDots } from "./currency-dots"
 import { dotAt, dotLayout, localDayKey } from "@/lib/utils/dashboard/currency-dots"
@@ -137,7 +139,7 @@ export function widgetContent(
   const fdp: WidgetAction = { id: "fdp", label: "FDP", run: () => ctx.go(WIDGET_HREF.duty!) }
   switch (id) {
     case "duty":
-      return { header: "face", body: hasDutyBody(brief) ? <DutyBody brief={brief} /> : null, actions: [fdp] }
+      return { header: "face", body: dutyRows(brief).length ? <DutyBody brief={brief} /> : null, actions: [fdp] }
     case "flight": {
       const legs = brief.duty.legs
       return {
@@ -224,62 +226,152 @@ export function useWidgetCtx(): Omit<WidgetCtx, "selectDuty"> & { prefetchSectio
   )
 }
 
-/** Anything the duty card's face does not already say. */
-function hasDutyBody(brief: FlightBrief): boolean {
-  if (brief.duty.index > 0) return !!brief.duty.period
-  const { phase, active, rest, lastDuty, next } = brief.status.duty
-  if (phase === "on_duty" && active) return active.maxFdpMinutes > 0
-  return !!rest || !!lastDuty || !!next
+/** A row of the duty card's table. */
+interface DutyRow {
+  label: string
+  value: string
+  /** A smaller line under the value (the rest's minimum, the day). */
+  sub?: string
+  tone?: "fail" | "caution"
+  /** The face's figure this row's value is — it flies there from the tile (`slot-<n>-v`). */
+  slot?: number
+}
+
+const MIN_MS = 60_000
+
+/**
+ * The duty card's rows, in the order the day RUNS (the owner, Nov 2026: "2
+ * columns, left are headers, right are values. In chronological order"):
+ * the duty rested from, the rest before the report (FORECAST to it, not as of
+ * now), the report, the FDP, the scheduled IN that ends it, the spare to its
+ * maximum, the latest IN that maximum allows, and past it the commander's
+ * discretion (para 13: up to 3:00, on the day, reported) with the IN it
+ * reaches. The face's three figures are rows here, and fly into them.
+ */
+export function dutyRows(brief: FlightBrief): DutyRow[] {
+  const { status, duty, clock, day } = brief
+  const { phase, active, next, lastDuty, rest } = status.duty
+  const lastArrive = duty.times.reduce<number | null>((m, t) => (t.arriveMs !== null && (m === null || t.arriveMs > m) ? t.arriveMs : m), null)
+  const span = (min: number) => formatDutyClock(Math.max(0, Math.round(min)))
+  const signed = (min: number) => `${min < 0 ? "−" : "+"}${span(Math.abs(min))}`
+  /** Scheduled IN → spare → latest IN → discretion → its IN. */
+  const tail = (fdpStartMs: number, schedInMs: number, maxMin: number, latestSlot?: number): DutyRow[] => {
+    if (maxMin <= 0) return [{ label: "Scheduled IN", value: clock(schedInMs) }]
+    const latest = fdpStartMs + maxMin * MIN_MS
+    const spare = (latest - schedInMs) / MIN_MS
+    return [
+      { label: "Scheduled IN", value: clock(schedInMs) },
+      { label: "Spare", value: signed(spare), tone: spare < 0 ? "fail" : undefined },
+      { label: "Latest IN", value: clock(latest), sub: "FDP maximum", slot: latestSlot },
+      // Past it, only the commander's discretion — on the day, for the
+      // unforeseen, and the company's approval asked (the owner: "flag to
+      // request for approval as per fifth schedule").
+      { label: "Further Delay", value: `+${span(PIC_FDP_DISCRETION_MIN)} max`, sub: "Request approval · para 13", tone: spare < 60 ? "caution" : undefined },
+      { label: "Waiver Max IN", value: clock(latest + PIC_FDP_DISCRETION_MIN * MIN_MS), sub: "With PIC discretion" },
+    ]
+  }
+  const last: DutyRow[] = lastDuty
+    ? [{ label: "Last Duty", value: lastDuty.route || formatDutyClock(lastDuty.elapsedMinutes), sub: `Off ${clock(lastDuty.debriefMs)} · ${day(lastDuty.debriefMs)}` }]
+    : []
+
+  /* A later duty, chosen in the header. */
+  if (duty.index > 0 && duty.period) {
+    const dp = duty.period
+    const w = dutyWindow(dp)
+    if (!w) return []
+    const planned = fdpMinutesOf(dp)
+    const r = dp.restBefore
+    return [
+      ...(r
+        ? [{ label: "Rest", value: formatRestSpan(r.restMinutes), sub: `Min ${formatDutyClock(r.requiredRestMinutes)}`, tone: r.compliant ? undefined : ("fail" as const), slot: 0 }]
+        : []),
+      { label: "Report", value: clock(w.startMs), sub: day(w.startMs), slot: 1 },
+      { label: "FDP", value: `${formatDutyClock(planned)}${dp.maxFdpMinutes > 0 ? ` / ${formatDutyClock(dp.maxFdpMinutes)}` : ""}`, sub: "Scheduled / max", tone: dp.maxFdpMinutes > 0 && planned > dp.maxFdpMinutes ? "fail" : undefined, slot: 2 },
+      ...tail(w.startMs, w.startMs + planned * MIN_MS, dp.maxFdpMinutes),
+    ]
+  }
+
+  /* On duty: the report as it was, the FDP so far. */
+  if (phase === "on_duty" && active) {
+    if (active.maxFdpMinutes <= 0) return []
+    const fdpOpen = active.startMs - (active.fdpElapsedMinutes - active.elapsedMinutes) * MIN_MS
+    const left = active.maxFdpMinutes - active.fdpElapsedMinutes
+    return [
+      { label: "Report", value: clock(active.startMs), sub: day(active.startMs) },
+      { label: "FDP", value: `${formatDutyClock(active.fdpElapsedMinutes)} / ${formatDutyClock(active.maxFdpMinutes)}`, sub: "So far / max", tone: active.exceeded ? "fail" : undefined, slot: 1 },
+      { label: active.exceeded ? "FDP Over" : "FDP Left", value: span(Math.abs(left)), tone: active.exceeded ? "fail" : undefined, slot: 0 },
+      ...tail(fdpOpen, lastArrive ?? active.endMs, active.maxFdpMinutes, 2),
+    ]
+  }
+
+  /* Off duty, the next duty ahead: its rest worked back from its report. */
+  if (next && next.restRequiredMinutes > 0) {
+    const short = next.legalAtReport === false
+    const over = next.maxFdpMinutes > 0 && next.plannedFdpMinutes > next.maxFdpMinutes
+    return [
+      ...last,
+      {
+        label: "Rest",
+        value: formatRestSpan(next.restAvailableMinutes),
+        sub: `To report · min ${next.restMinimum || formatDutyClock(next.restRequiredMinutes)}`,
+        tone: short ? "fail" : undefined,
+        slot: 0,
+      },
+      { label: "Report", value: clock(next.reportMs), sub: day(next.reportMs), slot: 1 },
+      {
+        label: "FDP",
+        value: next.plannedFdpMinutes > 0 ? `${formatDutyClock(next.plannedFdpMinutes)}${next.maxFdpMinutes > 0 ? ` / ${formatDutyClock(next.maxFdpMinutes)}` : ""}` : "—",
+        sub: "Scheduled / max",
+        tone: over ? "fail" : undefined,
+        slot: 2,
+      },
+      ...(next.plannedFdpMinutes > 0 ? tail(next.reportMs, next.reportMs + next.plannedFdpMinutes * MIN_MS, next.maxFdpMinutes) : []),
+    ]
+  }
+
+  /* Off duty, nothing ahead: the rest so far, and when it is legal. */
+  if (rest) {
+    const legal = Date.parse(rest.legalAtUtc)
+    return [
+      ...last,
+      { label: "Rest", value: formatRestSpan(rest.elapsedMinutes), sub: "So far", slot: 0 },
+      ...(rest.isLegalNow || !Number.isFinite(legal) ? [] : [{ label: "Legal From", value: clock(legal), slot: 1 }]),
+    ]
+  }
+  return last
 }
 
 /**
- * What the duty card's face has no room for — never a figure it already
- * shows — in the order the day RUNS (the owner, Nov 2026: "no flow … let's do
- * it in a chronological manner"): the duty rested from, the rest so far, when
- * the chosen duty ends, the latest on-blocks its FDP allows and the spare that
- * leaves (how much later the duty can run on its own FDP — the limits card
- * keeps the rolling windows). No "spare before report": the face's strip and
- * "Legal from" already say it.
+ * The duty card's body: `dutyRows` as a two-column table — what it is on the
+ * left, its value on the right, read top to bottom as the day runs.
  */
 function DutyBody({ brief }: { brief: FlightBrief }) {
-  const { status, clock, day } = brief
-  const { active, rest, lastDuty, next } = status.duty
-  // When the chosen duty ends — free of all duties (it moved here from the flights card).
-  const w = brief.duty.period ? dutyWindow(brief.duty.period) : null
-  const fdpSpare = brief.margin?.each.find((e) => e.limit === "FDP")?.minutes ?? null
-  const spareFig =
-    fdpSpare !== null ? (
-      <Fig label="FDP Spare" value={<span className={marginTone(fdpSpare)}>+{marginText(fdpSpare)}</span>} />
-    ) : null
-  if (brief.duty.index > 0) {
-    return w ? (
-      <Grid>
-        <Fig label="Off Duty" value={clock(w.endMs)} />
-        {spareFig}
-      </Grid>
-    ) : null
-  }
-  if (status.duty.phase === "on_duty" && active) {
-    if (active.maxFdpMinutes <= 0) return null
-    return (
-      <Grid>
-        <Fig label="Off Duty" value={clock(active.debriefMs)} />
-        {spareFig}
-      </Grid>
-    )
-  }
+  const rows = dutyRows(brief)
+  if (rows.length === 0) return null
   return (
-    <Grid>
-      {lastDuty && (
-        <Fig label={`Last Duty · ${day(lastDuty.debriefMs)}`} value={lastDuty.route || formatDutyClock(lastDuty.elapsedMinutes)} />
-      )}
-      {rest && <Fig label="Rested" value={formatRestSpan(rest.elapsedMinutes)} />}
-      {w && next && <Fig label="Off Duty" value={clock(w.endMs)} />}
-      {next && next.maxFdpMinutes > 0 && (
-        <Fig label="Latest On-Blocks" value={clock(next.reportMs + next.maxFdpMinutes * 60_000)} />
-      )}
-      {spareFig}
-    </Grid>
+    <dl>
+      {rows.map((r, i) => (
+        // One line a row, one rule under it: label left, value right.
+        <div key={r.label} className={cn("flex items-baseline justify-between gap-4 py-2", i < rows.length - 1 && "border-b border-border/50")}>
+          <dt className="shrink-0 text-[13px] text-muted-foreground" data-morph={r.slot !== undefined ? `slot-${r.slot}-l` : undefined}>
+            {r.label}
+          </dt>
+          <dd className="min-w-0 text-right">
+            <span
+              className={cn(
+                "text-[15px] font-semibold tabular-nums",
+                r.tone === "fail" ? "text-destructive" : r.tone === "caution" ? "text-status-warning" : "text-foreground",
+              )}
+              suppressHydrationWarning
+              data-morph={r.slot !== undefined ? `slot-${r.slot}-v` : undefined}
+            >
+              {r.value}
+            </span>
+            {r.sub && <span className="block text-[11px] text-muted-foreground" suppressHydrationWarning>{r.sub}</span>}
+          </dd>
+        </div>
+      ))}
+    </dl>
   )
 }
 
@@ -372,7 +464,12 @@ function planned(out?: string, inn?: string): string {
 function CrewBody({ brief, go }: { brief: FlightBrief; go: (href: string) => void }) {
   return (
     <div>
-      {brief.crew.map((m) => (
+      {brief.crew.map((m, i) => (
+        <React.Fragment key={m.personId ?? `${m.cabin ? "cabin" : "crew"}:${m.name}`}>
+        {/* The cabin, after the flight crew, under a caption of its own. */}
+        {m.cabin && !brief.crew[i - 1]?.cabin && (
+          <p className="mt-2 border-t border-border/70 pt-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Cabin</p>
+        )}
         <TapRow
           key={m.personId ?? m.name}
           onClick={m.personId ? () => go(`/crew?selected=${m.personId}`) : undefined}
@@ -387,6 +484,7 @@ function CrewBody({ brief, go }: { brief: FlightBrief; go: (href: string) => voi
           }
           right={<span data-morph={`crew-last-${crewKey(m)}`}>{m.last ? shortDay(m.last.date) : "New"}</span>}
         />
+        </React.Fragment>
       ))}
     </div>
   )

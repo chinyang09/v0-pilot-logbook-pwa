@@ -67,7 +67,9 @@ export function dutyClock(input: DutyClockInput): DutyClock | null {
     nowMs,
     fromMs,
     toMs,
-    tickHours: spanH <= 30 ? 1 : 3,
+    // A tick every hour whatever the span (the owner's reference: "1hr
+    // interval, with 6, 12, 18, 24 as bolded lines").
+    tickHours: 1,
     labelHours: spanH <= 18 ? 3 : spanH <= 36 ? 6 : 12,
     rest:
       rest && duty
@@ -80,14 +82,15 @@ export function dutyClock(input: DutyClockInput): DutyClock | null {
   }
 }
 
-/** The ticks between `fromMs` and `toMs`: each `tickHours` on the hour, a label every `labelHours`. */
+/** The ticks between `fromMs` and `toMs`: each `tickHours` on the hour, bold every six, a label every `labelHours`. */
 export function clockTicks(c: Pick<DutyClock, "fromMs" | "toMs" | "tickHours" | "labelHours">, hourOf: (ms: number) => number) {
   const out: Array<{ ms: number; major: boolean; label: string | null }> = []
   for (let ms = c.fromMs; ms <= c.toMs; ms += H) {
     const h = hourOf(ms)
     if (h % c.tickHours !== 0) continue
     const labelled = h % c.labelHours === 0
-    out.push({ ms, major: labelled, label: labelled ? String(h).padStart(2, "0") : null })
+    // Every sixth hour is the bold line, whichever hours carry a label.
+    out.push({ ms, major: h % 6 === 0, label: labelled ? String(h).padStart(2, "0") : null })
   }
   return out
 }

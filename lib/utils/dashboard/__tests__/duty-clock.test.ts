@@ -51,5 +51,8 @@ describe("the duty clock", () => {
     const ticks = clockTicks(c, utcHour)
     expect(ticks.length).toBe(30)
     expect(ticks.filter((t) => t.label).map((t) => t.label)).toEqual(["12", "18", "00", "06", "12"])
+    // All one height; the bold ones are 00, 06, 12 and 18 (the owner's reference).
+    expect(ticks.filter((t) => t.major).map((t) => utcHour(t.ms) % 6)).toEqual([0, 0, 0, 0, 0])
+    expect(ticks.filter((t) => t.major).length).toBe(5)
   })
 })

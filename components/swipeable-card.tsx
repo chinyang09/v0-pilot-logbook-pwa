@@ -657,6 +657,15 @@ export function SwipeableCard({
 
   const handleDragEnd = useCallback(
     (_: unknown, info: PanInfo) => {
+      // A finger that never left tap range was a TAP, and a tap on the row
+      // closes it. Framer starts a drag at ~3px, so a tap on the open row that
+      // drifted a few pixels — most taps on a phone — ended here AFTER the
+      // document's lift had closed it, read the row as still open and settled
+      // it open again: the owner's "sometimes one tap, sometimes two" (Pixel).
+      if (Math.hypot(info.offset.x, info.offset.y) <= TAP_SLOP_PX) {
+        settle(0)
+        return
+      }
       const current = x.get()
       const velocity = info.velocity.x
       if (current > 0) {
