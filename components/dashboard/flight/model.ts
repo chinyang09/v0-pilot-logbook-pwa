@@ -19,6 +19,7 @@ import type { RunwayGeo } from "@/lib/runways/parse"
 import type { AirportInfo } from "@/lib/weather/airport-info"
 import type { DelayMargin } from "@/lib/utils/dashboard/delay-margin"
 import type { LogbookAuthority } from "@/lib/utils/logbook-rules"
+import type { DutyInEstimate } from "@/lib/utils/dashboard/estimated-in"
 
 export interface FlightBrief {
   status: PilotStatus
@@ -56,6 +57,11 @@ export interface FlightBrief {
     info: DutyInfo | null
     lookupsLoading: boolean
     refreshLookups: () => void
+    /**
+     * Where the duty is actually heading — its last on-blocks from what the
+     * logbook recorded and the sources say now (`estimateDutyIn`).
+     */
+    estimate: DutyInEstimate | null
   }
   /** How much later the chosen duty can run inside every limit — FDP and the rolling windows. */
   margin: DelayMargin | null

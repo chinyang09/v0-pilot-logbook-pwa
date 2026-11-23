@@ -1,6 +1,7 @@
 "use client"
 
 import useSWR from "swr"
+import { AIRPORT_INFO_MAX_IDS } from "@/lib/weather/airport-info"
 import { lookup } from "@/lib/lookup/client"
 import type { AirportInfo } from "@/lib/weather/airport-info"
 
@@ -35,18 +36,25 @@ async function fetchInfo(ids: string[]): Promise<Record<string, AirportInfo | nu
     else out[id] = k
   }
   if (ask.length === 0) return out
-  const res = await lookup.airportInfo(ask)
-  if (!res.ok) {
+  // The route takes AIRPORT_INFO_MAX_IDS at a time (a briefing's airports
+  // with its en-route list can be more).
+  const chunks: string[][] = []
+  for (let i = 0; i < ask.length; i += AIRPORT_INFO_MAX_IDS) chunks.push(ask.slice(i, i + AIRPORT_INFO_MAX_IDS))
+  const answers = await Promise.all(chunks.map((c) => lookup.airportInfo(c)))
+  const failed = answers.find((r) => !r.ok)
+  if (failed && !failed.ok && answers.every((r) => !r.ok)) {
     if (Object.keys(out).length) return out
-    throw new Error(res.error)
+    throw new Error(failed.error)
   }
-  for (const id of ask) {
-    if (!(id in res.data)) continue
-    out[id] = res.data[id]
-    try {
-      window.localStorage.setItem(keyOf(id), JSON.stringify({ at: Date.now(), info: res.data[id] }))
-    } catch {
-      // Kept for this session only.
+  for (const res of answers) {
+    if (!res.ok) continue
+    for (const [id, info] of Object.entries(res.data)) {
+      out[id] = info
+      try {
+        window.localStorage.setItem(keyOf(id), JSON.stringify({ at: Date.now(), info }))
+      } catch {
+        // Kept for this session only.
+      }
     }
   }
   return out

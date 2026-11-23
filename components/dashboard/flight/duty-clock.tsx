@@ -29,7 +29,6 @@ import { fdpMinutesOf } from "@/lib/utils/roster/fdp-calculator"
 import { clockTicks, dutyClock, type DutyClock, type DutyClockInput } from "@/lib/utils/dashboard/duty-clock"
 import { DutyBand, Scale, TONE, type Ramp } from "./instruments"
 import type { FlightBrief } from "./model"
-import { CARD_TITLE_BAR } from "./widget"
 import type { RequirementState } from "@/lib/utils/dashboard/legality"
 
 const MIN = 60_000
@@ -45,11 +44,37 @@ interface DutyClockView {
   tone: RequirementState | null
 }
 
+/**
+ * A reported delay that eats into the FDP maximum, said as the tile's line
+ * (the owner, Nov 2026: react to real-time changes, and grab attention only
+ * where it belongs): past the latest IN in red, within the hour of it in
+ * amber. Only a LIVE estimate speaks — the schedule alone is the FDP figure's.
+ */
+export function estimateConcern(brief: FlightBrief, latestMs: number): { headline: string; tone: "fail" | "caution" } | null {
+  const e = brief.duty.estimate
+  if (!e || e.kind === "scheduled") return null
+  const room = Math.round((latestMs - e.ms) / MIN)
+  if (room < 0) return { headline: `Est. IN ${formatDutyClock(-room)} past max`, tone: "fail" }
+  if (room < 60) return { headline: `Est. IN ${formatDutyClock(room)} to max`, tone: "caution" }
+  return null
+}
+
 /** What the tile draws, or null where the duty band says it better (standby, nothing known). */
 export function dutyClockView(brief: FlightBrief): DutyClockView | null {
   const { status, duty, now, clock, day } = brief
   const { phase, active, next, rest, standby } = status.duty
-  const legs = duty.times.map((t, i) => ({ departMs: t.departMs, arriveMs: t.arriveMs, flown: !!duty.legs[i]?.inTime }))
+  // Each leg where it is now expected (`estimateDutyIn`): a delay the
+  // sources report moves the bars toward the maximum's mark as it happens.
+  const est = duty.estimate
+  const legs = duty.times.map((t, i) => {
+    const e = est?.legs[i]
+    const flown = !!duty.legs[i]?.inTime
+    return {
+      departMs: !flown && e?.outMs != null ? e.outMs : t.departMs,
+      arriveMs: !flown && e?.inMs != null ? e.inMs : t.arriveMs,
+      flown,
+    }
+  })
   const lastArrive = legs.reduce<number | null>((m, l) => (l.arriveMs !== null && (m === null || l.arriveMs > m) ? l.arriveMs : m), null)
   const stateTone = status.dutyState
 
@@ -94,17 +119,18 @@ export function dutyClockView(brief: FlightBrief): DutyClockView | null {
     if (active.maxFdpMinutes <= 0) return null
     const fdpOpen = active.startMs - (active.fdpElapsedMinutes - active.elapsedMinutes) * MIN
     const left = Math.max(0, active.maxFdpMinutes - active.fdpElapsedMinutes)
+    const late = estimateConcern(brief, fdpOpen + active.maxFdpMinutes * MIN)
     return {
       state: "On Duty",
-      stateTone,
-      headline: status.dutyAction.headline,
+      stateTone: late && stateTone === "current" ? (late.tone === "fail" ? "action_required" : "warning") : stateTone,
+      headline: late && stateTone === "current" ? late.headline : status.dutyAction.headline,
       input: {
         nowMs: now,
         rest: null,
         duty: {
           reportMs: active.startMs,
           fdpStartMs: fdpOpen,
-          fdpEndMs: Math.max(active.endMs, lastArrive ?? 0),
+          fdpEndMs: Math.max(active.endMs, est?.ms ?? lastArrive ?? 0),
           endMs: Math.max(active.debriefMs, (lastArrive ?? 0) + 30 * MIN),
           maxFdpMinutes: active.maxFdpMinutes,
         },
@@ -115,7 +141,7 @@ export function dutyClockView(brief: FlightBrief): DutyClockView | null {
         { value: `${formatDutyClock(active.fdpElapsedMinutes)}/${formatDutyClock(active.maxFdpMinutes)}`, label: "FDP / Max", live: true },
         { value: clock(fdpOpen + active.maxFdpMinutes * MIN), label: "Latest On-Blocks" },
       ],
-      tone,
+      tone: tone ?? late?.tone ?? null,
     }
   }
 
@@ -129,17 +155,20 @@ export function dutyClockView(brief: FlightBrief): DutyClockView | null {
     const w = duty.period ? dutyWindow(duty.period) : null
     const fdpEnd = next.reportMs + next.plannedFdpMinutes * MIN
     const over = next.maxFdpMinutes > 0 && next.plannedFdpMinutes > next.maxFdpMinutes
+    // A delay reported before the report: the duty now runs into its maximum.
+    const late = next.maxFdpMinutes > 0 && duty.index === 0 ? estimateConcern(brief, next.reportMs + next.maxFdpMinutes * MIN) : null
+    const quiet = stateTone === "current" && !over
     return {
       state: phase === "post_duty" ? "Duty Complete" : "Off Duty",
-      stateTone,
-      headline: status.dutyAction.headline,
+      stateTone: late && quiet ? (late.tone === "fail" ? "action_required" : "warning") : stateTone,
+      headline: late && quiet ? late.headline : status.dutyAction.headline,
       input: {
         nowMs: now,
         rest: { startMs: restStart, legalMs: legal },
         duty: {
           reportMs: next.reportMs,
           fdpStartMs: next.reportMs,
-          fdpEndMs: lastArrive ?? fdpEnd,
+          fdpEndMs: est && duty.index === 0 ? est.ms : (lastArrive ?? fdpEnd),
           endMs: w?.endMs ?? fdpEnd + 30 * MIN,
           maxFdpMinutes: next.maxFdpMinutes,
         },
@@ -158,7 +187,7 @@ export function dutyClockView(brief: FlightBrief): DutyClockView | null {
           tone: over ? "fail" : undefined,
         },
       ],
-      tone: tone ?? (over ? "fail" : null),
+      tone: tone ?? (over ? "fail" : null) ?? late?.tone ?? null,
     }
   }
 
@@ -283,11 +312,9 @@ export function DutyClockFace({ brief, inCard = false }: { brief: FlightBrief; i
   return (
     <section aria-label="Duty and FDP">
       {/* The maximum is not said up here as well: the FDP / Max figure below carries it. */}
-      <div className={cn(inCard && CARD_TITLE_BAR)}>
-        <p className={cn("flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em]", t.text)} data-morph="duty-state">
-          {view.state}
-        </p>
-      </div>
+      <p className={cn("flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em]", t.text)} data-morph="duty-state">
+        {view.state}
+      </p>
       {/* The reason, in its colour (dark cockpit: ink when all is well). */}
       <p className={cn("mt-1 truncate text-[20px] font-semibold leading-[1.15] tracking-tight", lit)} suppressHydrationWarning data-morph="duty-headline">
         {view.headline}

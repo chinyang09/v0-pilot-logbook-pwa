@@ -29,6 +29,8 @@
  */
 
 import * as React from "react"
+import { usePreferences } from "@/components/providers/preferences-provider"
+import { formatRunwayLength } from "@/lib/utils/runway-length"
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronRight, Moon, PlaneLanding, PlaneTakeoff, Sun, Wind } from "lucide-react"
 import type { Airport } from "@/types/entities/airport.types"
 import type { AirportInfo } from "@/lib/weather/airport-info"
@@ -52,7 +54,6 @@ const CATEGORY_DOT: Record<Exclude<FlightCategory, "VFR">, string> = {
   LIFR: "bg-fuchsia-500",
 }
 
-const fmtFt = (n: number) => `${Math.round(n).toLocaleString("en-US")}'`
 
 /** The wind's head (tail, amber) and cross components on one runway: "12kt↓ 6kt→". */
 function Components({ wind }: { wind: WindOnRunway }) {
@@ -140,6 +141,8 @@ export function AirportPanel({
   onLast?: () => void
 }) {
   const mk = (k: string) => (morph ? `ap-${k}-${icao}` : undefined)
+  // Feet or metres, as Settings › Display says.
+  const unit = usePreferences().preferences?.display?.runwayLength
   const c = React.useMemo(() => (metar ? metarConditions(metar.raw) : null), [metar])
   const readings = React.useMemo(() => (metar ? metarReadings(metar.raw) : null), [metar])
   const windDir = c?.windDir ?? null
@@ -253,7 +256,7 @@ export function AirportPanel({
             {listed.map((r) => (
               <span key={r.id} className="whitespace-nowrap">
                 <span className="font-semibold text-foreground">{r.id}</span>
-                {r.lengthFt ? <span className="text-muted-foreground"> {fmtFt(r.lengthFt)}</span> : null}
+                {r.lengthFt ? <span className="text-muted-foreground"> {formatRunwayLength(r.lengthFt, unit)}</span> : null}
               </span>
             ))}
           </Line>

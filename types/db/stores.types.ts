@@ -27,6 +27,8 @@ export interface DisplayPreferences {
   useZuluTime: boolean
   airportIdentifier: "icao" | "iata" | "both"
   coordinateFormat: "decimal" | "dms"
+  /** How a runway's length is written — feet ("10,499'") or metres ("3,200m"). */
+  runwayLength: "ft" | "m"
   /** Light / dark / follow the OS. Orthogonal to the palette. */
   theme: ThemePreference
   /**
@@ -126,6 +128,7 @@ export const DEFAULT_DISPLAY_PREFERENCES: DisplayPreferences = {
   useZuluTime: true,
   airportIdentifier: "icao",
   coordinateFormat: "decimal",
+  runwayLength: "ft",
   theme: "dark",
   palette: DEFAULT_PALETTE_ID,
 }

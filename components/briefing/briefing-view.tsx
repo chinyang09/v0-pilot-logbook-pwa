@@ -43,6 +43,7 @@ import { useAirportWeather } from "@/hooks/use-airport-weather"
 import { briefStations, metarReadings, stationWindows, WINDOW_MS, type StationWindow } from "@/lib/weather/brief"
 import { StationWeather } from "@/components/dashboard/flight/weather"
 import { usePreferences } from "@/components/providers/preferences-provider"
+import { formatRunwayLength } from "@/lib/utils/runway-length"
 import type { BriefingNoteRecord, BriefingRecord, FrequencyNote, ProcedureRow } from "@/types/entities/briefing.types"
 
 /* ── the sections ────────────────────────────────────────────────────────── */
@@ -869,52 +870,65 @@ function NoteRow({ label, value, placeholder, onCommit }: { label: string; value
   )
 }
 
-function AirportInfoBlock({
+/**
+ * One airport as a ROW of its group (the owner, Nov 2026: "group alternates
+ * together, group en route together"): its code and name, what it is to this
+ * flight on the right, and a line under them — the runways with their lengths
+ * (feet or metres, as Settings › Display says), and for an alternate the
+ * OFP's runway, approach and distance. A tap unfolds the company's and the
+ * community's notes in place.
+ */
+function AirportRow({
   station,
   info,
+  sub,
   defaultOpen,
+  role = true,
 }: {
   station: BriefingStation
   info: ReturnType<typeof useAirportInfo>[string] | undefined
+  /** What the OFP says about it (an alternate's runway, approach, distance). */
+  sub?: string
   defaultOpen: boolean
+  /** Say its role on the right (a group already named by role does not). */
+  role?: boolean
 }) {
   const note = useBriefingNote("airport", station.icao)
   const save = (patch: Partial<Pick<BriefingNoteRecord, "company" | "community">>) => void saveBriefingNote("airport", station.icao, patch).then(refreshBriefingCaches)
-  const runways = info?.runways ?? []
+  const unit = usePreferences().preferences?.display?.runwayLength
+  const runways = (info?.runways ?? []).map((r) => [r.id, formatRunwayLength(r.lengthFt ?? 0, unit)].filter(Boolean).join(" ")).join(" • ")
   const [open, setOpen] = React.useState(defaultOpen)
   const noted = !!(note?.company?.trim() || note?.community?.trim())
   return (
-    <FormSection>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="flex min-h-12 w-full items-center gap-2 px-4 py-2.5 text-left"
-      >
-        <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-foreground">
-          {station.icao}
-          {station.name ? <span className="font-normal text-muted-foreground"> · {station.name}</span> : null}
+    <div className="row-divider">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex min-h-12 w-full items-start gap-2 px-4 py-2.5 text-left">
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[15px] font-semibold text-foreground">
+            {station.icao}
+            {station.name ? <span className="font-normal text-muted-foreground"> · {station.name}</span> : null}
+          </span>
+          {/* What the OFP plans (an alternate's runway, approach, distance), then its runways. */}
+          {sub && <span className="mt-0.5 block truncate text-[12px] leading-snug tabular-nums text-foreground">{sub}</span>}
+          {runways && <span className="mt-0.5 block text-[12px] leading-snug tabular-nums text-muted-foreground">{runways}</span>}
         </span>
-        <span className="shrink-0 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
-          {ROLE_NAME[station.role]}
-          {!open && noted ? " • Notes" : ""}
-        </span>
-        <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200", open && "rotate-180")} aria-hidden />
-      </button>
-      {open && (
-        <>
-          {runways.length > 0 && (
-            <p className="-mt-1 px-4 pb-2 text-[13px] tabular-nums text-muted-foreground">
-              {runways.map((r) => `${r.id}${r.lengthFt ? ` ${Math.round(r.lengthFt * 0.3048).toLocaleString("en-GB")}m` : ""}`).join(" • ")}
-            </p>
+        <span className="mt-0.5 flex shrink-0 items-center gap-1.5">
+          {(role || (!open && noted)) && (
+            <span className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+              {[role ? ROLE_NAME[station.role] : null, !open && noted ? "Notes" : null].filter(Boolean).join(" • ")}
+            </span>
           )}
+          <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform duration-200", open && "rotate-180")} aria-hidden />
+        </span>
+      </button>
+      <Fold open={open}>
+        {open && (
           <div className="border-t border-border/70">
-            <NoteRow label={`Company`} value={note?.company ?? ""} placeholder="The company's airport briefing, summarised" onCommit={(t) => save({ company: t })} />
-            <NoteRow label={`Community`} value={note?.community ?? ""} placeholder="What other pilots say to look out for" onCommit={(t) => save({ community: t })} />
+            <NoteRow label="Company" value={note?.company ?? ""} placeholder="The company's airport briefing, summarised" onCommit={(t) => save({ company: t })} />
+            <NoteRow label="Community" value={note?.community ?? ""} placeholder="What other pilots say to look out for" onCommit={(t) => save({ community: t })} />
           </div>
-        </>
-      )}
-    </FormSection>
+        )}
+      </Fold>
+    </div>
   )
 }
 
@@ -931,30 +945,47 @@ export function outstationOf(b: Briefing): string {
   return b.flight.arr
 }
 
-/** The airports, the outstation open and the rest folded — home base and the alternates. */
+/**
+ * The airports in three groups, each one card of rows (the owner, Nov 2026:
+ * grouped, and the grouped layout was "terrible"): the FLIGHT — the
+ * outstation first and open, then home base; the ALTERNATES the OFP plans,
+ * each with its runway, approach and distance; and EN ROUTE, what the WX list
+ * adds. Every row unfolds its notes in place.
+ */
 function AirportsSection({ b }: { b: Briefing }) {
   const { main, enroute } = briefingAirports(b)
-  const [showEnroute, setShowEnroute] = React.useState(false)
-  const info = useAirportInfo(
-    main.map((s) => s.icao),
-    true,
-  )
+  const info = useAirportInfo([...main, ...enroute].map((s) => s.icao), true)
   const lead = outstationOf(b)
-  // The outstation leads; the others keep their order (home base, then the alternates).
-  const ordered = [...main.filter((s) => s.icao === lead), ...main.filter((s) => s.icao !== lead)]
+  const flight = main.filter((s) => s.role !== "alternate")
+  const alternates = main.filter((s) => s.role === "alternate")
+  // The outstation leads; home base after it.
+  const ordered = [...flight.filter((s) => s.icao === lead), ...flight.filter((s) => s.icao !== lead)]
+  const altSub = (icao: string) => {
+    const a = b.alternates.find((x) => x.icao === icao)
+    if (!a) return undefined
+    return [a.runway && `RWY ${a.runway}`, a.approach, a.distNm != null && `${a.distNm}nm`].filter(Boolean).join(" · ") || undefined
+  }
   return (
     <div className="space-y-3">
-      {ordered.map((s) => (
-        <AirportInfoBlock key={s.icao} station={s} info={info[s.icao]} defaultOpen={s.icao === lead} />
-      ))}
-      {enroute.length > 0 && (
-        <FormSection>
-          <FoldButton open={showEnroute} onClick={() => setShowEnroute((o) => !o)}>
-            En route · {enroute.map((s) => s.icao).join(" • ")}
-          </FoldButton>
+      <FormSection title="Flight">
+        {ordered.map((s) => (
+          <AirportRow key={s.icao} station={s} info={info[s.icao]} defaultOpen={s.icao === lead} />
+        ))}
+      </FormSection>
+      {alternates.length > 0 && (
+        <FormSection title="Alternates">
+          {alternates.map((s) => (
+            <AirportRow key={s.icao} station={s} info={info[s.icao]} sub={altSub(s.icao)} defaultOpen={false} role={false} />
+          ))}
         </FormSection>
       )}
-      {showEnroute && enroute.map((s) => <AirportInfoBlock key={s.icao} station={s} info={undefined} defaultOpen={false} />)}
+      {enroute.length > 0 && (
+        <FormSection title="En Route">
+          {enroute.map((s) => (
+            <AirportRow key={s.icao} station={s} info={info[s.icao]} defaultOpen={false} role={false} />
+          ))}
+        </FormSection>
+      )}
     </div>
   )
 }
