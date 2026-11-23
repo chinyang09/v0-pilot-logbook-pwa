@@ -2,98 +2,75 @@
 
 /**
  * Import & Export — the app's way in and out of the pilot's other records, a
- * nav destination of its own (the owner, Nov 2026: "move imports and exports
- * to a separate nav tab instead of action button"). One picker reads them
- * all — the kind is told from the file (`import-flow.tsx`) — so every row
- * below opens the same picker; the rows say what it reads. The briefings
- * already imported are listed, newest first, so a briefing is a tap away from
- * any page the tab bar reaches (the Flight Deck included).
+ * nav destination of its own (the owner, Nov 2026). ONE drop zone: drop files
+ * on it or tap it to choose them; it says what it reads, and the kind is told
+ * from the file (`import-flow.tsx`). Export is a card of its own under it.
+ * Briefings are reached from the flight they belong to (the logbook card's
+ * right swipe, the Flight Deck's flights card), not listed here.
  */
 
-import { useMemo } from "react"
-import { useRouter } from "next/navigation"
-import { CalendarRange, ChevronRight, FileSpreadsheet, FileUp, Loader2, NotebookTabs, ScrollText } from "lucide-react"
+import { useState } from "react"
+import { FileUp, Loader2 } from "lucide-react"
 import { PageContainer } from "@/components/page-container"
 import { FormSection } from "@/components/ui/form-section"
-import { Button } from "@/components/ui/button"
 import { useImportPicker } from "@/components/import/unified-import-button"
-import { useAllBriefings } from "@/hooks/data/use-briefings"
 import { refreshAllData } from "@/hooks/data/use-db"
 import { useMainPanelFullWidth } from "@/lib/layout/panel-mode"
-import { formatDay } from "@/lib/utils/date"
+import { cn } from "@/lib/utils"
 
-const KINDS = [
-  { icon: CalendarRange, label: "Crew Schedule Report", detail: "PDF or CSV · flights, duties, crew" },
-  { icon: NotebookTabs, label: "Crew Logbook Report", detail: "PDF or CSV · the times flown" },
-  { icon: ScrollText, label: "Briefing Package", detail: "PDF · OFP, NOTAMs, INTAMs" },
-  { icon: FileSpreadsheet, label: "LogTen Pro Export", detail: "Flights, Aircraft, Address Book (TXT)" },
+const READS = [
+  ["Crew Schedule Report", "PDF or CSV"],
+  ["Crew Logbook Report", "PDF or CSV"],
+  ["Briefing Package", "PDF"],
+  ["LogTen Pro Export", "TXT"],
 ] as const
 
 export default function ImportPage() {
-  const router = useRouter()
-  const briefings = useAllBriefings()
   useMainPanelFullWidth(true)
-  const { open, working, element } = useImportPicker({ onComplete: () => void refreshAllData() })
-  const recent = useMemo(
-    () =>
-      (briefings ?? [])
-        .filter((r) => r.data)
-        .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "") || (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-        .slice(0, 12),
-    [briefings],
-  )
+  const { open, take, working, element } = useImportPicker({ onComplete: () => void refreshAllData() })
+  const [over, setOver] = useState(false)
+
   return (
     <PageContainer title="Import & Export">
       <div className="mx-auto max-w-2xl space-y-4 px-panel pt-4">
         {element}
-        <Button className="h-11 w-full" onClick={open} disabled={working}>
-          {working ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
-          {working ? "Reading…" : "Choose Files"}
-        </Button>
-        <FormSection title="Reads">
-          {KINDS.map(({ icon: Icon, label, detail }) => (
-            <button
-              key={label}
-              type="button"
-              onClick={open}
-              disabled={working}
-              className="row-divider flex w-full items-center px-4 py-3.5 text-left transition-colors hover:bg-secondary/50 active:bg-secondary/50"
-            >
-              <Icon className="mr-3 h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium">{label}</span>
-                <span className="block truncate text-xs text-muted-foreground">{detail}</span>
-              </span>
-              <ChevronRight className="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
-            </button>
-          ))}
+        <FormSection title="Import">
+          <button
+            type="button"
+            onClick={open}
+            disabled={working}
+            onDragOver={(e) => {
+              e.preventDefault()
+              e.dataTransfer.dropEffect = "copy"
+              if (!over) setOver(true)
+            }}
+            onDragLeave={() => setOver(false)}
+            onDrop={(e) => {
+              e.preventDefault()
+              setOver(false)
+              if (!working) take(Array.from(e.dataTransfer.files))
+            }}
+            aria-label="Choose files to import, or drop them here"
+            className={cn(
+              "m-3 flex w-[calc(100%-1.5rem)] flex-col items-center gap-3 rounded-xl border-2 border-dashed px-4 py-7 text-center transition-colors",
+              over ? "border-primary bg-primary/10" : "border-border hover:bg-secondary/40 active:bg-secondary/40",
+            )}
+          >
+            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-secondary">
+              {working ? <Loader2 className="h-5 w-5 animate-spin" /> : <FileUp className="h-5 w-5 text-muted-foreground" />}
+            </span>
+            <span className="text-sm font-semibold">{working ? "Reading…" : over ? "Drop to Import" : "Drop Files or Tap to Choose"}</span>
+            <span className="grid w-full max-w-xs grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-left text-xs">
+              {READS.map(([label, kind]) => (
+                <span key={label} className="contents">
+                  <span className="text-foreground">{label}</span>
+                  <span className="text-right text-muted-foreground">{kind}</span>
+                </span>
+              ))}
+            </span>
+            <span className="text-xs text-muted-foreground">Several at once — a schedule and a logbook report are read together.</span>
+          </button>
         </FormSection>
-
-        {recent.length > 0 && (
-          <FormSection title="Briefings">
-            {recent.map((r) => {
-              const b = r.data!
-              return (
-                <button
-                  key={r.id}
-                  type="button"
-                  onClick={() => router.push(`/briefing?id=${encodeURIComponent(r.id)}`)}
-                  className="row-divider flex w-full items-center px-4 py-3 text-left transition-colors hover:bg-secondary/50 active:bg-secondary/50"
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-medium tabular-nums">
-                      {b.flight.number} {b.flight.dep}–{b.flight.arr}
-                    </span>
-                    <span className="block truncate text-xs tabular-nums text-muted-foreground">
-                      {formatDay(b.flight.date)} • {b.route.schedDep}Z • OFP {b.flight.ofpVersion}
-                    </span>
-                  </span>
-                  <ChevronRight className="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
-                </button>
-              )
-            })}
-          </FormSection>
-        )}
 
         <FormSection title="Export">
           <p className="px-4 py-3.5 text-sm text-muted-foreground">Exporting the logbook comes in a later build.</p>

@@ -12,7 +12,7 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { Plane, PlaneLanding, RefreshCw } from "lucide-react"
+import { ChevronRight, Plane, RefreshCw } from "lucide-react"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { dutyWindow, formatDutyClock, formatRestSpan } from "@/lib/utils/dashboard/duty-status"
 import { gateLabel } from "@/lib/utils/dashboard/duty-line"
@@ -20,12 +20,15 @@ import { whereaboutsLines } from "@/lib/lookup/aircraft-whereabouts"
 import type { Requirement } from "@/lib/utils/dashboard/legality"
 import { cn } from "@/lib/utils"
 import { formatDay } from "@/lib/utils/date"
+import { formatClockDisplay } from "@/lib/utils/time"
 import { REQ_TONE } from "./instruments"
-import { crewKey, crewRole, currenciesBySoonest, currencyRows, limitsOf, marginText, marginTone, shortDay, shortName } from "./faces"
+import { crewKey, crewRole, currenciesBySoonest, currencyRows, legNow, limitsOf, marginText, marginTone, shortDay, shortName } from "./faces"
 import { CurrencyDots } from "./currency-dots"
 import { dotAt, dotLayout, localDayKey } from "@/lib/utils/dashboard/currency-dots"
 import { AirportBody } from "./airport-tile"
 import type { FlightBrief } from "./model"
+import { pageOf, useRememberedPage } from "./pager"
+import { briefingId } from "@/lib/briefing/ids"
 import { SheetClosingContext, type WidgetAction, type WidgetId } from "./widget"
 
 export const WIDGET_TITLE: Record<WidgetId, string> = {
@@ -140,7 +143,8 @@ export function widgetContent(
       return {
         header: "face",
         body: legs.length || brief.crew.length ? <FlightBody brief={brief} ctx={ctx} /> : null,
-        // Each leg opens from its own row; the one thing to DO is ask again.
+        // Each leg opens from its own row; what to DO is ask again, and read
+        // the briefing of the leg the tile is on.
         actions: [
           ...(legs.length && brief.duty.lookups
             ? [
@@ -151,6 +155,19 @@ export function widgetContent(
                   run: brief.duty.refreshLookups,
                   stay: true,
                   busy: brief.duty.lookupsLoading,
+                },
+              ]
+            : []),
+          ...(legs.some((l) => l.flightNumber)
+            ? [
+                {
+                  id: "briefing",
+                  label: "Briefing",
+                  run: () => {
+                    const at = pageOf(`flight:${brief.duty.atMs}`) ?? legNow(brief)
+                    const f = legs[Math.min(Math.max(0, at), legs.length - 1)]
+                    ctx.go(f.flightNumber ? `/briefing?id=${encodeURIComponent(briefingId(f.flightNumber, f.date, f.departureIcao || ""))}` : "/briefing")
+                  },
                 },
               ]
             : []),
@@ -269,76 +286,60 @@ function DutyBody({ brief }: { brief: FlightBrief }) {
 }
 
 /**
- * The chosen duty: its figures (what its face does not say), each leg a row a
- * tap opens, and the aeroplane coming in. The duty is chosen on the tile's
- * own date line, not here.
+ * The flights card under its header — the tile's face, the leg on show with
+ * its route, number, times, aeroplane, gate and inbound line. The body says
+ * only what that face does not (the owner, Nov 2026: no duplicate info), for
+ * the SAME leg, following the header's pager: the gates at both ends with
+ * terminal and stand, the schedule where it differs from what flew, the block,
+ * the inbound's STD and arrival gate, the flight the aeroplane goes on to.
+ * Then a row that opens the flight, and the crew.
  */
 function FlightBody({ brief, ctx }: { brief: FlightBrief; ctx: WidgetCtx }) {
-  const { duty, code, clock } = brief
-  const times = duty.times
-  const inbound = duty.lookups?.inbound
-  const lines =
-    inbound?.status === "done" ? whereaboutsLines(inbound.whereabouts, brief.now, brief.display?.clockSeparator) : null
+  const { duty } = brief
+  const count = duty.legs.length
+  const [page] = useRememberedPage(`flight:${duty.atMs}`, legNow(brief), count)
+  const f = duty.legs[page]
+  const figs: Array<{ label: string; value: string }> = []
+  if (f) {
+    const g = duty.lookups?.gates[f.id]
+    const done = g?.status === "done" ? g.gates : null
+    const dep = done ? gateLabel(done.departure.gate, done.departure.terminal, done.departure.stand) : ""
+    const arr = done ? gateLabel(done.arrival.gate, done.arrival.terminal, done.arrival.stand) : ""
+    // The face names one gate; the card both ends, with terminal and stand.
+    if (dep) figs.push({ label: "Departure", value: dep })
+    if (arr) figs.push({ label: "Arrival", value: arr })
+    // The face's times are what flew; the schedule only where it differs.
+    const sep = brief.display?.clockSeparator
+    const sched = f.scheduledOut && f.scheduledIn ? `${formatClockDisplay(f.scheduledOut, sep)}–${formatClockDisplay(f.scheduledIn, sep)}Z` : ""
+    if (sched && (f.outTime || f.inTime)) figs.push({ label: "Scheduled", value: sched })
+    const block = f.inTime && f.blockTime && f.blockTime !== "00:00" ? f.blockTime : planned(f.scheduledOut, f.scheduledIn)
+    if (block) figs.push({ label: f.inTime ? "Block" : "Planned Block", value: block })
+    const inbound = page === legNow(brief) && !f.inTime ? duty.lookups?.inbound : null
+    const lines =
+      inbound?.status === "done" ? whereaboutsLines(inbound.whereabouts, brief.now, brief.display?.clockSeparator) : null
+    if (lines?.std) figs.push({ label: "Inbound", value: lines.std })
+    if (lines?.gate) figs.push({ label: "Inbound Arr", value: lines.gate })
+    if (done?.inboundFlight && !lines) figs.push({ label: "Inbound", value: done.inboundFlight })
+    if (done?.onwardFlight) figs.push({ label: "Aircraft On To", value: done.onwardFlight })
+  }
   return (
     <div>
       {/* Report and off duty are the Duty & FDP card's (the owner, Nov 2026);
           this card is the flights. */}
-      {duty.legs.length > 0 && (
-        <div>
-          {duty.legs.map((f, i) => {
-            const g = duty.lookups?.gates[f.id]
-            const done = g?.status === "done" ? g.gates : null
-            const dep = done ? gateLabel(done.departure.gate, done.departure.terminal, done.departure.stand) : ""
-            const arr = done ? gateLabel(done.arrival.gate, done.arrival.terminal, done.arrival.stand) : ""
-            return (
-              <TapRow
-                key={f.id}
-                onClick={() => ctx.openFlight(f.id)}
-                lead={<Plane className={cn("h-4 w-4 shrink-0", f.inTime ? "text-foreground" : "text-muted-foreground")} aria-hidden />}
-                title={
-                  <>
-                    {f.flightNumber || "Flight"}{" "}
-                    <span className="font-normal text-muted-foreground">
-                      {code(f.departureIcao, f.departureIata)} → {code(f.arrivalIcao, f.arrivalIata)}
-                    </span>
-                  </>
-                }
-                sub={
-                  [
-                    // The leg's own times: the tile's bar draws them, the row says them.
-                    times[i]?.departMs != null && times[i]?.arriveMs != null
-                      ? `${clock(times[i].departMs!).replace(/Z$/, "")}–${clock(times[i].arriveMs!)}`
-                      : null,
-                    dep || arr ? `Gate ${dep || "–"} → ${arr || "–"}` : null,
-                    // The airport names the flight the aeroplane comes in on.
-                    done?.inboundFlight ? `Inbound ${done.inboundFlight}` : null,
-                    // And the one it goes on to after this leg — the owner's
-                    // "the next flight taking the same aircraft".
-                    done?.onwardFlight ? `On to ${done.onwardFlight}` : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ") || undefined
-                }
-                right={f.aircraftReg || undefined}
-              />
-            )
-          })}
-          {lines && (
-            // The aeroplane coming in: which flight, its STD, where it is,
-            // and the gate it arrives at — the gate means little apart from
-            // the flight it belongs to.
-            <TapRow
-              lead={<PlaneLanding className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />}
-              title={
-                <>
-                  {lines.flight} <span className="font-normal text-muted-foreground">{duty.lookups?.inboundRegistration}</span>
-                </>
-              }
-              sub={[lines.std, lines.primary].filter(Boolean).join(" · ")}
-              right={lines.gate || undefined}
-            />
-          )}
-        </div>
+      {figs.length > 0 && (
+        <Grid>
+          {figs.map((x) => (
+            <Fig key={x.label} label={x.label} value={x.value} />
+          ))}
+        </Grid>
+      )}
+      {f && (
+        <TapRow
+          onClick={() => ctx.openFlight(f.id)}
+          lead={<Plane className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />}
+          title={`Open ${f.flightNumber || "Flight"}`}
+          right={<ChevronRight className="h-4 w-4" aria-hidden />}
+        />
       )}
       {/* The crew is part of this card (the owner's duty-and-crew widget). */}
       {brief.crew.length > 0 && (
@@ -348,6 +349,15 @@ function FlightBody({ brief, ctx }: { brief: FlightBrief; ctx: WidgetCtx }) {
       )}
     </div>
   )
+}
+
+/** "00:05" − "22:30" across midnight → "1:35"; "" without both. */
+function planned(out?: string, inn?: string): string {
+  if (!out || !inn) return ""
+  const m = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5))
+  if (!/^\d\d:\d\d$/.test(out) || !/^\d\d:\d\d$/.test(inn)) return ""
+  const d = (m(inn) - m(out) + 1440) % 1440
+  return d ? `${Math.floor(d / 60)}:${String(d % 60).padStart(2, "0")}` : ""
 }
 
 /** Who, and when last together — a tap opens their card. */
@@ -361,8 +371,13 @@ function CrewBody({ brief, go }: { brief: FlightBrief; go: (href: string) => voi
           // The tile's initials and name fly into these (shared morph).
           lead={<Initials name={m.name} morph={`crew-ini-${crewKey(m)}`} />}
           title={<span data-morph={`crew-name-${crewKey(m)}`}>{m.name}</span>}
-          sub={[crewRole(m.role, brief.authority), m.count ? `${m.count} together` : null].filter(Boolean).join(" · ")}
-          right={m.last ? shortDay(m.last.date) : "New"}
+          sub={
+            <>
+              <span data-morph={`crew-role-${crewKey(m)}`}>{crewRole(m.role, brief.authority)}</span>
+              {m.count ? ` · ${m.count} together` : null}
+            </>
+          }
+          right={<span data-morph={`crew-last-${crewKey(m)}`}>{m.last ? shortDay(m.last.date) : "New"}</span>}
         />
       ))}
     </div>

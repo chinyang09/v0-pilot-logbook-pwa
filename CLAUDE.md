@@ -836,9 +836,11 @@ and a **Crew Logbook Report** — and both land through one entry point
 picker; the pipeline behind it, `import-flow.tsx`, loads once files are
 chosen). The picker lives on the **Import & Export page** (`/import`, a nav
 destination and a tab choice — the owner, Nov 2026: imports and future exports
-in a tab of their own, not an action button): one Choose Files, the kinds it
-reads as rows that open the same picker, the briefings imported, and Export
-(a later build). The logbook's header no longer carries an import button; its
+in a tab of their own, not an action button; below Settings in the sidebar):
+ONE drop zone — drop files on it or tap it to choose them (`useImportPicker`'s
+`take` / `open`) — that says what it reads, then Export as a card of its own
+(a later build). No list of briefings there (the owner: not the right place —
+a briefing is reached from its flight). The logbook's header no longer carries an import button; its
 empty state links to the page. Uploading both together
 cross-hydrates them into one plan.
 
@@ -1122,7 +1124,7 @@ NAV, INIT B, PERF — the OFP has nothing for DATA or RAD NAV), then the brief:
 | Perf | the OptiClimb steps | Weights · kg — Max ZFW / Max TOW / Max LW with the plan under each — and OptiClimb. No RTOW card, no cruise table (the owner) |
 | NOTAMs | "2 flagged • 5 new", else "Nothing flagged or new" | by the bulletin's `====` SECTION (a block each, open when it holds flagged or new), then airport, then `++++` CATEGORY; each NOTAM an ACCORDION row — number, NEW, validity, schedule and its marked title collapsed, the reflowed text open; the BOOKMARK (not a flag — the owner) a target of its own beside the row. Seen ones fold under "N seen before"; Review / Flagged |
 | INTAMs | count • first title | an accordion row each, the text reflowed and marked |
-| Airports | the airports • | departure, destination and alternates (each once), en route folded: each airport's runways (`useAirportInfo`) and the Company and Community notes as plain rows (no green / pink — the owner) |
+| Airports | the airports • | departure, destination and alternates (each once), en route folded: each airport's runways (`useAirportInfo`) and the Company and Community notes as plain rows (no green / pink — the owner). Each airport FOLDS: the OUTSTATION leads and is open — the end away from home base (`outstationOf`: the destination out, the departure back, so WSSS–VVTS–WSSS opens VVTS on both legs; the destination when both or neither end is home) — and home base and the alternates are folded (the owner, Nov 2026), a folded one saying "• Notes" when it holds any |
 | Weather | the airports • | the same airports' LIVE METAR and TAF (`StationWeather`) with the flight's times there lit, Refresh |
 
 The fuel HISTORY section is gone for now (the owner); `fuelHistory` stays in
@@ -1131,11 +1133,14 @@ The fuel HISTORY section is gone for now (the owner); `fuelHistory` stays in
 Every note is `NoteText` — a draft while focused, committed on blur and after
 a pause. Reached by SWIPING THE FLIGHT CARD RIGHT in the logbook
 (`SwipeableCard`'s `leadingActions` — every operated flight with a number; a
-flight with no briefing opens the page that imports one), from the Import &
-Export page (its picker — `import-flow.tsx` tells a briefing apart by its
-first pages BEFORE the status dialog opens, saves it and opens the page — and
-its list of the briefings imported, newest first), and by the page's own
-import. Not from the flight form (the owner).
+flight with no briefing opens the page that imports one), from the FLIGHT
+DECK — the header's Briefing button and the flights card's footer, each for
+the leg the flights tile is swiped to (`pageOf`), else the leg the duty is on
+(the owner, Nov 2026: "navigate to specific briefing based on the flight duty
+selected") —, from the Import & Export page's picker (`import-flow.tsx` tells
+a briefing apart by its first pages BEFORE the status dialog opens, saves it
+and opens the page), and by the page's own import. Not from the flight form
+(the owner).
 
 ### The Pilot's Seat (`lib/utils/roster/pilot-role.ts`)
 
@@ -1353,7 +1358,7 @@ tiles (`flight/widget.tsx`, faces in `flight/faces.tsx`, bodies in
 | Tile | Glance | Its card adds | Footer |
 |---|---|---|---|
 | Duty & FDP (`flight/duty-clock.tsx`; the owner, Nov 2026: "use the timeline … track FDP … depict the max FDP on the timeline") | the phase, the line in its tone ("Legal from 22:00Z", "Rest short by 3:00" red, "Sector 2 of 3") — no "Max 12:15" beside it, the FDP / Max figure below says it (the owner's screenshot read it twice); ONE STRIP in time (`dutyClock`, `lib/utils/dashboard/duty-clock.ts`, tested) — the rest from its start (the last 16h of a long one) to the report, solid to where its minimum is met, red from a report inside it; the duty from report to off duty, its FDP darker to the last on-blocks, each leg; the Reg 14 MAXIMUM a dotted outline from the FDP's start with a mark at its end, the FDP past it red; now; a tick an hour (three on a long strip), labelled every 3/6/12; then three figures: on duty FDP left · FDP / max · latest on-blocks; off duty rest / its minimum · report · FDP planned / max; a LATER duty its own (rest before it from `restBefore`). A standby, or nothing known, keeps `DutyBand` | on duty: FDP Spare (the FDP's own delay margin), Off Duty; off duty: Rested, Spare Before Report, Latest On-Blocks, Off Duty (the next duty's), FDP Spare, Last Duty; a LATER duty: FDP Spare, Off Duty | FDP › |
-| Flights & Crew (the chosen duty, a LEG A PAGE — the owner, Nov 2026: "tracks individual flights, swipeable to first or second leg") | Now / Next / Later · day, "Leg 1/2"; the duty's day bar with the leg on show lit (the others dimmed); the LEG — its route large, flight number and times, its gate, the aeroplane line on the leg it is about (else the rest before the duty on the first), "then WMKK–WSSS"; dots under it (`Pager`, controlled, its page remembered by `useRememberedPage` so the card opens on the leg swiped to); that LEG's crew in the panel (`FlightBrief.legCrew`), the panel and its divider running the tile's FULL height. It opens on the leg the duty is on (`legNow`). Before this: a 24-hour DAY BAR (`DayBar` — a tick each hour and a taller one every six with its hour under it, in the pilot's clock, shifted in 6h steps so the duty fits; the duty track and each leg SQUARED off and 18px tall so their ends read, flown legs in ink, a now marker); the route large ("WSSS–WIII–WSSS", 17px under a 15rem column, 21px above); first out – last in with the FDP/max; flight numbers · "One more leg" · the next gate · the aeroplane line — or, for a later duty, the rest before it. Now (the owner, Nov 2026: "show aircraft in use, gate, essentially flight info") each leg page carries its AEROPLANE — registration and type, else "Aircraft not yet assigned" — and its GATE (the departure's, the arrival's once on blocks) on a line of their own, then the inbound, or the rest before the duty, and what follows; the CREW on a panel at the right across the row, under the duty in a narrower two-row tile, none in a narrower one-row tile (`CrewPanel`: initials, name, the seat AS THE PILOT'S LOGBOOK RULES NAME IT — `crewRole` → `roleLabel`, "PIC" / "P2" under CAAS, "Relief" — · times flown together or "New", "+ N more") | the card's header is the face WITHOUT the crew panel (the owner: full width — the crew is listed below); NO Report or Off Duty — those are the Duty & FDP card's (the owner: "off duty should be in FDP/duty"); a row per leg — its times, gates with stand, the airport's inbound flight, tail; the inbound row; then the crew, a row each (a tap opens their card) | Refresh (only once gates are asked) |
+| Flights & Crew (the chosen duty, a LEG A PAGE — the owner, Nov 2026: "tracks individual flights, swipeable to first or second leg") | Now / Next / Later · day, "Leg 1/2"; the duty's day bar with the leg on show lit (the others dimmed); the LEG — its route large, flight number and times, its gate, the aeroplane line on the leg it is about (else the rest before the duty on the first), "then WMKK–WSSS"; dots under it (`Pager`, controlled, its page remembered by `useRememberedPage` so the card opens on the leg swiped to); that LEG's crew in the panel (`FlightBrief.legCrew`), the panel and its divider running the tile's FULL height. It opens on the leg the duty is on (`legNow`). Before this: a 24-hour DAY BAR (`DayBar` — a tick each hour and a taller one every six with its hour under it, in the pilot's clock, shifted in 6h steps so the duty fits; the duty track and each leg SQUARED off and 18px tall so their ends read, flown legs in ink, a now marker); the route large ("WSSS–WIII–WSSS", 17px under a 15rem column, 21px above); first out – last in with the FDP/max; flight numbers · "One more leg" · the next gate · the aeroplane line — or, for a later duty, the rest before it. Now (the owner, Nov 2026: "show aircraft in use, gate, essentially flight info") each leg page carries its AEROPLANE — registration and type, else "Aircraft not yet assigned" — and its GATE (the departure's, the arrival's once on blocks) on a line of their own, then the inbound, or the rest before the duty, and what follows; the CREW on a panel at the right across the row, under the duty in a narrower two-row tile, none in a narrower one-row tile (`CrewPanel`: initials, name, the seat AS THE PILOT'S LOGBOOK RULES NAME IT — `crewRole` → `roleLabel`, "PIC" / "P2" under CAAS, "Relief" — · times flown together or "New", "+ N more") | the card's header is the face WITHOUT the crew panel (the owner: full width — the crew is listed below); NO Report or Off Duty — those are the Duty & FDP card's (the owner: "off duty should be in FDP/duty"); under it ONLY what the header does not say, for the SAME leg (the owner, Nov 2026: no duplicate info — it listed every leg's route, times, gate and tail again under a header that had just said them): the gates at both ends with terminal and stand, the schedule where the leg flew off it, the block (planned until flown), the inbound's STD and arrival gate, the flight the aeroplane goes on to — figures in a grid, following the header's pager (`useRememberedPage` is ONE store per key, so the header and the body read the same leg) —, an "Open TR438" row, then the crew, a row each (a tap opens their card) | Refresh (only once gates are asked), Briefing |
 | Airport (`flight/airport-tile.tsx`; the owner, Nov 2026: "combine airport and weather widget … they will synergise well together" — it was a Weather tile and a Destination tile) | one airport of the duty a PAGE — every one it touches, departure and return to base included (`airportsOf`, the weather briefs) — opening on where it goes next, swiped between with dots at the FOOT (`Pager` with `fill`), drawn as a STATION after the owner's widget, the RUNWAY DIAGRAM in the middle and the text in the four corners. The diagram (`RunwayDiagram`, `flight/runway-diagram.tsx`, shared with the card) is as LARGE as the tile allows clear of the text — `largestCircle` (`lib/utils/dashboard/largest-circle.ts`, tested) over the corners' boxes, re-read by a ResizeObserver whenever the tile or a corner changes size, in layout values (`offset*`, which the card's scaling morph does not move); left out under 40px (the owner, Nov 2026: "allow ring to occupy as much space as possible without any text covering it or it covering any text"). In it: the airport's runways to scale off their thresholds inside a ring of dots, the one LANDING on in the accent with a dashed approach coming in over its threshold to an arrowhead, the one DEPARTING from in ink with an arrowhead leaving past its far end, the rest muted (with nothing from the traffic, the wind's runway carries the approach, muted), and the wind a wedge on the rim where it comes FROM (amber at 25kt or a gust). Top left the code (18px) and, two rows tall and more, the runways IN USE under it, one a line ("✈↓ 25L" over "✈↑ 25R"); top right the QNH ("Q1011", 12px), the category under it only below VFR (dark cockpit), and the wind in words ("220° 15kt G25"); bottom left CAVOK where the METAR says so (`Conditions.cavok`), else the LOW cloud — the lowest ceiling at or below 3,500ft, else the lowest layer there, as the METAR writes it (`cloudLayer`: "BKN011", "SCT008CB"; `skyOf`, `LOW_CLOUD_FT`) — else poor visibility or rain, else NOTHING (the owner: "at 30000, it is not of concern", then "up to 3,500ft"); bottom right temperature / dew point. No local time or zone (the owner: the card has them), no alert icon. No distance, no TAF on the tile | the SAME airport, swiped the same way (the page is shared — `useRememberedPage`, `ap:<duty>:<airports>`; each page as tall as itself, the pager's window following it): above, the airport as a PICTURE (`AirportPanel`, after a station-weather widget the owner sent) — the place, local time and UTC offset, day or night on arrival (no distance — the owner: it means nothing there); the category as a dot only below VFR; the wind and gust (amber) • temperature / dew point • QNH on ONE line, and ONLY those (visibility, ceiling and the frequencies went — the owner); the runways IN USE, a row each ("✈↓ 25L 13kt↓ 7kt→ 2 arr · 20m", "✈↑ 25R …"), else the one the wind favours ("by wind"), beside the same `RunwayDiagram` (`runwayShown`); its runways with length; the TAF aerodromes NEAR it with their weather; last there and arrivals this year. Below, its reports (`StationWeather`): the worst category and hazards as chips, the METAR's raw text, and the LATEST TAF WHOLE (captioned "TAF · 18Z–24Z · this duty lit"), its lines NOT indented (a lit period's wash reaches past the text) with the periods over the duty's times there lit and their leg, the rest muted. Then EN ROUTE and when the weather was checked. The code, time, category, QNH, temperature, the runways in use, the dots, the wind's words and the runway diagram FLY from the tile into their places (`ap-*` morph keys, on the page on show only) | Refresh |
 | Currency | a DOT CALENDAR (`CurrencyDots`, `lib/utils/dashboard/currency-dots.ts`, tested; after a "days of the year" widget the owner sent): a dot a day, seven to a column (Monday at the top), running AHEAD from today — 90 days (13 weeks) in a third of the row, six months in two thirds, a year across it, calendar dates so a 29 February is a dot — each currency's last valid day lit in its state's colour (ink, amber, red; dark cockpit), the CLOSEST ringed, today an ink ring, month names under it; then the closest by name and figure (`currenciesBySoonest` — gone first, then by expiry; recency judged against the DUTY, "before duty" when it lapses first), more of them in a tall tile; "+2" beside the label, in the worst one's colour, counts flags past the rows named | the year ahead as dots, every expiry INK — a tap on a dot or a row SELECTS that currency (a second tap deselects): its dot alone in colour (its state's, else the accent), the others dimmed, and the days from today up to it LIGHT UP one after another, about half a second in all, and stay faintly lit (`.currency-sweep`) — how many days, at a glance (the owner, Nov 2026: no colour code; "the highlighted dot will be the only one colour coded"); then ONE line each: name, expiry (or "before duty"), days left, flag — recency with T/O, LDG and its lapse. A row no longer navigates: the Currencies page is the footer's | Currencies › |
 | Limits | the FOUR rolling limits as bars with the hours LEFT — no "Delay" (the owner, Nov 2026: the limits tile tracks the four limits; the FDP is the duty tile's) | "If This Duty Runs Late": the margin on each window that holds the duty, smallest first (the FDP's is the duty card's); "Breach ahead" where the roster runs into one | FDP › |
@@ -1510,7 +1515,30 @@ instead (`header: "label"`), so no name appears twice.
   one thing moving, not two crossfading. A picture tagged
   `data-morph-stretch` (a day bar, a strip, a limit's bar) takes the other's
   BOX — scaled on each axis — where text scales evenly so its letters keep
-  their shape. Keys are matched by the FIRST of each on either side that is
+  their shape; the LABELS inside a stretched picture (a time axis's hours, its
+  "Z") are counter-scaled every frame about their own anchor, so they keep an
+  even scale too — stretched with the bar they widened, doubled in the
+  crossfade and snapped back as the copy was dropped (the owner's "time axis
+  requires an extra step to snap into position", Nov 2026). Every pair rides
+  ONE progress clock written per frame (`place`), and the copies are PLACED
+  before they are appended — appended bare, they sat for one frame at the
+  surface's corner at their own size (a flash at the start of every open and
+  close). It READS every pair (boxes, styles, the labels' anchors) before it
+  WRITES anything: measuring a pair after the last one's copies went in
+  forced a layout of the whole card per pair (112ms of a currency card's open
+  at 4×). Tag the thing that is the SAME on both sides, at its own size — the
+  pager's dots are their group, not the full-width row (centred at two widths,
+  the row's copies crossfaded between two places); a crew member's role and
+  history fly into the card row's caption and right. A pager's FIRST height
+  lands without its transition (the airport card's dots slid 21px after the
+  morph had measured them), and what a card lists that the tile does not ask
+  for (the airport card's alternates) is asked while the page is up, so it is
+  there before the card measures (`useDutyAlternates` in the page). Measured
+  with every copy's last frame against its original's first (`data-morph-copy`
+  on the copies): all five cards land to the pixel, at the default layout and
+  with the duty and flights tiles taller (the crossfade path). Film it WITHOUT
+  Playwright's fake clock: it skews `performance.now()` against the document
+  timeline, and WAAPI opacities then start ~350ms late — not the app. Keys are matched by the FIRST of each on either side that is
   IN VIEW — a page swiped out of its PAGER (clipped by the `[data-pager]`, not
   the tile: the flights tile's next leg sits under its crew panel), or a card
   element scrolled out of the card, does not fly. Whatever is not tagged
@@ -3101,6 +3129,10 @@ re-renders).
   on ANOTHER swipeable row (`[data-swipe-card]`) only closes — its click is
   swallowed, so the first tap closes and the second opens, as a native list
   does. A menu the row opened (the `…` cascade) owns the taps while it is up.
+  A TAP on the open row's own content closes it on the LIFT (within
+  `TAP_SLOP_PX`), and its click is swallowed — the click straight after a
+  swipe is lost on device, so it took two taps on the row itself (the owner's
+  report).
 - **No full-swipe:** there is intentionally **no** "swipe past N% to auto-trigger
   the primary action" behaviour — it was removed. Actions fire only on button tap.
 
@@ -3254,8 +3286,8 @@ re-renders).
   structure, Nov 2026): Flight Deck, Summary and Logbook at the top as three
   rows of their own under no heading (the owner: "each its own" — they were
   under DASHBOARD), then DATABASE (Aircraft, Airports, Crew), DUTY &
-  COMPLIANCE (Currencies, FDP, Discrepancies) and SYSTEM (Import & Export,
-  Account, Settings, Bin, Feedback). A section whose one row
+  COMPLIANCE (Currencies, FDP, Discrepancies) and SYSTEM (Account,
+  Settings, Import & Export, Bin, Feedback). A section whose one row
   carries its own name draws no heading (`heading: false`) — LOGBOOK over
   Logbook is one word twice, with a chevron hiding one row. A row's
   `description` ("Master fleet records") is its tooltip. Headings are ONE
@@ -6128,6 +6160,8 @@ When making changes, be aware of these high-impact files:
 - Do not show a NOTAM's or INTAM's text with the printer's line breaks — `reflowLines` / `notamBody` join them; and do not mark keywords by hand: `highlightSpans` is the one list (facilities bold, what closes them in the caution colour)
 - Do not draw a computed MCDU field (INIT B's TRIP, TOW / LW, EXTRA) in the keyed cyan — it is green (`ref`); and keep an alternate's weather judged over ITS window and against ITS minima (`alternateConcerns`), never the destination's
 - Do not put an import button back in a page header — imports (and exports) are the Import & Export page (`/import`, `useImportPicker`); a page that needs one links there
+- Do not list the briefings on the Import & Export page or split its import into a row per kind — it is ONE drop zone that says what it reads, Export a card under it; a briefing is reached from its flight (the logbook card's right swipe, the Flight Deck's Briefing button and flights card)
+- Do not repeat in a dashboard card's body what its header (the tile's face) says — the flights card's body is the leg on show's OTHER facts. And do not fly a picture's labels stretched, append a morph copy before placing it, or measure a pair after another pair's copies went in (`runSharedMorph`: read pass, then write pass)
 - Do not let a swiped-open row survive a press elsewhere, or let a press on another row both close it and open that row — `openRow` and its document listener in `swipeable-card.tsx`
 - Do not close a dialog and navigate in the same step — the dialog's `useBackDismiss` marker release pops the new page. A briefing import skips the status dialog altogether
 - Do not hand-roll a suggestion list under a field — `SuggestionList` (`components/ui/suggestion-list.tsx`) is the one (an inset well, 44px rows, inset dividers), and `AircraftTypeSuggestions` and the add-aircraft / add-airport candidate lists all render through it; the aircraft form, panel and page each carried a bordered `hover:bg-accent` web dropdown

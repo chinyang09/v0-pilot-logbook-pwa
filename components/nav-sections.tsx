@@ -76,14 +76,14 @@ export const navSections: NavSection[] = [
     label: "System",
     heading: true,
     items: [
+      { label: "Account", href: "/account", icon: <UserCircle className="h-4 w-4" /> },
+      { label: "Settings", href: "/settings", icon: <Settings className="h-4 w-4" /> },
       {
         label: "Import & Export",
         href: "/import",
         icon: <ArrowDownUp className="h-4 w-4" />,
         description: "Company reports, briefings, LogTen",
       },
-      { label: "Account", href: "/account", icon: <UserCircle className="h-4 w-4" /> },
-      { label: "Settings", href: "/settings", icon: <Settings className="h-4 w-4" /> },
       { label: "Bin", href: "/recently-deleted", icon: <Trash2 className="h-4 w-4" /> },
       {
         label: "Feedback",
