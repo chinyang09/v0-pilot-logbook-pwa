@@ -124,3 +124,30 @@ export function whereaboutsLines(
     .join(" ")
   return { primary, secondary: [flight, std, gate].filter(Boolean).join(" · "), flight, std, gate }
 }
+
+/** The next crew reports at the aircraft an hour before its scheduled off (the owner's rule). */
+const NEXT_CREW_BEFORE_MS = 3600_000
+
+/**
+ * The flight that takes the aeroplane OVER after ours (the owner, Nov 2026:
+ * to init the MCDU for them, and to know when their crew reports at the
+ * aircraft — its STD less an hour — which decides whether to secure it):
+ *
+ *   TR290 to DPS · STD 06:30Z · crew 05:30Z
+ *
+ * Null when the list has no flight after ours.
+ */
+export function onwardLines(
+  w: AircraftWhereabouts,
+  clockSeparator: "colon" | "none" = "colon",
+): { flight: string; std: string; crew: string; line: string } | null {
+  const next = w.next
+  if (!next || !next.flightNumber) return null
+  const zulu = (ms: number) => `${formatClockDisplay(new Date(ms).toISOString().slice(11, 16), clockSeparator)}Z`
+  const to = next.destination ? ` to ${next.destination.iata || next.destination.icao}` : ""
+  const stdMs = next.scheduledDeparture ? Date.parse(next.scheduledDeparture) : NaN
+  const flight = `${next.flightNumber}${to}`
+  const std = Number.isFinite(stdMs) ? `STD ${zulu(stdMs)}` : ""
+  const crew = Number.isFinite(stdMs) ? `crew ${zulu(stdMs - NEXT_CREW_BEFORE_MS)}` : ""
+  return { flight, std, crew, line: [flight, std, crew].filter(Boolean).join(" · ") }
+}

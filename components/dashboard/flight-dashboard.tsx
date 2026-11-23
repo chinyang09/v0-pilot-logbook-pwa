@@ -250,7 +250,12 @@ export function FlightDashboard({ className }: { className?: string }) {
     () => (legs.length ? destinationVisits(legs, flights, firstDepart ?? Infinity) : []),
     [legs, flights, firstDepart],
   )
-  const currency = React.useMemo(() => currencySummary(currencies, dutyAtMs), [currencies, dutyAtMs])
+  // A later duty forecasts the currencies to its report; the next one is today's.
+  const currencyAsOfMs = index > 0 && dutyAtMs !== null ? dutyAtMs : null
+  const currency = React.useMemo(
+    () => currencySummary(currencies, dutyAtMs, currencyAsOfMs),
+    [currencies, dutyAtMs, currencyAsOfMs],
+  )
   const stations = React.useMemo(() => dutyStations(legs), [legs])
   const airports = useAirportsByIcao(stations)
   // Runways for every airport of the duty — the airport card draws the one in
@@ -323,6 +328,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       },
       margin,
       recencyLapseIso: recency.lapseIso,
+      currencyAsOfMs: currencyAsOfMs ?? now,
       crew,
       legCrew,
       currency,
@@ -340,7 +346,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       day: (ms: number) =>
         formatDayAt(ms, display?.useZuluTime === false ? zone : "UTC", { year: false }),
     }),
-    [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, margin, recency.lapseIso, crew, legCrew, currency, destinations, airports, airportInfo, runways, weather, weatherStation, iataOf, pref, zone, isActive],
+    [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, margin, recency.lapseIso, currencyAsOfMs, crew, legCrew, currency, destinations, airports, airportInfo, runways, weather, weatherStation, iataOf, pref, zone, isActive],
   )
   // The airport card's alternates, asked while the page is up (the route reads
   // the stored TAF snapshot — no request to the source): asked only when the

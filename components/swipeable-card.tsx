@@ -41,11 +41,17 @@ const NO_ACTIONS: SwipeAction[] = []
  * its click is swallowed, so the first tap closes and the second opens, as a
  * native list does. A press that turns into a scroll or a swipe has no click
  * to swallow, so the flag lapses with the next press. While a menu the row
- * opened is up (the `…` cascade) the menu owns the taps.
+ * opened is up (the `…` cascade) the menu owns the taps. A TAP on the open
+ * row itself (not one of its buttons) closes it too, on the lift, and its
+ * click is swallowed — decided here at the document, not by the row's own
+ * handlers, which missed the first tap on an iPhone.
  */
 let openRow: { id: string; el: HTMLElement | null } | null = null
 let swallowClick = false
+/** A press on the open row's own content (not its buttons), closed on the lift if it stays a tap. */
+let selfPress: { id: number; x: number; y: number } | null = null
 let outsideListening = false
+const closeAll = () => window.dispatchEvent(new CustomEvent(SWIPE_CLOSE_EVENT, { detail: { id: null } }))
 function listenOutside() {
   if (outsideListening || typeof document === "undefined") return
   outsideListening = true
@@ -53,14 +59,42 @@ function listenOutside() {
     "pointerdown",
     (e) => {
       swallowClick = false
+      selfPress = null
       const row = openRow
       if (!row || isMenuOpen()) return
       const target = e.target as Element | null
-      if (target && row.el?.contains(target)) return
+      if (target && row.el?.isConnected && row.el.contains(target)) {
+        // The row's own buttons do what they say; a tap anywhere else on it
+        // closes it — handled HERE, at the document, on the lift: the row's
+        // own handlers missed the first tap on device (WebKit), so it took
+        // two taps on the row itself (the owner's report, twice).
+        if (!target.closest?.("[data-swipe-actions]")) selfPress = { id: e.pointerId, x: e.clientX, y: e.clientY }
+        return
+      }
       openRow = null
       // The close event every row hears; only the open one has anything to do.
-      window.dispatchEvent(new CustomEvent(SWIPE_CLOSE_EVENT, { detail: { id: null } }))
+      closeAll()
       if (target?.closest?.("[data-swipe-card]")) swallowClick = true
+    },
+    { capture: true },
+  )
+  document.addEventListener(
+    "pointerup",
+    (e) => {
+      const press = selfPress
+      selfPress = null
+      if (!press || press.id !== e.pointerId || !openRow) return
+      if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > TAP_SLOP_PX) return
+      openRow = null
+      closeAll()
+      swallowClick = true
+    },
+    { capture: true },
+  )
+  document.addEventListener(
+    "pointercancel",
+    () => {
+      selfPress = null
     },
     { capture: true },
   )
@@ -638,35 +672,10 @@ export function SwipeableCard({
 
   // Capture-phase guard: swallow the click synthesised at the end of a drag, and
   // close (rather than navigate) when the row is open — before it reaches a child.
-  // A TAP on the open row's own content closes it on the LIFT. The click
-  // straight after a swipe is lost on device (the reason swipe actions fire on
-  // the lift), so waiting for it took a second tap on the row itself while a
-  // tap on any other row closed it at once (the owner's report).
-  const tapRef = useRef<{ x: number; y: number } | null>(null)
-  const swallowUntilRef = useRef(0)
-  const onContentPointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      tapRef.current = Math.abs(x.get()) > 2 ? { x: e.clientX, y: e.clientY } : null
-    },
-    [x],
-  )
-  const onContentPointerUp = useCallback(
-    (e: React.PointerEvent) => {
-      const start = tapRef.current
-      tapRef.current = null
-      if (!start || Math.abs(x.get()) <= 2) return
-      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > TAP_SLOP_PX) return
-      swallowUntilRef.current = performance.now() + 700
-      close()
-    },
-    [close, x],
-  )
-
   const handleClickCapture = useCallback(
     (e: React.MouseEvent) => {
       const isOpen = Math.abs(x.get()) > 2
-      if (movedRef.current || isOpen || performance.now() < swallowUntilRef.current) {
-        swallowUntilRef.current = 0
+      if (movedRef.current || isOpen) {
         e.stopPropagation()
         e.preventDefault()
         if (isOpen) close()
@@ -842,8 +851,6 @@ export function SwipeableCard({
         onDragStart={handleDragStart}
         onDrag={handleDrag}
         onDragEnd={handleDragEnd}
-        onPointerDown={onContentPointerDown}
-        onPointerUp={onContentPointerUp}
         onClickCapture={handleClickCapture}
         onClick={handleClick}
         // `x` is bound only while armed. An unarmed row sits at 0, and a bound

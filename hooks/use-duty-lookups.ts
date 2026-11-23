@@ -25,7 +25,7 @@ import { useFlights } from "@/hooks/data"
 import { lookup } from "@/lib/lookup/client"
 import { normalizeFlightNumber, type FlightGates } from "@/lib/lookup/flight-suggest"
 import { whereaboutsAnswer, type WhereaboutsAnswer } from "@/hooks/use-aircraft-whereabouts"
-import { dutyFlights, inboundLeg, legDepartureIso } from "@/lib/utils/dashboard/duty-flights"
+import { dutyFlights, inboundLeg, legArrivalIso, legDepartureIso } from "@/lib/utils/dashboard/duty-flights"
 import { normalizeRegistration } from "@/lib/utils/string"
 import type { FlightLog } from "@/types/entities/flight.types"
 
@@ -37,13 +37,23 @@ export interface DutyLookups {
   inbound: WhereaboutsAnswer | null
   inboundRegistration: string
   inboundFlightId: string | null
+  /**
+   * Where the aeroplane goes after the duty's LAST leg — its `next` is the
+   * flight that takes it over (the owner: to init the MCDU for that crew and
+   * to know when they report at the aircraft, its STD less an hour, which
+   * decides whether to secure it).
+   */
+  onward: WhereaboutsAnswer | null
 }
 
 const NO_FLIGHTS: FlightLog[] = []
 
 async function fetchDutyLookups(legs: FlightLog[]): Promise<DutyLookups> {
   const first = inboundLeg(legs)
-  const [gateAnswers, inbound] = await Promise.all([
+  const last = legs[legs.length - 1]
+  const lastReg = last?.aircraftReg || first?.aircraftReg || ""
+  const lastArrives = last ? legArrivalIso(last) : null
+  const [gateAnswers, inbound, onward] = await Promise.all([
     Promise.all(
       legs.map(async (f): Promise<[string, GateState] | null> => {
         if (normalizeFlightNumber(f.flightNumber || "").length < 3 || !f.date) return null
@@ -52,12 +62,15 @@ async function fetchDutyLookups(legs: FlightLog[]): Promise<DutyLookups> {
       })
     ),
     first ? lookup.aircraftWhereabouts(first.aircraftReg, legDepartureIso(first) ?? undefined).then(whereaboutsAnswer) : null,
+    // At the last leg's arrival the flight it last departed on is ours; the one after is the onward.
+    lastReg && lastArrives ? lookup.aircraftWhereabouts(lastReg, lastArrives).then(whereaboutsAnswer) : null,
   ])
   return {
     gates: Object.fromEntries(gateAnswers.filter((e): e is [string, GateState] => !!e)),
     inbound,
     inboundRegistration: first?.aircraftReg ?? "",
     inboundFlightId: first?.id ?? null,
+    onward,
   }
 }
 

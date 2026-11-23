@@ -54,24 +54,58 @@ export interface CurrencySummary {
 const stateOf = (c: CurrencyWithStatus): RequirementState =>
   c.status === "expired" ? "fail" : c.status === "critical" || c.status === "warning" ? "caution" : "ok"
 
+const DAY_MS = 86_400_000
+const SGT_MS = 8 * 3_600_000
+
+/** The Singapore calendar day of an instant, as days since the epoch — the clock a currency lapses on. */
+const sgtDay = (ms: number) => Math.floor((ms + SGT_MS) / DAY_MS)
+
+/** Days from the Singapore day of `atMs` to a document's last valid day (negative once it has gone). */
+export function daysLeftAt(expiryDate: string, atMs: number): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(expiryDate || "")
+  if (!m) return null
+  return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / DAY_MS - sgtDay(atMs)
+}
+
 /**
  * The documents, grouped as the Currencies page groups them. `dutyAtMs` is the
  * report of the duty the dashboard is about (null when none is rostered).
+ *
+ * `asOfMs` FORECASTS them (the owner, Nov 2026: every other tile forecasts a
+ * later duty, the currency did not): each document's days left and state as
+ * they will stand on that day — inside its warning window then is a caution
+ * then — rather than today. Null judges them today, as the page does.
  */
-export function currencySummary(currencies: readonly CurrencyWithStatus[], dutyAtMs: number | null): CurrencySummary {
+export function currencySummary(
+  currencies: readonly CurrencyWithStatus[],
+  dutyAtMs: number | null,
+  asOfMs: number | null = null,
+): CurrencySummary {
   const lines = [...currencies]
     .sort((a, b) => a.expiryDate.localeCompare(b.expiryDate) || a.code.localeCompare(b.code))
     .map((c): CurrencyLine => {
       const lapse = lapseOf(c.expiryDate)
-      const state = stateOf(c)
-      const lapsesBeforeDuty = state !== "fail" && dutyAtMs !== null && lapse !== null && lapse <= dutyAtMs
+      const now = stateOf(c)
+      const lapsesBeforeDuty = now !== "fail" && dutyAtMs !== null && lapse !== null && lapse <= dutyAtMs
+      const ahead = asOfMs === null ? null : daysLeftAt(c.expiryDate, asOfMs)
+      const days = ahead ?? c.daysRemaining
+      // Forecast, a document that has gone by then is still renewable today: a
+      // caution ("before duty"), not the red of one already expired.
+      const state: RequirementState =
+        ahead === null
+          ? lapsesBeforeDuty && now === "ok" ? "caution" : now
+          : now === "fail"
+            ? "fail"
+            : lapsesBeforeDuty || ahead <= c.warningDays
+              ? "caution"
+              : "ok"
       return {
         id: c.id,
         name: (c.description || "").trim() || c.code,
-        state: lapsesBeforeDuty && state === "ok" ? "caution" : state,
-        figure: daysFigure(c.daysRemaining),
+        state,
+        figure: daysFigure(days),
         expiryDate: c.expiryDate,
-        daysRemaining: c.daysRemaining,
+        daysRemaining: days,
         lapsesBeforeDuty,
       }
     })

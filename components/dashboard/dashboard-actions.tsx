@@ -44,7 +44,9 @@ const MENU_BUTTON = cn(
  * | the DUTY menu | which duty the page is about — the one in progress or next, else a later one ("Next · 21 Nov" in the button). It was a menu laid over the flights tile's date line, which the tile's card did not carry, so the duty could not be changed once the card was open |
  * | Briefing | the briefing of the leg the flights tile is on (else the leg the duty is on); a leg with none opens the briefing page to import one |
  * | Done | only while arranging — a long press on a tile enters Arrange |
- * | the bell | import notes |
+ *
+ * No bell: import notes are not a Flight Deck question (the owner, Nov 2026) —
+ * the Summary and the Discrepancies page carry them.
  */
 export function FlightDeckActions() {
   const menu = useDutyMenu()
@@ -83,6 +85,7 @@ export function FlightDeckActions() {
           </ChoicePicker>
         </GlassButtonGroup>
       )}
+      {(arranging || hasLegs) && (
       <GlassButtonGroup>
         {arranging && (
           <GlassGroupButton ariaLabel="Done arranging" ariaPressed active onClick={() => setArranging(false)}>
@@ -94,8 +97,8 @@ export function FlightDeckActions() {
             <ScrollText className="h-5 w-5" />
           </GlassGroupButton>
         )}
-        <AlertsDropdown />
       </GlassButtonGroup>
+      )}
     </>
   )
 }

@@ -21,6 +21,7 @@ const lookups = (over: Partial<DutyLookups>): DutyLookups => ({
   inbound: null,
   inboundRegistration: "9V-NCA",
   inboundFlightId: "a",
+  onward: null,
   ...over,
 })
 const line = (l: DutyLookups | null, loading = false) => describeDuty(legs, l, loading, () => {}).line

@@ -57,3 +57,12 @@ export function legDepartureIso(f: Pick<FlightLog, "date" | "scheduledOut" | "ou
   const ms = flightInstantMs(f.date, time)
   return ms === null ? null : new Date(ms).toISOString()
 }
+
+/** When a leg arrives, as an ISO instant — its schedule first, else its IN; past midnight the next day. */
+export function legArrivalIso(f: Pick<FlightLog, "date" | "scheduledOut" | "scheduledIn" | "outTime" | "inTime">): string | null {
+  const out = f.scheduledOut || f.outTime
+  const time = f.scheduledIn || f.inTime
+  if (!f.date || !time) return null
+  const ms = flightInstantMs(f.date, time, out || undefined)
+  return ms === null ? null : new Date(ms).toISOString()
+}

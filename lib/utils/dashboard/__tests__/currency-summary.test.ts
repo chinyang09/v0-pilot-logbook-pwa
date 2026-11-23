@@ -66,3 +66,26 @@ describe("currencySummary", () => {
     expect(s.attention[0]).toMatchObject({ state: "fail", lapsesBeforeDuty: false })
   })
 })
+
+describe("currencySummary — forecast to a later duty", () => {
+  it("judges each document's days and state as on the duty's day", () => {
+    // Valid through 31 Dec; its warning window is 30 days.
+    const lic = doc({ id: "lic", code: "LIC", description: "Licence", expiryDate: "2026-12-31", daysRemaining: 38 })
+    // Today (23 Nov): 38 days, clear.
+    expect(currencySummary([lic], null).current[0]).toMatchObject({ figure: "38d", state: "ok" })
+    // A duty reporting 10 Dec 02:00Z (10:00 SGT): 21 days left, inside the window.
+    const at = Date.UTC(2026, 11, 10, 2, 0)
+    const f = currencySummary([lic], at, at)
+    expect(f.attention[0]).toMatchObject({ figure: "21d", state: "caution", daysRemaining: 21 })
+  })
+
+  it("reads the duty's SINGAPORE day, and a document gone by then is a caution, not expired", () => {
+    const dg = doc({ id: "dg", code: "DG", description: "DG", expiryDate: "2026-12-09", daysRemaining: 16 })
+    // 9 Dec 17:00Z is 10 Dec 01:00 SGT — the day after its last valid day.
+    const at = Date.UTC(2026, 11, 9, 17, 0)
+    expect(currencySummary([dg], at, at).attention[0]).toMatchObject({ figure: "Expired", state: "caution", lapsesBeforeDuty: true })
+    // 9 Dec 15:00Z is still 9 Dec in Singapore: its last day.
+    const last = Date.UTC(2026, 11, 9, 15, 0)
+    expect(currencySummary([dg], last, last).attention[0]).toMatchObject({ figure: "Today", state: "caution" })
+  })
+})

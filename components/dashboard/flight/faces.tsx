@@ -25,9 +25,11 @@ import type { TileSize } from "@/lib/utils/dashboard/bento"
 import { PILOT_ROLES, roleLabel, type LogbookAuthority } from "@/lib/utils/logbook-rules"
 import type { PilotRole } from "@/types/entities/flight.types"
 import { addDays, localDayKey, lookAheadFor, type LookAhead } from "@/lib/utils/dashboard/currency-dots"
+import { daysLeftAt } from "@/lib/utils/dashboard/currency-summary"
+import { RECENCY_CAUTION_DAYS } from "@/lib/utils/dashboard/legality"
 import { CurrencyDots } from "./currency-dots"
 import { Pager, useRememberedPage } from "./pager"
-import { whereaboutsLines } from "@/lib/lookup/aircraft-whereabouts"
+import { onwardLines, whereaboutsLines } from "@/lib/lookup/aircraft-whereabouts"
 import * as React from "react"
 
 /** "18 Nov" — a stored day, as a tile has room for it. */
@@ -81,12 +83,6 @@ export function dutyWord(brief: FlightBrief): string {
   return brief.duty.current ? "Now" : brief.duty.index === 0 ? "Next" : "Later"
 }
 
-/** The rest before a later duty, against its own minimum: "Rest 15:20 · Min 12:00". */
-export function restBeforeText(brief: FlightBrief): { text: string; short: boolean } | null {
-  const r = brief.duty.restBefore
-  if (!r) return null
-  return { text: `Rest ${formatRestSpan(r.restMinutes)} · Min ${formatDutyClock(r.requiredRestMinutes)}`, short: !r.compliant }
-}
 
 /**
  * The duty laid on its day (the owner's duty-and-crew widget): a 24-hour
@@ -117,6 +113,9 @@ function DayBar({ brief, focus }: { brief: FlightBrief; focus: number | null }) 
   const span = (a: number, b: number) => ({ left: pct(a), width: `calc(${pct(b)} - ${pct(a)})` })
   const hourOf = (ms: number) => (zulu ? new Date(ms).getUTCHours() : new Date(ms).getHours())
   return (
+    // No inset for the first hour, centred on the left edge: it hangs into the
+    // tile's padding. An inset in px would scale with the stretched copy in
+    // the morph and part the tile's labels from the card's.
     <div aria-hidden className="mb-1.5" data-morph="fl-day" data-morph-stretch>
       <div className="relative h-[18px]">
         {/* The six-hourly lines run through the strip, behind the duty. */}
@@ -152,11 +151,12 @@ function DayBar({ brief, focus }: { brief: FlightBrief; focus: number | null }) 
       </div>
       <div className="relative h-3 text-[9px] tabular-nums text-muted-foreground">
         {[0, 6, 12, 18].map((h) => (
-          <span key={h} className="absolute" style={{ left: pct(from + h * H) }}>
+          // Centred on its tick, as the duty strip's hours are.
+          <span key={h} data-anchor="center" className="absolute -translate-x-1/2" style={{ left: pct(from + h * H) }}>
             {String(hourOf(from + h * H)).padStart(2, "0")}
           </span>
         ))}
-        <span className="absolute right-0">{zulu ? "Z" : "L"}</span>
+        <span data-anchor="end" className="absolute right-0">{zulu ? "Z" : "L"}</span>
       </div>
     </div>
   )
@@ -234,10 +234,42 @@ export function legNow(brief: FlightBrief): number {
 }
 
 /**
+ * The line under a leg's aeroplane (the owner, Nov 2026): on the leg the
+ * pilot takes the aeroplane over for, when its inbound LANDED — whether to
+ * hold the APU after start; on the duty's last leg, the flight that takes
+ * the aeroplane over after it and when that crew reports at the aircraft
+ * (its STD less an hour) — whether to secure it, and to init the MCDU for
+ * them. Nothing else: not the rest before the duty (the duty card's), not
+ * the leg after (the pilot flies it).
+ */
+export function legLine(brief: FlightBrief, i: number): { kind: "inbound" | "onward"; text: string } | null {
+  const { duty } = brief
+  const f = duty.legs[i]
+  if (!f) return null
+  const sep = brief.display?.clockSeparator
+  if (i === legNow(brief) && !f.inTime && !f.outTime) {
+    const inbound = duty.lookups?.inbound
+    const w = inbound?.status === "done" ? whereaboutsLines(inbound.whereabouts, brief.now, sep) : null
+    // The flight number only — where it came from is the card's; the time it
+    // landed is what decides the engines' idle and the APU on the turn.
+    if (w) return { kind: "inbound", text: [w.flight.split(" ")[0], w.primary].filter(Boolean).join(" · ") }
+  }
+  if (i === duty.legs.length - 1) {
+    const onward = duty.lookups?.onward
+    const o = onward?.status === "done" ? onwardLines(onward.whereabouts, sep) : null
+    if (o) return { kind: "onward", text: ["Next " + o.flight.split(" ")[0], o.crew].filter(Boolean).join(" · ") }
+    const g = duty.lookups?.gates[f.id]
+    const viaAirport = g?.status === "done" ? g.gates.onwardFlight : ""
+    if (viaAirport) return { kind: "onward", text: `Next ${viaAirport}` }
+  }
+  return null
+}
+
+/**
  * One leg as the flights tile has it (the owner, Nov 2026: "show aircraft in
  * use, gate, essentially flight info"): the route large; the flight number
  * and its times; the AEROPLANE (registration and type) and the GATE on a line
- * of their own; then where the aeroplane is coming from, or what follows.
+ * of their own; then the inbound's landing, or the flight after ours.
  */
 function LegPage({ brief, i }: { brief: FlightBrief; i: number }) {
   const { duty, clock, code } = brief
@@ -246,15 +278,9 @@ function LegPage({ brief, i }: { brief: FlightBrief; i: number }) {
   const flown = !!f.inTime
   const gates = duty.info?.legGates[i]
   const gate = flown ? gates?.arr || "" : gates?.dep || ""
-  const last = i === duty.legs.length - 1
-  const rest = i === 0 ? restBeforeText(brief) : null
-  // The inbound aeroplane belongs to the leg still to fly next.
-  const inbound = i === legNow(brief) && !flown ? duty.lookups?.inbound : null
-  const whereabouts =
-    inbound?.status === "done" ? whereaboutsLines(inbound.whereabouts, brief.now, brief.display?.clockSeparator) : null
   const reg = f.aircraftReg || (i === legNow(brief) ? duty.lookups?.inboundRegistration : "") || ""
   const type = f.aircraftType || ""
-  const next = !last && !flown ? duty.legs[i + 1] : null
+  const line = legLine(brief, i)
   return (
     <>
       <p className="truncate text-[17px] font-bold leading-tight tracking-tight text-foreground @[15rem]:text-[21px]" data-morph={`fl-route-${i}`}>
@@ -267,7 +293,7 @@ function LegPage({ brief, i }: { brief: FlightBrief; i: number }) {
       </p>
       <p className="flex items-baseline justify-between gap-2 text-[12px] leading-tight tabular-nums">
         <span className="min-w-0 truncate" data-morph={`fl-ac-${i}`}>
-          <span className={cn("font-semibold", reg ? "text-foreground" : "text-muted-foreground")}>{reg || "Aircraft not yet assigned"}</span>
+          <span className={cn("font-semibold", reg ? "text-foreground" : "text-muted-foreground")}>{reg || "Aircraft TBA"}</span>
           {reg && type && <span className="text-muted-foreground"> {type}</span>}
         </span>
         {gate && (
@@ -276,18 +302,8 @@ function LegPage({ brief, i }: { brief: FlightBrief; i: number }) {
           </span>
         )}
       </p>
-      <p
-        className={cn("truncate text-[11px] leading-tight", rest?.short ? "text-destructive" : "text-muted-foreground")}
-        suppressHydrationWarning
-        data-morph={`fl-next-${i}`}
-      >
-        {[
-          whereabouts ? [whereabouts.flight, whereabouts.primary].filter(Boolean).join(" · ") : null,
-          !whereabouts && rest ? rest.text : null,
-          next ? `then ${code(next.departureIcao, next.departureIata)}–${code(next.arrivalIcao, next.arrivalIata)}` : null,
-        ]
-          .filter(Boolean)
-          .join(" · ") || "\u00a0"}
+      <p className="truncate text-[11px] leading-tight text-muted-foreground" suppressHydrationWarning data-morph={`fl-next-${i}`}>
+        {line?.text || "\u00a0"}
       </p>
     </>
   )
@@ -408,16 +424,25 @@ export function currencyRows(brief: FlightBrief): CurrencyRow[] {
   // and renewed on the ground), so it leads — and it is judged against the
   // DUTY, not today: recency that lapses before the report does not cover it.
   const lapseMs = brief.recencyLapseIso ? Date.parse(`${brief.recencyLapseIso}T00:00:00Z`) : NaN
+  // Forecast to a later duty: the days recency has left ON that day. Flights
+  // rostered before it are not counted — they are not flown yet.
+  const forecast = brief.currencyAsOfMs !== brief.now
+  const lastDay = brief.recencyLapseIso ? addDays(brief.recencyLapseIso, -1) : null
+  const daysAt = forecast && lastDay ? daysLeftAt(lastDay, brief.currencyAsOfMs) : null
   const logbook = brief.status.legality.requirements
     .filter((r) => r.group === "currency" && !r.id.startsWith("doc-"))
     .map((r) => {
       const beforeDuty =
         r.id === "recency" && r.state !== "fail" && brief.duty.atMs !== null && Number.isFinite(lapseMs) && lapseMs <= brief.duty.atMs
+      const ahead = r.id === "recency" && r.state !== "fail" ? daysAt : null
+      const state: Requirement["state"] =
+        beforeDuty || (ahead !== null && ahead <= RECENCY_CAUTION_DAYS) ? "caution" : ahead !== null ? "ok" : r.state
+      const value = ahead === null ? r.value : ahead < 0 ? "Lapsed" : `${ahead}d`
       return {
         key: r.id,
         name: r.id === "recency" ? "Recency 90d" : r.label,
-        state: beforeDuty ? ("caution" as const) : r.state,
-        figure: beforeDuty ? `${r.value} · before duty` : r.value,
+        state,
+        figure: beforeDuty ? `${value} · before duty` : value,
         // Recency's last current day; lapsed (or never current), it is today's.
         ymd: r.id === "recency" ? (brief.recencyLapseIso && r.state !== "fail" ? addDays(brief.recencyLapseIso, -1) : "0000-01-01") : null,
       }
@@ -469,14 +494,20 @@ export function CurrencyFace({ brief, size }: { brief: FlightBrief; size: TileSi
           edge and the dots' colours carry what is flagged. */}
       <WidgetLabel right={third ? undefined : <MoreFlagged rows={all.slice(lines)} />}>
         Currency
-        {!third && <span className="font-medium normal-case tracking-normal"> · {AHEAD_SHORT[ahead]}</span>}
+        {/* Forecast to a later duty, the day it is judged on; else how far the dots look. */}
+        {!third && (
+          <span className="font-medium normal-case tracking-normal" suppressHydrationWarning>
+            {" · "}
+            {brief.currencyAsOfMs !== brief.now ? `at ${shortDay(localDayKey(brief.currencyAsOfMs))}` : AHEAD_SHORT[ahead]}
+          </span>
+        )}
       </WidgetLabel>
       {all.length === 0 ? (
         <p className="text-xs leading-snug text-muted-foreground">None tracked</p>
       ) : (
         <>
           <div data-morph="cur-dots">
-            <CurrencyDots today={localDayKey(brief.now)} ahead={ahead} marks={marks} closest={marks[0]?.key ?? null} className="mb-1" />
+            <CurrencyDots today={localDayKey(brief.currencyAsOfMs)} ahead={ahead} marks={marks} closest={marks[0]?.key ?? null} className="mb-1" />
           </div>
           <ul className="space-y-1">
             {all.slice(0, lines).map((r) => {

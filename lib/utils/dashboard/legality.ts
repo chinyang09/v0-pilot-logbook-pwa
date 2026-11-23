@@ -110,7 +110,7 @@ function worst(states: RequirementState[]): RequirementState {
 const LIMIT_CAUTION = 0.8
 
 /** A currency is worth flagging before it lapses, not on the day. */
-const RECENCY_CAUTION_DAYS = 14
+export const RECENCY_CAUTION_DAYS = 14
 
 /** Takeoffs (and landings) required inside the 90-day window. */
 const RECENCY_REQUIRED = 3
