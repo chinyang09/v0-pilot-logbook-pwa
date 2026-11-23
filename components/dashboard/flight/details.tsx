@@ -16,13 +16,13 @@ import { ChevronRight, Plane, RefreshCw } from "lucide-react"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { dutyWindow, formatDutyClock, formatRestSpan } from "@/lib/utils/dashboard/duty-status"
 import { gateLabel } from "@/lib/utils/dashboard/duty-line"
-import { whereaboutsLines } from "@/lib/lookup/aircraft-whereabouts"
+import { onwardLines, whereaboutsLines } from "@/lib/lookup/aircraft-whereabouts"
 import type { Requirement } from "@/lib/utils/dashboard/legality"
 import { cn } from "@/lib/utils"
 import { formatDay } from "@/lib/utils/date"
 import { formatClockDisplay } from "@/lib/utils/time"
 import { REQ_TONE } from "./instruments"
-import { crewKey, crewRole, currenciesBySoonest, currencyRows, legNow, limitsOf, marginText, marginTone, shortDay, shortName } from "./faces"
+import { crewKey, crewRole, currenciesBySoonest, currencyRows, legLine, legNow, limitsOf, marginText, marginTone, shortDay, shortName } from "./faces"
 import { CurrencyDots } from "./currency-dots"
 import { dotAt, dotLayout, localDayKey } from "@/lib/utils/dashboard/currency-dots"
 import { AirportBody } from "./airport-tile"
@@ -234,9 +234,12 @@ function hasDutyBody(brief: FlightBrief): boolean {
 
 /**
  * What the duty card's face has no room for — never a figure it already
- * shows. The FDP's spare (how much later this duty can run on its own FDP —
- * the limits card keeps the rolling windows), when the duty ends, how long
- * rested so far, the room before the report, and the duty rested from.
+ * shows — in the order the day RUNS (the owner, Nov 2026: "no flow … let's do
+ * it in a chronological manner"): the duty rested from, the rest so far, when
+ * the chosen duty ends, the latest on-blocks its FDP allows and the spare that
+ * leaves (how much later the duty can run on its own FDP — the limits card
+ * keeps the rolling windows). No "spare before report": the face's strip and
+ * "Legal from" already say it.
  */
 function DutyBody({ brief }: { brief: FlightBrief }) {
   const { status, clock, day } = brief
@@ -251,8 +254,8 @@ function DutyBody({ brief }: { brief: FlightBrief }) {
   if (brief.duty.index > 0) {
     return w ? (
       <Grid>
-        {spareFig}
         <Fig label="Off Duty" value={clock(w.endMs)} />
+        {spareFig}
       </Grid>
     ) : null
   }
@@ -260,27 +263,22 @@ function DutyBody({ brief }: { brief: FlightBrief }) {
     if (active.maxFdpMinutes <= 0) return null
     return (
       <Grid>
-        {spareFig}
         <Fig label="Off Duty" value={clock(active.debriefMs)} />
+        {spareFig}
       </Grid>
     )
   }
-  // How much later than legal the next report is — the room for a delay, or
-  // for an addition the company asks for before it.
-  const legalAt = rest ? Date.parse(rest.legalAtUtc) : NaN
-  const spare = next && Number.isFinite(legalAt) && next.legalAtReport !== false ? Math.round((next.reportMs - Math.max(legalAt, brief.now)) / 60_000) : null
   return (
     <Grid>
-      {rest && <Fig label="Rested" value={formatRestSpan(rest.elapsedMinutes)} />}
-      {spare !== null && spare > 0 && <Fig label="Spare Before Report" value={formatRestSpan(spare)} />}
-      {next && next.maxFdpMinutes > 0 && (
-        <Fig label="Latest On-Blocks" value={clock(next.reportMs + next.maxFdpMinutes * 60_000)} />
-      )}
-      {w && next && <Fig label="Off Duty" value={clock(w.endMs)} />}
-      {spareFig}
       {lastDuty && (
         <Fig label={`Last Duty · ${day(lastDuty.debriefMs)}`} value={lastDuty.route || formatDutyClock(lastDuty.elapsedMinutes)} />
       )}
+      {rest && <Fig label="Rested" value={formatRestSpan(rest.elapsedMinutes)} />}
+      {w && next && <Fig label="Off Duty" value={clock(w.endMs)} />}
+      {next && next.maxFdpMinutes > 0 && (
+        <Fig label="Latest On-Blocks" value={clock(next.reportMs + next.maxFdpMinutes * 60_000)} />
+      )}
+      {spareFig}
     </Grid>
   )
 }
@@ -301,26 +299,36 @@ function FlightBody({ brief, ctx }: { brief: FlightBrief; ctx: WidgetCtx }) {
   const f = duty.legs[page]
   const figs: Array<{ label: string; value: string }> = []
   if (f) {
+    const sep = brief.display?.clockSeparator
     const g = duty.lookups?.gates[f.id]
     const done = g?.status === "done" ? g.gates : null
+    // What the header (the tile's face) already says on its last line.
+    const shown = legLine(brief, page)
+    // In the order the day runs: the aeroplane coming in, this leg, the flight after it.
+    const inbound = page === legNow(brief) && !f.inTime && !f.outTime ? duty.lookups?.inbound : null
+    const lines = inbound?.status === "done" ? whereaboutsLines(inbound.whereabouts, brief.now, sep) : null
+    if (lines?.std) figs.push({ label: "Inbound", value: lines.std })
+    if (lines?.gate) figs.push({ label: "Inbound Arr", value: lines.gate })
+    if (done?.inboundFlight && !lines) figs.push({ label: "Inbound", value: done.inboundFlight })
     const dep = done ? gateLabel(done.departure.gate, done.departure.terminal, done.departure.stand) : ""
     const arr = done ? gateLabel(done.arrival.gate, done.arrival.terminal, done.arrival.stand) : ""
     // The face names one gate; the card both ends, with terminal and stand.
     if (dep) figs.push({ label: "Departure", value: dep })
     if (arr) figs.push({ label: "Arrival", value: arr })
     // The face's times are what flew; the schedule only where it differs.
-    const sep = brief.display?.clockSeparator
     const sched = f.scheduledOut && f.scheduledIn ? `${formatClockDisplay(f.scheduledOut, sep)}–${formatClockDisplay(f.scheduledIn, sep)}Z` : ""
     if (sched && (f.outTime || f.inTime)) figs.push({ label: "Scheduled", value: sched })
     const block = f.inTime && f.blockTime && f.blockTime !== "00:00" ? f.blockTime : planned(f.scheduledOut, f.scheduledIn)
     if (block) figs.push({ label: f.inTime ? "Block" : "Planned Block", value: block })
-    const inbound = page === legNow(brief) && !f.inTime ? duty.lookups?.inbound : null
-    const lines =
-      inbound?.status === "done" ? whereaboutsLines(inbound.whereabouts, brief.now, brief.display?.clockSeparator) : null
-    if (lines?.std) figs.push({ label: "Inbound", value: lines.std })
-    if (lines?.gate) figs.push({ label: "Inbound Arr", value: lines.gate })
-    if (done?.inboundFlight && !lines) figs.push({ label: "Inbound", value: done.inboundFlight })
-    if (done?.onwardFlight) figs.push({ label: "Aircraft On To", value: done.onwardFlight })
+    if (page === duty.legs.length - 1) {
+      const onward = duty.lookups?.onward
+      const o = onward?.status === "done" ? onwardLines(onward.whereabouts, sep) : null
+      if (o) {
+        figs.push({ label: "Next Flight", value: [o.flight, o.std].filter(Boolean).join(" · ") })
+        // The header names the crew's report when it carries the onward line.
+        if (o.crew && shown?.kind !== "onward") figs.push({ label: "Next Crew at Aircraft", value: o.crew.replace(/^crew /, "") })
+      } else if (done?.onwardFlight && shown?.kind !== "onward") figs.push({ label: "Next Flight", value: done.onwardFlight })
+    }
   }
   return (
     <div>
@@ -403,7 +411,8 @@ function CurrencyBody({ brief }: { brief: FlightBrief }) {
   // Closing, nothing is selected: the morph then copies a calendar at rest.
   const selected = React.useContext(SheetClosingContext) ? null : chosen
   const toggle = (key: string) => setSelected((s) => (s === key ? null : key))
-  const today = localDayKey(brief.now)
+  // The day the dots start: a later duty's, as the rows are forecast to it.
+  const today = localDayKey(brief.currencyAsOfMs)
   const dated = React.useMemo(() => {
     const layout = dotLayout(today, "1y")
     return currenciesBySoonest(currencyRows(brief)).filter((r) => r.ymd !== null && dotAt(layout, r.ymd) !== null)
@@ -435,8 +444,15 @@ function CurrencyBody({ brief }: { brief: FlightBrief }) {
     )
   }
   const recencyRows = currencyRows(brief).filter((r) => !r.key.startsWith("doc-"))
+  const forecast = brief.currencyAsOfMs !== brief.now
   return (
     <div>
+      {/* A later duty: every figure below is as it will stand on its day. */}
+      {forecast && (
+        <p className="mb-1.5 text-xs text-muted-foreground" suppressHydrationWarning>
+          As at {formatDay(today)}
+        </p>
+      )}
       {dated.length > 0 && (
         <div data-morph="cur-dots">
         <CurrencyDots
@@ -464,7 +480,7 @@ function CurrencyBody({ brief }: { brief: FlightBrief }) {
                 : d.value,
             )
             .join(" · ") || ""
-        return row(r.id, shown?.name ?? r.label, sub, r.value, shown?.state ?? r.state)
+        return row(r.id, shown?.name ?? r.label, sub, shown ? shown.figure.split(" · ")[0] : r.value, shown?.state ?? r.state)
       })}
       {[...attention, ...current].map((l, i) =>
         <div key={l.id} className={cn(i === 0 && logbook.length > 0 && "mt-1 border-t border-border/70 pt-1")}>

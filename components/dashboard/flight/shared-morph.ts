@@ -176,13 +176,20 @@ function place(
 /**
  * Where each label of a stretched picture scales from, read off the original
  * (in the read pass): a label pinned to the right edge ("Z") from there, one
- * centred on its tick from its middle, any other from its left.
+ * centred on its tick from its middle, any other from its left — as the label
+ * states it (`data-anchor="end" | "center"`), else as its computed style says.
  */
 function originsOf(original: HTMLElement): string[] {
   const leaf = (el: Element) => el.childElementCount === 0 && !!el.textContent?.trim()
   return [...original.querySelectorAll<HTMLElement>("*")].filter(leaf).map((o) => {
+    // Stated by the label where it can be (`data-anchor`): WebKit and Blink
+    // spell a computed `translate` differently ("calc(-50%)" / "-50%"), and a
+    // centred label read as left-anchored drifts through the morph and snaps.
+    const anchor = o.dataset.anchor
+    if (anchor === "end") return "100% 50%"
+    if (anchor === "center") return "50% 50%"
     const cs = getComputedStyle(o)
-    return cs.right === "0px" && cs.left !== "0px" ? "100% 50%" : cs.translate.startsWith("-") ? "50% 50%" : "0% 50%"
+    return cs.right === "0px" && cs.left !== "0px" ? "100% 50%" : /-/.test(cs.translate) ? "50% 50%" : "0% 50%"
   })
 }
 

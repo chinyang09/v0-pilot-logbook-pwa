@@ -236,13 +236,14 @@ export function DutyClockStrip({ clock: c, zulu }: { clock: DutyClock; zulu: boo
       </div>
       <div className="relative h-3 text-[9px] tabular-nums text-muted-foreground">
         {ticks
-          .filter((t) => t.label && t.ms < c.toMs - c.labelHours * 3_600_000 * 0.4)
+          // Clear of both ends: the "Z" at the right, the strip's edge at the left.
+          .filter((t) => t.label && t.ms < c.toMs - c.labelHours * 3_600_000 * 0.4 && t.ms > c.fromMs + c.labelHours * 3_600_000 * 0.15)
           .map((t) => (
-            <span key={t.ms} className="absolute -translate-x-1/2" style={{ left: pct(t.ms) }}>
+            <span key={t.ms} data-anchor="center" className="absolute -translate-x-1/2" style={{ left: pct(t.ms) }}>
               {t.label}
             </span>
           ))}
-        <span className="absolute right-0">{zulu ? "Z" : "L"}</span>
+        <span data-anchor="end" className="absolute right-0">{zulu ? "Z" : "L"}</span>
       </div>
     </div>
   )

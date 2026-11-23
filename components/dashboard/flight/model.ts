@@ -61,6 +61,11 @@ export interface FlightBrief {
   margin: DelayMargin | null
   /** The first day 90-day recency is NOT met, YYYY-MM-DD (null when it is not met now). */
   recencyLapseIso: string | null
+  /**
+   * The instant the currencies are judged at: a LATER duty's report (they are
+   * forecast to it, as every other tile is), else now.
+   */
+  currencyAsOfMs: number
   crew: CrewMate[]
   /** Each leg's own crew, in the order flown — the flights tile shows the leg on its page. */
   legCrew: CrewMate[][]

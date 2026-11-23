@@ -87,3 +87,22 @@ describe("aircraft whereabouts", () => {
     expect(whereaboutsLines(at(null), 0)).toBeNull()
   })
 })
+
+describe("onwardLines — the flight taking the aeroplane over after ours", () => {
+  it("names the flight, its STD, and the next crew's report an hour before it", async () => {
+    const { onwardLines } = await import("../aircraft-whereabouts")
+    const w: AircraftWhereabouts = {
+      registration: "9V-NCA",
+      typecode: "A21N",
+      at: "2026-11-23T04:25:00Z",
+      inbound: null,
+      next: movementOf(row("TR290", "SIN", "DPS", "2026-11-23T06:30:00Z")),
+    }
+    expect(onwardLines(w)?.line).toBe("TR290 to DPS · STD 06:30Z · crew 05:30Z")
+    expect(onwardLines(w, "none")?.crew).toBe("crew 0530Z")
+  })
+  it("says nothing when the list has no flight after ours", async () => {
+    const { onwardLines } = await import("../aircraft-whereabouts")
+    expect(onwardLines({ registration: "9V-NCA", typecode: "", at: "", inbound: null, next: null })).toBeNull()
+  })
+})
