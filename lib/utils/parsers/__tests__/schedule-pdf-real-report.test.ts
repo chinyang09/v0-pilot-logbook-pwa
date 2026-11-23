@@ -157,6 +157,17 @@ describe("schedule PDF — October 2026 report", () => {
     expect(tr983).toMatchObject({ actualOut: "13:56", actualIn: "17:27" });
   });
 
+  it("carries each sector's cabin crew apart from its pilots", async () => {
+    const sectors = creates(await parseScheduleCSV(await loadReport()));
+    const withCabin = sectors.filter((s) => (s.cabinCrew?.length ?? 0) > 0);
+    expect(withCabin.length).toBeGreaterThan(0);
+    for (const s of withCabin) {
+      const pilotIds = new Set((s.crew ?? []).map((c) => c.crewId));
+      expect(s.cabinCrew!.every((m) => m.name && m.crewId && !pilotIds.has(m.crewId))).toBe(true);
+      expect(s.cabinCrew!.every((m) => !["CPT", "FO", "SFO", "SO", "PIC"].includes(m.role))).toBe(true);
+    }
+  });
+
   it("refuses a Local Base report whose base airport cannot be resolved", async () => {
     const { SIN: _base, ...withoutBase } = airports;
     knownAirports = withoutBase;

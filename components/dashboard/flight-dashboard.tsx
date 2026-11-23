@@ -144,7 +144,7 @@ const CARD_SIZE: TileSize = { cols: 3, rows: 1 }
 function faceOf(id: WidgetId, brief: FlightBrief, size: TileSize, inCard = false): React.ReactNode {
   switch (id) {
     case "duty":
-      return <DutyFace brief={brief} />
+      return <DutyFace brief={brief} inCard={inCard} />
     case "flight":
       return <FlightFace brief={brief} size={size} inCard={inCard} />
     case "airport":
@@ -478,13 +478,10 @@ export function FlightDashboard({ className }: { className?: string }) {
           // header: a full-width, one-row tile whose face does not change in
           // the card (the flights face drops its crew panel there; the
           // destination's pages become the card's list).
-          seamless={
-            widgetContent(sheet.id, brief, ctx).header === "face" &&
-            sheet.size.cols === 3 &&
-            sheet.size.rows === 1 &&
-            sheet.id !== "flight" &&
-            sheet.id !== "airport"
-          }
+          // Every card's header is now its title bar over the content (one
+          // shell for all five), never the tile's face as it stands — so each
+          // crossfades, and what the two share flies.
+          seamless={false}
           tone={tint[sheet.id] ?? null}
           // Anything in the card that goes somewhere closes it first.
           render={(dismiss) => {

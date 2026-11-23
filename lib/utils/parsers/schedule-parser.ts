@@ -28,7 +28,7 @@ import type {
   DutyType,
 } from "@/types/entities/roster.types";
 import type { Personnel } from "@/types/entities/crew.types";
-import type { FlightLog } from "@/types/entities/flight.types";
+import type { CabinCrewMember, FlightLog } from "@/types/entities/flight.types";
 import {
   userDb,
   isLiveFlight,
@@ -490,6 +490,7 @@ interface RawSector {
   rowDate: string;
   sourceLine: number;
   crew?: ScheduledCrewMember[];
+  cabinCrew?: CabinCrewMember[];
 }
 
 function extractSectorsFromRow(
@@ -676,12 +677,13 @@ async function normalizeSector(
     ...(report ? { reportTime: report.utcTime } : {}),
     sourceLine: raw.sourceLine,
     crew: raw.crew,
+    ...(raw.cabinCrew?.length ? { cabinCrew: raw.cabinCrew } : {}),
     ...(timesUncertain ? { timesUncertain: true } : {}),
   };
 }
 
 // ============================================================
-// Crew parsing (pilots only)
+// Crew parsing (pilots to the seats; cabin crew apart)
 // ============================================================
 
 /**
@@ -710,7 +712,22 @@ const CREW_MEMBER_START_RE =
  * well) so a wrapped cabin-crew name never bleeds onto the previous pilot.
  */
 export function parseCrewColumn(crewCell: string): ScheduledCrewMember[] {
+  return readCrewCell(crewCell).pilots;
+}
+
+/**
+ * The CABIN crew the same column lists (CL, CC, CIC …), in the report's
+ * order — for the Flight Deck's crew list only (the owner, Nov 2026: "include
+ * all crew member. But for logbook we only focus on flight crew"). They never
+ * take a seat or a crew card; they ride on the flight as `cabinCrew`.
+ */
+export function parseCabinCrew(crewCell: string): CabinCrewMember[] {
+  return readCrewCell(crewCell).cabin;
+}
+
+function readCrewCell(crewCell: string): { pilots: ScheduledCrewMember[]; cabin: CabinCrewMember[] } {
   const crew: ScheduledCrewMember[] = [];
+  const cabin: CabinCrewMember[] = [];
   const lines = crewCell.split(/\r?\n/);
 
   let pending: { role: string; commander: boolean; crewId: string; nameParts: string[] } | null =
@@ -727,6 +744,9 @@ export function parseCrewColumn(crewCell: string): ScheduledCrewMember[] {
         name,
         ...(pending.commander ? { commander: true } : {}),
       });
+    } else {
+      const name = pending.nameParts.join(" ").replace(/\s+/g, " ").trim();
+      if (name) cabin.push({ role: roleKey, crewId: pending.crewId, name });
     }
     pending = null;
   };
@@ -750,7 +770,7 @@ export function parseCrewColumn(crewCell: string): ScheduledCrewMember[] {
   }
   flush();
 
-  return crew;
+  return { pilots: crew, cabin };
 }
 
 // ============================================================
@@ -1203,8 +1223,10 @@ export async function parseScheduleCSV(
           }
         }
 
+        const cabinCrew = parseCabinCrew(cols[header.columnIndices.crew] || "");
         for (const sector of sectors) {
           sector.crew = crewMembers;
+          if (cabinCrew.length > 0) sector.cabinCrew = cabinCrew;
         }
         rawSectors.push(...sectors);
       } catch (error) {

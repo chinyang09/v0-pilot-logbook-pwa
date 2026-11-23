@@ -26,7 +26,7 @@
  * applies the user-approved subset.
  */
 
-import type { AdditionalCrew, FlightLog } from "../../../types/entities/flight.types";
+import type { AdditionalCrew, CabinCrewMember, FlightLog } from "../../../types/entities/flight.types";
 import type { ScheduledCrewMember } from "@/types/entities/roster.types";
 import { classifyChanges } from "./classification";
 import { newestStamp, type ReportSource } from "./report-tracking";
@@ -93,6 +93,8 @@ export interface ParsedSector {
   timesUncertain?: boolean;
   /** Crew from the CSV row — CPT/PIC and FO. */
   crew?: ScheduledCrewMember[];
+  /** The cabin crew the same row lists — onto the flight's `cabinCrew`, never a seat. */
+  cabinCrew?: CabinCrewMember[];
 
   // ------------------------------------------------------------
   // Optional fields populated by the logbook parser / cross-hydration.
@@ -363,6 +365,17 @@ export function describeCrewList(list: readonly AdditionalCrew[]): string {
  * person by crew-card id, else by name (`isSamePersonName`); one already in a
  * SEAT is not added again as a relief pilot.
  */
+/** Two cabin lists the same people in the same roles, in order. */
+export function sameCabinCrew(a: readonly CabinCrewMember[] | undefined, b: readonly CabinCrewMember[]): boolean {
+  const x = a ?? []
+  return x.length === b.length && x.every((m, i) => m.crewId === b[i].crewId && m.role === b[i].role && m.name === b[i].name)
+}
+
+/** "Tan Shi Yun (CL), …" — how the review reads a cabin crew list. */
+function describeCabinCrew(list: readonly CabinCrewMember[]): string {
+  return list.map((m) => `${m.name} (${m.role})`).join(", ")
+}
+
 export function mergeReliefCrew(
   flight: Pick<FlightLog, "additionalCrew" | "picId" | "picName" | "sicId" | "sicName">,
   incoming: readonly AdditionalCrew[]
@@ -1090,6 +1103,18 @@ function diffSectorVsFlight(
         value: merged,
       })
     }
+  }
+
+  // The CABIN crew the report lists, for the Flight Deck: the company's word,
+  // replaced whole when it differs (a cabin roster changes; it is no record of
+  // the pilot's). Never a seat, never a discrepancy.
+  if (sector.cabinCrew && sector.cabinCrew.length > 0 && !sameCabinCrew(flight.cabinCrew, sector.cabinCrew)) {
+    changes.push({
+      field: "cabinCrew",
+      from: describeCabinCrew(flight.cabinCrew ?? []),
+      to: describeCabinCrew(sector.cabinCrew),
+      value: sector.cabinCrew,
+    })
   }
 
   // A sector the pilot logged as POSITIONING was not flown by them: nothing

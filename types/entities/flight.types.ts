@@ -77,6 +77,20 @@ export interface AdditionalCrew {
   role: "Relief Pilot" | "Observer" | "Check Airman" | "Instructor" | "Examiner" | "Other"
 }
 
+/**
+ * A member of the CABIN crew as the company's schedule lists them ("CL - 4021 -
+ * Name"): the report's own role code, its crew id and the name. Carried on a
+ * flight for the Flight Deck's crew list only — never a seat, a crew card or
+ * a logbook entry (the owner, Nov 2026: "for logbook we only focus on flight
+ * crew, no cabin crew").
+ */
+export interface CabinCrewMember {
+  /** The report's code: "CL", "CC", "CIC" … */
+  role: string
+  crewId: string
+  name: string
+}
+
 export type PilotRole = "PIC" | "SIC" | "PICUS" | "Dual" | "Instructor"
 
 /**
@@ -159,6 +173,8 @@ export interface FlightLog {
   sicId: string
   sicName: string
   additionalCrew: AdditionalCrew[]
+  /** The cabin crew the schedule report lists — company-owned, shown on the Flight Deck, never logged. */
+  cabinCrew?: CabinCrewMember[]
   // Flying duties
   pilotFlying: boolean
   pilotRole: PilotRole

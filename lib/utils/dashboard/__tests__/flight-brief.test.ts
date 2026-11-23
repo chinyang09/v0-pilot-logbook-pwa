@@ -84,6 +84,18 @@ describe("who the pilot flies with on a duty", () => {
     const mates = crewOnDuty([f({ id: "l3", picName: "Tan Ah Kow" })], [], crew, today)
     expect(mates).toEqual([{ personId: null, name: "Tan Ah Kow", role: "PIC", last: null, count: 0 }])
   })
+
+  it("lists the cabin crew after the pilots, once each, with how often flown together by crew id", () => {
+    const cabin = [{ role: "CL", crewId: "4021", name: "Ng Wei Ling" }, { role: "CC", crewId: "3095", name: "Tan Shi Yun" }]
+    const before = f({ id: "old", date: "2026-11-10", picName: "Tan Ah Kow", cabinCrew: [cabin[1]] })
+    const legs = [f({ id: "l1", outTime: "", inTime: "", picName: "Tan Ah Kow", cabinCrew: cabin }), f({ id: "l2", outTime: "", inTime: "", cabinCrew: cabin })]
+    const mates = crewOnDuty(legs, [before, ...legs], crew, "2026-11-18")
+    expect(mates.map((m) => [m.name, m.role, m.cabin ?? false, m.count])).toEqual([
+      ["Tan Ah Kow", "PIC", false, 0],
+      ["Ng Wei Ling", "CL", true, 0],
+      ["Tan Shi Yun", "CC", true, 1],
+    ])
+  })
 })
 
 describe("when the pilot was last at each destination", () => {

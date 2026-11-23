@@ -52,6 +52,7 @@ type CrewFlight = Pick<
   | "sicId"
   | "sicName"
   | "additionalCrew"
+  | "cabinCrew"
   | "deletedAt"
   | "entryType"
   | "isSimulator"
@@ -104,6 +105,9 @@ export function crewCardResolver(
   }
 }
 
+/** The history key of a cabin crew member, who has no crew card: their company crew id. */
+export const cabinKey = (crewId: string) => `cabin:${crewId}`
+
 export function crewFlyingHistory(
   flights: readonly CrewFlight[],
   personnel: readonly Pick<Personnel, "id" | "name" | "isMe">[],
@@ -133,6 +137,8 @@ export function crewFlyingHistory(
       const card = cardFor(id || undefined, name || undefined)
       if (card) aboard.add(card)
     }
+    // Cabin crew carry no card — they are kept by their crew id (`cabinKey`).
+    for (const c of f.cabinCrew ?? []) if (c.crewId) aboard.add(cabinKey(c.crewId))
     const key = keyOf(f)
     for (const card of aboard) {
       const h = entry(card)

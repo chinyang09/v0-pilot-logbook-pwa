@@ -148,6 +148,13 @@ export const REST_STARTS_AFTER_DUTY_MIN = 60
  * crew member is not yet free of all duties while doing them.
  */
 export const PRE_FLIGHT_CHECK_MIN = 60
+
+/**
+ * Para 13(1)(c): how far the pilot-in-command may extend an FDP past its
+ * maximum, in unforeseen circumstances on the day (reported afterwards) — 3
+ * hours. Never for a schedule: a duty rostered past its maximum is not legal.
+ */
+export const PIC_FDP_DISCRETION_MIN = 3 * 60
 export const POST_FLIGHT_CHECK_MIN = 30
 
 /* ── Circadian definitions ──────────────────────────────────────────────── */

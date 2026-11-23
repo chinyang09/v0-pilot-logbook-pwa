@@ -57,8 +57,10 @@ import type { BriefingRecord, NotamRecord, BriefingNoteRecord } from "@/types/en
  *   multi-crew time), filled from each flight's own crew evidence.
  * 5 adds a flight's `soloTime`. (The `positioning` entry type needs no
  *   rewrite: `entryType` was already an optional string.)
+ * 6 adds a flight's `cabinCrew` (the schedule report's cabin crew, for the
+ *   Flight Deck; never a seat).
  */
-export const SYNC_SCHEMA_VERSION = 5
+export const SYNC_SCHEMA_VERSION = 6
 
 /**
  * Push/pull order: dependency-light collections first, so a flight never
@@ -215,6 +217,7 @@ const FLIGHT_FIELDS = {
   sicId: "",
   sicName: "",
   additionalCrew: emptyArray,
+  cabinCrew: emptyArray,
   // Filled from the record's own figures when a push omits them — a constant
   // here filed every such flight as flown, in command (`flight-evidence.ts`).
   pilotFlying: (src) => inferPilotFlying(src),

@@ -27,6 +27,7 @@
  * duties on one axis.
  */
 
+import { PIC_FDP_DISCRETION_MIN } from "@/lib/utils/roster/regulation-definitions"
 import { formatDayAt } from "@/lib/utils/date"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { AlertTriangle, ChevronRight, Minus, Plus, X } from "lucide-react"
@@ -106,7 +107,6 @@ const MAX_INNER_PX = 12_000_000
 const WHEEL_ZOOM = 0.004
 
 /** Para 13(1)(c) and para 3(2): what a pilot-in-command's discretion can cover. */
-const PIC_FDP_DISCRETION_MIN = 3 * 60
 const PIC_REST_DISCRETION_MIN = 2 * 60
 
 /** A duty that is not a flight duty period, by the code the timeline gives it. */
