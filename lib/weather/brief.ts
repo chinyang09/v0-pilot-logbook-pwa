@@ -31,6 +31,8 @@ export interface Conditions {
   windDir?: number | null
   windKt?: number
   gustKt?: number
+  /** CAVOK: visibility 10km or more, no cloud below 5,000ft or the MSA, no weather. */
+  cavok?: boolean
   /** Metres; 9999 for "10km or more", CAVOK included. */
   visM?: number
   weather?: string[]
@@ -87,6 +89,7 @@ export function readConditions(tokens: readonly string[]): Conditions {
       c.windKt = kt(Number(m[2]))
       if (m[3]) c.gustKt = kt(Number(m[3]))
     } else if (t === "CAVOK") {
+      c.cavok = true
       c.visM = 9999
       c.clouds = []
       c.weather = []

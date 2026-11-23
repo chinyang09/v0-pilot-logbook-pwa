@@ -23,13 +23,58 @@ import {
   subscribePendingActions,
 } from "@/lib/utils/pending-actions"
 import { HoldProgressBorder } from "@/components/ui/hold-progress-border"
-import { useMenuOpen } from "@/lib/utils/menu-lock"
+import { isMenuOpen, useMenuOpen } from "@/lib/utils/menu-lock"
 
 /** An unarmed row's content style — stable, so it is not a new prop each render. */
 const UNARMED_STYLE = { touchAction: "pan-y" } as const
 
 const SWIPE_CLOSE_EVENT = "swipe-card-close-others"
 const NO_ACTIONS: SwipeAction[] = []
+
+/**
+ * The row swiped OPEN, if any, and the one document listener that closes it
+ * (the owner, Nov 2026: tapping anywhere else used to close a swiped card,
+ * and a tap on ANOTHER card both closed this one and opened that flight).
+ *
+ * A press anywhere outside the open row closes it — the header, the calendar,
+ * the page — and a press that lands on another swipeable row is ONLY that:
+ * its click is swallowed, so the first tap closes and the second opens, as a
+ * native list does. A press that turns into a scroll or a swipe has no click
+ * to swallow, so the flag lapses with the next press. While a menu the row
+ * opened is up (the `…` cascade) the menu owns the taps.
+ */
+let openRow: { id: string; el: HTMLElement | null } | null = null
+let swallowClick = false
+let outsideListening = false
+function listenOutside() {
+  if (outsideListening || typeof document === "undefined") return
+  outsideListening = true
+  document.addEventListener(
+    "pointerdown",
+    (e) => {
+      swallowClick = false
+      const row = openRow
+      if (!row || isMenuOpen()) return
+      const target = e.target as Element | null
+      if (target && row.el?.contains(target)) return
+      openRow = null
+      // The close event every row hears; only the open one has anything to do.
+      window.dispatchEvent(new CustomEvent(SWIPE_CLOSE_EVENT, { detail: { id: null } }))
+      if (target?.closest?.("[data-swipe-card]")) swallowClick = true
+    },
+    { capture: true },
+  )
+  document.addEventListener(
+    "click",
+    (e) => {
+      if (!swallowClick) return
+      swallowClick = false
+      e.stopPropagation()
+      e.preventDefault()
+    },
+    { capture: true },
+  )
+}
 
 /** Width of each revealed action button (px) */
 const BUTTON_WIDTH = 64
@@ -421,7 +466,11 @@ export function SwipeableCard({
 
   const settle = useCallback(
     (target: number, velocity = 0) => {
-      if (target !== 0) setActive(true)
+      if (target !== 0) {
+        setActive(true)
+        listenOutside()
+        openRow = { id: cardId.current, el: containerRef.current }
+      } else if (openRow?.id === cardId.current) openRow = null
       animate(x, target, {
         ...SPRING,
         velocity,
@@ -437,6 +486,13 @@ export function SwipeableCard({
   )
 
   const close = useCallback(() => settle(0), [settle])
+  // A row that unmounts while open (a virtualised list recycles it) is not the open one any more.
+  useEffect(
+    () => () => {
+      if (openRow?.id === cardId.current) openRow = null
+    },
+    [],
+  )
 
   // A keyboard user tabbing along the list reaches the action buttons, which
   // rest at opacity 0 behind the content — so Tab used to stop, invisibly, on
@@ -485,6 +541,12 @@ export function SwipeableCard({
   useEffect(() => {
     const handler = (e: Event) => {
       if ((e as CustomEvent).detail?.id !== cardId.current) {
+        // Every row hears this on every swipe start and tap. A row already
+        // shut has nothing to do — it used to start a spring to 0 and set two
+        // states, so a screen of cards re-rendered on the first frame of
+        // every swipe (the owner's "sometimes janky").
+        if (Math.abs(x.get()) < 0.5) return
+        if (openRow?.id === cardId.current) openRow = null
         animate(x, 0, {
           ...SPRING,
           onComplete: () => {
@@ -625,6 +687,8 @@ export function SwipeableCard({
       // thumb resting on a revealed row is aiming at a button, not holding the
       // card.
       data-swipe-open={active ? "true" : undefined}
+      // Any row a swipe can open: a press on one while another is open only closes that one.
+      data-swipe-card={hasActions ? "" : undefined}
       className={cn(
         "relative overflow-hidden",
         isCard && "rounded-lg",

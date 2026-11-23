@@ -14,6 +14,7 @@ import {
   Settings,
   Trash2,
   MessageSquarePlus,
+  ArrowDownUp,
 } from "lucide-react"
 
 export interface NavItem {
@@ -38,28 +39,19 @@ export interface NavSection {
 
 /**
  * The sidebar, in the order a pilot reaches for it (the owner's structure,
- * Nov 2026): what am I legal for → the record → the reference data it is
- * written against → the rules it is checked against → the app itself.
+ * Nov 2026): what am I legal for, what have I flown, the record — three rows
+ * of their own, no heading over them (the owner: "flight deck, summary and
+ * logbook, each its own") — then the reference data it is written against,
+ * the rules it is checked against, what comes in and goes out, and the app.
  */
 export const navSections: NavSection[] = [
   {
-    label: "Dashboard",
-    heading: true,
+    label: "Home",
+    heading: false,
     items: [
       { label: "Flight Deck", href: "/", icon: <Gauge className="h-4 w-4" />, description: "This or the next duty, at a glance" },
       { label: "Summary", href: "/summary", icon: <ChartColumn className="h-4 w-4" />, description: "What you have flown, by period" },
-    ],
-  },
-  {
-    label: "Logbook",
-    heading: false,
-    items: [
-      {
-        label: "Logbook",
-        href: "/logbook",
-        icon: <Book className="h-4 w-4" />,
-        description: "Your primary flight records",
-      },
+      { label: "Logbook", href: "/logbook", icon: <Book className="h-4 w-4" />, description: "Your primary flight records" },
     ],
   },
   {
@@ -84,6 +76,12 @@ export const navSections: NavSection[] = [
     label: "System",
     heading: true,
     items: [
+      {
+        label: "Import & Export",
+        href: "/import",
+        icon: <ArrowDownUp className="h-4 w-4" />,
+        description: "Company reports, briefings, LogTen",
+      },
       { label: "Account", href: "/account", icon: <UserCircle className="h-4 w-4" /> },
       { label: "Settings", href: "/settings", icon: <Settings className="h-4 w-4" /> },
       { label: "Bin", href: "/recently-deleted", icon: <Trash2 className="h-4 w-4" /> },

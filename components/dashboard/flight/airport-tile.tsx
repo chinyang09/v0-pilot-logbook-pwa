@@ -45,7 +45,7 @@ import { RunwayDiagram, windWords } from "./runway-diagram"
 import { AirportPanel } from "./airport"
 import { EnRoute, useDutyAlternates, type AlternateBrief } from "./alternates"
 import { fallbackRunway, useAirportRunways, type AirportRunwayState } from "./runway-state"
-import { distanceInto, shortDay } from "./faces"
+import { shortDay } from "./faces"
 import type { FlightBrief } from "./model"
 
 const RANK: Record<FlightCategory, number> = { VFR: 0, MVFR: 1, IFR: 2, LIFR: 3 }
@@ -275,7 +275,6 @@ function CardPage({
         info={brief.airportInfo[icao]}
         metar={b.metar}
         arrivalMs={brief.duty.times.find((t) => t.arrivalIcao === icao)?.arriveMs ?? null}
-        distanceNm={distanceInto(brief, icao)}
         weatherAsked={brief.weather.asked}
         nearby={near}
         codeOf={brief.code}

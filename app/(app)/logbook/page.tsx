@@ -32,7 +32,6 @@ import { standbyActivation } from "@/lib/utils/roster/standby-activation"
 import { buildLogbookRows, dutyDayKey, dutyRowKey, dutySearchFields, isRosterDuty, newDutyKey, rowCoversDate } from "@/lib/utils/logbook-rows"
 import type { ScheduleEntry } from "@/types/entities/roster.types"
 import { insertFlightSorted } from "@/lib/utils/flight-sort"
-import { UnifiedImportButton } from "@/components/import/unified-import-button"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { useSearchParams } from "next/navigation"
@@ -702,17 +701,9 @@ export default function LogbookPage() {
             that grew this group far enough to reach the centred nav pill. */}
       </GlassButtonGroup>
 
-      {/* VIEW, then TOOLS, then CREATE — one capsule per role (see the header
-          rule in glass-icon-button.tsx). Import brings data in; it is not a
-          way of looking at the logbook, so it is not in the view group. */}
-      <GlassButtonGroup>
-        <UnifiedImportButton
-          context="logbook"
-          onComplete={() => {
-            refreshAllData()
-          }}
-        />
-      </GlassButtonGroup>
+      {/* VIEW, then CREATE — one capsule per role (see the header rule in
+          glass-icon-button.tsx). Import is a page of its own now (Import &
+          Export, the nav), not a button here (the owner, Nov 2026). */}
 
       {/* CREATE. The logbook alone adds a flight in one tap; with the roster's
           duties shown (in the list or on the calendar) it asks which — a

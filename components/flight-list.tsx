@@ -26,6 +26,7 @@ import { CACHE_KEYS } from "@/hooks/data";
 import { Card, CardContent } from "@/components/ui/card";
 import { FlightCardBody } from "@/components/flight-card-body";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Plane, Trash2, MoreHorizontal, FileText } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -961,7 +962,13 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
                 <EmptyState
                   icon={Plane}
                   title="No Flights Logged"
-                  description="Add your first flight to get started"
+                  description="Add your first flight, or bring in the company's reports or a LogTen export."
+                  action={
+                    // Import is a page of its own (Import & Export), not a header button here.
+                    <Button variant="outline" onClick={() => router.push("/import")}>
+                      Import Reports
+                    </Button>
+                  }
                 />
               )}
             </div>

@@ -348,15 +348,6 @@ export function destinationsOf(brief: FlightBrief) {
   return brief.destinations
 }
 
-/** The great-circle distance of the leg that lands at `icao`, nm. */
-export function distanceInto(brief: FlightBrief, icao: string): number | null {
-  const leg = brief.duty.legs.find((l) => (l.arrivalIcao || "").toUpperCase() === icao)
-  const from = leg ? brief.airports.get((leg.departureIcao || "").toUpperCase()) : undefined
-  const to = brief.airports.get(icao)
-  if (!from || !to || !hasCoordinates(from) || !hasCoordinates(to)) return null
-  return greatCircleNm({ lat: from.latitude, lon: from.longitude }, { lat: to.latitude, lon: to.longitude })
-}
-
 /** The runway the wind favours at a destination — the tile's tone (a tailwind) reads it. */
 export function favouredAt(brief: FlightBrief, icao: string): WindOnRunway | null {
   const info = brief.airportInfo[icao]

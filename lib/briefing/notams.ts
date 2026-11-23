@@ -148,32 +148,4 @@ export function notamCounts(groups: NotamGroup[]): Record<NotamStatus, number> &
 }
 
 
-/**
- * A NOTAM's TITLE — the line that says what it is about, for the collapsed
- * row (the owner, Nov 2026: "ID or header or title, with validity shown when
- * collapsed"). An AIP supplement opens with its own number, "AIP SUPPLEMENT",
- * the aerodrome and a VALIDITY line before it says anything; those lines are
- * skipped. Falls back to the first line.
- */
-export function notamTitle(n: Pick<Notam, "text" | "location">): string {
-  const lines = n.text.split("\n").map((l) => l.trim()).filter(Boolean)
-  const noise = (l: string) =>
-    /^[A-Z0-9]{1,3}\d{2,4}\/\d{2}\b/.test(l) ||
-    /^AIP\s+SUP/i.test(l) ||
-    /^[A-Z]{4}\s*[/-]\s*[A-Z]/.test(l) ||
-    /^VALIDITY/i.test(l) ||
-    l === n.location
-  const at = lines.findIndex((l) => !noise(l))
-  if (at < 0) return (lines[0] ?? "").replace(/\s+/g, " ")
-  // The PDF wraps at ~65 characters: a title cut on a joining word ("… AND")
-  // carries on into the next line.
-  let title = lines[at]
-  for (let i = at + 1; i < lines.length && title.length < 140 && /\b(AND|OR|OF|TO|THE|AT|FOR|WITH|IN|ON|BY|FROM|BTN|WI)$|[-,]$/.test(title); i++) {
-    if (noise(lines[i]) || /^(\d|-{3,}|F\))/.test(lines[i])) break
-    title += ` ${lines[i]}`
-  }
-  return title
-    .replace(/^[A-Z][A-Z ]+ (AP|AIRPORT|INTL)\s+-\s+(?=\S)/, "")
-    .replace(/\s+F\)\s.*$/, "")
-    .replace(/\s+/g, " ")
-}
+export { notamTitle } from "./notam-text"

@@ -13,6 +13,7 @@ import {
   Settings,
   UserCircle,
   Trash2,
+  ArrowDownUp,
 } from "lucide-react"
 import type { BottomNavTab } from "@/types/db/stores.types"
 
@@ -120,6 +121,12 @@ export const TAB_CONFIG: Record<
     href: "/discrepancies",
     isActive: (p) => p === "/discrepancies",
   },
+  import: {
+    label: "Import",
+    icon: ArrowDownUp,
+    href: "/import",
+    isActive: (p) => p === "/import" || p === "/briefing",
+  },
   bin: {
     label: "Bin",
     icon: Trash2,
@@ -139,6 +146,7 @@ export const NAV_TAB_CHOICES: readonly BottomNavTab[] = [
   "currencies",
   "fdp",
   "discrepancies",
+  "import",
   "account",
   "settings",
   "bin",
