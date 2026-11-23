@@ -202,8 +202,15 @@ function CrewPanel({ brief, crew, below = false }: { brief: FlightBrief; crew: C
               <span className="block truncate text-[12px] font-medium text-foreground" data-morph={`crew-name-${crewKey(m)}`}>
                 {shortName(m.name)}
               </span>
+              {/* The role and the history fly into the card's row (its caption and its right). */}
               <span className="block truncate text-[10px] tabular-nums text-muted-foreground">
-                {[role(m.role), m.last ? (m.count ? `${m.count}×` : null) : "New"].filter(Boolean).join(" · ")}
+                <span data-morph={`crew-role-${crewKey(m)}`}>{role(m.role)}</span>
+                {(m.last ? (m.count ? `${m.count}×` : null) : "New") && (
+                  <>
+                    {" · "}
+                    <span data-morph={`crew-last-${crewKey(m)}`}>{m.last ? `${m.count}×` : "New"}</span>
+                  </>
+                )}
               </span>
             </span>
           </div>

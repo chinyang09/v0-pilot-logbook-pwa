@@ -57,7 +57,9 @@ import { CurrencyFace, DutyFace, FlightFace, LimitsFace, currencyRows, destinati
 import { dutyTone } from "./flight/duty-clock"
 import { setChosenDuty, useChosenDuty, publishDutyChoices } from "@/hooks/use-dashboard-duty"
 import { destinationOfRoute } from "@/lib/utils/dashboard/destination"
+import { briefingId } from "@/lib/briefing/ids"
 import { type WeatherState } from "./flight/weather"
+import { useDutyAlternates } from "./flight/alternates"
 import { AirportFace, airportsOf, stationPoor } from "./flight/airport-tile"
 import { WIDGET_TITLE, useWidgetCtx, widgetContent } from "./flight/details"
 import { BentoGrid } from "./flight/bento"
@@ -340,12 +342,21 @@ export function FlightDashboard({ className }: { className?: string }) {
     }),
     [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, margin, recency.lapseIso, crew, legCrew, currency, destinations, airports, airportInfo, runways, weather, weatherStation, iataOf, pref, zone, isActive],
   )
+  // The airport card's alternates, asked while the page is up (the route reads
+  // the stored TAF snapshot — no request to the source): asked only when the
+  // card opened, they landed after its morph and the card grew at the end.
+  useDutyAlternates(brief, isActive && legs.length > 0)
 
   /* ── The header's duty menu ──────────────────────────────────────────── */
   // Where each duty GOES and when (the owner, Nov 2026: "I want to see
   // destination and date of duty"): "WIII · Wed, 18 Nov", the report and
   // whether it is the duty now or next under it. Published while the page is
   // on screen.
+  const legBriefings = React.useMemo(
+    () => legs.map((l) => (l.flightNumber ? briefingId(l.flightNumber, l.date, l.departureIcao || "") : "")),
+    [legs],
+  )
+  const legNowIndex = Math.max(0, legs.findIndex((l) => !l.inTime) < 0 ? legs.length - 1 : legs.findIndex((l) => !l.inTime))
   const legRoute = legs.length ? [legs[0].departureIcao, ...legs.map((l) => l.arrivalIcao)].join("-") : ""
   React.useEffect(() => {
     if (!isActive) return
@@ -364,9 +375,12 @@ export function FlightDashboard({ className }: { className?: string }) {
             word: index === 0 ? (current ? "Now" : "Next") : "Later",
             day: brief.day(dutyAtMs).replace(/^\w+,?\s*/, ""),
             dest: destinationOfRoute(choices[index]?.period?.route || legRoute, brief.code),
+            atMs: dutyAtMs,
+            briefings: legBriefings,
+            legNow: legNowIndex,
           },
     )
-  }, [isActive, choices, dutyAtMs, current, index, brief, legRoute])
+  }, [isActive, choices, dutyAtMs, current, index, brief, legRoute, legBriefings, legNowIndex])
 
   /* ── Opening a widget ────────────────────────────────────────────────── */
   const isDesktop = useIsDesktop()

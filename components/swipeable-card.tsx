@@ -76,6 +76,9 @@ function listenOutside() {
   )
 }
 
+/** How far a press may travel and still be a tap on the open row (px). */
+const TAP_SLOP_PX = 8
+
 /** Width of each revealed action button (px) */
 const BUTTON_WIDTH = 64
 /** How far a press must travel sideways before it is a swipe and arms the row. */
@@ -635,10 +638,35 @@ export function SwipeableCard({
 
   // Capture-phase guard: swallow the click synthesised at the end of a drag, and
   // close (rather than navigate) when the row is open — before it reaches a child.
+  // A TAP on the open row's own content closes it on the LIFT. The click
+  // straight after a swipe is lost on device (the reason swipe actions fire on
+  // the lift), so waiting for it took a second tap on the row itself while a
+  // tap on any other row closed it at once (the owner's report).
+  const tapRef = useRef<{ x: number; y: number } | null>(null)
+  const swallowUntilRef = useRef(0)
+  const onContentPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      tapRef.current = Math.abs(x.get()) > 2 ? { x: e.clientX, y: e.clientY } : null
+    },
+    [x],
+  )
+  const onContentPointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      const start = tapRef.current
+      tapRef.current = null
+      if (!start || Math.abs(x.get()) <= 2) return
+      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > TAP_SLOP_PX) return
+      swallowUntilRef.current = performance.now() + 700
+      close()
+    },
+    [close, x],
+  )
+
   const handleClickCapture = useCallback(
     (e: React.MouseEvent) => {
       const isOpen = Math.abs(x.get()) > 2
-      if (movedRef.current || isOpen) {
+      if (movedRef.current || isOpen || performance.now() < swallowUntilRef.current) {
+        swallowUntilRef.current = 0
         e.stopPropagation()
         e.preventDefault()
         if (isOpen) close()
@@ -814,6 +842,8 @@ export function SwipeableCard({
         onDragStart={handleDragStart}
         onDrag={handleDrag}
         onDragEnd={handleDragEnd}
+        onPointerDown={onContentPointerDown}
+        onPointerUp={onContentPointerUp}
         onClickCapture={handleClickCapture}
         onClick={handleClick}
         // `x` is bound only while armed. An unarmed row sits at 0, and a bound

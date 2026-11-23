@@ -21,6 +21,11 @@ export interface DutyMenu {
   word: string
   day: string
   dest: string
+  /** The duty's report — the key its flights tile remembers the leg on show by. */
+  atMs: number
+  /** Each leg's briefing id (`briefingId`), and the leg the duty is on. */
+  briefings: string[]
+  legNow: number
 }
 
 let chosen: number | null = null

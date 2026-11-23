@@ -22,6 +22,7 @@
 import * as React from "react"
 import { Bookmark, ChevronDown, Plus, RefreshCw, X } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { DEFAULT_HOME_BASE } from "@/lib/utils/roster/days-off"
 import { formatDay } from "@/lib/utils/date"
 import { formatInstant } from "@/lib/utils/tz-format"
 import { FormSection } from "@/components/ui/form-section"
@@ -868,26 +869,69 @@ function NoteRow({ label, value, placeholder, onCommit }: { label: string; value
   )
 }
 
-function AirportInfoBlock({ station, info }: { station: BriefingStation; info: ReturnType<typeof useAirportInfo>[string] | undefined }) {
+function AirportInfoBlock({
+  station,
+  info,
+  defaultOpen,
+}: {
+  station: BriefingStation
+  info: ReturnType<typeof useAirportInfo>[string] | undefined
+  defaultOpen: boolean
+}) {
   const note = useBriefingNote("airport", station.icao)
   const save = (patch: Partial<Pick<BriefingNoteRecord, "company" | "community">>) => void saveBriefingNote("airport", station.icao, patch).then(refreshBriefingCaches)
   const runways = info?.runways ?? []
+  const [open, setOpen] = React.useState(defaultOpen)
+  const noted = !!(note?.company?.trim() || note?.community?.trim())
   return (
     <FormSection>
-      <AirportHeader station={station} />
-      {runways.length > 0 && (
-        <p className="px-4 pb-2 text-[13px] tabular-nums text-muted-foreground">
-          {runways.map((r) => `${r.id}${r.lengthFt ? ` ${Math.round(r.lengthFt * 0.3048).toLocaleString("en-GB")}m` : ""}`).join(" • ")}
-        </p>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex min-h-12 w-full items-center gap-2 px-4 py-2.5 text-left"
+      >
+        <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-foreground">
+          {station.icao}
+          {station.name ? <span className="font-normal text-muted-foreground"> · {station.name}</span> : null}
+        </span>
+        <span className="shrink-0 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+          {ROLE_NAME[station.role]}
+          {!open && noted ? " • Notes" : ""}
+        </span>
+        <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200", open && "rotate-180")} aria-hidden />
+      </button>
+      {open && (
+        <>
+          {runways.length > 0 && (
+            <p className="-mt-1 px-4 pb-2 text-[13px] tabular-nums text-muted-foreground">
+              {runways.map((r) => `${r.id}${r.lengthFt ? ` ${Math.round(r.lengthFt * 0.3048).toLocaleString("en-GB")}m` : ""}`).join(" • ")}
+            </p>
+          )}
+          <div className="border-t border-border/70">
+            <NoteRow label={`Company`} value={note?.company ?? ""} placeholder="The company's airport briefing, summarised" onCommit={(t) => save({ company: t })} />
+            <NoteRow label={`Community`} value={note?.community ?? ""} placeholder="What other pilots say to look out for" onCommit={(t) => save({ community: t })} />
+          </div>
+        </>
       )}
-      <div className="border-t border-border/70">
-        <NoteRow label={`Company`} value={note?.company ?? ""} placeholder="The company's airport briefing, summarised" onCommit={(t) => save({ company: t })} />
-        <NoteRow label={`Community`} value={note?.community ?? ""} placeholder="What other pilots say to look out for" onCommit={(t) => save({ community: t })} />
-      </div>
     </FormSection>
   )
 }
 
+/**
+ * The airport this leg is ABOUT — the one away from home base (the owner,
+ * Nov 2026: on WSSS–VVTS–WSSS, VVTS for both legs): the destination on the
+ * way out, the departure on the way back; the destination when both or
+ * neither end is home.
+ */
+export function outstationOf(b: Briefing): string {
+  const home = (icao: string) => DEFAULT_HOME_BASE.includes(icao.toUpperCase())
+  if (!home(b.flight.arr)) return b.flight.arr
+  if (!home(b.flight.dep)) return b.flight.dep
+  return b.flight.arr
+}
+
+/** The airports, the outstation open and the rest folded — home base and the alternates. */
 function AirportsSection({ b }: { b: Briefing }) {
   const { main, enroute } = briefingAirports(b)
   const [showEnroute, setShowEnroute] = React.useState(false)
@@ -895,10 +939,13 @@ function AirportsSection({ b }: { b: Briefing }) {
     main.map((s) => s.icao),
     true,
   )
+  const lead = outstationOf(b)
+  // The outstation leads; the others keep their order (home base, then the alternates).
+  const ordered = [...main.filter((s) => s.icao === lead), ...main.filter((s) => s.icao !== lead)]
   return (
     <div className="space-y-3">
-      {main.map((s) => (
-        <AirportInfoBlock key={s.icao} station={s} info={info[s.icao]} />
+      {ordered.map((s) => (
+        <AirportInfoBlock key={s.icao} station={s} info={info[s.icao]} defaultOpen={s.icao === lead} />
       ))}
       {enroute.length > 0 && (
         <FormSection>
@@ -907,7 +954,7 @@ function AirportsSection({ b }: { b: Briefing }) {
           </FoldButton>
         </FormSection>
       )}
-      {showEnroute && enroute.map((s) => <AirportInfoBlock key={s.icao} station={s} info={undefined} />)}
+      {showEnroute && enroute.map((s) => <AirportInfoBlock key={s.icao} station={s} info={undefined} defaultOpen={false} />)}
     </div>
   )
 }

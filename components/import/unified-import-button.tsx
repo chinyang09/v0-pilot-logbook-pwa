@@ -52,12 +52,13 @@ export function useImportPicker({ context = "shared", onComplete }: Options = {}
     };
   }, []);
 
-  const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
+  // Files from the picker, or dropped on a drop zone: the same flow.
+  const take = React.useCallback((files: File[]) => {
     if (files.length === 0) return;
     setRequest((prev) => ({ key: (prev?.key ?? 0) + 1, files }));
     void loadFlow().then(() => setReady(true));
-  };
+  }, []);
+  const onChange = (e: React.ChangeEvent<HTMLInputElement>) => take(Array.from(e.target.files ?? []));
   const resetPicker = React.useCallback(() => {
     if (inputRef.current) inputRef.current.value = "";
   }, []);
@@ -73,5 +74,5 @@ export function useImportPicker({ context = "shared", onComplete }: Options = {}
       )}
     </>
   );
-  return { open, working: busy || loading, element };
+  return { open, take, working: busy || loading, element };
 }

@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { Calendar, CalendarClock, Check, SlidersHorizontal } from "lucide-react"
+import { Calendar, CalendarClock, Check, ScrollText, SlidersHorizontal } from "lucide-react"
+import { useRouter } from "next/navigation"
 
 import { GlassButtonGroup, GlassGroupButton } from "@/components/ui/glass-icon-button"
 import {
@@ -14,6 +15,7 @@ import { setArranging, useArranging } from "@/hooks/use-dashboard-layout"
 import { setChosenDuty, useChosenDuty, useDutyMenu } from "@/hooks/use-dashboard-duty"
 import { ChoicePicker, type MenuOption } from "@/components/ui/option-menu"
 import { cn } from "@/lib/utils"
+import { pageOf } from "./flight/pager"
 
 const PERIOD_HINTS: Record<DashboardPreset, string> = {
   "7d": "Last 7 days",
@@ -40,6 +42,7 @@ const MENU_BUTTON = cn(
  * | | |
  * |---|---|
  * | the DUTY menu | which duty the page is about — the one in progress or next, else a later one ("Next · 21 Nov" in the button). It was a menu laid over the flights tile's date line, which the tile's card did not carry, so the duty could not be changed once the card was open |
+ * | Briefing | the briefing of the leg the flights tile is on (else the leg the duty is on); a leg with none opens the briefing page to import one |
  * | Done | only while arranging — a long press on a tile enters Arrange |
  * | the bell | import notes |
  */
@@ -47,6 +50,15 @@ export function FlightDeckActions() {
   const menu = useDutyMenu()
   const chosen = useChosenDuty()
   const arranging = useArranging()
+  const router = useRouter()
+  // Read at the tap: the leg the flights tile was swiped to is the one meant.
+  const openBriefing = React.useCallback(() => {
+    if (!menu || menu.briefings.length === 0) return
+    const at = pageOf(`flight:${menu.atMs}`) ?? menu.legNow
+    const id = menu.briefings[Math.min(Math.max(0, at), menu.briefings.length - 1)]
+    router.push(id ? `/briefing?id=${encodeURIComponent(id)}` : "/briefing")
+  }, [menu, router])
+  const hasLegs = !!menu && menu.briefings.some(Boolean)
   return (
     <>
       {menu && menu.options.length > 0 && (
@@ -75,6 +87,11 @@ export function FlightDeckActions() {
         {arranging && (
           <GlassGroupButton ariaLabel="Done arranging" ariaPressed active onClick={() => setArranging(false)}>
             <Check className="h-5 w-5" />
+          </GlassGroupButton>
+        )}
+        {hasLegs && (
+          <GlassGroupButton ariaLabel="Briefing for this duty" onClick={openBriefing}>
+            <ScrollText className="h-5 w-5" />
           </GlassGroupButton>
         )}
         <AlertsDropdown />
