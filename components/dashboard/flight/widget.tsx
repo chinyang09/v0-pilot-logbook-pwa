@@ -36,7 +36,6 @@ import { ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export type WidgetId =
-  | "duty"
   | "flight"
   | "airport"
   | "currency"

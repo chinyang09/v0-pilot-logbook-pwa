@@ -62,7 +62,10 @@ export function Pager({
   morph,
   perPage = 1,
   dotTone,
+  below,
 }: {
+  /** What sits under the pages and over the dots, not swiped (the flights card's duty and its Open). */
+  below?: React.ReactNode
   /**
    * An item whose dot is AMBER — the reason a tile's edge is amber, on a page
    * not on show (the owner: "make the amber border explain why"). In items.
@@ -131,7 +134,18 @@ export function Pager({
     ro.observe(el)
     return () => ro.disconnect()
   }, [fill, count, page])
-  if (count < 2) return fill ? <div className="flex min-h-0 flex-1 flex-col">{pageOf(0)}</div> : <>{pageOf(0)}</>
+  if (count < 2)
+    return fill ? (
+      <div className="flex min-h-0 flex-1 flex-col">
+        {pageOf(0)}
+        {below}
+      </div>
+    ) : (
+      <>
+        {pageOf(0)}
+        {below}
+      </>
+    )
   const settle = (to: number) => {
     const el = track.current
     if (el) {
@@ -209,6 +223,7 @@ export function Pager({
           ))}
         </div>
       </div>
+      {below}
       <div aria-hidden className={cn("flex justify-center", fill ? "pt-1.5" : "mt-1.5")}>
         {/* The dots themselves fly, not the row: a full-width row centres
             them at the tile's width and at the card's, and its copies

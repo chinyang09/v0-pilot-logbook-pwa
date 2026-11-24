@@ -100,9 +100,9 @@ function tileTones(brief: FlightBrief): Partial<Record<WidgetId, RequirementStat
   // The flights tile: a leg still to fly that the sources now expect late,
   // or whose inbound aeroplane lands too late to turn round in time.
   const flightLate = brief.duty.legs.some((_, i) => legDelay(brief, i) !== null || inboundLate(brief, i))
+  // One tile for the flights and the duty: the worse of the two.
   return {
-    duty: dutyTone(brief),
-    flight: flightLate ? "caution" : null,
+    flight: worstOf([dutyTone(brief), flightLate ? "caution" : null].filter((t): t is RequirementState => t !== null)),
     airport: airportPoor ? "caution" : null,
     currency: worstOf(currencyRows(brief).map((r) => r.state)),
     limits: worstOf(limitsOf(brief).map((r) => r.state)),
@@ -154,22 +154,39 @@ function faceOf(id: WidgetId, brief: FlightBrief, size: TileSize, inCard = false
   // card holds (`TileRows`).
   const wide = !inCard && fill
   switch (id) {
-    case "duty":
-      return (
-        <>
-          <DutyFace brief={brief} inCard={inCard} />
-          {/* The duty card's timetable, less the face's three figures. */}
-          {wide && (
-            <TileRows
-              rows={dutyRows(brief)
-                .filter((r) => r.slot === undefined)
-                .map((r) => ({ key: r.label, label: r.label, value: r.value, sub: r.sub, tone: r.tone }))}
-            />
-          )}
-        </>
-      )
     case "flight":
-      return <FlightFace brief={brief} size={size} inCard={inCard} fill={wide} />
+      // A standby, or no duty with flights, is the duty clock's own face; on
+      // the wide grid it says the rest of its card's table under it.
+      if (brief.duty.atMs === null || brief.duty.standby)
+        return (
+          <>
+            <DutyFace brief={brief} inCard={inCard} />
+            {wide && (
+              <TileRows
+                rows={dutyRows(brief)
+                  .filter((r) => r.slot === undefined)
+                  .map((r) => ({ key: r.label, label: r.label, value: r.value, sub: r.sub, tone: r.tone }))}
+              />
+            )}
+          </>
+        )
+      return (
+        <FlightFace
+          brief={brief}
+          size={size}
+          inCard={inCard}
+          fill={wide}
+          dutyMore={
+            wide ? (
+              <TileRows
+                rows={dutyRows(brief)
+                  .filter((r) => r.slot === undefined)
+                  .map((r) => ({ key: r.label, label: r.label, value: r.value, tone: r.tone }))}
+              />
+            ) : undefined
+          }
+        />
+      )
     case "airport":
       return <AirportFace brief={brief} size={size} />
     case "currency":
@@ -537,10 +554,11 @@ export function FlightDashboard({ className }: { className?: string }) {
   // the page takes the whole width, and the detail panel comes back only
   // for a flight opened from a card.
   const [sheet, setSheet] = React.useState<{ id: WidgetId; anchor: WidgetAnchor; size: TileSize } | null>(null)
-  // On a standby there are no flights and no airports: their tiles step aside
-  // and the others take the grid (the owner, Nov 2026: "not applicable").
+  // On a standby there are no airports to fly to: that tile steps aside and
+  // the others take the grid (the owner, Nov 2026: "not applicable"). The
+  // flight & duty tile reads the standby.
   const shown = React.useMemo(
-    () => (standby ? order.filter((id) => id !== "flight" && id !== "airport") : order),
+    () => (standby ? order.filter((id) => id !== "airport") : order),
     [order, standby],
   )
   // Where each tile sits — a card opens from its tile at that size.

@@ -31,10 +31,10 @@ import type { FlightBrief } from "./model"
 import { pageOf } from "./pager"
 import { briefingId } from "@/lib/briefing/ids"
 import { SheetClosingContext, type WidgetAction, type WidgetId } from "./widget"
+import { dutyClockView } from "./duty-clock"
 
 export const WIDGET_TITLE: Record<WidgetId, string> = {
-  duty: "Duty",
-  flight: "Flight & Crew",
+  flight: "Flight & Duty",
   airport: "Airport & Weather",
   currency: "Currency",
   limits: "Limits",
@@ -113,11 +113,12 @@ export function widgetContent(
    */
   header: "face" | "label"
 } {
-  const fdp: WidgetAction = { id: "fdp", label: "FDP", run: () => ctx.go(WIDGET_HREF.duty!) }
+  const fdp: WidgetAction = { id: "fdp", label: "FDP", run: () => ctx.go(WIDGET_HREF.flight!) }
   switch (id) {
-    case "duty":
-      return { header: "face", body: dutyRows(brief).length ? <DutyBody brief={brief} /> : null, actions: [fdp] }
     case "flight": {
+      // A standby, or no duty with flights: the duty clock's face and its table.
+      if (brief.duty.atMs === null || brief.duty.standby)
+        return { header: "face", body: dutyRows(brief).length ? <DutyBody brief={brief} /> : null, actions: [fdp] }
       const legs = brief.duty.legs
       return {
         header: "label",
@@ -150,6 +151,7 @@ export function widgetContent(
                 },
               ]
             : []),
+          fdp,
         ],
       }
     }
@@ -182,7 +184,7 @@ export function widgetContent(
 }
 
 /** The section each card's footer leads to — warmed when the card opens (`prefetchSection`). */
-export const WIDGET_HREF: Partial<Record<WidgetId, string>> = { duty: "/fdp", limits: "/fdp", currency: "/currencies" }
+export const WIDGET_HREF: Partial<Record<WidgetId, string>> = { flight: "/fdp", limits: "/fdp", currency: "/currencies" }
 
 /** The navigation every body needs, bound to the app's router and panel. */
 export function useWidgetCtx(): Omit<WidgetCtx, "selectDuty"> & { prefetchSection: (id: WidgetId) => void } {
@@ -393,14 +395,48 @@ function DutyBody({ brief }: { brief: FlightBrief }) {
 }
 
 /**
- * The flights card: the duty on its day, a leg a page — the leg's own table
- * and a row that opens it, the dots under them (`FlightCardLegs`) — then the
- * crew, flight and cabin.
+ * The duty's own table in the flight & duty card (the owner, Nov 2026: the
+ * FDP "beneath the leg rows"): its line in its tone, then `dutyRows` — rest,
+ * report, scheduled IN, FDP / max, the ESTIMATED IN and how far it is from
+ * the latest IN, the latest IN, the commander's discretion. The face's three
+ * figures fly into their rows.
+ */
+function DutySection({ brief }: { brief: FlightBrief }) {
+  const rows = dutyRows(brief)
+  const view = dutyClockView(brief)
+  if (rows.length === 0) return null
+  const lit = !view
+    ? "text-foreground"
+    : view.stateTone === "action_required"
+      ? "text-destructive"
+      : view.stateTone === "warning"
+        ? "text-status-warning"
+        : "text-foreground"
+  return (
+    <div className="mt-3 border-t border-border/70 pt-2.5">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Duty &amp; FDP</p>
+      {view && (
+        <p className={cn("mt-0.5 truncate text-[15px] font-semibold leading-tight", lit)} suppressHydrationWarning data-morph="duty-headline">
+          {view.headline}
+        </p>
+      )}
+      <div className="mt-1">
+        <DutyBody brief={brief} />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The flight & duty card: the duty on its day and its timeline, a leg a page
+ * — the leg's own table — then, not swiped, the duty's table and the leg's
+ * Open, the dots under them (`FlightCardLegs`); then the crew, flight and
+ * cabin.
  */
 function FlightBody({ brief, ctx }: { brief: FlightBrief; ctx: WidgetCtx }) {
   return (
     <div>
-      <FlightCardLegs brief={brief} openFlight={ctx.openFlight} />
+      <FlightCardLegs brief={brief} openFlight={ctx.openFlight} duty={<DutySection brief={brief} />} />
       {/* The crew is part of this card (the owner's duty-and-crew widget). */}
       {brief.crew.length > 0 && (
         <div className="mt-2 border-t border-border/70 pt-1">

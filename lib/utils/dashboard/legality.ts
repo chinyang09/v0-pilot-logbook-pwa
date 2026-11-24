@@ -122,6 +122,15 @@ function hours(n: number): string {
   return n >= 10 ? Math.round(n).toString() : n.toFixed(1)
 }
 
+/**
+ * Hours LEFT, rounded DOWN: headroom is never overstated, and the limits
+ * card's exact figure ("451:36", "451h") reads the same as the tile's.
+ */
+function hoursLeft(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "0"
+  return n >= 10 ? Math.floor(n).toString() : (Math.floor(n * 10) / 10).toFixed(1)
+}
+
 function daysBetween(fromIso: string, toIso: string): number {
   const a = Date.parse(`${fromIso}T00:00:00Z`)
   const b = Date.parse(`${toIso}T00:00:00Z`)
@@ -379,7 +388,7 @@ export function buildLegalityModel({
       progress: fraction,
       detail: [
         { label: "Used", value: `${hours(used)}h` },
-        { label: "Remaining", value: `${hours(Math.max(0, limit - used))}h` },
+        { label: "Remaining", value: `${hoursLeft(Math.max(0, limit - used))}h` },
         ...(forecast
           ? [{ label: "Forecast", value: "Breach on current roster" }]
           : []),
