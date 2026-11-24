@@ -13,7 +13,8 @@ import { formatDay } from "@/lib/utils/date"
 import { cn } from "@/lib/utils"
 import { dutyWindow, formatDutyClock } from "@/lib/utils/dashboard/duty-status"
 import { REQ_TONE, TONE } from "./instruments"
-import { DutyClockFace, HourLines } from "./duty-clock"
+import { DutyClockFace, DutyClockStrip, HourLines, dutyClockView } from "./duty-clock"
+import { dutyClock, type DutyClock } from "@/lib/utils/dashboard/duty-clock"
 import { WidgetLabel } from "./widget"
 import { metarConditions } from "@/lib/weather/brief"
 import { favouredRunway, runwayEndsFrom, type WindOnRunway } from "@/lib/weather/runway-wind"
@@ -163,58 +164,6 @@ export function crewRole(role: string, authority: LogbookAuthority): string {
 
 /** The key a crew member's initials and name fly between the tile and the card under. */
 export const crewKey = (m: { personId?: string | null; name: string }) => (m.personId ?? m.name).replace(/\s+/g, "_")
-
-/**
- * The crew of the leg on show: initials, the name, their seat and how often
- * flown together — on the right across the row, running the tile's full
- * height with its divider (the owner: it stopped short of a tall tile's
- * bottom), or under the leg in a narrower tile two rows tall.
- */
-function CrewPanel({ brief, crew, below = false }: { brief: FlightBrief; crew: CrewMate[]; below?: boolean }) {
-  // The flight crew: the cabin is the card's (there is no room for nine).
-  const flightCrew = crew.filter((m) => !m.cabin)
-  const shown = flightCrew.slice(0, 3)
-  const role = (r: string) => crewRole(r, brief.authority)
-  return (
-    <div
-      className={cn(
-        "flex shrink-0 flex-col justify-center gap-1.5 border-border/70 bg-muted/50",
-        below ? "-mx-3 -mb-3 mt-2 flex-1 border-t px-3 py-2" : "-my-3 -mr-3 ml-3 w-[40%] max-w-44 self-stretch rounded-r-2xl border-l px-2.5 py-3",
-      )}
-    >
-      {shown.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No crew yet</p>
-      ) : (
-        shown.map((m) => (
-          <div key={m.personId ?? m.name} className="flex min-w-0 items-center gap-1.5">
-            <span
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-card text-[9px] font-semibold text-foreground"
-              data-morph={`crew-ini-${crewKey(m)}`}
-            >
-              {initialsOf(m.name)}
-            </span>
-            <span className="min-w-0 leading-tight">
-              <span className="block truncate text-[12px] font-medium text-foreground" data-morph={`crew-name-${crewKey(m)}`}>
-                {shortName(m.name)}
-              </span>
-              {/* The role and the history fly into the card's row (its caption and its right). */}
-              <span className="block truncate text-[10px] tabular-nums text-muted-foreground">
-                <span data-morph={`crew-role-${crewKey(m)}`}>{role(m.role)}</span>
-                {(m.last ? (m.count ? `${m.count}×` : null) : "New") && (
-                  <>
-                    {" · "}
-                    <span data-morph={`crew-last-${crewKey(m)}`}>{m.last ? `${m.count}×` : "New"}</span>
-                  </>
-                )}
-              </span>
-            </span>
-          </div>
-        ))
-      )}
-      {flightCrew.length > shown.length && <p className="pl-7 text-[11px] text-muted-foreground">+ {flightCrew.length - shown.length} more</p>}
-    </div>
-  )
-}
 
 /** "Woon Kok Heng" → "WK". */
 export function initialsOf(name: string): string {
@@ -391,35 +340,142 @@ function LegPage({ brief, i, more = false }: { brief: FlightBrief; i: number; mo
   )
 }
 
+/** How much of a long rest the flights tile draws before the report: the duty is what it is about. */
+const REST_TILE_H = 3
+
 /**
- * The chosen duty's FLIGHTS, a leg a page (the owner, Nov 2026: "tracks
- * individual flights, swipeable to first or second leg"): the duty on its
- * day with the leg on show lit, the leg's route large, its number and times,
- * its gate and aeroplane — and that leg's crew beside it. It opens on the leg
- * the duty is on; the duty itself is chosen in the header. The card lists
- * every leg with its gates, and every crew member.
+ * The duty's TIMELINE as the flights tile and its card draw it (the owner,
+ * Nov 2026: one timeline for the legs and the FDP): the duty strip
+ * (`dutyClock`) with the rest before it cut to its last few hours — a
+ * shortfall still red — so the report, the legs and the maximum's cap have
+ * the width. Null where the duty clock has nothing to draw.
  */
-export function FlightFace({ brief, size, inCard = false, fill = false }: { brief: FlightBrief; size: TileSize; inCard?: boolean; fill?: boolean }) {
+export function flightClock(brief: FlightBrief): DutyClock | null {
+  const view = dutyClockView(brief)
+  if (!view || !view.input.duty) return null
+  const { rest, duty } = view.input
+  const trimmed = rest ? { ...rest, startMs: Math.max(rest.startMs, duty.reportMs - REST_TILE_H * 3_600_000) } : null
+  return dutyClock({ ...view.input, rest: trimmed && trimmed.startMs < duty.reportMs ? trimmed : null })
+}
+
+/** The duty's timeline (`flightClock`), else the 24-hour day bar. */
+function DutyTimeline({ brief, focus }: { brief: FlightBrief; focus: number | null }) {
+  const c = flightClock(brief)
+  if (!c) return <DayBar brief={brief} focus={focus} />
+  return (
+    <div className="-mt-1 mb-1.5">
+      <DutyClockStrip clock={c} zulu={brief.display?.useZuluTime !== false} focus={focus} />
+    </div>
+  )
+}
+
+/** A duty figure's caption as the readout has room for it: "Min 10:00 + night" is the rest's, "Report 18 Nov" the report's. */
+export function readoutLabel(label: string): string {
+  if (/^min\b/i.test(label)) return "Rest"
+  if (/^report\b/i.test(label)) return "Report"
+  if (/^from\b/i.test(label)) return "From"
+  return label.replace(/\s*\/\s*/g, "/")
+}
+
+/**
+ * The FDP beside the leg (the owner, Nov 2026: where "No crew yet" was) —
+ * the duty's line in its tone ("Sector 1 of 2", "Legal from 22:00Z", "Rest
+ * short by 3:00"), then the duty clock's three figures a row each (FDP left ·
+ * FDP / max · latest IN on duty; rest · report · FDP / max before it), and
+ * the leg's flight crew as initials at its foot. The figures fly into the
+ * card's Duty & FDP rows (`slot-<n>-v`).
+ */
+function DutyReadout({ brief, crew, wide = false, extra }: { brief: FlightBrief; crew: CrewMate[]; wide?: boolean; extra?: React.ReactNode }) {
+  const view = dutyClockView(brief)
+  const flightCrew = crew.filter((m) => !m.cabin)
+  if (!view && flightCrew.length === 0) return null
+  const lit = !view
+    ? ""
+    : view.stateTone === "action_required"
+      ? "text-destructive"
+      : view.stateTone === "warning"
+        ? "text-status-warning"
+        : "text-foreground"
+  const shown = flightCrew.slice(0, 3)
+  return (
+    <div className={cn("flex shrink-0 flex-col gap-1 border-l border-border/60 pl-2.5", wide ? "w-44" : "w-[40%] max-w-44")}>
+      {view && (
+        <>
+          <p className={cn("truncate text-[12px] font-semibold leading-tight", lit)} suppressHydrationWarning data-morph="duty-headline">
+            {view.headline}
+          </p>
+          {view.slots.map((slot, i) => (
+            <p key={slot.label} className="flex min-w-0 items-baseline justify-between gap-1.5 leading-tight">
+              <span className="min-w-0 truncate text-[9px] font-medium uppercase tracking-wider text-muted-foreground">{readoutLabel(slot.label)}</span>
+              <span
+                className={cn(
+                  "shrink-0 text-[13px] font-semibold tabular-nums",
+                  slot.tone === "fail" ? "text-destructive" : slot.tone === "caution" ? "text-status-warning" : "text-foreground",
+                )}
+                suppressHydrationWarning={slot.live}
+                data-morph={`slot-${i}-v`}
+              >
+                {slot.value}
+              </span>
+            </p>
+          ))}
+        </>
+      )}
+      {/* A tall wide tile: the rest of the duty's table (the card's). */}
+      {extra}
+      {/* The leg's flight crew, by initials: the card names them. */}
+      {shown.length > 0 && (
+        <span className="mt-auto flex items-center gap-1 pt-0.5" aria-label={shown.map((m) => shortName(m.name)).join(", ")}>
+          {shown.map((m) => (
+            <span
+              key={m.personId ?? m.name}
+              title={shortName(m.name)}
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[8px] font-semibold text-foreground"
+              data-morph={`crew-ini-${crewKey(m)}`}
+            >
+              {initialsOf(m.name)}
+            </span>
+          ))}
+          {flightCrew.length > shown.length && <span className="text-[10px] text-muted-foreground">+{flightCrew.length - shown.length}</span>}
+        </span>
+      )}
+    </div>
+  )
+}
+
+/**
+ * FLIGHT & DUTY — today's tactical tile (the owner, Nov 2026: the flights and
+ * the duty "operate on the exact same tactical time horizon"; one timeline,
+ * not two). Its eyebrow (Now / Next / Later · the day, "Leg 1/2"), the duty's
+ * timeline — the report, the legs (the one on show lit) and the Reg 14
+ * maximum's cap — then a leg a page on the left (route, number and times,
+ * aeroplane and gate, the inbound or the flight after) and the FDP on the
+ * right (`DutyReadout`). A standby, or no duty with flights, is the duty
+ * clock's own face.
+ */
+export function FlightFace({
+  brief,
+  size,
+  inCard = false,
+  fill = false,
+  dutyMore,
+}: {
+  brief: FlightBrief
+  size: TileSize
+  inCard?: boolean
+  fill?: boolean
+  /** Under the FDP on a tall wide tile: the rest of the duty's table. */
+  dutyMore?: React.ReactNode
+}) {
   const { duty, day } = brief
-  // No flight crew known yet: no panel (an empty one was a third of the tile saying "No crew yet").
-  const anyCrew = brief.crew.some((m) => !m.cabin)
-  const crewAt = inCard || !anyCrew ? null : size.cols >= 2.5 ? "side" : size.rows >= 2 ? "below" : null
   const count = duty.legs.length
   const [page, setPage] = useRememberedPage(`flight:${duty.atMs}`, legNow(brief), count)
+  if (duty.atMs === null || duty.standby) return <DutyFace brief={brief} inCard={inCard} />
   // A WIDE tile (a desktop's full width) lays its legs side by side — each
-  // about a phone third and a half — rather than one leg to a page across
-  // twice a phone's width.
-  const room = size.cols - (crewAt === "side" ? 1.45 : 0)
+  // about a phone third and a half — beside the FDP.
   const wide = !inCard && size.cols >= FACE_WIDE_COLS
+  const room = size.cols - 1.45
   const per = wide ? Math.max(1, Math.min(count, Math.floor(room / LEG_COLS))) : 1
-  if (duty.atMs === null) {
-    return (
-      <>
-        <WidgetLabel>Next</WidgetLabel>
-        <p className="text-sm font-medium text-muted-foreground">Nothing rostered</p>
-      </>
-    )
-  }
   // The crew of the leg on show — of the first leg on show, side by side.
   const first = per > 1 ? Math.floor(page / per) * per : page
   const crew = count ? (brief.legCrew[first] ?? brief.crew) : brief.crew
@@ -428,27 +484,29 @@ export function FlightFace({ brief, size, inCard = false, fill = false }: { brie
   const shownTo = Math.min(count, first + per)
   const legLabel = per > 1 ? (count > per ? `Legs ${first + 1}–${shownTo}/${count}` : null) : `Leg ${page + 1}/${count}`
   return (
-    <div className={cn("flex min-w-0 flex-1", crewAt === "below" && "flex-col")}>
-      {/* A container: on a phone the crew panel leaves the route ~190px, and a
-          three-stop route at 21px does not fit it (measured at 360). */}
-      <div className={cn("@container flex min-w-0 flex-col", crewAt !== "below" && "flex-1")}>
-        <WidgetLabel right={count > 1 && legLabel ? <span className="text-[10px] font-semibold tabular-nums text-muted-foreground" data-morph="fl-legn">{legLabel}</span> : undefined}>
-          <span suppressHydrationWarning>
-            {dutyWord(brief)} · {day(duty.atMs)}
-          </span>
-        </WidgetLabel>
-        <DayBar brief={brief} focus={count > 1 && per === 1 ? page : null} />
-        {count === 0 ? (
-          <p className="truncate text-[17px] font-bold leading-tight tracking-tight text-foreground @[15rem]:text-[21px]" data-morph="fl-route">
-            {stops.join(stops.length > 2 ? "–" : " – ") || "—"}
-          </p>
-        ) : (
-          <Pager count={count} page={page} onPage={setPage} morph="fl" perPage={per} fill={fill} dotTone={(i) => (legLate(brief, i) ? "caution" : undefined)}>
-            {(i) => <LegPage brief={brief} i={i} more={fill} />}
-          </Pager>
-        )}
+    <div className="flex min-w-0 flex-1 flex-col">
+      <WidgetLabel right={count > 1 && legLabel ? <span className="text-[10px] font-semibold tabular-nums text-muted-foreground" data-morph="fl-legn">{legLabel}</span> : undefined}>
+        <span suppressHydrationWarning>
+          {dutyWord(brief)} · {day(duty.atMs)}
+        </span>
+      </WidgetLabel>
+      <DutyTimeline brief={brief} focus={count > 1 && per === 1 ? page : null} />
+      <div className="flex min-h-0 min-w-0 flex-1 gap-3">
+        {/* A container: beside the FDP the leg has ~200px of a phone, and a
+            three-stop route at 21px does not fit it (measured at 360). */}
+        <div className="@container flex min-w-0 flex-1 flex-col">
+          {count === 0 ? (
+            <p className="truncate text-[17px] font-bold leading-tight tracking-tight text-foreground @[15rem]:text-[21px]" data-morph="fl-route">
+              {stops.join(stops.length > 2 ? "–" : " – ") || "—"}
+            </p>
+          ) : (
+            <Pager count={count} page={page} onPage={setPage} morph="fl" perPage={per} fill={fill} dotTone={(i) => (legLate(brief, i) ? "caution" : undefined)}>
+              {(i) => <LegPage brief={brief} i={i} more={fill} />}
+            </Pager>
+          )}
+        </div>
+        {!inCard && <DutyReadout brief={brief} crew={crew} wide={wide} extra={fill ? dutyMore : undefined} />}
       </div>
-      {crewAt && <CrewPanel brief={brief} crew={crew} below={crewAt === "below"} />}
     </div>
   )
 }
@@ -517,7 +575,7 @@ export function plannedBlock(out?: string, inn?: string): string {
  * TALL wide tile lists under the leg (`TileRows`) once the face's own lines
  * (the rows tagged `morph`) are left out.
  */
-export function legRows(brief: FlightBrief, i: number): CardRow[] {
+export function legRows(brief: FlightBrief, i: number, omitEstIn = false): CardRow[] {
   const { duty, clock } = brief
   const f = duty.legs[i]
   const t = duty.times[i]
@@ -588,14 +646,14 @@ export function legRows(brief: FlightBrief, i: number): CardRow[] {
     ].filter(Boolean).join(" · ")
     if (range) rows.push({ label: "Scheduled", value: range, sub: sub || undefined })
     // Off blocks, not yet on: where it is now expected in.
-    if (!f.inTime && e && e.inMs !== null)
+    if (!f.inTime && e && e.inMs !== null && !omitEstIn)
       rows.push({ label: "Est. IN", value: clock(e.inMs), sub: versus(e.inMs, f.scheduledIn, f.scheduledOut) || undefined, tone: lateTone(e.inMs, f.scheduledIn, f.scheduledOut) })
   } else if (e && (e.outKind !== "scheduled" || e.inKind !== "scheduled")) {
     // Not yet off: the number line is the schedule; the live estimate against it
     // (a source may give the arrival and not the departure).
     if (e.outKind !== "scheduled" && e.outMs !== null)
       rows.push({ label: "Est. OUT", value: clock(e.outMs), sub: versus(e.outMs, f.scheduledOut) || undefined, tone: lateTone(e.outMs, f.scheduledOut) })
-    if (e.inMs !== null)
+    if (e.inMs !== null && !omitEstIn)
       rows.push({ label: "Est. IN", value: clock(e.inMs), sub: versus(e.inMs, f.scheduledIn, f.scheduledOut) || undefined, tone: lateTone(e.inMs, f.scheduledIn, f.scheduledOut) })
   }
   if (gates?.arrival.gate || gates?.arrival.stand) {
@@ -622,12 +680,14 @@ export function legRows(brief: FlightBrief, i: number): CardRow[] {
   return rows
 }
 
-function CardLeg({ brief, i, openFlight }: { brief: FlightBrief; i: number; openFlight: (id: string) => void }) {
+function CardLeg({ brief, i }: { brief: FlightBrief; i: number }) {
   const { duty, clock, code } = brief
   const f = duty.legs[i]
   const t = duty.times[i]
   const flown = !!f.inTime
-  const rows = legRows(brief, i)
+  // The duty's last IN, estimated, is the Duty & FDP table's (with how far it
+  // is from the latest IN) — not said twice on the last leg.
+  const rows = legRows(brief, i, i === duty.legs.length - 1 && !!duty.estimate)
   return (
     <>
       <p className="truncate text-[21px] font-bold leading-tight tracking-tight text-foreground" data-morph={`fl-route-${i}`}>
@@ -641,30 +701,44 @@ function CardLeg({ brief, i, openFlight }: { brief: FlightBrief; i: number; open
       <div className="mt-1.5">
         <CardTable rows={rows} />
       </div>
-      {/* An ACTION, not a row of the table (the owner: it read as another
-          field): a capsule on the control surface. */}
-      <button
-        type="button"
-        onClick={() => openFlight(f.id)}
-        className="control-surface mt-2.5 flex h-10 w-full items-center justify-center gap-2 rounded-full px-4 text-[14px] font-medium text-foreground transition-colors"
-      >
-        <Plane className="h-4 w-4 shrink-0" aria-hidden />
-        <span className="truncate">Open {f.flightNumber || "Flight"}</span>
-        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-      </button>
     </>
   )
 }
 
+/** An ACTION, not a row of the table (the owner: it read as another field): a capsule on the control surface. */
+function OpenFlight({ brief, i, openFlight }: { brief: FlightBrief; i: number; openFlight: (id: string) => void }) {
+  const f = brief.duty.legs[i]
+  if (!f) return null
+  return (
+    <button
+      type="button"
+      onClick={() => openFlight(f.id)}
+      className="control-surface mt-2.5 flex h-10 w-full items-center justify-center gap-2 rounded-full px-4 text-[14px] font-medium text-foreground transition-colors"
+    >
+      <Plane className="h-4 w-4 shrink-0" aria-hidden />
+      <span className="truncate">Open {f.flightNumber || "Flight"}</span>
+      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+    </button>
+  )
+}
+
 /**
- * The flights CARD above its crew: the duty on its day, then a leg a page —
- * swiped as the tile is, the dots under the leg's Open row (the owner).
+ * The flight & duty CARD above its crew: the duty on its day and its
+ * timeline, then a leg a page — swiped as the tile is — and under the pages,
+ * not swiped, the duty's own table (`duty`, the Duty & FDP rows) and the leg
+ * on show's Open, the dots under it (the owner).
  */
-export function FlightCardLegs({ brief, openFlight }: { brief: FlightBrief; openFlight: (id: string) => void }) {
+export function FlightCardLegs({ brief, openFlight, duty: dutyNode }: { brief: FlightBrief; openFlight: (id: string) => void; duty?: React.ReactNode }) {
   const { duty, day } = brief
   const count = duty.legs.length
   const [page, setPage] = useRememberedPage(`flight:${duty.atMs}`, legNow(brief), count)
   if (duty.atMs === null) return <p className="py-1 text-[13px] text-muted-foreground">Nothing rostered</p>
+  const below = (
+    <>
+      {dutyNode}
+      {count > 0 && <OpenFlight brief={brief} i={page} openFlight={openFlight} />}
+    </>
+  )
   return (
     <div>
       <WidgetLabel right={count > 1 ? <span className="text-[10px] font-semibold tabular-nums text-muted-foreground" data-morph="fl-legn">Leg {page + 1}/{count}</span> : undefined}>
@@ -672,14 +746,17 @@ export function FlightCardLegs({ brief, openFlight }: { brief: FlightBrief; open
           {dutyWord(brief)} · {day(duty.atMs)}
         </span>
       </WidgetLabel>
-      <DayBar brief={brief} focus={count > 1 ? page : null} />
+      <DutyTimeline brief={brief} focus={count > 1 ? page : null} />
       {count === 0 ? (
-        <p className="truncate text-[21px] font-bold leading-tight tracking-tight text-foreground" data-morph="fl-route">
-          {(chainOf(brief).route ?? "").split("-").filter(Boolean).join(" – ") || "—"}
-        </p>
+        <>
+          <p className="truncate text-[21px] font-bold leading-tight tracking-tight text-foreground" data-morph="fl-route">
+            {(chainOf(brief).route ?? "").split("-").filter(Boolean).join(" – ") || "—"}
+          </p>
+          {below}
+        </>
       ) : (
-        <Pager count={count} page={page} onPage={setPage} morph="fl" dotTone={(i) => (legLate(brief, i) ? "caution" : undefined)}>
-          {(i) => <CardLeg brief={brief} i={i} openFlight={openFlight} />}
+        <Pager count={count} page={page} onPage={setPage} morph="fl" dotTone={(i) => (legLate(brief, i) ? "caution" : undefined)} below={below}>
+          {(i) => <CardLeg brief={brief} i={i} />}
         </Pager>
       )}
     </div>

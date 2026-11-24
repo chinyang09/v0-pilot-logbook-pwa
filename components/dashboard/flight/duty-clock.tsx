@@ -173,7 +173,7 @@ export function dutyClockView(brief: FlightBrief): DutyClockView | null {
       slots: [
         { value: formatDutyClock(left), label: active.exceeded ? "FDP Over" : "FDP Left", live: true, tone: active.exceeded ? "fail" : undefined },
         { value: `${formatDutyClock(active.fdpElapsedMinutes)}/${formatDutyClock(active.maxFdpMinutes)}`, label: "FDP / Max", live: true },
-        { value: clock(fdpOpen + active.maxFdpMinutes * MIN), label: "Latest On-Blocks" },
+        { value: clock(fdpOpen + active.maxFdpMinutes * MIN), label: "Latest IN" },
       ],
       tone: tone ?? late?.tone ?? null,
     }
@@ -268,7 +268,7 @@ export function HourLines({ ticks, pct }: { ticks: Array<{ ms: number; major: bo
  * The strip: rest, duty, legs and the maximum on one scale in time, over a
  * line each hour (`HourLines`), labelled every few in the pilot's clock.
  */
-export function DutyClockStrip({ clock: c, zulu }: { clock: DutyClock; zulu: boolean }) {
+export function DutyClockStrip({ clock: c, zulu, focus = null }: { clock: DutyClock; zulu: boolean; focus?: number | null }) {
   const span = c.toMs - c.fromMs
   const pct = (ms: number) => `${Math.max(0, Math.min(100, ((ms - c.fromMs) / span) * 100))}%`
   const range = (a: number, b: number) => ({ left: pct(a), width: `calc(${pct(Math.max(a, b))} - ${pct(a)})` })
@@ -297,7 +297,16 @@ export function DutyClockStrip({ clock: c, zulu }: { clock: DutyClock; zulu: boo
             <span className="absolute inset-y-[1px] rounded-[2px] bg-foreground/10" style={range(duty.fdpStartMs, duty.fdpEndMs)} />
             {c.legs.map((l, i) =>
               l.departMs !== null && l.arriveMs !== null ? (
-                <span key={i} className={cn("absolute inset-y-[3px] rounded-[2px]", l.flown ? "bg-foreground/55" : "bg-primary")} style={range(l.departMs, l.arriveMs)} />
+                <span
+                  key={i}
+                  className={cn(
+                    "absolute inset-y-[3px] rounded-[2px] transition-opacity",
+                    l.flown ? "bg-foreground/55" : "bg-primary",
+                    // The leg the flights tile is swiped to stands out; the others are context.
+                    focus !== null && focus !== i && "opacity-35",
+                  )}
+                  style={range(l.departMs, l.arriveMs)}
+                />
               ) : null,
             )}
             {duty.maxEndMs !== null && (

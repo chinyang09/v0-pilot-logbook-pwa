@@ -16,15 +16,17 @@ import { clampSize, columnsOf, type GridKind, type TileSize } from "@/lib/utils/
  */
 
 // The crew is part of the flights tile (the owner's duty-and-crew widget, Nov
-// 2026), and the airport and its weather are one tile (the owner: "combine
-// airport and weather widget").
-export const DASHBOARD_TILES = ["duty", "flight", "airport", "currency", "limits"] as const
+// 2026), the airport and its weather are one tile (the owner: "combine
+// airport and weather widget"), and so are the flights and the duty (the
+// owner, Nov 2026: one tactical tile for today — the legs and the FDP on one
+// timeline — beside the limits, the strategic one).
+export const DASHBOARD_TILES = ["flight", "airport", "currency", "limits"] as const
 export type DashboardTile = (typeof DASHBOARD_TILES)[number]
 
 const STORAGE_KEY = "ooo:dashboard-tiles"
 
 /** Tiles that became another: a stored order keeps the new one where the first of the old ones was. */
-const RENAMED: Record<string, string> = { weather: "airport", destination: "airport" }
+const RENAMED: Record<string, string> = { weather: "airport", destination: "airport", duty: "flight" }
 
 /** A stored order, put right: unknown ids dropped, duplicates removed, tiles added since appended. */
 export function normaliseTileOrder(stored: unknown): DashboardTile[] {
@@ -98,28 +100,26 @@ const DEFAULT_ORDER: DashboardTile[] = [...DASHBOARD_TILES]
 /* ── Sizes ──────────────────────────────────────────────────────────────── */
 
 /**
- * Each tile's size by default, on the six-column grid (`packTiles`): the duty
- * and the flights across the page, the airport station half the row and four
+ * Each tile's size by default, on the six-column grid (`packTiles`): the
+ * flights and the duty across the page, three rows tall, the airport station half the row and four
  * rows tall (its wind dial between the code and the sky), the currency's dots
  * and the limits stacked beside it.
  */
 export const DEFAULT_TILE_SIZES: Record<DashboardTile, TileSize> = {
-  duty: { cols: 6, rows: 2 },
-  flight: { cols: 6, rows: 2 },
+  flight: { cols: 6, rows: 3 },
   airport: { cols: 3, rows: 4 },
   currency: { cols: 3, rows: 2 },
   limits: { cols: 3, rows: 2 },
 }
 
 /**
- * The WIDE grid's (twelve columns — a desktop's full width): the duty and the
- * flights side by side, then the airport (its airports side by side) beside
+ * The WIDE grid's (twelve columns — a desktop's full width): the flights and
+ * the duty across it, the legs side by side with the FDP beside them, then the airport (its airports side by side) beside
  * the currency over the limits — each tile about a phone and a half wide at
  * 1,100px, so a face lays out more rather than the same thing larger.
  */
 export const DEFAULT_WIDE_TILE_SIZES: Record<DashboardTile, TileSize> = {
-  duty: { cols: 6, rows: 2 },
-  flight: { cols: 6, rows: 2 },
+  flight: { cols: 12, rows: 2 },
   airport: { cols: 6, rows: 4 },
   currency: { cols: 6, rows: 2 },
   limits: { cols: 6, rows: 2 },
@@ -129,7 +129,6 @@ const DEFAULTS: Record<GridKind, Record<DashboardTile, TileSize>> = { narrow: DE
 
 /** The fewest columns a tile can take: the duty strip and the day bar need two thirds of a phone's row. */
 export const TILE_MIN_COLS: Record<DashboardTile, number> = {
-  duty: 4,
   flight: 4,
   airport: 2,
   currency: 2,
@@ -138,7 +137,6 @@ export const TILE_MIN_COLS: Record<DashboardTile, number> = {
 
 /** The same on the wide grid: a column there is about the narrow grid's at 760px, more beyond it. */
 const TILE_MIN_COLS_WIDE: Record<DashboardTile, number> = {
-  duty: 4,
   flight: 4,
   airport: 3,
   currency: 3,
@@ -170,7 +168,11 @@ export function sizesFromV3(stored: unknown): unknown {
 export function normaliseTileSizes(stored: unknown, grid: GridKind = "narrow"): Record<DashboardTile, TileSize> {
   const out = { ...DEFAULTS[grid] }
   if (stored && typeof stored === "object") {
+    // A layout from before the flights tile took the duty's in: its flights
+    // size was half the tile it is now, so the merged tile starts at its default.
+    const premerge = "duty" in (stored as object)
     for (const id of DASHBOARD_TILES) {
+      if (premerge && id === "flight") continue
       const v = (stored as Record<string, unknown>)[id]
       // The airport tile keeps its default rather than the size of either tile it replaced.
       if (v && typeof v === "object") out[id] = clampSize(v as Partial<TileSize>, minColsOf(id, grid), columnsOf(grid))
