@@ -20,7 +20,6 @@ import { mutate } from "swr"
 import { Calendar, Plane, Plus, Search, SearchX, X } from "lucide-react"
 import { EmptyState } from "@/components/ui/empty-state"
 import { Button } from "@/components/ui/button"
-import { useRouter } from "next/navigation"
 import { GlassContainer } from "@/components/ui/glass-container"
 import { pairStart, usePanelDualMonth } from "@/lib/layout/panel-mode"
 import { parseYMDLocal as parseDateLocal, formatLocalYMD } from "@/lib/utils/date"
@@ -64,7 +63,6 @@ function inSamePair(anchorMonth: number, anchorYear: number, month: number, year
 const LIST_TOP_GAP = 16
 
 export default function LogbookPage() {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const { isReady: dbReady, isLoading: dbLoading } = useDBReady()
 

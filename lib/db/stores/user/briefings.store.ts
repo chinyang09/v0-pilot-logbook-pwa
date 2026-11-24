@@ -51,10 +51,6 @@ export async function getBriefing(id: string): Promise<BriefingRecord | undefine
   return r && !r.deletedAt ? r : undefined
 }
 
-export async function getAllBriefings(): Promise<BriefingRecord[]> {
-  return (await userDb.briefings.toArray()).filter((r) => !r.deletedAt)
-}
-
 /**
  * Keep a parsed package — the flight's briefing, replaced whole by a newer
  * OFP — and fold its NOTAMs into the register. Answers the record and how

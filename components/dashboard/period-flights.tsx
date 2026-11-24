@@ -1,6 +1,5 @@
 "use client"
 
-import * as React from "react"
 import Link from "next/link"
 import { ChevronRight, ArrowUpRight } from "lucide-react"
 import { useDetailPanel } from "@/hooks/use-detail-panel"

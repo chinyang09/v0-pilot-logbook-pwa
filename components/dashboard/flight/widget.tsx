@@ -254,29 +254,7 @@ function WidgetFooter({ actions, run }: { actions: WidgetAction[]; run: (a: Widg
 }
 
 /**
- * The card, as the panel beside a tablet's page shows it: the face, the body
- * under a hairline, the footer line beneath.
- */
-export function WidgetCard({
-  face,
-  body,
-  actions = [],
-}: {
-  face: React.ReactNode | null
-  body: React.ReactNode | null
-  actions?: WidgetAction[]
-}) {
-  // The panel's own title is the section's name: no bar under it.
-  return (
-    <div className="relative overflow-hidden rounded-2xl border border-border bg-card">
-      {(face || body) && <CardShell header={face} body={body} />}
-      <WidgetFooter actions={actions} run={(a) => a.run()} />
-    </div>
-  )
-}
-
-/**
- * Every card's shell, on the phone's sheet and in the tablet's panel alike:
+ * Every card's shell — the card that grows out of its tile, on a phone and a desktop alike:
  * the header (its label the title bar — `CardShellContext`), then the body
  * straight under it, then the footer line (drawn by the caller).
  */
@@ -482,15 +460,18 @@ export function WidgetSheet({
   const vw = window.innerWidth
   const vh = window.innerHeight
   // A full-width tile keeps its width; a narrow one opens to the width a
-  // full-width tile has.
+  // full-width tile has — and so does one WIDER than a card (a desktop's
+  // full-width page), which narrows to it, centred.
   const fullWidth = Math.min(vw - MARGIN * 2, CARD_MAX_PX)
-  const wide = anchor.width >= fullWidth - 24
+  const wide = anchor.width >= fullWidth - 24 && anchor.width <= fullWidth + 24
   const width = wide ? anchor.width : fullWidth
   const maxCard = vh - MARGIN * 2 - 24
   // The content's height, plus the surface's two border pixels.
   const restH = Math.min((height ?? anchor.height) + 2, maxCard)
   const rest = {
-    left: wide ? anchor.left : (vw - width) / 2,
+    // Over its tile, kept on screen: a phone's tile opens across the screen,
+    // a desktop's over itself rather than across the page from it.
+    left: wide ? anchor.left : Math.min(vw - MARGIN - width, Math.max(MARGIN, anchor.left + anchor.width / 2 - width / 2)),
     top: Math.max(MARGIN + 12, (vh - restH) / 2),
     width,
     height: restH,

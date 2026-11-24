@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import type { User, WebAuthnChallenge } from "@/lib/auth/types";
+import type { User } from "@/lib/auth/types";
 
 // POST /api/auth/register - Start registration
 export async function POST(request: NextRequest) {

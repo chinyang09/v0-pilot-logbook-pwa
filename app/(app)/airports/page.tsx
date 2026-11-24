@@ -639,12 +639,6 @@ export default function AirportsPage() {
 
   const showFastScroll = fastScrollItems.length > 1 && !debouncedSearchQuery.trim();
 
-  const pageTitle = !fieldType
-    ? "Airports"
-    : fieldType.includes("departure")
-    ? "Departure"
-    : "Arrival";
-
   // Desktop floating glass bar actions — expandable search + glass add button
   const picking = !!(fieldType && flightId);
   const airportActions = useMemo(() => (

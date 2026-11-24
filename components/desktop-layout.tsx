@@ -147,7 +147,7 @@ function DetailPanelContent() {
  *   < 720px: Mobile — single panel + bottom pill + overlay sidebar
  */
 function AppShellContent({ children }: AppShellProps) {
-  const { selectedId, setSelectedId, backFromDetail, selectionExplicit } = useDetailPanel()
+  const { selectedId, backFromDetail, selectionExplicit } = useDetailPanel()
   const isDesktop = useIsDesktop()
   const hydrated = useHydrated()
   // Sidebar UI (pill↔sidebar morph) exists only at the desktop-pill tier —

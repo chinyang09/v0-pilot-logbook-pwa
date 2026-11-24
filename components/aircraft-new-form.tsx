@@ -72,7 +72,7 @@ export function AircraftNewForm({
   const [registration, setRegistration] = useState(prefilledReg.toUpperCase())
   const [typecode, setTypecode] = useState("")
   const {
-    typeSearchQuery, setTypeSearchQuery,
+    setTypeSearchQuery,
     typeSearchResults, selectedType, setSelectedType,
     showTypeSearch, setShowTypeSearch,
     handleSelectType: baseHandleSelectType, resetTypeSearch,

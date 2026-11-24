@@ -1,6 +1,5 @@
 "use client"
 
-import * as React from "react"
 
 import { useDashboardPeriod } from "@/hooks/use-dashboard-period"
 import { useDashboardAggregates } from "@/hooks/data/use-dashboard-aggregates"

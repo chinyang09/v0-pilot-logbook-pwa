@@ -66,14 +66,3 @@ function dutyLine(legs: FlightLog[], lookups: DutyLookups | null, loading: boole
 }
 
 
-/**
- * "D41 · T1" — a gate and its terminal, as far as either is known, and the
- * STAND where the airport gives one that is not the gate itself (a remote
- * stand: "B4 · T1 · Stand 512"). A contact stand named like its gate is the
- * gate said twice.
- */
-export function gateLabel(gate: string, terminal: string, stand = ""): string {
-  return [gate, terminal && `T${terminal.replace(/^T/i, "")}`, stand && stand !== gate && `Stand ${stand}`]
-    .filter(Boolean)
-    .join(" · ")
-}

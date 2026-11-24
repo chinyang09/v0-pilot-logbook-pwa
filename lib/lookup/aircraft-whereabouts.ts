@@ -119,7 +119,7 @@ export function whereaboutsLines(
   const from = inbound.origin ? ` from ${inbound.origin.iata || inbound.origin.icao}` : ""
   const flight = `${inbound.flightNumber || "Flight"}${from}`
   const std = inbound.scheduledDeparture ? `STD ${zulu(inbound.scheduledDeparture)}` : ""
-  const gate = opts.gate === false ? "" : [inbound.arrivalGate && `Gate ${inbound.arrivalGate}`, inbound.arrivalTerminal && `T${inbound.arrivalTerminal.replace(/^T/i, "")}`]
+  const gate = opts.gate === false ? "" : [inbound.arrivalGate && `Gate ${inbound.arrivalGate}`, inbound.arrivalTerminal && !/^T?0$/i.test(inbound.arrivalTerminal.trim()) && `T${inbound.arrivalTerminal.replace(/^T/i, "")}`]
     .filter(Boolean)
     .join(" ")
   return { primary, secondary: [flight, std, gate].filter(Boolean).join(" · "), flight, std, gate }

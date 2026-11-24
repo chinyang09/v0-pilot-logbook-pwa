@@ -28,7 +28,7 @@ import * as React from "react"
 import { createPortal } from "react-dom"
 import { animate, motion, useMotionValue } from "framer-motion"
 import { Move } from "lucide-react"
-import { GRID_COLUMNS, moveTile, nudgeTile, packTiles, sizeLabel, type TileSize } from "@/lib/utils/dashboard/bento"
+import { GRID_GAP_PX, columnsOf, mergeShownOrder, moveTile, nudgeTile, packTiles, sizeLabel, type GridKind, type TileSize } from "@/lib/utils/dashboard/bento"
 import { DASHBOARD_TILES, setArranging, setTileOrder, setTileSize, type DashboardTile } from "@/hooks/use-dashboard-layout"
 import { haptic } from "@/lib/utils/haptics"
 import { cn } from "@/lib/utils"
@@ -64,7 +64,7 @@ interface Drag {
 }
 
 /** The grid's gap, px (`gap-2`). */
-const GAP = 8
+const GAP = GRID_GAP_PX
 /** A row's floor, px (2.5rem): two rows and the gap are the 3 × 2 grid's 5.5rem. */
 const ROW_MIN_PX = 40
 
@@ -80,18 +80,29 @@ interface Resize {
   start: TileSize
   colPitch: number
   rowPitch: number
+  grid: GridKind
 }
 
 export function BentoGrid({
+  grid,
+  gridRef,
   order,
+  fullOrder,
   sizes,
   arranging,
   label,
   tile,
   face,
 }: {
+  /** Six columns (a phone, a narrow panel) or twelve (`gridKindFor` — a desktop's full width). */
+  grid: GridKind
+  /** The grid element — the page measures it to choose `grid`. */
+  gridRef?: React.Ref<HTMLDivElement>
+  /** The tiles on show, in order. */
   order: DashboardTile[]
-  /** Each tile's chosen size on the three-column grid. */
+  /** Every tile in the pilot's order, those not applicable now included (a standby's flights). */
+  fullOrder?: DashboardTile[]
+  /** Each tile's chosen size on `grid`. */
   sizes: Record<DashboardTile, TileSize>
   arranging: boolean
   label: (id: DashboardTile) => string
@@ -100,11 +111,12 @@ export function BentoGrid({
   /** Its face alone, for the card that is dragged and the slots while arranging. */
   face: (id: DashboardTile, size: TileSize) => React.ReactNode
 }) {
+  const columns = columnsOf(grid)
   const placed = React.useMemo(() => {
     const m = new Map<DashboardTile, { index: number; col: number; row: number; cols: number; rows: number }>()
-    packTiles(order, sizes).forEach((t, index) => m.set(t.id, { index, col: t.col, row: t.row, cols: t.cols, rows: t.rows }))
+    packTiles(order, sizes, columns).forEach((t, index) => m.set(t.id, { index, col: t.col, row: t.row, cols: t.cols, rows: t.rows }))
     return m
-  }, [order, sizes])
+  }, [order, sizes, columns])
   const sizesRef = React.useRef(sizes)
   React.useEffect(() => {
     sizesRef.current = sizes
@@ -124,7 +136,7 @@ export function BentoGrid({
       const cols = Math.round(start.cols + (edge === "r" ? dx : edge === "l" ? -dx : 0))
       const rows = Math.round(start.rows + (edge === "b" ? dy : edge === "t" ? -dy : 0))
       const cur = sizesRef.current[resize.id]
-      setTileSize(resize.id, { cols, rows })
+      setTileSize(resize.id, { cols, rows }, resize.grid)
       const next = sizesRef.current[resize.id]
       if (cur.cols !== next.cols || cur.rows !== next.rows) haptic("tick")
     }
@@ -145,9 +157,9 @@ export function BentoGrid({
     e.stopPropagation()
     e.preventDefault()
     const slot = e.currentTarget.closest<HTMLElement>("[data-tile-slot]")
-    const grid = slot?.parentElement
-    if (!slot || !grid) return
-    const g = grid.getBoundingClientRect()
+    const gridEl = slot?.parentElement
+    if (!slot || !gridEl) return
+    const g = gridEl.getBoundingClientRect()
     const r = slot.getBoundingClientRect()
     const start = sizesRef.current[id]
     const p = placed.get(id)
@@ -158,16 +170,21 @@ export function BentoGrid({
       x0: e.clientX,
       y0: e.clientY,
       start,
-      colPitch: (g.width - GAP * (GRID_COLUMNS - 1)) / GRID_COLUMNS + GAP,
+      colPitch: (g.width - GAP * (columns - 1)) / columns + GAP,
       rowPitch: Math.max(ROW_MIN_PX + GAP, (r.height + GAP) / (p?.rows ?? 1)),
+      grid,
     })
     haptic("tick")
   }
 
   const orderRef = React.useRef(order)
+  const fullRef = React.useRef(fullOrder ?? order)
   React.useEffect(() => {
     orderRef.current = order
-  }, [order])
+    fullRef.current = fullOrder ?? order
+  }, [order, fullOrder])
+  // A reorder of the tiles on show keeps the hidden ones where they were.
+  const reorder = (next: DashboardTile[]) => setTileOrder(mergeShownOrder(fullRef.current, next))
 
   const [drag, setDrag] = React.useState<Drag | null>(null)
   // The tile in hand: its frame and its four edge handles are drawn; the
@@ -209,7 +226,7 @@ export function BentoGrid({
       const now = performance.now()
       if (target === swap.current.target || now - swap.current.at < SWAP_COOLDOWN_MS) return
       swap.current = { target, at: now }
-      setTileOrder(moveTile(orderRef.current, dragId, target))
+      reorder(moveTile(orderRef.current, dragId, target))
       haptic("tick")
     }
     const onUp = () => {
@@ -274,13 +291,13 @@ export function BentoGrid({
       const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key]
       if (!d) return
       e.preventDefault()
-      setTileSize(id, { cols: s0.cols + d[0], rows: s0.rows + d[1] })
+      setTileSize(id, { cols: s0.cols + d[0], rows: s0.rows + d[1] }, grid)
       return
     }
     const by = e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : 0
     if (!by) return
     e.preventDefault()
-    setTileOrder(nudgeTile(orderRef.current, id, by))
+    reorder(nudgeTile(orderRef.current, id, by))
   }
 
   return (
@@ -291,20 +308,29 @@ export function BentoGrid({
           taller than the phone cut the duty tile's captions off. Unbounded,
           every row is as tall as its tallest tile, and only the wrapper
           scrolls, as a last resort. */}
-      <div className={cn("min-h-0 overflow-y-auto overscroll-contain scrollbar-hide", arranging && "-m-4 p-4")} data-bento-scroll>
+      {/* On the WIDE grid the rows also share the page's HEIGHT (a desktop has
+          room under the tiles a phone has not): auto rows stretch to fill a
+          grid taller than its content, and never shrink below it. */}
       <div
+        className={cn("min-h-0 overflow-y-auto overscroll-contain scrollbar-hide", grid === "wide" && "flex-1", arranging && "-m-4 p-4")}
+        data-bento-scroll
+      >
+      <div
+        ref={gridRef}
         // While arranging, the wrapper gains a margin's room on every side
         // (and gives it back as negative margin, so nothing moves) for the
         // move badges that sit ON each tile's corner — inside it they covered
         // the tile's own corner (a weather hazard, the currency tally).
-        className="grid content-start gap-2"
+        className={cn("grid gap-2", grid === "wide" ? "min-h-full content-stretch" : "content-start")}
         // A row is as tall as its tallest tile, and a tile two rows tall spans
         // both; the floor keeps a two-row tile visibly two rows.
-        style={{ gridTemplateColumns: `repeat(${GRID_COLUMNS}, minmax(0, 1fr))`, gridAutoRows: `minmax(${ROW_MIN_PX}px, auto)` }}
+        style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gridAutoRows: `minmax(${ROW_MIN_PX}px, auto)` }}
       >
         {/* The DOM order never changes: the grid places each tile by row and column. */}
         {DASHBOARD_TILES.map((id) => {
-          const p = placed.get(id)!
+          // A tile not in the order is not applicable to this duty (a standby's flights).
+          const p = placed.get(id)
+          if (!p) return null
           const size: TileSize = { cols: p.cols, rows: p.rows }
           const style = { gridColumn: `${p.col + 1} / span ${p.cols}`, gridRow: `${p.row + 1} / span ${p.rows}` }
           if (!arranging) {
@@ -325,7 +351,7 @@ export function BentoGrid({
               role="button"
               tabIndex={0}
               aria-roledescription="Movable tile"
-              aria-label={`Move ${label(id)}, ${p.index + 1} of ${DASHBOARD_TILES.length}, ${sizeLabel(sizes[id])}. Arrow keys move it, Shift and arrows resize it.`}
+              aria-label={`Move ${label(id)}, ${p.index + 1} of ${order.length}, ${sizeLabel(sizes[id])}. Arrow keys move it, Shift and arrows resize it.`}
               onPointerDown={(e) => pickUp(e, id)}
               onKeyDown={(e) => onKey(e, id)}
               onFocus={() => setActive(id)}

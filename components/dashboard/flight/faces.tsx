@@ -11,17 +11,16 @@ import type { Requirement } from "@/lib/utils/dashboard/legality"
 import type { SectorLeg } from "@/lib/utils/dashboard/duty-status"
 import { formatDay } from "@/lib/utils/date"
 import { cn } from "@/lib/utils"
-import { dutyWindow, formatDutyClock, formatRestSpan } from "@/lib/utils/dashboard/duty-status"
+import { dutyWindow, formatDutyClock } from "@/lib/utils/dashboard/duty-status"
 import { REQ_TONE, TONE } from "./instruments"
 import { DutyClockFace, HourLines } from "./duty-clock"
 import { WidgetLabel } from "./widget"
 import { metarConditions } from "@/lib/weather/brief"
 import { favouredRunway, runwayEndsFrom, type WindOnRunway } from "@/lib/weather/runway-wind"
-import { greatCircleNm } from "@/lib/utils/geo"
-import { hasCoordinates } from "@/lib/utils/flight-calculations"
 import type { FlightBrief } from "./model"
 import type { CrewMate } from "@/lib/utils/dashboard/flight-brief"
-import type { TileSize } from "@/lib/utils/dashboard/bento"
+import { FACE_WIDE_COLS, type TileSize } from "@/lib/utils/dashboard/bento"
+import { TileRows } from "./tile-rows"
 import { PILOT_ROLES, roleLabel, type LogbookAuthority } from "@/lib/utils/logbook-rules"
 import type { PilotRole } from "@/types/entities/flight.types"
 import { addDays, localDayKey, lookAheadFor, type LookAhead } from "@/lib/utils/dashboard/currency-dots"
@@ -294,10 +293,42 @@ export function legDelay(brief: FlightBrief, i: number): number | null {
 /** A delay under this is not said — a few minutes either way is the schedule. */
 const DELAY_SAID_MIN = 10
 
-/** "+0:40" in amber, beside a leg's times. */
+/** "OUT +0:40" in amber, beside a leg's times — the departure, said as such (the times beside it are the schedule). */
 function DelayChip({ minutes }: { minutes: number | null }) {
   if (minutes === null) return null
-  return <span className="font-semibold text-status-warning"> +{formatDutyClock(minutes)}</span>
+  return <span className="shrink-0 whitespace-pre font-semibold text-status-warning"> · OUT +{formatDutyClock(minutes)}</span>
+}
+
+/** A terminal worth naming: "T1" → "1"; a blank or a source's "0" → "". */
+export function knownTerminal(t: string | undefined | null): string {
+  const v = (t ?? "").trim().replace(/^T/i, "")
+  return v && v !== "0" ? v : ""
+}
+
+/**
+ * Leg `i`'s aeroplane: its own (the logbook's, the inbound's on the leg the
+ * pilot takes over, the source's), else — a turnaround, leaving where the leg
+ * before arrived — the leg before's, marked EXPECTED (the owner, Nov 2026:
+ * "Aircraft TBA" beside a known tail read as missing data).
+ */
+export function legAircraft(brief: FlightBrief, i: number): { reg: string; type: string; expected: boolean; from: string } {
+  const { duty } = brief
+  const f = duty.legs[i]
+  if (!f) return { reg: "", type: "", expected: false, from: "" }
+  const g = duty.lookups?.gates[f.id]
+  const own = f.aircraftReg || (i === legNow(brief) ? duty.lookups?.inboundRegistration : "") || (g?.status === "done" ? g.gates.flight.registration : "") || ""
+  if (own) return { reg: own, type: f.aircraftType || "", expected: false, from: "" }
+  const prev = duty.legs[i - 1]
+  if (prev && prev.arrivalIcao && prev.arrivalIcao === f.departureIcao) {
+    const p = legAircraft(brief, i - 1)
+    if (p.reg) return { reg: p.reg, type: f.aircraftType || p.type, expected: true, from: prev.flightNumber || "" }
+  }
+  return { reg: "", type: f.aircraftType || "", expected: false, from: "" }
+}
+
+/** Why the flights tile's edge is amber, per leg: it leaves late, or its inbound lands too late to turn round. */
+export function legLate(brief: FlightBrief, i: number): boolean {
+  return legDelay(brief, i) !== null || inboundLate(brief, i)
 }
 
 /**
@@ -306,31 +337,34 @@ function DelayChip({ minutes }: { minutes: number | null }) {
  * and its times; the AEROPLANE (registration and type) and the GATE on a line
  * of their own; then the inbound's landing, or the flight after ours.
  */
-function LegPage({ brief, i }: { brief: FlightBrief; i: number }) {
+function LegPage({ brief, i, more = false }: { brief: FlightBrief; i: number; more?: boolean }) {
   const { duty, clock, code } = brief
   const f = duty.legs[i]
   const t = duty.times[i]
   const flown = !!f.inTime
   const gates = duty.info?.legGates[i]
   const gate = flown ? gates?.arr || "" : gates?.dep || ""
-  const reg = f.aircraftReg || (i === legNow(brief) ? duty.lookups?.inboundRegistration : "") || ""
-  const type = f.aircraftType || ""
+  const { reg, type, expected } = legAircraft(brief, i)
   const line = legLine(brief, i)
   return (
     <>
       <p className="truncate text-[17px] font-bold leading-tight tracking-tight text-foreground @[15rem]:text-[21px]" data-morph={`fl-route-${i}`}>
         {code(f.departureIcao, f.departureIata)} – {code(f.arrivalIcao, f.arrivalIata)}
       </p>
-      <p className="mt-0.5 truncate text-[12px] leading-tight tabular-nums text-foreground" suppressHydrationWarning data-morph={`fl-num-${i}`}>
-        <span className="font-semibold">{f.flightNumber || "Flight"}</span>
-        {t?.departMs != null && t?.arriveMs != null && ` · ${clock(t.departMs).replace(/Z$/, "")}–${clock(t.arriveMs)}`}
-        {flown && <span className="text-muted-foreground"> · On blocks</span>}
+      {/* The delay keeps its place when the line is short of room: the times give way first. */}
+      <p className="mt-0.5 flex min-w-0 items-baseline text-[12px] leading-tight tabular-nums text-foreground">
+        <span className="min-w-0 truncate" suppressHydrationWarning data-morph={`fl-num-${i}`}>
+          <span className="font-semibold">{f.flightNumber || "Flight"}</span>
+          {t?.departMs != null && t?.arriveMs != null && ` · ${clock(t.departMs).replace(/Z$/, "")}–${clock(t.arriveMs)}`}
+          {flown && <span className="text-muted-foreground"> · On blocks</span>}
+        </span>
         <DelayChip minutes={legDelay(brief, i)} />
       </p>
       <p className="flex items-baseline justify-between gap-2 text-[12px] leading-tight tabular-nums">
         <span className="min-w-0 truncate" data-morph={`fl-ac-${i}`}>
           <span className={cn("font-semibold", reg ? "text-foreground" : "text-muted-foreground")}>{reg || "Aircraft TBA"}</span>
           {reg && type && <span className="text-muted-foreground"> {type}</span>}
+          {expected && <span className="text-muted-foreground"> · expected</span>}
         </span>
         {gate && (
           <span className="shrink-0 font-semibold text-foreground" data-morph={`fl-gate-${i}`}>
@@ -345,6 +379,14 @@ function LegPage({ brief, i }: { brief: FlightBrief; i: number }) {
       >
         {line?.text || "\u00a0"}
       </p>
+      {/* A tall wide tile: the leg's own rows the face has not said. */}
+      {more && (
+        <TileRows
+          rows={legRows(brief, i)
+            .filter((r) => !r.morph)
+            .map((r) => ({ key: r.label, label: r.label, value: r.value, sub: r.sub, tone: r.tone }))}
+        />
+      )}
     </>
   )
 }
@@ -357,11 +399,19 @@ function LegPage({ brief, i }: { brief: FlightBrief; i: number }) {
  * the duty is on; the duty itself is chosen in the header. The card lists
  * every leg with its gates, and every crew member.
  */
-export function FlightFace({ brief, size, inCard = false }: { brief: FlightBrief; size: TileSize; inCard?: boolean }) {
+export function FlightFace({ brief, size, inCard = false, fill = false }: { brief: FlightBrief; size: TileSize; inCard?: boolean; fill?: boolean }) {
   const { duty, day } = brief
-  const crewAt = inCard ? null : size.cols >= 2.5 ? "side" : size.rows >= 2 ? "below" : null
+  // No flight crew known yet: no panel (an empty one was a third of the tile saying "No crew yet").
+  const anyCrew = brief.crew.some((m) => !m.cabin)
+  const crewAt = inCard || !anyCrew ? null : size.cols >= 2.5 ? "side" : size.rows >= 2 ? "below" : null
   const count = duty.legs.length
   const [page, setPage] = useRememberedPage(`flight:${duty.atMs}`, legNow(brief), count)
+  // A WIDE tile (a desktop's full width) lays its legs side by side — each
+  // about a phone third and a half — rather than one leg to a page across
+  // twice a phone's width.
+  const room = size.cols - (crewAt === "side" ? 1.45 : 0)
+  const wide = !inCard && size.cols >= FACE_WIDE_COLS
+  const per = wide ? Math.max(1, Math.min(count, Math.floor(room / LEG_COLS))) : 1
   if (duty.atMs === null) {
     return (
       <>
@@ -370,27 +420,31 @@ export function FlightFace({ brief, size, inCard = false }: { brief: FlightBrief
       </>
     )
   }
-  const crew = count ? (brief.legCrew[page] ?? brief.crew) : brief.crew
+  // The crew of the leg on show — of the first leg on show, side by side.
+  const first = per > 1 ? Math.floor(page / per) * per : page
+  const crew = count ? (brief.legCrew[first] ?? brief.crew) : brief.crew
   const { legs, route } = chainOf(brief)
   const stops = legs.length ? [legs[0].from, ...legs.map((l) => l.to)] : (route ?? "").split("-").filter(Boolean)
+  const shownTo = Math.min(count, first + per)
+  const legLabel = per > 1 ? (count > per ? `Legs ${first + 1}–${shownTo}/${count}` : null) : `Leg ${page + 1}/${count}`
   return (
     <div className={cn("flex min-w-0 flex-1", crewAt === "below" && "flex-col")}>
       {/* A container: on a phone the crew panel leaves the route ~190px, and a
           three-stop route at 21px does not fit it (measured at 360). */}
       <div className={cn("@container flex min-w-0 flex-col", crewAt !== "below" && "flex-1")}>
-        <WidgetLabel right={count > 1 ? <span className="text-[10px] font-semibold tabular-nums text-muted-foreground" data-morph="fl-legn">Leg {page + 1}/{count}</span> : undefined}>
+        <WidgetLabel right={count > 1 && legLabel ? <span className="text-[10px] font-semibold tabular-nums text-muted-foreground" data-morph="fl-legn">{legLabel}</span> : undefined}>
           <span suppressHydrationWarning>
             {dutyWord(brief)} · {day(duty.atMs)}
           </span>
         </WidgetLabel>
-        <DayBar brief={brief} focus={count > 1 ? page : null} />
+        <DayBar brief={brief} focus={count > 1 && per === 1 ? page : null} />
         {count === 0 ? (
           <p className="truncate text-[17px] font-bold leading-tight tracking-tight text-foreground @[15rem]:text-[21px]" data-morph="fl-route">
             {stops.join(stops.length > 2 ? "–" : " – ") || "—"}
           </p>
         ) : (
-          <Pager count={count} page={page} onPage={setPage} morph="fl">
-            {(i) => <LegPage brief={brief} i={i} />}
+          <Pager count={count} page={page} onPage={setPage} morph="fl" perPage={per} fill={fill} dotTone={(i) => (legLate(brief, i) ? "caution" : undefined)}>
+            {(i) => <LegPage brief={brief} i={i} more={fill} />}
           </Pager>
         )}
       </div>
@@ -398,6 +452,9 @@ export function FlightFace({ brief, size, inCard = false }: { brief: FlightBrief
     </div>
   )
 }
+
+/** The width one leg takes side by side on a wide tile, in thirds of a phone's row. */
+const LEG_COLS = 1.5
 
 /** A row of a card's table: what it is on the left, the value on the right. */
 export interface CardRow {
@@ -455,8 +512,13 @@ export function plannedBlock(out?: string, inn?: string): string {
  * each of the tile's lines flying into its row. Nothing the number line says
  * is said again.
  */
-function CardLeg({ brief, i, openFlight }: { brief: FlightBrief; i: number; openFlight: (id: string) => void }) {
-  const { duty, clock, code } = brief
+/**
+ * Leg `i`'s rows, in the order it runs — the flights card's table, and what a
+ * TALL wide tile lists under the leg (`TileRows`) once the face's own lines
+ * (the rows tagged `morph`) are left out.
+ */
+export function legRows(brief: FlightBrief, i: number): CardRow[] {
+  const { duty, clock } = brief
   const f = duty.legs[i]
   const t = duty.times[i]
   const sep = brief.display?.clockSeparator
@@ -464,7 +526,7 @@ function CardLeg({ brief, i, openFlight }: { brief: FlightBrief; i: number; open
   const g = duty.lookups?.gates[f.id]
   const gates = g?.status === "done" ? g.gates : null
   const line = legLine(brief, i)
-  const reg = f.aircraftReg || (i === legNow(brief) ? duty.lookups?.inboundRegistration : "") || gates?.flight.registration || ""
+  const ac = legAircraft(brief, i)
   const e = duty.estimate?.legs[i]
   const rows: CardRow[] = []
   // The aeroplane coming in, on the leg the pilot takes it over for.
@@ -483,11 +545,14 @@ function CardLeg({ brief, i, openFlight }: { brief: FlightBrief; i: number; open
   }
   rows.push({
     label: "Aircraft",
-    value: reg ? `${reg}${f.aircraftType ? ` ${f.aircraftType}` : ""}` : "TBA",
+    value: ac.reg ? `${ac.reg}${ac.type ? ` ${ac.type}` : ""}` : "TBA",
+    sub: ac.expected ? `Expected · after ${ac.from || "the leg before"}, not yet confirmed` : undefined,
     morph: `fl-ac-${i}`,
   })
-  const terminalStand = (x: { terminal: string; stand?: string } | undefined) =>
-    [x?.terminal && `Terminal ${x.terminal.replace(/^T/i, "")}`, x?.stand && `Stand ${x.stand}`].filter(Boolean).join(" · ") || undefined
+  // A contact stand named like its gate is the gate said twice.
+  const terminalStand = (x: { gate: string; terminal: string; stand?: string } | undefined) =>
+    // A terminal of "0" is no terminal (a source's blank), never "Terminal 0".
+    [knownTerminal(x?.terminal) && `Terminal ${knownTerminal(x?.terminal)}`, x?.stand && x.stand !== x.gate && `Stand ${x.stand}`].filter(Boolean).join(" · ") || undefined
   if (gates?.departure.gate || gates?.departure.stand) {
     rows.push({
       label: "Departure",
@@ -499,27 +564,39 @@ function CardLeg({ brief, i, openFlight }: { brief: FlightBrief; i: number; open
   // The times where they are NOT what the number line says: what flew
   // against the schedule, or the live estimate against it.
   const sched = (hhmm?: string) => (hhmm && /^\d{1,2}:\d{2}$/.test(hhmm) ? `${formatClockDisplay(hhmm, sep)}Z` : "")
-  const versus = (ms: number | null, hhmm: string | undefined, after?: string) => {
+  // Against the schedule, one way everywhere: "+0:33", "−0:05", "On time".
+  const minutesOff = (ms: number | null, hhmm: string | undefined, after?: string) => {
     const s0 = hhmm && /^\d{1,2}:\d{2}$/.test(hhmm) ? flightInstantMs(f.date, hhmm, after ?? null) : null
-    if (ms === null || s0 === null) return ""
-    const d = Math.round((ms - s0) / 60_000)
-    return Math.abs(d) < 5 ? "On time" : d > 0 ? `${formatDutyClock(d)} late` : `${formatDutyClock(-d)} early`
+    return ms === null || s0 === null ? null : Math.round((ms - s0) / 60_000)
+  }
+  const versus = (ms: number | null, hhmm: string | undefined, after?: string) => {
+    const d = minutesOff(ms, hhmm, after)
+    if (d === null) return ""
+    return Math.abs(d) < 5 ? "On time" : d > 0 ? `+${formatDutyClock(d)}` : `−${formatDutyClock(-d)}`
+  }
+  // Amber only for its OWN lateness (a delay said from 10 minutes).
+  const lateTone = (ms: number | null, hhmm: string | undefined, after?: string) => {
+    const d = minutesOff(ms, hhmm, after)
+    return d !== null && d >= DELAY_SAID_MIN ? ("caution" as const) : undefined
   }
   if (f.outTime) {
     // The number line says what flew; the schedule it flew against, once.
     const range = sched(f.scheduledOut) && sched(f.scheduledIn) ? `${sched(f.scheduledOut).replace(/Z$/, "")}–${sched(f.scheduledIn)}` : ""
     const sub = [
-      versus(t?.departMs ?? null, f.scheduledOut) && `OUT ${versus(t?.departMs ?? null, f.scheduledOut).toLowerCase()}`,
-      f.inTime && versus(t?.arriveMs ?? null, f.scheduledIn, f.scheduledOut) && `IN ${versus(t?.arriveMs ?? null, f.scheduledIn, f.scheduledOut).toLowerCase()}`,
+      versus(t?.departMs ?? null, f.scheduledOut) && `OUT ${versus(t?.departMs ?? null, f.scheduledOut)}`,
+      f.inTime && versus(t?.arriveMs ?? null, f.scheduledIn, f.scheduledOut) && `IN ${versus(t?.arriveMs ?? null, f.scheduledIn, f.scheduledOut)}`,
     ].filter(Boolean).join(" · ")
     if (range) rows.push({ label: "Scheduled", value: range, sub: sub || undefined })
     // Off blocks, not yet on: where it is now expected in.
-    if (!f.inTime && e && e.inMs !== null) rows.push({ label: "Est. IN", value: clock(e.inMs), sub: versus(e.inMs, f.scheduledIn, f.scheduledOut) || undefined })
-  } else if (e && e.outKind !== "scheduled" && e.outMs !== null) {
-    // Not yet off: the number line is the schedule; the live estimate against it.
-    const late = legDelay(brief, i) !== null
-    rows.push({ label: "Est. OUT", value: clock(e.outMs), sub: versus(e.outMs, f.scheduledOut) || undefined, tone: late ? "caution" : undefined })
-    if (e.inMs !== null) rows.push({ label: "Est. IN", value: clock(e.inMs), sub: versus(e.inMs, f.scheduledIn, f.scheduledOut) || undefined, tone: late ? "caution" : undefined })
+    if (!f.inTime && e && e.inMs !== null)
+      rows.push({ label: "Est. IN", value: clock(e.inMs), sub: versus(e.inMs, f.scheduledIn, f.scheduledOut) || undefined, tone: lateTone(e.inMs, f.scheduledIn, f.scheduledOut) })
+  } else if (e && (e.outKind !== "scheduled" || e.inKind !== "scheduled")) {
+    // Not yet off: the number line is the schedule; the live estimate against it
+    // (a source may give the arrival and not the departure).
+    if (e.outKind !== "scheduled" && e.outMs !== null)
+      rows.push({ label: "Est. OUT", value: clock(e.outMs), sub: versus(e.outMs, f.scheduledOut) || undefined, tone: lateTone(e.outMs, f.scheduledOut) })
+    if (e.inMs !== null)
+      rows.push({ label: "Est. IN", value: clock(e.inMs), sub: versus(e.inMs, f.scheduledIn, f.scheduledOut) || undefined, tone: lateTone(e.inMs, f.scheduledIn, f.scheduledOut) })
   }
   if (gates?.arrival.gate || gates?.arrival.stand) {
     rows.push({
@@ -542,6 +619,15 @@ function CardLeg({ brief, i, openFlight }: { brief: FlightBrief; i: number; open
       morph: `fl-next-${i}`,
     })
   }
+  return rows
+}
+
+function CardLeg({ brief, i, openFlight }: { brief: FlightBrief; i: number; openFlight: (id: string) => void }) {
+  const { duty, clock, code } = brief
+  const f = duty.legs[i]
+  const t = duty.times[i]
+  const flown = !!f.inTime
+  const rows = legRows(brief, i)
   return (
     <>
       <p className="truncate text-[21px] font-bold leading-tight tracking-tight text-foreground" data-morph={`fl-route-${i}`}>
@@ -555,13 +641,15 @@ function CardLeg({ brief, i, openFlight }: { brief: FlightBrief; i: number; open
       <div className="mt-1.5">
         <CardTable rows={rows} />
       </div>
+      {/* An ACTION, not a row of the table (the owner: it read as another
+          field): a capsule on the control surface. */}
       <button
         type="button"
         onClick={() => openFlight(f.id)}
-        className="-mx-1.5 mt-0.5 flex w-[calc(100%+0.75rem)] items-center gap-2.5 rounded-lg px-1.5 py-2 text-left transition-colors active:bg-muted/60"
+        className="control-surface mt-2.5 flex h-10 w-full items-center justify-center gap-2 rounded-full px-4 text-[14px] font-medium text-foreground transition-colors"
       >
-        <Plane className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-        <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-foreground">Open {f.flightNumber || "Flight"}</span>
+        <Plane className="h-4 w-4 shrink-0" aria-hidden />
+        <span className="truncate">Open {f.flightNumber || "Flight"}</span>
         <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
       </button>
     </>
@@ -590,7 +678,7 @@ export function FlightCardLegs({ brief, openFlight }: { brief: FlightBrief; open
           {(chainOf(brief).route ?? "").split("-").filter(Boolean).join(" – ") || "—"}
         </p>
       ) : (
-        <Pager count={count} page={page} onPage={setPage} morph="fl">
+        <Pager count={count} page={page} onPage={setPage} morph="fl" dotTone={(i) => (legLate(brief, i) ? "caution" : undefined)}>
           {(i) => <CardLeg brief={brief} i={i} openFlight={openFlight} />}
         </Pager>
       )}
@@ -718,20 +806,27 @@ const AHEAD_SHORT: Record<LookAhead, string> = { "90d": "90d", "6m": "6m", "1y":
  * closest ringed — then the closest by name (more of them in a tile two rows
  * tall). The tally counts what is flagged past the rows named.
  */
-export function CurrencyFace({ brief, size }: { brief: FlightBrief; size: TileSize }) {
+export function CurrencyFace({ brief, size, fill = false }: { brief: FlightBrief; size: TileSize; fill?: boolean }) {
   const all = currenciesBySoonest(currencyRows(brief))
   const ahead = lookAheadFor(size.cols)
   // Under two thirds of the row it names the closest only; a THIRD puts the
   // figure under the name (half the row has room for both on one line).
   const narrow = size.cols < 2
   const third = size.cols < 1.5
+  // WIDE (a desktop's full width): the year of dots and the list side by
+  // side, the list in the dots' height — more names, not bigger dots.
+  const wide = size.cols >= FACE_WIDE_COLS
+  // The rows sharing the page's height (the wide grid), the list is as long
+  // as the tile holds — beside the dots when wide, under them when not.
+  const fitList = fill || wide
   const lines = size.rows >= 2 ? (narrow ? 3 : 6) : narrow ? 1 : 2
   const marks = all.filter((r) => r.ymd !== null).map((r) => ({ key: r.key, name: r.name, state: r.state, ymd: r.ymd! }))
   return (
     <>
       {/* A third of the row has no room for the tally beside the label: its
           edge and the dots' colours carry what is flagged. */}
-      <WidgetLabel title right={third ? undefined : <MoreFlagged rows={all.slice(lines)} />}>
+      {/* Wide, the list shows what its height holds, the flagged first: no tally. */}
+      <WidgetLabel title right={third || fitList ? undefined : <MoreFlagged rows={all.slice(lines)} />}>
         Currency
         {/* Forecast to a later duty, the day it is judged on; else how far the dots look. */}
         {!third && (
@@ -744,7 +839,30 @@ export function CurrencyFace({ brief, size }: { brief: FlightBrief; size: TileSi
       {all.length === 0 ? (
         <p className="text-xs leading-snug text-muted-foreground">None tracked</p>
       ) : (
-        <>
+        fitList ? (
+          // The year of dots and the list — beside them when wide, under
+          // them when not — the list showing as many as the tile's height
+          // holds (`TileRows`).
+          <div className={cn("flex min-h-0 min-w-0 flex-1", wide ? "gap-4" : "flex-col")}>
+            <div data-morph="cur-dots" className={cn("min-w-0", wide && "flex-[3]")}>
+              <CurrencyDots today={localDayKey(brief.currencyAsOfMs)} ahead={ahead} marks={marks} closest={marks[0]?.key ?? null} />
+            </div>
+            <div className={cn("flex min-h-0 min-w-0 flex-col", wide ? "-mt-2 flex-[2]" : "flex-1")}>
+              <TileRows
+                names
+                rows={all.map((r) => ({
+                  key: r.key,
+                  label: r.name,
+                  value: r.figure.split(" · ")[0],
+                  tone: r.state === "fail" ? "fail" : r.state === "ok" ? undefined : "caution",
+                  labelMorph: `cur-name-${r.key}`,
+                  valueMorph: `cur-fig-${r.key}`,
+                }))}
+              />
+            </div>
+          </div>
+        ) : (
+        <div>
           <div data-morph="cur-dots">
             <CurrencyDots today={localDayKey(brief.currencyAsOfMs)} ahead={ahead} marks={marks} closest={marks[0]?.key ?? null} className="mb-1" />
           </div>
@@ -766,7 +884,8 @@ export function CurrencyFace({ brief, size }: { brief: FlightBrief; size: TileSi
               )
             })}
           </ul>
-        </>
+        </div>
+        )
       )}
     </>
   )
@@ -794,22 +913,40 @@ export function marginTone(minutes: number): string {
 
 /**
  * The four rolling limits as bars with the hours LEFT (the owner, Nov 2026:
- * the limits tile tracks the four limits; the FDP is the duty tile's).
+ * the limits tile tracks the four limits; the FDP is the duty tile's) — the
+ * TIGHTEST FIRST (the least headroom for its size leads; the owner: "show
+ * whichever window has the lowest remaining buffer"), the basis beside the
+ * label ("to 23 Nov": logged duties to the last one off), and in plain words
+ * where one is near or at its limit.
  */
-export function LimitsFace({ brief, size }: { brief: FlightBrief; size?: TileSize }) {
-  const limits = limitsOf(brief)
+export function LimitsFace({ brief, size, fill = false }: { brief: FlightBrief; size?: TileSize; fill?: boolean }) {
+  const limits = [...limitsOf(brief)].sort((a, b) => (b.progress ?? 0) - (a.progress ?? 0))
   // A third of the row: the figure alone ("81h").
   const narrow = (size?.cols ?? 3) < 2
+  // WIDE: two columns, each with what is used against its limit.
+  const wide = (size?.cols ?? 3) >= FACE_WIDE_COLS
+  const last = brief.status.duty.lastDuty?.debriefMs ?? null
   return (
     <>
-      <WidgetLabel title>Limits</WidgetLabel>
+      <WidgetLabel title>
+        Limits
+        {!narrow && last !== null && (
+          <span className="font-medium normal-case tracking-normal" suppressHydrationWarning>
+            {" · to "}
+            {shortDay(new Date(last).toISOString().slice(0, 10))}
+          </span>
+        )}
+      </WidgetLabel>
       {/* The rows share the tile's height, so a tall tile has no empty foot. */}
-      <ul className="flex min-h-0 flex-1 flex-col justify-around gap-1.5">
+      {/* Filling the page's height, the rows under it take the room (`TileRows`). */}
+      <ul className={cn(wide ? "grid grid-cols-2 gap-x-5 gap-y-2" : fill ? "flex flex-col gap-2" : "flex min-h-0 flex-1 flex-col justify-around gap-1.5")}>
         {limits.map((r) => {
           // What is LEFT is the question ("how much more"); the bar shows what is used.
           const left = (r.detail?.find((d) => d.label === "Remaining")?.value ?? "").replace(/h$/, "")
           const fraction = Math.min(1, Math.max(0, r.progress ?? 0))
           const fill = r.state === "ok" ? "bg-muted-foreground" : REQ_TONE[r.state].fill
+          // Dark cockpit: "left" while there is room; plain words when there is not.
+          const word = r.state === "fail" ? " at limit" : r.state === "caution" ? " near limit" : " left"
           return (
             <li key={r.id} className="text-[11px] leading-none">
               <span className="flex items-baseline justify-between gap-1">
@@ -818,7 +955,8 @@ export function LimitsFace({ brief, size }: { brief: FlightBrief; size?: TileSiz
                 </span>
                 <span className="shrink-0 tabular-nums" data-morph={`lim-left-${r.id}`}>
                   <span className={cn("font-semibold", r.state === "ok" ? "text-foreground" : REQ_TONE[r.state].icon)}>{left}h</span>
-                  {!narrow && <span className="text-muted-foreground"> left</span>}
+                  {!narrow && <span className={r.state === "ok" ? "text-muted-foreground" : REQ_TONE[r.state].icon}>{word}</span>}
+                  {wide && r.value && <span className="text-muted-foreground"> · {r.value}</span>}
                 </span>
               </span>
               <span className="mt-1 block h-1 overflow-hidden rounded-full bg-muted" data-morph={`lim-bar-${r.id}`} data-morph-stretch>

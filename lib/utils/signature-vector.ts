@@ -12,7 +12,6 @@
  */
 
 import type {
-  SignaturePoint,
   SignatureStroke,
   SignatureBounds,
   FlightSignature,

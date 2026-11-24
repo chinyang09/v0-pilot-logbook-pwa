@@ -1214,7 +1214,6 @@ export function reconcileRoster(
     sectors: rawSectors,
     existingFlights,
     csvDateRange,
-    reportGeneratedAt,
     useLegacyUpdateConflict = true,
     currentUser,
   } = input;

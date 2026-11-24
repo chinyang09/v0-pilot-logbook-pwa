@@ -22,7 +22,6 @@
  * report to legal; an FDP past its maximum is red past the mark.
  */
 
-import * as React from "react"
 import { cn } from "@/lib/utils"
 import { dutyWindow, formatDutyClock, formatRestSpan, restMinimumText } from "@/lib/utils/dashboard/duty-status"
 import { fdpMinutesOf } from "@/lib/utils/roster/fdp-calculator"
@@ -77,6 +76,41 @@ export function dutyClockView(brief: FlightBrief): DutyClockView | null {
   })
   const lastArrive = legs.reduce<number | null>((m, l) => (l.arriveMs !== null && (m === null || l.arriveMs > m) ? l.arriveMs : m), null)
   const stateTone = status.dutyState
+
+  /* A STANDBY, in progress or ahead: its window — no FDP (para 14 never
+     applied to it), the rest before it where it has one. */
+  if (duty.standby) {
+    const sb = duty.standby
+    const len = Math.round((sb.endMs - sb.startMs) / MIN)
+    const r = duty.period?.restBefore ?? null
+    const restStart = r ? sb.startMs - r.restMinutes * MIN : null
+    const short = !sb.current && r ? !r.compliant : false
+    const left = Math.max(0, Math.round((sb.endMs - now) / MIN))
+    return {
+      state: sb.current ? `On ${sb.code}` : duty.index === 0 ? `Next ${sb.code}` : `Later ${sb.code}`,
+      stateTone: short ? "action_required" : "current",
+      headline: short
+        ? `Rest short by ${formatDutyClock(r!.requiredRestMinutes - r!.restMinutes)}`
+        : sb.current
+          ? "Not called"
+          : `From ${clock(sb.startMs)} ${shortDayOf(day(sb.startMs))}`,
+      input: {
+        nowMs: now,
+        rest: !sb.current && r && restStart !== null ? { startMs: restStart, legalMs: restStart + r.requiredRestMinutes * MIN } : null,
+        // In progress, the part already stood is filled (to now).
+        duty: { reportMs: sb.startMs, fdpStartMs: sb.startMs, fdpEndMs: sb.current ? Math.min(now, sb.endMs) : sb.startMs, endMs: sb.endMs, maxFdpMinutes: 0 },
+        legs: [],
+      },
+      slots: [
+        { value: clock(sb.startMs), label: `From ${shortDayOf(day(sb.startMs))}` },
+        sb.current
+          ? { value: formatDutyClock(left), label: "Left", live: true }
+          : { value: formatDutyClock(len), label: "Length" },
+        { value: clock(sb.endMs), label: "Until" },
+      ],
+      tone: short ? "fail" : null,
+    }
+  }
 
   /* A later duty, chosen in the header. */
   if (duty.index > 0 && duty.period) {

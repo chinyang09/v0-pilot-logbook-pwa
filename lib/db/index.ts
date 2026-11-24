@@ -142,7 +142,6 @@ export {
 
 export {
   getBriefing,
-  getAllBriefings,
   saveBriefing,
   deleteBriefing,
   getNotamRegister,

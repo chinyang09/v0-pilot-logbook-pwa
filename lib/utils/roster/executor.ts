@@ -34,7 +34,6 @@ import {
   getAirportByIata,
   getAirportByIcao,
   getAirportTimeInfo,
-  getCurrentUserPersonnel,
   getLoggingProfile,
   getUserPreferences,
   bulkUpsertScheduleEntries,

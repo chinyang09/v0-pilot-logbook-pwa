@@ -1,7 +1,6 @@
 import { useCallback } from "react"
 import {
   addFlight,
-  getCurrentUserPersonnel,
   getLoggingProfile,
   getUserPreferences,
   isLiveFlight,

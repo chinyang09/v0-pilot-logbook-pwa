@@ -54,13 +54,26 @@ export function useRememberedPage(key: string, start: number, count: number): [n
  * move is left to the page. Controlled: `page` and `onPage`.
  */
 export function Pager({
-  count,
-  page,
-  onPage,
+  count: items,
+  page: itemPage,
+  onPage: onItemPage,
   children,
   fill = false,
   morph,
+  perPage = 1,
+  dotTone,
 }: {
+  /**
+   * An item whose dot is AMBER — the reason a tile's edge is amber, on a page
+   * not on show (the owner: "make the amber border explain why"). In items.
+   */
+  dotTone?: (item: number) => "caution" | undefined
+  /**
+   * Items side by side on a page (a WIDE tile — every leg of a short duty,
+   * two airports): `count`, `page` and `onPage` are then in ITEMS, the page
+   * on show the one holding `page`, and a swipe moves a whole page.
+   */
+  perPage?: number
   /** The shared morph's key for the dots — they fly between the tile and its card. */
   morph?: string
   count: number
@@ -70,6 +83,26 @@ export function Pager({
   /** Fill the tile: each page its full height, the dots at its foot. */
   fill?: boolean
 }) {
+  const per = Math.max(1, Math.floor(perPage))
+  const count = Math.ceil(items / per)
+  const page = Math.max(0, Math.min(count - 1, Math.floor(itemPage / per)))
+  const onPage = (g: number) => onItemPage(Math.min(items - 1, g * per))
+  const pageOf = (g: number) =>
+    per === 1 ? (
+      children(g)
+    ) : (
+      <div className={cn("flex min-w-0 gap-3", fill ? "min-h-0 flex-1" : "items-start")}>
+        {Array.from({ length: Math.min(per, items - g * per) }, (_, j) => (
+          <div key={j} className={cn("flex min-w-0 flex-1 flex-col", j > 0 && "border-l border-border/60 pl-3")}>
+            {children(g * per + j)}
+          </div>
+        ))}
+        {/* The last page keeps its items at the others' width. */}
+        {Array.from({ length: Math.max(0, per - (items - g * per)) }, (_, j) => (
+          <div key={`pad-${j}`} aria-hidden className="min-w-0 flex-1" />
+        ))}
+      </div>
+    )
   const track = React.useRef<HTMLDivElement>(null)
   const drag = React.useRef<{ x0: number; y0: number; dx: number; w: number; active: boolean } | null>(null)
   const swiped = React.useRef(false)
@@ -98,7 +131,7 @@ export function Pager({
     ro.observe(el)
     return () => ro.disconnect()
   }, [fill, count, page])
-  if (count < 2) return fill ? <div className="flex min-h-0 flex-1 flex-col">{children(0)}</div> : <>{children(0)}</>
+  if (count < 2) return fill ? <div className="flex min-h-0 flex-1 flex-col">{pageOf(0)}</div> : <>{pageOf(0)}</>
   const settle = (to: number) => {
     const el = track.current
     if (el) {
@@ -171,7 +204,7 @@ export function Pager({
         >
           {Array.from({ length: count }, (_, i) => (
             <div key={i} className={cn("w-full shrink-0", fill && "flex flex-col")} aria-hidden={i !== page || undefined}>
-              {children(i)}
+              {pageOf(i)}
             </div>
           ))}
         </div>
@@ -181,9 +214,18 @@ export function Pager({
             them at the tile's width and at the card's, and its copies
             crossfaded between two places. */}
         <span className="flex gap-1" data-morph={morph ? `${morph}-dots` : undefined}>
-          {Array.from({ length: count }, (_, i) => (
-            <span key={i} className={cn("h-1.5 w-1.5 rounded-full transition-colors", i === page ? "bg-foreground" : "bg-foreground/25")} />
-          ))}
+          {Array.from({ length: count }, (_, i) => {
+            const amber = dotTone && Array.from({ length: Math.min(per, items - i * per) }, (_, j) => dotTone(i * per + j)).some(Boolean)
+            return (
+              <span
+                key={i}
+                className={cn(
+                  "h-1.5 w-1.5 rounded-full transition-colors",
+                  amber ? (i === page ? "bg-status-warning" : "bg-status-warning/60") : i === page ? "bg-foreground" : "bg-foreground/25",
+                )}
+              />
+            )
+          })}
         </span>
       </div>
     </div>
