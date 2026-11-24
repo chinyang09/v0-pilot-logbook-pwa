@@ -724,21 +724,18 @@ function OpenFlight({ brief, i, openFlight }: { brief: FlightBrief; i: number; o
 
 /**
  * The flight & duty CARD above its crew: the duty on its day and its
- * timeline, then a leg a page — swiped as the tile is — and under the pages,
- * not swiped, the duty's own table (`duty`, the Duty & FDP rows) and the leg
- * on show's Open, the dots under it (the owner).
+ * timeline, then a leg a page — swiped as the tile is — the leg on show's
+ * Open under the pages and the dots under it, then the duty's own table
+ * (`duty`, the Duty & FDP rows), apart from the legs (the owner).
  */
 export function FlightCardLegs({ brief, openFlight, duty: dutyNode }: { brief: FlightBrief; openFlight: (id: string) => void; duty?: React.ReactNode }) {
   const { duty, day } = brief
   const count = duty.legs.length
   const [page, setPage] = useRememberedPage(`flight:${duty.atMs}`, legNow(brief), count)
   if (duty.atMs === null) return <p className="py-1 text-[13px] text-muted-foreground">Nothing rostered</p>
-  const below = (
-    <>
-      {dutyNode}
-      {count > 0 && <OpenFlight brief={brief} i={page} openFlight={openFlight} />}
-    </>
-  )
+  // The leg's Open goes with the LEG, its dots under it (not swiped); the
+  // duty's table follows the pager, apart from it (the owner, Nov 2026: Open
+  // "should not be in duty & FDP area").
   return (
     <div>
       <WidgetLabel right={count > 1 ? <span className="text-[10px] font-semibold tabular-nums text-muted-foreground" data-morph="fl-legn">Leg {page + 1}/{count}</span> : undefined}>
@@ -752,13 +749,20 @@ export function FlightCardLegs({ brief, openFlight, duty: dutyNode }: { brief: F
           <p className="truncate text-[21px] font-bold leading-tight tracking-tight text-foreground" data-morph="fl-route">
             {(chainOf(brief).route ?? "").split("-").filter(Boolean).join(" – ") || "—"}
           </p>
-          {below}
         </>
       ) : (
-        <Pager count={count} page={page} onPage={setPage} morph="fl" dotTone={(i) => (legLate(brief, i) ? "caution" : undefined)} below={below}>
+        <Pager
+          count={count}
+          page={page}
+          onPage={setPage}
+          morph="fl"
+          dotTone={(i) => (legLate(brief, i) ? "caution" : undefined)}
+          below={<OpenFlight brief={brief} i={page} openFlight={openFlight} />}
+        >
           {(i) => <CardLeg brief={brief} i={i} />}
         </Pager>
       )}
+      {dutyNode}
     </div>
   )
 }

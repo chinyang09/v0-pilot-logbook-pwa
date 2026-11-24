@@ -181,7 +181,7 @@ function faceOf(id: WidgetId, brief: FlightBrief, size: TileSize, inCard = false
               <TileRows
                 rows={dutyRows(brief)
                   .filter((r) => r.slot === undefined)
-                  .map((r) => ({ key: r.label, label: r.label, value: r.value, tone: r.tone }))}
+                  .map((r) => ({ key: r.label, label: r.label, value: r.value, sub: r.sub, tone: r.tone }))}
               />
             ) : undefined
           }

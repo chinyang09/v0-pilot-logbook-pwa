@@ -20,7 +20,6 @@ import { cn } from "@/lib/utils"
 import { formatDay } from "@/lib/utils/date"
 import { REQ_TONE } from "./instruments"
 import { fdpMinutesOf } from "@/lib/utils/roster/fdp-calculator"
-import { PIC_FDP_DISCRETION_MIN } from "@/lib/utils/roster/regulation-definitions"
 import { SegmentedTabs } from "@/components/ui/segmented-tabs"
 import { byTightness, type LimitId } from "@/lib/utils/dashboard/limit-detail"
 import { CardTable, FlightCardLegs, type CardRow, crewKey, crewRole, currenciesBySoonest, currencyRows, legNow, limitsOf, marginText, shortDay, shortName } from "./faces"
@@ -214,6 +213,9 @@ interface DutyRow {
   tone?: "fail" | "caution"
   /** The face's figure this row's value is — it flies there from the tile (`slot-<n>-v`). */
   slot?: number
+  /** Several values on one row, each under a small helper ("Sch", "Max") —
+   *  the card draws these; `value` / `sub` say the same for a plain row. */
+  pairs?: { helper: string; value: string; slot?: number }[]
 }
 
 const MIN_MS = 60_000
@@ -222,41 +224,33 @@ const MIN_MS = 60_000
  * The duty card's rows, in the order the day RUNS (the owner, Nov 2026: "2
  * columns, left are headers, right are values. In chronological order"):
  * the duty rested from, the rest before the report (FORECAST to it, not as of
- * now), the report, the scheduled IN that ends the FDP and the FDP itself,
- * then where the duty is actually heading — the ESTIMATED IN, from what the
- * logbook recorded and the sources say now — against the latest IN its
- * maximum allows, and past that the commander's discretion (para 13: up to
- * 3:00, on the day, reported) with the IN it reaches. The face's three
- * figures are rows here, and fly into them.
+ * now), the report, the FDP, then IN — scheduled and the latest the maximum
+ * allows, on one row — and where the duty is actually heading, the ESTIMATED
+ * IN, from what the logbook recorded and the sources say now. The face's
+ * three figures are rows here, and fly into them.
  */
 export function dutyRows(brief: FlightBrief): DutyRow[] {
   const { status, duty, clock, day } = brief
   const { phase, active, next, lastDuty, rest } = status.duty
   const lastArrive = duty.times.reduce<number | null>((m, t) => (t.arriveMs !== null && (m === null || t.arriveMs > m) ? t.arriveMs : m), null)
   const span = (min: number) => formatDutyClock(Math.max(0, Math.round(min)))
-  /** Scheduled IN, then the FDP row the caller hands in. */
-  const head = (schedInMs: number, fdp: DutyRow[]): DutyRow[] => [{ label: "Scheduled IN", value: clock(schedInMs) }, ...fdp]
-  /** Estimated IN → latest IN → discretion → its IN. */
-  const tail = (fdpStartMs: number, schedInMs: number, maxMin: number, latestSlot?: number): DutyRow[] => {
+  /**
+   * The FDP row(s) the caller hands in, then ONE "IN" row — the scheduled IN
+   * and the latest IN the maximum allows, side by side under "Sch" and "Max"
+   * (the owner, Nov 2026: the separate Scheduled IN / Latest IN rows, and the
+   * commander's discretion rows under them, took too much room and attention
+   * for every day) — then the ESTIMATED IN against it.
+   */
+  const inRows = (fdp: DutyRow[], fdpStartMs: number, schedInMs: number, maxMin: number, latestSlot?: number): DutyRow[] => {
     const latest = maxMin > 0 ? fdpStartMs + maxMin * MIN_MS : null
-    const rows: DutyRow[] = []
+    const inRow: DutyRow = {
+      label: "IN",
+      value: clock(schedInMs),
+      sub: latest === null ? "Scheduled" : `Scheduled · max ${clock(latest)}`,
+      pairs: [{ helper: "Sch", value: clock(schedInMs) }, ...(latest === null ? [] : [{ helper: "Max", value: clock(latest), slot: latestSlot }])],
+    }
     const est = estimateRow(brief, schedInMs, latest)
-    if (est) rows.push(est)
-    if (latest === null) return rows
-    const estMs = duty.estimate?.ms ?? schedInMs
-    const room = (latest - estMs) / MIN_MS
-    rows.push({ label: "Latest IN", value: clock(latest), sub: "FDP maximum", slot: latestSlot })
-    // Past it, only the commander's discretion — on the day, for the
-    // unforeseen, and the company's approval asked (the owner: "flag to
-    // request for approval as per fifth schedule").
-    rows.push({
-      label: "Further Delay",
-      value: `+${span(PIC_FDP_DISCRETION_MIN)} max`,
-      sub: "Request approval · para 13",
-      tone: room < 0 ? "fail" : room < 60 ? "caution" : undefined,
-    })
-    rows.push({ label: "Waiver Max IN", value: clock(latest + PIC_FDP_DISCRETION_MIN * MIN_MS), sub: "With PIC discretion" })
-    return rows
+    return [...fdp, inRow, ...(est ? [est] : [])]
   }
   const fdpRow = (planned: number, max: number, slot?: number): DutyRow => ({
     label: "FDP",
@@ -305,8 +299,7 @@ export function dutyRows(brief: FlightBrief): DutyRow[] {
         ? [{ label: "Rest", value: formatRestSpan(r.restMinutes), sub: `Min ${formatDutyClock(r.requiredRestMinutes)}`, tone: r.compliant ? undefined : ("fail" as const), slot: 0 }]
         : []),
       { label: "Report", value: clock(w.startMs), sub: day(w.startMs), slot: 1 },
-      ...head(schedIn, [fdpRow(planned, dp.maxFdpMinutes, 2)]),
-      ...tail(w.startMs, schedIn, dp.maxFdpMinutes),
+      ...inRows([fdpRow(planned, dp.maxFdpMinutes, 2)], w.startMs, schedIn, dp.maxFdpMinutes),
     ]
   }
 
@@ -318,11 +311,16 @@ export function dutyRows(brief: FlightBrief): DutyRow[] {
     const schedIn = lastArrive ?? active.endMs
     return [
       { label: "Report", value: clock(active.startMs), sub: day(active.startMs) },
-      ...head(schedIn, [
-        { label: "FDP", value: `${formatDutyClock(active.fdpElapsedMinutes)} / ${formatDutyClock(active.maxFdpMinutes)}`, sub: "So far / max", tone: active.exceeded ? "fail" : undefined, slot: 1 },
-        { label: active.exceeded ? "FDP Over" : "FDP Left", value: span(Math.abs(left)), tone: active.exceeded ? "fail" : undefined, slot: 0 },
-      ]),
-      ...tail(fdpOpen, schedIn, active.maxFdpMinutes, 2),
+      ...inRows(
+        [
+          { label: "FDP", value: `${formatDutyClock(active.fdpElapsedMinutes)} / ${formatDutyClock(active.maxFdpMinutes)}`, sub: "So far / max", tone: active.exceeded ? "fail" : undefined, slot: 1 },
+          { label: active.exceeded ? "FDP Over" : "FDP Left", value: span(Math.abs(left)), tone: active.exceeded ? "fail" : undefined, slot: 0 },
+        ],
+        fdpOpen,
+        schedIn,
+        active.maxFdpMinutes,
+        2,
+      ),
     ]
   }
 
@@ -341,7 +339,7 @@ export function dutyRows(brief: FlightBrief): DutyRow[] {
       },
       { label: "Report", value: clock(next.reportMs), sub: day(next.reportMs), slot: 1 },
       ...(next.plannedFdpMinutes > 0
-        ? [...head(schedIn, [fdpRow(next.plannedFdpMinutes, next.maxFdpMinutes, 2)]), ...tail(next.reportMs, schedIn, next.maxFdpMinutes)]
+        ? inRows([fdpRow(next.plannedFdpMinutes, next.maxFdpMinutes, 2)], next.reportMs, schedIn, next.maxFdpMinutes)
         : [fdpRow(0, next.maxFdpMinutes, 2)]),
     ]
   }
@@ -389,7 +387,26 @@ function DutyBody({ brief }: { brief: FlightBrief }) {
   const rows = dutyRows(brief)
   return (
     <CardTable
-      rows={rows.map((r) => ({ label: r.label, value: r.value, sub: r.sub, tone: r.tone, morph: r.slot !== undefined ? `slot-${r.slot}-v` : undefined }))}
+      rows={rows.map((r) =>
+        r.pairs
+          ? {
+              label: r.label,
+              tone: r.tone,
+              value: (
+                <span className="inline-flex items-baseline gap-3">
+                  {r.pairs.map((p) => (
+                    <span key={p.helper} className="inline-flex items-baseline gap-1">
+                      <span className="text-[11px] font-normal text-muted-foreground">{p.helper}</span>
+                      <span suppressHydrationWarning data-morph={p.slot !== undefined ? `slot-${p.slot}-v` : undefined}>
+                        {p.value}
+                      </span>
+                    </span>
+                  ))}
+                </span>
+              ),
+            }
+          : { label: r.label, value: r.value, sub: r.sub, tone: r.tone, morph: r.slot !== undefined ? `slot-${r.slot}-v` : undefined },
+      )}
     />
   )
 }
@@ -397,9 +414,8 @@ function DutyBody({ brief }: { brief: FlightBrief }) {
 /**
  * The duty's own table in the flight & duty card (the owner, Nov 2026: the
  * FDP "beneath the leg rows"): its line in its tone, then `dutyRows` — rest,
- * report, scheduled IN, FDP / max, the ESTIMATED IN and how far it is from
- * the latest IN, the latest IN, the commander's discretion. The face's three
- * figures fly into their rows.
+ * report, FDP / max, IN (scheduled and max), the ESTIMATED IN and how far
+ * it is from the latest IN. The face's three figures fly into their rows.
  */
 function DutySection({ brief }: { brief: FlightBrief }) {
   const rows = dutyRows(brief)
@@ -429,9 +445,8 @@ function DutySection({ brief }: { brief: FlightBrief }) {
 
 /**
  * The flight & duty card: the duty on its day and its timeline, a leg a page
- * — the leg's own table — then, not swiped, the duty's table and the leg's
- * Open, the dots under them (`FlightCardLegs`); then the crew, flight and
- * cabin.
+ * — the leg's own table — its Open and the dots under it, then the duty's
+ * table (`FlightCardLegs`); then the crew, flight and cabin.
  */
 function FlightBody({ brief, ctx }: { brief: FlightBrief; ctx: WidgetCtx }) {
   return (
