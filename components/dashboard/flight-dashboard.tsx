@@ -44,6 +44,7 @@ import { dutyWindow } from "@/lib/utils/dashboard/duty-status"
 import { fdpMinutesOf } from "@/lib/utils/roster/fdp-calculator"
 import { delayMargin } from "@/lib/utils/dashboard/delay-margin"
 import { estimateDutyIn } from "@/lib/utils/dashboard/estimated-in"
+import { limitDetails } from "@/lib/utils/dashboard/limit-detail"
 import type { FlightTimesLive } from "@/lib/lookup/flight-suggest"
 import { crewOnDuty, destinationVisits, dutyStations, legTimes } from "@/lib/utils/dashboard/flight-brief"
 import { briefStations, stationWindows } from "@/lib/weather/brief"
@@ -191,6 +192,20 @@ function faceOf(id: WidgetId, brief: FlightBrief, size: TileSize, inCard = false
                 }))}
             />
           )}
+          {/* No duty to run late (a standby): when each limit frees up instead. */}
+          {wide && !brief.margin && brief.limits.some((l) => l.rollOff) && (
+            <TileRows
+              caption="Frees Up"
+              rows={brief.limits
+                .filter((l) => l.rollOff)
+                .map((l) => ({
+                  key: l.id,
+                  label: l.label,
+                  sub: formatDayAt(l.rollOff!.atMs, "UTC", { weekday: false, year: l.days > 60 }),
+                  value: `+${marginText(l.rollOff!.minutes)}`,
+                }))}
+            />
+          )}
         </>
       )
   }
@@ -233,7 +248,7 @@ export function FlightDashboard({ className }: { className?: string }) {
   const { flights, isLoading: flightsLoading } = useFlights()
   const { personnel } = usePersonnel()
   const { currencies } = useCurrencies()
-  const { allDutyPeriods } = useFDPData()
+  const { allDutyPeriods, pastDuties } = useFDPData()
   const dayKey = useDayKey()
   const recency = React.useMemo(
     () => ninetyDayRecency(flights),
@@ -243,14 +258,38 @@ export function FlightDashboard({ className }: { className?: string }) {
   const { status, isLoading: statusLoading } = usePilotStatus(recency, now, display)
 
   /* ── The duty the page is about ──────────────────────────────────────── */
+  // A flight duty in progress; else a STANDBY in progress or one that comes
+  // before the next flight duty (the owner, Nov 2026: on standby the flight
+  // tiles are not applicable — the page is about the standby); else the next
+  // flight duty.
   const onDuty = status.duty.phase === "on_duty" && status.duty.active !== null
-  const defaultAt = onDuty ? status.duty.active!.startMs : (status.duty.next?.reportMs ?? null)
-  const defaultId = onDuty ? status.duty.active!.id : (status.duty.next?.id ?? null)
+  const sbyNow = status.duty.standby && !status.duty.standby.activated ? status.duty.standby : null
+  const searchMinute = Math.floor(now / 60_000)
+  const nextReportMs = status.duty.next?.reportMs
+  const nextStandby = React.useMemo(() => {
+    if (onDuty || sbyNow) return null
+    const now = searchMinute * 60_000
+    const before = nextReportMs ?? Infinity
+    let best: { atMs: number; id: string } | null = null
+    for (const dp of allDutyPeriods) {
+      if (dp.dutyKind !== "standby") continue
+      const w = dutyWindow(dp)
+      if (!w || w.startMs <= now || w.startMs >= before) continue
+      if (!best || w.startMs < best.atMs) best = { atMs: w.startMs, id: dp.id }
+    }
+    return best
+  }, [allDutyPeriods, onDuty, sbyNow, nextReportMs, searchMinute])
+  const defaultAt = onDuty
+    ? status.duty.active!.startMs
+    : sbyNow
+      ? sbyNow.startMs
+      : (nextStandby?.atMs ?? status.duty.next?.reportMs ?? null)
+  const defaultId = onDuty ? status.duty.active!.id : sbyNow ? sbyNow.id : (nextStandby?.id ?? status.duty.next?.id ?? null)
   const choices: DutyChoice[] = React.useMemo(() => {
     const byId = defaultId ? allDutyPeriods.find((dp) => dp.id === defaultId) ?? null : null
     const after = defaultAt ?? now
     const later = allDutyPeriods
-      .filter(hasFlying)
+      .filter((dp) => hasFlying(dp) || dp.dutyKind === "standby")
       .map((dp) => ({ period: dp, atMs: dutyWindow(dp)?.startMs ?? NaN }))
       .filter((c) => Number.isFinite(c.atMs) && c.atMs > after + 60_000)
       .sort((a, b) => a.atMs - b.atMs)
@@ -263,12 +302,25 @@ export function FlightDashboard({ className }: { className?: string }) {
   const choice = choices[index] ?? null
   const current = onDuty && index === 0
   const dutyAtMs = choice?.atMs ?? null
+  // The chosen duty is a standby: no flights, no airports — its window only.
+  const standby = React.useMemo(() => {
+    const dp = choice?.period
+    if (!dp || dp.dutyKind !== "standby") return null
+    const w = dutyWindow(dp)
+    if (!w) return null
+    return {
+      startMs: w.startMs,
+      endMs: w.endMs,
+      current: index === 0 && !!sbyNow && sbyNow.id === dp.id,
+      code: dp.standbyKind === "airport" ? "Airport Standby" : "Standby",
+    }
+  }, [choice, index, sbyNow])
   const selectDuty = React.useCallback(
     (atMs: number) => setChosenDuty(choices[0]?.atMs === atMs ? null : atMs),
     [choices],
   )
   const fdp = React.useMemo(() => {
-    if (current || !choice) return null
+    if (current || !choice || choice.period?.dutyKind === "standby") return null
     if (index === 0 && status.duty.next) {
       const n = status.duty.next
       return n.plannedFdpMinutes > 0 ? { planned: n.plannedFdpMinutes, max: n.maxFdpMinutes } : null
@@ -280,12 +332,22 @@ export function FlightDashboard({ className }: { className?: string }) {
   // that holds it (the duties rostered after it included).
   const margin = React.useMemo(() => {
     const dp = choice?.period
-    if (!dp) return null
+    if (!dp || dp.dutyKind === "standby") return null
     return delayMargin(allDutyPeriods, dp, dp.maxFdpMinutes > 0 ? dp.maxFdpMinutes - fdpMinutesOf(dp) : null)
   }, [choice, allDutyPeriods])
-  const legs = React.useMemo(() => (dutyAtMs === null ? [] : dutyFlights(flights, dutyAtMs)), [flights, dutyAtMs])
+  // The limits in detail, as of the minute: the chosen duty's share when it
+  // is not counted yet.
+  const nowMinute = Math.floor(now / 60_000)
+  const limitDetail = React.useMemo(
+    () => limitDetails(pastDuties, allDutyPeriods, nowMinute * 60_000, choice?.period ?? null),
+    [pastDuties, allDutyPeriods, nowMinute, choice],
+  )
+  const legs = React.useMemo(
+    () => (dutyAtMs === null || standby ? [] : dutyFlights(flights, dutyAtMs)),
+    [flights, dutyAtMs, standby],
+  )
   const times = React.useMemo(() => legs.map(legTimes), [legs])
-  const lookupsClose = dutyAtMs !== null && Math.abs(dutyAtMs - now) <= LOOKUP_WINDOW_MS
+  const lookupsClose = dutyAtMs !== null && !standby && Math.abs(dutyAtMs - now) <= LOOKUP_WINDOW_MS
   // Within three hours of it, or on it, a delay moves by the minute: ask more often.
   const lookupsFast = dutyAtMs !== null && (current || Math.abs(dutyAtMs - now) <= 3 * 3600_000)
   const lookups = useDutyLookups(lookupsClose ? dutyAtMs : null, { active: isActive, fast: lookupsFast })
@@ -398,8 +460,10 @@ export function FlightDashboard({ className }: { className?: string }) {
         lookupsLoading: lookups.loading,
         refreshLookups: lookups.refresh,
         estimate,
+        standby,
       },
       margin,
+      limits: limitDetail,
       recencyLapseIso: recency.lapseIso,
       currencyAsOfMs: currencyAsOfMs ?? now,
       crew,
@@ -419,7 +483,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       day: (ms: number) =>
         formatDayAt(ms, display?.useZuluTime === false ? zone : "UTC", { year: false }),
     }),
-    [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, estimate, margin, recency.lapseIso, currencyAsOfMs, crew, legCrew, currency, destinations, airports, airportInfo, runways, weather, weatherStation, iataOf, pref, zone, isActive],
+    [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, estimate, standby, margin, limitDetail, recency.lapseIso, currencyAsOfMs, crew, legCrew, currency, destinations, airports, airportInfo, runways, weather, weatherStation, iataOf, pref, zone, isActive],
   )
   // The airport card's alternates, asked while the page is up (the route reads
   // the stored TAF snapshot — no request to the source): asked only when the
@@ -444,22 +508,28 @@ export function FlightDashboard({ className }: { className?: string }) {
         ? null
         : {
             options: choices.map((c, i) => {
-              const dest = destinationOfRoute(c.period?.route || (i === index ? legRoute : ""), brief.code)
+              const sby = c.period?.dutyKind === "standby"
+              const dest = sby ? "Standby" : destinationOfRoute(c.period?.route || (i === index ? legRoute : ""), brief.code)
               return {
                 value: String(c.atMs),
                 label: [dest, brief.day(c.atMs)].filter(Boolean).join(" · "),
-                hint: [i === 0 ? (current ? "Now" : "Next") : null, `Report ${brief.clock(c.atMs)}`].filter(Boolean).join(" · "),
+                hint: [
+                  i === 0 ? (current || (sby && standby?.current) ? "Now" : "Next") : null,
+                  `${sby ? "From" : "Report"} ${brief.clock(c.atMs)}`,
+                ]
+                  .filter(Boolean)
+                  .join(" · "),
               }
             }),
-            word: index === 0 ? (current ? "Now" : "Next") : "Later",
+            word: index === 0 ? (current || standby?.current ? "Now" : "Next") : "Later",
             day: brief.day(dutyAtMs).replace(/^\w+,?\s*/, ""),
-            dest: destinationOfRoute(choices[index]?.period?.route || legRoute, brief.code),
+            dest: standby ? "SBY" : destinationOfRoute(choices[index]?.period?.route || legRoute, brief.code),
             atMs: dutyAtMs,
             briefings: legBriefings,
             legNow: legNowIndex,
           },
     )
-  }, [isActive, choices, dutyAtMs, current, index, brief, legRoute, legBriefings, legNowIndex])
+  }, [isActive, choices, dutyAtMs, current, index, brief, legRoute, legBriefings, legNowIndex, standby])
 
   /* ── Opening a widget ────────────────────────────────────────────────── */
   // The tile is hidden for its card's whole life: the card's surface covers
@@ -467,13 +537,19 @@ export function FlightDashboard({ className }: { className?: string }) {
   // the page takes the whole width, and the detail panel comes back only
   // for a flight opened from a card.
   const [sheet, setSheet] = React.useState<{ id: WidgetId; anchor: WidgetAnchor; size: TileSize } | null>(null)
+  // On a standby there are no flights and no airports: their tiles step aside
+  // and the others take the grid (the owner, Nov 2026: "not applicable").
+  const shown = React.useMemo(
+    () => (standby ? order.filter((id) => id !== "flight" && id !== "airport") : order),
+    [order, standby],
+  )
   // Where each tile sits — a card opens from its tile at that size.
   const placedSizes = React.useMemo(
     () =>
       new Map<WidgetId, TileSize>(
-        packTiles(order, sizes, columnsOf(grid)).map((p) => [p.id, faceSizeOf({ cols: p.cols, rows: p.rows })]),
+        packTiles(shown, sizes, columnsOf(grid)).map((p) => [p.id, faceSizeOf({ cols: p.cols, rows: p.rows })]),
       ),
-    [order, sizes, grid, faceSizeOf],
+    [shown, sizes, grid, faceSizeOf],
   )
   const nav = useWidgetCtx()
   const open = React.useCallback(
@@ -513,7 +589,8 @@ export function FlightDashboard({ className }: { className?: string }) {
       <BentoGrid
         grid={grid}
         gridRef={gridRef}
-        order={order}
+        order={shown}
+        fullOrder={order}
         sizes={sizes}
         arranging={arranging}
         label={(id) => WIDGET_TITLE[id]}

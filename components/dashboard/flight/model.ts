@@ -4,6 +4,7 @@
  * answer and nothing queries twice.
  */
 
+import type { LimitDetail } from "@/lib/utils/dashboard/limit-detail"
 import type { FlightLog } from "@/types/entities/flight.types"
 import type { DutyPeriod, RestPeriodInfo } from "@/types/entities/roster.types"
 import type { Airport } from "@/types/entities/airport.types"
@@ -62,7 +63,15 @@ export interface FlightBrief {
      * logbook recorded and the sources say now (`estimateDutyIn`).
      */
     estimate: DutyInEstimate | null
+    /**
+     * The chosen duty is a STANDBY (the owner, Nov 2026: on standby the
+     * flight tiles are not applicable) — its window, and whether it is the one
+     * in progress. The flights and airport tiles step aside while it is set.
+     */
+    standby: { startMs: number; endMs: number; current: boolean; code: string } | null
   }
+  /** The four rolling limits in detail: headroom, what fills them, roll-off, the next duty's share (`limitDetails`). */
+  limits: LimitDetail[]
   /** How much later the chosen duty can run inside every limit — FDP and the rolling windows. */
   margin: DelayMargin | null
   /** The first day 90-day recency is NOT met, YYYY-MM-DD (null when it is not met now). */

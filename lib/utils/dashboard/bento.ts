@@ -240,3 +240,14 @@ export function nudgeTile<T extends string>(order: readonly T[], id: T, by: numb
   const to = Math.min(order.length - 1, Math.max(0, from + by))
   return moveTile(order, id, order[to])
 }
+
+/**
+ * A new order of the tiles ON SHOW put back into the full order: each slot a
+ * shown tile held takes the next of `shown` in turn, and a tile not on show
+ * (not applicable to this duty) keeps its place.
+ */
+export function mergeShownOrder<T extends string>(full: readonly T[], shown: readonly T[]): T[] {
+  const on = new Set(shown)
+  let k = 0
+  return full.map((id) => (on.has(id) ? shown[k++] : id))
+}

@@ -61,7 +61,13 @@ export function Pager({
   fill = false,
   morph,
   perPage = 1,
+  dotTone,
 }: {
+  /**
+   * An item whose dot is AMBER — the reason a tile's edge is amber, on a page
+   * not on show (the owner: "make the amber border explain why"). In items.
+   */
+  dotTone?: (item: number) => "caution" | undefined
   /**
    * Items side by side on a page (a WIDE tile — every leg of a short duty,
    * two airports): `count`, `page` and `onPage` are then in ITEMS, the page
@@ -208,9 +214,18 @@ export function Pager({
             them at the tile's width and at the card's, and its copies
             crossfaded between two places. */}
         <span className="flex gap-1" data-morph={morph ? `${morph}-dots` : undefined}>
-          {Array.from({ length: count }, (_, i) => (
-            <span key={i} className={cn("h-1.5 w-1.5 rounded-full transition-colors", i === page ? "bg-foreground" : "bg-foreground/25")} />
-          ))}
+          {Array.from({ length: count }, (_, i) => {
+            const amber = dotTone && Array.from({ length: Math.min(per, items - i * per) }, (_, j) => dotTone(i * per + j)).some(Boolean)
+            return (
+              <span
+                key={i}
+                className={cn(
+                  "h-1.5 w-1.5 rounded-full transition-colors",
+                  amber ? (i === page ? "bg-status-warning" : "bg-status-warning/60") : i === page ? "bg-foreground" : "bg-foreground/25",
+                )}
+              />
+            )
+          })}
         </span>
       </div>
     </div>

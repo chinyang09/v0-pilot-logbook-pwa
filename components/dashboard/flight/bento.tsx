@@ -28,7 +28,7 @@ import * as React from "react"
 import { createPortal } from "react-dom"
 import { animate, motion, useMotionValue } from "framer-motion"
 import { Move } from "lucide-react"
-import { GRID_GAP_PX, columnsOf, moveTile, nudgeTile, packTiles, sizeLabel, type GridKind, type TileSize } from "@/lib/utils/dashboard/bento"
+import { GRID_GAP_PX, columnsOf, mergeShownOrder, moveTile, nudgeTile, packTiles, sizeLabel, type GridKind, type TileSize } from "@/lib/utils/dashboard/bento"
 import { DASHBOARD_TILES, setArranging, setTileOrder, setTileSize, type DashboardTile } from "@/hooks/use-dashboard-layout"
 import { haptic } from "@/lib/utils/haptics"
 import { cn } from "@/lib/utils"
@@ -87,6 +87,7 @@ export function BentoGrid({
   grid,
   gridRef,
   order,
+  fullOrder,
   sizes,
   arranging,
   label,
@@ -97,7 +98,10 @@ export function BentoGrid({
   grid: GridKind
   /** The grid element — the page measures it to choose `grid`. */
   gridRef?: React.Ref<HTMLDivElement>
+  /** The tiles on show, in order. */
   order: DashboardTile[]
+  /** Every tile in the pilot's order, those not applicable now included (a standby's flights). */
+  fullOrder?: DashboardTile[]
   /** Each tile's chosen size on `grid`. */
   sizes: Record<DashboardTile, TileSize>
   arranging: boolean
@@ -174,9 +178,13 @@ export function BentoGrid({
   }
 
   const orderRef = React.useRef(order)
+  const fullRef = React.useRef(fullOrder ?? order)
   React.useEffect(() => {
     orderRef.current = order
-  }, [order])
+    fullRef.current = fullOrder ?? order
+  }, [order, fullOrder])
+  // A reorder of the tiles on show keeps the hidden ones where they were.
+  const reorder = (next: DashboardTile[]) => setTileOrder(mergeShownOrder(fullRef.current, next))
 
   const [drag, setDrag] = React.useState<Drag | null>(null)
   // The tile in hand: its frame and its four edge handles are drawn; the
@@ -218,7 +226,7 @@ export function BentoGrid({
       const now = performance.now()
       if (target === swap.current.target || now - swap.current.at < SWAP_COOLDOWN_MS) return
       swap.current = { target, at: now }
-      setTileOrder(moveTile(orderRef.current, dragId, target))
+      reorder(moveTile(orderRef.current, dragId, target))
       haptic("tick")
     }
     const onUp = () => {
@@ -289,7 +297,7 @@ export function BentoGrid({
     const by = e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : 0
     if (!by) return
     e.preventDefault()
-    setTileOrder(nudgeTile(orderRef.current, id, by))
+    reorder(nudgeTile(orderRef.current, id, by))
   }
 
   return (
@@ -320,7 +328,9 @@ export function BentoGrid({
       >
         {/* The DOM order never changes: the grid places each tile by row and column. */}
         {DASHBOARD_TILES.map((id) => {
-          const p = placed.get(id)!
+          // A tile not in the order is not applicable to this duty (a standby's flights).
+          const p = placed.get(id)
+          if (!p) return null
           const size: TileSize = { cols: p.cols, rows: p.rows }
           const style = { gridColumn: `${p.col + 1} / span ${p.cols}`, gridRow: `${p.row + 1} / span ${p.rows}` }
           if (!arranging) {
@@ -341,7 +351,7 @@ export function BentoGrid({
               role="button"
               tabIndex={0}
               aria-roledescription="Movable tile"
-              aria-label={`Move ${label(id)}, ${p.index + 1} of ${DASHBOARD_TILES.length}, ${sizeLabel(sizes[id])}. Arrow keys move it, Shift and arrows resize it.`}
+              aria-label={`Move ${label(id)}, ${p.index + 1} of ${order.length}, ${sizeLabel(sizes[id])}. Arrow keys move it, Shift and arrows resize it.`}
               onPointerDown={(e) => pickUp(e, id)}
               onKeyDown={(e) => onKey(e, id)}
               onFocus={() => setActive(id)}
