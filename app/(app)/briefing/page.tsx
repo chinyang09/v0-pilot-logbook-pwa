@@ -26,6 +26,7 @@ import { FormSection } from "@/components/ui/form-section"
 import {
   BRIEFING_SECTIONS,
   BriefingSectionPanel,
+  FlightAirportsPanel,
   concernTone,
   groundTempOf,
   sectionSummary,
@@ -40,6 +41,9 @@ import { groupNotams, notamCounts } from "@/lib/briefing/notams"
 import { showToast } from "@/lib/utils/undo-toast"
 import { appAlert } from "@/lib/utils/app-alert"
 import { formatDay } from "@/lib/utils/date"
+import { flightDigits } from "@/lib/briefing/ids"
+import { useFlights } from "@/hooks/data/use-flights"
+import type { FlightLog } from "@/types/entities/flight.types"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
 import { cn } from "@/lib/utils"
@@ -53,11 +57,34 @@ const ICONS: Partial<Record<BriefingSectionKey, React.ComponentType<{ className?
 
 const isSection = (s: string | null): s is BriefingSectionKey => !!s && BRIEFING_SECTIONS.some((x) => x.key === s)
 
+/**
+ * The logbook's flight a briefing id is about (`brief:<digits>:<date>:<dep>`)
+ * — for a flight with NO briefing imported, whose airports and their notes
+ * are still the pilot's to read and write.
+ */
+function flightOfBriefingId(id: string | null, flights: readonly FlightLog[]): FlightLog | null {
+  const m = id?.match(/^brief:([^:]+):(\d{4}-\d{2}-\d{2}):([A-Z0-9]+)$/i)
+  if (!m) return null
+  const [, digits, date, dep] = m
+  return (
+    flights.find(
+      (f) =>
+        f.date === date &&
+        (f.departureIcao || "").toUpperCase() === dep.toUpperCase() &&
+        !!f.flightNumber &&
+        flightDigits(f.flightNumber.toUpperCase()) === digits,
+    ) ?? null
+  )
+}
+
 function BriefingPage() {
   const router = useRouter()
   const params = useSearchParams()
   const id = params.get("id")
   const { briefing, isLoading } = useBriefing(id)
+  const { flights, isLoading: flightsLoading } = useFlights()
+  // With no briefing, the flight itself: its airports' notes are the pilot's.
+  const flight = useMemo(() => (briefing === null ? flightOfBriefingId(id, flights) : null), [briefing, id, flights])
   const register = useNotamRegister()
   const input = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
@@ -73,7 +100,7 @@ function BriefingPage() {
       showToast(`${record.flightNumber} ${record.dep}–${record.arr} briefing saved · ${notams} NOTAMs, ${newNotams} new`)
       if (record.id !== id) router.replace(`/briefing?id=${encodeURIComponent(record.id)}`, { scroll: false })
     } catch (e) {
-      void appAlert({ title: "Not a Briefing", message: e instanceof Error ? e.message : "This PDF could not be read as a briefing package." })
+      void appAlert({ title: "Briefing Not Imported", message: e instanceof Error ? e.message : "This PDF could not be read as a briefing package." })
     } finally {
       setBusy(false)
     }
@@ -101,6 +128,20 @@ function BriefingPage() {
   // The detail panel follows the selection, as Settings' does.
   useEffect(() => {
     if (!briefing || !b) {
+      // No briefing: the flight's Airports, the one section that is the pilot's own.
+      if (flight && flight.departureIcao && flight.arrivalIcao) {
+        if (selectedId === "airports")
+          setDetailContent(
+            <FlightAirportsPanel
+              dep={flight.departureIcao}
+              arr={flight.arrivalIcao}
+              description={`${flight.flightNumber} ${flight.departureIcao}–${flight.arrivalIcao} · ${formatDay(flight.date, { weekday: false })}`}
+            />,
+          )
+        else if (isDesktop) setSelectedId("airports", { explicit: false })
+        else setDetailContent(null)
+        return
+      }
       setDetailContent(null)
       return
     }
@@ -108,9 +149,13 @@ function BriefingPage() {
     // explicit:false — a programmatic default must not open the phone's overlay.
     else if (isDesktop) setSelectedId("init-a", { explicit: false })
     else setDetailContent(null)
-  }, [briefing, b, selectedId, isDesktop, setDetailContent, setSelectedId])
+  }, [briefing, b, flight, selectedId, isDesktop, setDetailContent, setSelectedId])
 
-  const title = b ? `${b.flight.number} ${b.flight.dep}–${b.flight.arr}` : "Briefing"
+  const title = b
+    ? `${b.flight.number} ${b.flight.dep}–${b.flight.arr}`
+    : flight?.departureIcao && flight.arrivalIcao
+      ? `${flight.flightNumber} ${flight.departureIcao}–${flight.arrivalIcao}`
+      : "Briefing"
   return (
     <PageContainer title={title}>
       <input
@@ -123,7 +168,7 @@ function BriefingPage() {
           e.target.value = ""
         }}
       />
-      {isLoading || briefing === undefined ? (
+      {isLoading || briefing === undefined || (briefing === null && !!id && flightsLoading) ? (
         <PageLoading />
       ) : briefing && b ? (
         <div className="space-y-4 px-panel pt-1">
@@ -132,6 +177,40 @@ function BriefingPage() {
             {b.flight.ofpVersion}
           </p>
           <BriefingSectionLists b={b} counts={counts} selected={isDesktop ? selectedId : null} onSelect={(k) => setSelectedId(k)} />
+        </div>
+      ) : flight && flight.departureIcao && flight.arrivalIcao ? (
+        <div className="space-y-4 px-panel pt-1">
+          <p className="text-[13px] tabular-nums text-muted-foreground">
+            {[
+              formatDay(flight.date),
+              flight.scheduledOut && flight.scheduledIn ? `${flight.scheduledOut}–${flight.scheduledIn}Z` : "",
+              [flight.aircraftReg, flight.aircraftType].filter(Boolean).join(" "),
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+          <FormSection title="Company Briefing">
+            <button
+              type="button"
+              onClick={pick}
+              disabled={busy}
+              className="row-divider flex w-full items-center px-4 py-3.5 text-left transition-colors hover:bg-secondary/50 active:bg-secondary/50 disabled:opacity-60"
+            >
+              <FileUp className="mr-3 h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium">{busy ? "Reading the PDF…" : "Import PDF"}</span>
+                <span className="block truncate text-xs text-muted-foreground">INIT A to PERF, NOTAMs and INTAMs come with it</span>
+              </span>
+              <ChevronRight className="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
+            </button>
+          </FormSection>
+          <SectionList
+            title="Brief"
+            keys={["airports"]}
+            render={() => `${flight.departureIcao} • ${flight.arrivalIcao}`}
+            selected={isDesktop ? selectedId : null}
+            onSelect={(k) => setSelectedId(k)}
+          />
         </div>
       ) : (
         <EmptyState

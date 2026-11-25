@@ -138,6 +138,37 @@ const find = (lines: string[], re: RegExp) => {
 
 /* ── the OFP ─────────────────────────────────────────────────────────────── */
 
+const ROUTE_START = /^\s*[A-Z]{4}\/\w+\s/
+const ROUTE_END = /\s[A-Z]{4}\/\w+\s*$/
+const ROUTE = /^\s*([A-Z]{4})\/(\w+) (.+) ([A-Z]{4})\/(\w+)\s*$/
+
+/**
+ * The ATC route — "WSSS/02C … VVTS/07L" — joined over the lines it WRAPS
+ * onto. A long route runs past the print's width ("… L637 ANBOV" over
+ * "ANBOV5E VVTS/07L", TR552); read as one line it matched nothing, the
+ * departure and arrival came back blank and the import refused the package.
+ * It starts on the line opening with an aerodrome and its runway and ends on
+ * the line closing with one, a few lines at most, never past the schedule.
+ */
+export function readRoute(ofp: string[]): RegExpMatchArray | null {
+  for (let i = 0; i < ofp.length; i++) {
+    if (!ROUTE_START.test(ofp[i])) continue
+    let joined = ofp[i].trim()
+    for (let j = i; j < Math.min(ofp.length, i + 6); j++) {
+      if (j > i) {
+        if (/SCHED\s+DEP|FLT\s+RULES/.test(ofp[j])) break
+        joined += " " + ofp[j].trim()
+      }
+      if (ROUTE_END.test(" " + joined)) {
+        const m = joined.match(ROUTE)
+        if (m) return m
+        break
+      }
+    }
+  }
+  return null
+}
+
 function fuelLine(lines: string[], label: string): FuelLine {
   const m = find(lines, new RegExp(`${label.replace(/ /g, "\\s+")}\\s+(\\d{2}\\.\\d{2}|\\.+)?\\s*(\\d+|\\.+)\\s*$`))
   return { time: hmm(m?.[1]), kg: num(m?.[2]) }
@@ -568,7 +599,7 @@ export function parseBriefing(pages: string[][]): Briefing {
 
   const flightLine = find(ofp, /^\s*(\w{4,6})\s+([A-Z]{3})(\d{1,4}[A-Z]?)\s+([A-Z]{3})\/([A-Z]{3})\s+ETD\s+(\d{4})\s+(\d{2}[A-Z]{3}\d{2})/)
   const routeNo = find(ofp, /RTE\s+NO\s+(\S+)\s+(\S+)\s+CAPT\s+(.+?)\s*$/)
-  const routeText = find(ofp, /^\s*([A-Z]{4})\/(\w+) (.+) ([A-Z]{4})\/(\w+)\s*$/)
+  const routeText = readRoute(ofp)
   const sched = find(ofp, /SCHED\s+DEP\s+(\d{4})\s+UTC\s+SCHED\s+ARR\s+(\d{4})/)
   const rules = find(ofp, /FLT\s+RULES:\s*(\S+)\s+CRUISE\s+CI\s*(\d+)/)
   const cruise = find(ofp, /^\s*[A-Z]{3}\/(\d{3})\s*$/)

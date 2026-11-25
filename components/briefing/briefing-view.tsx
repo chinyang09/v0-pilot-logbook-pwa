@@ -838,13 +838,29 @@ function IntamsSection({ b }: { b: Briefing }) {
 
 const ROLE_NAME = { departure: "Departure", destination: "Destination", alternate: "Alternate", enroute: "En Route" } as const
 
+/**
+ * What the Airports section needs: the flight's two ends, and — where a
+ * briefing is imported — the alternates its OFP plans and the airports its
+ * WX list names. The notes are the pilot's own (`note:airport:<ICAO>`), so
+ * a flight with NO briefing has the section too, from its ends alone (the
+ * owner, Nov 2026: "to be made available even without briefing upload").
+ */
+export interface FlightAirports {
+  dep: string
+  arr: string
+  alternates: Briefing["alternates"]
+  stations: BriefingStation[]
+}
+
+export const airportsOfBriefing = (b: Briefing): FlightAirports => ({ dep: b.flight.dep, arr: b.flight.arr, alternates: b.alternates, stations: stationsOf(b) })
+
 /** The departure, destination and alternates once each, then what the WX list adds en route. */
-export function briefingAirports(b: Briefing): { main: BriefingStation[]; enroute: BriefingStation[] } {
-  const all = stationsOf(b)
+export function briefingAirports(a: FlightAirports): { main: BriefingStation[]; enroute: BriefingStation[] } {
+  const all = a.stations
   const named = (icao: string, role: BriefingStation["role"]): BriefingStation => all.find((s) => s.icao === icao) ?? { icao, iata: "", name: "", role }
   // An airport once — the departure is often the first alternate too.
-  const main = [named(b.flight.dep, "departure"), named(b.flight.arr, "destination"), ...b.alternates.map((a) => named(a.icao, "alternate"))].filter(
-    (s, i, xs) => xs.findIndex((x) => x.icao === s.icao) === i,
+  const main = [named(a.dep, "departure"), named(a.arr, "destination"), ...a.alternates.map((x) => named(x.icao, "alternate"))].filter(
+    (s, i, xs) => !!s.icao && xs.findIndex((x) => x.icao === s.icao) === i,
   )
   return { main, enroute: all.filter((s) => !main.some((m) => m.icao === s.icao)) }
 }
@@ -899,13 +915,15 @@ function AirportRow({
   const runways = (info?.runways ?? []).map((r) => [r.id, formatRunwayLength(r.lengthFt ?? 0, unit)].filter(Boolean).join(" ")).join(" • ")
   const [open, setOpen] = React.useState(defaultOpen)
   const noted = !!(note?.company?.trim() || note?.community?.trim())
+  // With no WX list to name it (no briefing imported), the airport data does.
+  const name = station.name || info?.name || ""
   return (
     <div className="row-divider">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex min-h-12 w-full items-start gap-2 px-4 py-2.5 text-left">
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[15px] font-semibold text-foreground">
             {station.icao}
-            {station.name ? <span className="font-normal text-muted-foreground"> · {station.name}</span> : null}
+            {name ? <span className="font-normal text-muted-foreground"> · {name}</span> : null}
           </span>
           {/* What the OFP plans (an alternate's runway, approach, distance), then its runways. */}
           {sub && <span className="mt-0.5 block truncate text-[12px] leading-snug tabular-nums text-foreground">{sub}</span>}
@@ -938,11 +956,11 @@ function AirportRow({
  * way out, the departure on the way back; the destination when both or
  * neither end is home.
  */
-export function outstationOf(b: Briefing): string {
+export function outstationOf(dep: string, arr: string): string {
   const home = (icao: string) => DEFAULT_HOME_BASE.includes(icao.toUpperCase())
-  if (!home(b.flight.arr)) return b.flight.arr
-  if (!home(b.flight.dep)) return b.flight.dep
-  return b.flight.arr
+  if (arr && !home(arr)) return arr
+  if (dep && !home(dep)) return dep
+  return arr || dep
 }
 
 /**
@@ -952,16 +970,16 @@ export function outstationOf(b: Briefing): string {
  * each with its runway, approach and distance; and EN ROUTE, what the WX list
  * adds. Every row unfolds its notes in place.
  */
-function AirportsSection({ b }: { b: Briefing }) {
-  const { main, enroute } = briefingAirports(b)
+export function AirportsSection({ airports }: { airports: FlightAirports }) {
+  const { main, enroute } = briefingAirports(airports)
   const info = useAirportInfo([...main, ...enroute].map((s) => s.icao), true)
-  const lead = outstationOf(b)
+  const lead = outstationOf(airports.dep, airports.arr)
   const flight = main.filter((s) => s.role !== "alternate")
   const alternates = main.filter((s) => s.role === "alternate")
   // The outstation leads; home base after it.
   const ordered = [...flight.filter((s) => s.icao === lead), ...flight.filter((s) => s.icao !== lead)]
   const altSub = (icao: string) => {
-    const a = b.alternates.find((x) => x.icao === icao)
+    const a = airports.alternates.find((x) => x.icao === icao)
     if (!a) return undefined
     return [a.runway && `RWY ${a.runway}`, a.approach, a.distNm != null && `${a.distNm}nm`].filter(Boolean).join(" · ") || undefined
   }
@@ -999,7 +1017,7 @@ function WeatherSection({ b }: { b: Briefing }) {
   const [showEnroute, setShowEnroute] = React.useState(false)
   // The reports' ages are read against when the section opened.
   const [now] = React.useState(Date.now)
-  const { main, enroute } = briefingAirports(b)
+  const { main, enroute } = briefingAirports(airportsOfBriefing(b))
   const block = (s: BriefingStation) => {
     const brief = wx.briefs.find((x) => x.station === s.icao)
     return (
@@ -1047,8 +1065,21 @@ export function BriefingSectionPanel({ record, section }: { record: BriefingReco
       {section === "perf" && <PerfSection b={b} />}
       {section === "notams" && <NotamsSection record={record} />}
       {section === "intams" && <IntamsSection b={b} />}
-      {section === "airports" && <AirportsSection b={b} />}
+      {section === "airports" && <AirportsSection airports={airportsOfBriefing(b)} />}
       {section === "weather" && <WeatherSection b={b} />}
+    </ReadingPanel>
+  )
+}
+
+/**
+ * The Airports section for a flight with NO briefing imported — its two
+ * ends and the pilot's notes on them, which belong to the airport, not to a
+ * PDF (`note:airport:<ICAO>`).
+ */
+export function FlightAirportsPanel({ dep, arr, description }: { dep: string; arr: string; description: string }) {
+  return (
+    <ReadingPanel title="Airports" description={description}>
+      <AirportsSection airports={{ dep, arr, alternates: [], stations: [] }} />
     </ReadingPanel>
   )
 }
@@ -1086,6 +1117,6 @@ export function sectionSummary(key: BriefingSectionKey, b: Briefing, ctx: Summar
       return b.intams.length ? join([`${b.intams.length}`, b.intams[0].title]) : "None"
     case "airports":
     case "weather":
-      return join(briefingAirports(b).main.map((s) => s.icao))
+      return join(briefingAirports(airportsOfBriefing(b)).main.map((s) => s.icao))
   }
 }
