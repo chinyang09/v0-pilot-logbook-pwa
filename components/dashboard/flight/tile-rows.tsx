@@ -35,12 +35,15 @@ export function TileRows({
   className,
   caption,
   names = false,
+  stacked = false,
 }: {
   rows: TileRow[]
   className?: string
   caption?: string
   /** The labels ARE the content (the currencies' names), not captions. */
   names?: boolean
+  /** A narrow column (beside the FDP): the label over its value, the value's line truncated — side by side the label went and the value was cut. */
+  stacked?: boolean
 }) {
   const box = React.useRef<HTMLDivElement>(null)
   const [fit, setFit] = React.useState(0)
@@ -71,7 +74,21 @@ export function TileRows({
             {caption}
           </p>
         )}
-        {rows.map((r, i) => (
+        {rows.map((r, i) =>
+          stacked ? (
+            <div
+              key={r.key}
+              className={cn("border-t border-border/50 py-1.5 leading-tight", !caption && i === 0 && "mt-2", i >= fit && "invisible")}
+            >
+              <p className="truncate text-[9px] font-medium uppercase tracking-wider text-muted-foreground">{r.label}</p>
+              <p className="truncate text-[12px] tabular-nums" suppressHydrationWarning>
+                <span className={cn("font-semibold", r.tone === "fail" ? "text-destructive" : r.tone === "caution" ? "text-status-warning" : "text-foreground")}>
+                  {r.value}
+                </span>
+                {r.sub && <span className="text-muted-foreground"> · {r.sub}</span>}
+              </p>
+            </div>
+          ) : (
           <div
             key={r.key}
             className={cn(
@@ -88,7 +105,8 @@ export function TileRows({
               </span>
             </span>
           </div>
-        ))}
+          ),
+        )}
       </div>
     </div>
   )

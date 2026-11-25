@@ -10,6 +10,7 @@
 import type { Requirement } from "@/lib/utils/dashboard/legality"
 import type { SectorLeg } from "@/lib/utils/dashboard/duty-status"
 import { formatDay } from "@/lib/utils/date"
+import { limitOrder } from "@/lib/utils/dashboard/limit-detail"
 import { cn } from "@/lib/utils"
 import { dutyWindow, formatDutyClock } from "@/lib/utils/dashboard/duty-status"
 import { REQ_TONE, TONE } from "./instruments"
@@ -32,6 +33,7 @@ import { Pager, useRememberedPage } from "./pager"
 import { onwardLines, whereaboutsLines } from "@/lib/lookup/aircraft-whereabouts"
 import { MIN_TURN_MIN } from "@/lib/utils/dashboard/estimated-in"
 import * as React from "react"
+import { icaoTypeOfOfp } from "@/lib/briefing/aircraft"
 import { normalizeRegistration } from "@/lib/utils/string"
 import { scheduledInMs, scheduledOutMs } from "@/lib/utils/flight-day"
 import { ChevronRight, Plane } from "lucide-react"
@@ -317,6 +319,12 @@ export function legAircraft(brief: FlightBrief, i: number): { reg: string; type:
   // As the aircraft database spells and types it (the Aircraft page's name).
   const rec = own ? brief.fleet?.get(normalizeRegistration(own)) : undefined
   if (own) return { reg: rec?.registration || own, type: rec?.typecode || f.aircraftType || "", expected: false, from: "" }
+  // The leg's OFP names the aeroplane it is planned on.
+  const plan = brief.planned?.[i]
+  if (plan?.registration) {
+    const p = brief.fleet?.get(normalizeRegistration(plan.registration))
+    return { reg: p?.registration || plan.registration, type: p?.typecode || f.aircraftType || icaoTypeOfOfp(plan.aircraftType), expected: false, from: "" }
+  }
   const prev = duty.legs[i - 1]
   if (prev && prev.arrivalIcao && prev.arrivalIcao === f.departureIcao) {
     const p = legAircraft(brief, i - 1)
@@ -408,11 +416,11 @@ export function flightClock(brief: FlightBrief): DutyClock | null {
 }
 
 /** The duty's timeline (`flightClock`), else the 24-hour day bar. */
-function DutyTimeline({ brief, focus }: { brief: FlightBrief; focus: number | null }) {
+function DutyTimeline({ brief, focus, compact = false }: { brief: FlightBrief; focus: number | null; compact?: boolean }) {
   const c = flightClock(brief)
   if (!c) return <DayBar brief={brief} focus={focus} />
   return (
-    <div className="-mt-1 mb-1.5">
+    <div className={compact ? "-mt-2 mb-1" : "-mt-1 mb-1.5"}>
       <DutyClockStrip clock={c} zulu={brief.display?.useZuluTime !== false} focus={focus} />
     </div>
   )
@@ -532,14 +540,21 @@ export function FlightFace({
   const stops = legs.length ? [legs[0].from, ...legs.map((l) => l.to)] : (route ?? "").split("-").filter(Boolean)
   const shownTo = Math.min(count, first + per)
   const legLabel = per > 1 ? (count > per ? `Legs ${first + 1}–${shownTo}/${count}` : null) : `Leg ${page + 1}/${count}`
+  // ONE ROW tall (a phone's row is ~150–170px): the eyebrow goes — the
+  // header's duty button names the duty and its day — and the crew's
+  // initials, which the card lists; the strip sits tighter. What is left fits
+  // a 360 phone's row (measured).
+  const compact = !inCard && !fill && size.rows < 1.5
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <WidgetLabel right={count > 1 && legLabel ? <span className="text-[10px] font-semibold tabular-nums text-muted-foreground" data-morph="fl-legn">{legLabel}</span> : undefined}>
-        <span suppressHydrationWarning>
-          {dutyWord(brief)} · {day(duty.atMs)}
-        </span>
-      </WidgetLabel>
-      <DutyTimeline brief={brief} focus={count > 1 && per === 1 ? page : null} />
+      {!compact && (
+        <WidgetLabel right={count > 1 && legLabel ? <span className="text-[10px] font-semibold tabular-nums text-muted-foreground" data-morph="fl-legn">{legLabel}</span> : undefined}>
+          <span suppressHydrationWarning>
+            {dutyWord(brief)} · {day(duty.atMs)}
+          </span>
+        </WidgetLabel>
+      )}
+      <DutyTimeline brief={brief} focus={count > 1 && per === 1 ? page : null} compact={compact} />
       <div className="flex min-h-0 min-w-0 flex-1 gap-3">
         {/* A container: beside the FDP the leg has ~200px of a phone, and a
             three-stop route at 21px does not fit it (measured at 360). */}
@@ -554,7 +569,7 @@ export function FlightFace({
             </Pager>
           )}
         </div>
-        {!inCard && <DutyReadout brief={brief} crew={crew} wide={wide} extra={fill ? dutyMore : undefined} />}
+        {!inCard && <DutyReadout brief={brief} crew={compact ? [] : crew} wide={wide} extra={fill ? dutyMore : undefined} />}
       </div>
     </div>
   )
@@ -1036,7 +1051,10 @@ export function marginTone(minutes: number): string {
  * where one is near or at its limit.
  */
 export function LimitsFace({ brief, size, fill = false }: { brief: FlightBrief; size?: TileSize; fill?: boolean }) {
-  const limits = [...limitsOf(brief)].sort((a, b) => (b.progress ?? 0) - (a.progress ?? 0))
+  // In concern first, else the regulation's order (`limitOrder`).
+  const reqs = limitsOf(brief)
+  const states = new Map(reqs.map((r) => [r.id, r.state]))
+  const limits = limitOrder(reqs, (id) => states.get(id), (r) => r.progress ?? 0)
   // A third of the row: the figure alone ("81h").
   const narrow = (size?.cols ?? 3) < 2
   // WIDE: two columns, each with what is used against its limit.

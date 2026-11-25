@@ -21,14 +21,14 @@ import { formatDay } from "@/lib/utils/date"
 import { REQ_TONE } from "./instruments"
 import { fdpMinutesOf } from "@/lib/utils/roster/fdp-calculator"
 import { SegmentedTabs } from "@/components/ui/segmented-tabs"
-import { byTightness, type LimitId } from "@/lib/utils/dashboard/limit-detail"
+import { limitOrder, type LimitId } from "@/lib/utils/dashboard/limit-detail"
 import { CardTable, FlightCardLegs, type CardRow, crewKey, crewRole, currenciesBySoonest, currencyRows, legNow, limitsOf, marginText, shortDay, shortName } from "./faces"
 import { CurrencyDots } from "./currency-dots"
 import { dotAt, dotLayout, localDayKey } from "@/lib/utils/dashboard/currency-dots"
 import { AirportBody } from "./airport-tile"
 import type { FlightBrief } from "./model"
 import { pageOf } from "./pager"
-import { briefingId } from "@/lib/briefing/ids"
+import { flightBriefingId } from "@/lib/briefing/ids"
 import { SheetClosingContext, type WidgetAction, type WidgetId } from "./widget"
 import { dutyClockView } from "./duty-clock"
 
@@ -145,7 +145,7 @@ export function widgetContent(
                   run: () => {
                     const at = pageOf(`flight:${brief.duty.atMs}`) ?? legNow(brief)
                     const f = legs[Math.min(Math.max(0, at), legs.length - 1)]
-                    ctx.go(f.flightNumber ? `/briefing?id=${encodeURIComponent(briefingId(f.flightNumber, f.date, f.departureIcao || ""))}` : "/briefing")
+                    ctx.go(f.flightNumber ? `/briefing?id=${encodeURIComponent(flightBriefingId(f))}` : "/briefing")
                   },
                 },
               ]
@@ -620,10 +620,11 @@ const limitSpan = (min: number) => (Math.abs(min) >= 100 * 60 ? `${Math.trunc(mi
  */
 function LimitsBody({ brief }: { brief: FlightBrief }) {
   const details = brief.limits
-  const ordered = React.useMemo(() => byTightness(details), [details])
+  const reqs = React.useMemo(() => new Map(limitsOf(brief).map((r) => [r.id, r])), [brief])
+  // Opens on the limit the tile leads with: one in concern, else the first.
+  const ordered = React.useMemo(() => limitOrder(details, (id) => reqs.get(id)?.state), [details, reqs])
   const [chosen, setChosen] = React.useState<LimitId | null>(null)
   const d = details.find((x) => x.id === (chosen ?? ordered[0]?.id)) ?? null
-  const reqs = new Map(limitsOf(brief).map((r) => [r.id, r]))
   if (!d) return <p className="py-1 text-[13px] text-muted-foreground">Nothing logged yet</p>
   const req = reqs.get(d.id)
   const state = req?.state ?? "ok"
@@ -631,22 +632,33 @@ function LimitsBody({ brief }: { brief: FlightBrief }) {
   const ymd = (ms: number) => new Date(ms).toISOString().slice(0, 10)
   const toneOf = (left: number): "fail" | "caution" | undefined => (left <= 0 ? "fail" : left < d.limitMinutes * 0.1 ? "caution" : undefined)
   const margin = brief.margin?.each.find((e) => e.limit === d.label)
-  const rows: CardRow[] = []
-  if (d.rollOff) rows.push({ label: "Frees Up", value: `+${limitSpan(d.rollOff.minutes)}`, sub: `${formatDay(ymd(d.rollOff.atMs), { weekday: false, year: d.days > 60 })} · ${formatDay(d.rollOff.date, { weekday: false, year: d.days > 60 })} rolls out` })
-  if (d.next && brief.duty.atMs !== null)
-    rows.push({
-      label: "Next Duty",
-      value: `${limitSpan(d.next.leavesMinutes)} left`,
-      sub: `Adds ${limitSpan(d.next.minutes)} · ${shortDay(ymd(brief.duty.atMs))}`,
-      tone: toneOf(d.next.leavesMinutes),
-    })
-  if (d.tightestAhead)
-    rows.push({ label: "Tightest Ahead", value: `${limitSpan(d.tightestAhead.leftMinutes)} left`, sub: `${shortDay(d.tightestAhead.date)} · rostered`, tone: toneOf(d.tightestAhead.leftMinutes) })
-  if (margin) rows.push({ label: "If This Duty Runs Late", value: `+${marginText(margin.minutes)}`, tone: margin.minutes <= 0 ? "fail" : margin.minutes < 60 ? "caution" : undefined })
-  const shown = d.contributors.slice(0, 4)
-  const more = d.contributors.length - shown.length
-  const what = (c: (typeof d.contributors)[number]) =>
-    c.kind === "standby" ? "Standby" : c.kind === "training" ? "Simulator" : c.kind === "positioning" ? "Positioning" : c.route || "Duty"
+  // The SAME four rows for every limit, "—" where one has nothing to say: a
+  // limit with fewer rows changed the card's height under the tabs, and the
+  // card moved on every tap (the owner's "flashes when tapped").
+  const NONE = "—"
+  const rows: CardRow[] = [
+    d.rollOff
+      ? {
+          label: "Frees Up",
+          value: `+${limitSpan(d.rollOff.minutes)}`,
+          sub: `${formatDay(ymd(d.rollOff.atMs), { weekday: false, year: d.days > 60 })} · ${formatDay(d.rollOff.date, { weekday: false, year: d.days > 60 })} rolls out`,
+        }
+      : { label: "Frees Up", value: NONE },
+    d.next && brief.duty.atMs !== null
+      ? {
+          label: "Next Duty",
+          value: `${limitSpan(d.next.leavesMinutes)} left`,
+          sub: `Adds ${limitSpan(d.next.minutes)} · ${shortDay(ymd(brief.duty.atMs))}`,
+          tone: toneOf(d.next.leavesMinutes),
+        }
+      : { label: "Next Duty", value: NONE },
+    d.tightestAhead
+      ? { label: "Tightest Ahead", value: `${limitSpan(d.tightestAhead.leftMinutes)} left`, sub: `${shortDay(d.tightestAhead.date)} · rostered`, tone: toneOf(d.tightestAhead.leftMinutes) }
+      : { label: "Tightest Ahead", value: NONE },
+    margin
+      ? { label: "If This Duty Runs Late", value: `+${marginText(margin.minutes)}`, tone: margin.minutes <= 0 ? "fail" : margin.minutes < 60 ? "caution" : undefined }
+      : { label: "If This Duty Runs Late", value: NONE },
+  ]
   const breach = req?.detail?.some((x) => x.label === "Forecast")
   return (
     <div>
@@ -655,6 +667,7 @@ function LimitsBody({ brief }: { brief: FlightBrief }) {
         value={d.id}
         onChange={(v) => setChosen(v)}
         className="w-full"
+        dense
       />
       <div className="mt-3">
         <p className="flex items-baseline gap-2">
@@ -672,22 +685,6 @@ function LimitsBody({ brief }: { brief: FlightBrief }) {
       <div className="mt-2">
         <CardTable rows={rows} />
       </div>
-      {shown.length > 0 && (
-        <div className="mt-2 border-t border-border/70 pt-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Counted</p>
-          <ul className="mt-1">
-            {shown.map((c) => (
-              <li key={c.id} className="flex items-baseline justify-between gap-3 py-1 text-[13px]">
-                <span className="min-w-0 truncate">
-                  <span className="tabular-nums text-muted-foreground">{shortDay(c.date)}</span> <span className="text-foreground">{what(c)}</span>
-                </span>
-                <span className="shrink-0 font-semibold tabular-nums text-foreground">{limitSpan(c.minutes)}</span>
-              </li>
-            ))}
-          </ul>
-          {more > 0 && <p className="text-[11px] text-muted-foreground">+{more} more</p>}
-        </div>
-      )}
       {breach && (
         <p className="mt-1.5 border-t border-border/70 pt-1.5 text-[13px] font-semibold text-destructive">Breach ahead on the roster</p>
       )}

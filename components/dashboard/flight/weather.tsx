@@ -12,7 +12,7 @@
  */
 
 import type * as React from "react"
-import { Cloud, CloudFog, CloudLightning, CloudRain, CloudSnow, CloudSun, Sun } from "lucide-react"
+import { Cloud, CloudFog, CloudLightning, CloudRain, CloudSnow, CloudSun, PlaneLanding, PlaneTakeoff, Sun } from "lucide-react"
 import { ageText, cloudLayer } from "@/lib/weather/format"
 import { categoryOf, hazardLine, hazardsOf, metarConditions, type FlightCategory, type StationBrief, type StationWindow } from "@/lib/weather/brief"
 import { cn } from "@/lib/utils"
@@ -92,6 +92,9 @@ function Chip({ children, tone }: { children: React.ReactNode; tone: "warn" | "m
   )
 }
 
+/** A leg as its tag reads it: "TR275" → "275" (the airline is the pilot's own). */
+const shortLeg = (label: string) => label.replace(/^[A-Z]{2,3}(?=\d)/, "")
+
 /** A part's caption in the card: "METAR · 06:30Z", "TAF · over this duty". */
 const SECTION = "text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground"
 
@@ -104,7 +107,6 @@ const SECTION = "text-[10px] font-semibold uppercase tracking-[0.12em] text-mute
  */
 export function StationWeather({ b, clock, now }: { b: StationBrief; clock: (ms: number) => string; now: number }) {
   const periods = b.taf ? b.taf.periods.map((p, i) => ({ p, i, covers: b.touchedBy.get(i) })) : []
-  const anyLit = periods.some((x) => x.covers)
   const hazards = hazardLine(b.hazards).split(" · ").filter(Boolean)
   return (
     <div className="space-y-1.5">
@@ -132,7 +134,6 @@ export function StationWeather({ b, clock, now }: { b: StationBrief; clock: (ms:
       {b.taf && (
         <p className={cn(SECTION, "pt-1")} suppressHydrationWarning>
           TAF · {clock(b.taf.from).replace(/Z$/, "")}–{clock(b.taf.to)}
-          {anyLit ? " · this duty lit" : ""}
         </p>
       )}
       <div className="space-y-0.5">
@@ -143,14 +144,32 @@ export function StationWeather({ b, clock, now }: { b: StationBrief; clock: (ms:
           return (
             // No indent (the owner, Nov 2026): a lit period's wash reaches past
             // the text, the text stays in line with the METAR's.
-            <div key={i} className={cn("-mx-2 rounded-md px-2 py-0.5", covers ? (flagged ? "bg-chart-4/15" : "bg-primary/10") : "")}>
-              <p className={cn("break-words text-[12px] leading-snug tabular-nums", covers ? "text-foreground" : "text-muted-foreground")}>
+            <div
+              key={i}
+              className={cn("-mx-2 flex items-start gap-2 rounded-md px-2 py-0.5", covers ? (flagged ? "bg-chart-4/15" : "bg-primary/10") : "")}
+            >
+              <p className={cn("min-w-0 flex-1 break-words text-[12px] leading-snug tabular-nums", covers ? "text-foreground" : "text-muted-foreground")}>
                 {p.text.replace(/^TAF (AMD |COR )?/, "")}
               </p>
+              {/* The legs it covers, as a TAG beside it — the departure or
+                  arrival's glyph and the flight's digits (the owner, Nov 2026:
+                  "TR275 DEP 02:35Z" under every lit period cluttered the card). */}
               {covers && (
-                <p className={cn("text-[10px] font-semibold uppercase tracking-wide", flagged ? "text-status-warning" : "text-primary")}>
-                  {covers.map((w: StationWindow) => `${w.label} ${w.role === "dep" ? "dep" : "arr"} ${clock(w.atMs)}`).join(" · ")}
-                </p>
+                <span className={cn("flex shrink-0 flex-col items-end gap-0.5 pt-px", flagged ? "text-status-warning" : "text-primary")}>
+                  {covers.map((w: StationWindow) => {
+                    const Glyph = w.role === "dep" ? PlaneTakeoff : PlaneLanding
+                    return (
+                      <span
+                        key={`${w.label}-${w.role}`}
+                        className="flex items-center gap-0.5 text-[10px] font-semibold leading-none tabular-nums"
+                        aria-label={`${w.label} ${w.role === "dep" ? "departure" : "arrival"} ${clock(w.atMs)}`}
+                      >
+                        <Glyph className="h-3 w-3" aria-hidden />
+                        {shortLeg(w.label)}
+                      </span>
+                    )
+                  })}
+                </span>
               )}
             </div>
           )

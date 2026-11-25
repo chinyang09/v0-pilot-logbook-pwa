@@ -62,14 +62,15 @@ import { TileRows } from "./flight/tile-rows"
 import { dutyTone } from "./flight/duty-clock"
 import { setChosenDuty, useChosenDuty, publishDutyChoices } from "@/hooks/use-dashboard-duty"
 import { destinationOfRoute } from "@/lib/utils/dashboard/destination"
-import { briefingId } from "@/lib/briefing/ids"
+import { flightBriefingId } from "@/lib/briefing/ids"
+import { useBriefingsByIds } from "@/hooks/data/use-briefings"
 import { type WeatherState } from "./flight/weather"
 import { useDutyAlternates } from "./flight/alternates"
 import { AirportFace, airportsOf, stationPoor } from "./flight/airport-tile"
 import { WIDGET_TITLE, dutyRows, useWidgetCtx, widgetContent } from "./flight/details"
 import { BentoGrid } from "./flight/bento"
 import { setArranging, useArranging, useTileOrder, useTileSizes } from "@/hooks/use-dashboard-layout"
-import { columnsOf, faceSizeOn, gridKindFor, packTiles, type GridKind, type TileSize } from "@/lib/utils/dashboard/bento"
+import { columnsOf, faceSizeOn, gridKindFor, packTiles, rowHeightFor, rowsOf, type GridKind, type TileSize } from "@/lib/utils/dashboard/bento"
 import { Widget, WidgetSheet, type WidgetAnchor, type WidgetId } from "./flight/widget"
 import type { DutyChoice, FlightBrief } from "./flight/model"
 import type { DutyPeriod } from "@/types/entities/roster.types"
@@ -165,6 +166,7 @@ function faceOf(id: WidgetId, brief: FlightBrief, size: TileSize, inCard = false
             <DutyFace brief={brief} inCard={inCard} />
             {wide && (
               <TileRows
+                stacked
                 rows={dutyRows(brief)
                   .filter((r) => r.slot === undefined)
                   .map((r) => ({ key: r.label, label: r.label, value: r.value, sub: r.sub, tone: r.tone }))}
@@ -181,6 +183,7 @@ function faceOf(id: WidgetId, brief: FlightBrief, size: TileSize, inCard = false
           dutyMore={
             wide ? (
               <TileRows
+                stacked
                 rows={dutyRows(brief)
                   .filter((r) => r.slot === undefined)
                   .map((r) => ({ key: r.label, label: r.label, value: r.value, sub: r.sub, tone: r.tone }))}
@@ -239,10 +242,13 @@ export function FlightDashboard({ className }: { className?: string }) {
     setArranging(false)
   })
   const order = useTileOrder()
-  // The grid's width decides six columns or twelve, and gives each face its
-  // real width. Read in a ResizeObserver; the first answer is rendered before
-  // the frame paints (flushSync), so a desktop never shows the phone's grid.
-  const [gridBox, setGridBox] = React.useState<{ grid: GridKind; px: number }>({ grid: "narrow", px: 0 })
+  // The box the tiles have decides the grid — six columns or twelve, held
+  // landscape or upright (`gridKindFor`) — and its ROW height: the box's
+  // height shared out among the grid's rows (`rowHeightFor`), so a tile's
+  // rows are a fixed size, not its content's. Read in a ResizeObserver; the
+  // first answer is rendered before the frame paints (flushSync), so a
+  // desktop never shows the phone's grid.
+  const [gridBox, setGridBox] = React.useState<{ grid: GridKind; px: number; rowPx: number }>({ grid: "narrow", px: 0, rowPx: 0 })
   const roRef = React.useRef<ResizeObserver | null>(null)
   const gridRef = React.useCallback((el: HTMLDivElement | null) => {
     roRef.current?.disconnect()
@@ -250,15 +256,19 @@ export function FlightDashboard({ className }: { className?: string }) {
     if (!el) return
     const ro = new ResizeObserver(([entry]) => {
       const px = Math.round(entry.contentBoxSize?.[0]?.inlineSize ?? entry.contentRect.width)
-      const grid = gridKindFor(px)
-      flushSync(() => setGridBox((b) => (b.grid === grid && Math.abs(b.px - px) < 1 ? b : { grid, px })))
+      const h = Math.round(entry.contentBoxSize?.[0]?.blockSize ?? entry.contentRect.height)
+      const grid = gridKindFor(px, h)
+      const rowPx = rowHeightFor(grid, h)
+      flushSync(() =>
+        setGridBox((b) => (b.grid === grid && Math.abs(b.px - px) < 1 && Math.abs(b.rowPx - rowPx) < 1 ? b : { grid, px, rowPx })),
+      )
     })
     ro.observe(el)
     roRef.current = ro
   }, [])
-  const { grid, px: gridPx } = gridBox
+  const { grid, px: gridPx, rowPx } = gridBox
   const sizes = useTileSizes(grid)
-  const faceSizeOf = React.useCallback((size: TileSize) => faceSizeOn(size, grid, gridPx), [grid, gridPx])
+  const faceSizeOf = React.useCallback((size: TileSize) => faceSizeOn(size, grid, gridPx, rowPx), [grid, gridPx, rowPx])
   const arranging = useArranging()
   const now = useTick(isActive)
   const { preferences } = usePreferences()
@@ -446,16 +456,29 @@ export function FlightDashboard({ className }: { className?: string }) {
     [stationBriefs, weatherClose, stations.length, wx.loading, wx.refreshing, wx.failed, wx.refreshFailed, wx.weather, wx.refresh],
   )
 
+  // Each leg's imported briefing: its OFP names the aeroplane planned for it
+  // (the same ids the alternates ask, so one read serves both).
+  const planIds = React.useMemo(() => legs.filter((l) => l.flightNumber).map((l) => flightBriefingId(l)), [legs])
+  const planRecords = useBriefingsByIds(planIds)
+  const planned = React.useMemo(() => {
+    const byId = new Map(planRecords.map((r) => [r.id, r]))
+    return legs.map((l) => {
+      const r = l.flightNumber ? byId.get(flightBriefingId(l)) : undefined
+      return r?.registration ? { registration: r.registration, aircraftType: r.aircraftType } : null
+    })
+  }, [legs, planRecords])
+
   // Every aeroplane the duty names, as the aircraft database spells and types it.
   const fleetRegs = React.useMemo(() => {
     const out = legs.map((l) => l.aircraftReg || "")
+    for (const p of planned) if (p) out.push(p.registration)
     const l = lookupsClose ? lookups.lookups : null
     if (l) {
       out.push(l.inboundRegistration)
       for (const g of Object.values(l.gates)) if (g?.status === "done") out.push(g.gates.flight.registration)
     }
     return out.filter(Boolean)
-  }, [legs, lookupsClose, lookups.lookups])
+  }, [legs, planned, lookupsClose, lookups.lookups])
   const fleet = useAircraftRecords(fleetRegs)
 
   /* ── Formatting ──────────────────────────────────────────────────────── */
@@ -503,6 +526,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       destinations,
       airports,
       fleet,
+      planned,
       airportInfo,
       runways,
       // The runway in use is NOW, like the METAR — read whatever the duty's distance.
@@ -515,7 +539,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       day: (ms: number) =>
         formatDayAt(ms, display?.useZuluTime === false ? zone : "UTC", { year: false }),
     }),
-    [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, estimate, standby, margin, limitDetail, recency.lapseIso, currencyAsOfMs, crew, legCrew, currency, destinations, airports, fleet, airportInfo, runways, weather, weatherStation, iataOf, pref, zone, isActive],
+    [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, estimate, standby, margin, limitDetail, recency.lapseIso, currencyAsOfMs, crew, legCrew, currency, destinations, airports, fleet, planned, airportInfo, runways, weather, weatherStation, iataOf, pref, zone, isActive],
   )
   // The airport card's alternates, asked while the page is up (the route reads
   // the stored TAF snapshot — no request to the source): asked only when the
@@ -528,7 +552,7 @@ export function FlightDashboard({ className }: { className?: string }) {
   // whether it is the duty now or next under it. Published while the page is
   // on screen.
   const legBriefings = React.useMemo(
-    () => legs.map((l) => (l.flightNumber ? briefingId(l.flightNumber, l.date, l.departureIcao || "") : "")),
+    () => legs.map((l) => (l.flightNumber ? flightBriefingId(l) : "")),
     [legs],
   )
   const legNowIndex = Math.max(0, legs.findIndex((l) => !l.inTime) < 0 ? legs.length - 1 : legs.findIndex((l) => !l.inTime))
@@ -580,7 +604,7 @@ export function FlightDashboard({ className }: { className?: string }) {
   const placedSizes = React.useMemo(
     () =>
       new Map<WidgetId, TileSize>(
-        packTiles(shown, sizes, columnsOf(grid)).map((p) => [p.id, faceSizeOf({ cols: p.cols, rows: p.rows })]),
+        packTiles(shown, sizes, columnsOf(grid), rowsOf(grid)).map((p) => [p.id, faceSizeOf({ cols: p.cols, rows: p.rows })]),
       ),
     [shown, sizes, grid, faceSizeOf],
   )
@@ -636,31 +660,32 @@ export function FlightDashboard({ className }: { className?: string }) {
       tone={tint[id] ?? null}
       className="flex-1"
     >
-      {faceOf(id, brief, faceSizeOf(size), false, grid === "wide")}
+      {faceOf(id, brief, faceSizeOf(size), false, grid !== "narrow")}
     </Widget>
   )
   return (
-    <div className={cn("@container flex max-h-full min-h-0 flex-col", grid === "wide" && "flex-1", className)}>
+    <div className={cn("@container flex min-h-0 flex-1 flex-col", className)}>
       {/* Scrolls only as a LAST RESORT: every tile fits a phone held upright
           (measured: 360×780 and up). Held sideways it is ~390px tall, and the
           tiles scroll rather than being squeezed out of sight. */}
       <BentoGrid
         grid={grid}
         gridRef={gridRef}
+        rowPx={rowPx}
         order={shown}
         fullOrder={order}
         sizes={sizes}
         arranging={arranging}
         label={(id) => WIDGET_TITLE[id]}
         tile={tile}
-        face={(id, size) => faceOf(id, brief, faceSizeOf(size), false, grid === "wide")}
+        face={(id, size) => faceOf(id, brief, faceSizeOf(size), false, grid !== "narrow")}
       />
 
       {sheet && (
         <WidgetSheet
           anchor={sheet.anchor}
           title={WIDGET_TITLE[sheet.id]}
-          face={faceOf(sheet.id, brief, sheet.size, false, grid === "wide")}
+          face={faceOf(sheet.id, brief, sheet.size, false, grid !== "narrow")}
           // The tile opens straight down only where its face IS the card's
           // header: a full-width, one-row tile whose face does not change in
           // the card (the flights face drops its crew panel there; the

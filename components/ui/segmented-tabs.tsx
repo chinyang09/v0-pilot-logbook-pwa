@@ -38,11 +38,14 @@ export function SegmentedTabs<T extends string>({
   value,
   onChange,
   className,
+  dense = false,
 }: {
   tabs: SegmentedTab<T>[];
   value: T;
   onChange: (value: T) => void;
   className?: string;
+  /** Tighter segments, for four in a phone's card (the limits'): "Flight 12m" was cut off at 360. */
+  dense?: boolean;
 }) {
   const [boxes, setBoxes] = useState<Boxes>({});
   const listRef = useRef<HTMLDivElement>(null);
@@ -117,7 +120,8 @@ export function SegmentedTabs<T extends string>({
                 // flex-1: the segments share the control's width, as a native
                 // segmented control's do — content-sized, a full-width control
                 // ended in an empty strip after the last one.
-                "relative z-10 flex h-10 flex-1 shrink-0 items-center justify-center rounded-full px-3.5 text-xs font-medium whitespace-nowrap",
+                "relative z-10 flex h-10 flex-1 shrink-0 items-center justify-center rounded-full text-xs font-medium whitespace-nowrap",
+                dense ? "px-1.5" : "px-3.5",
                 "transition-colors active:scale-[0.97]",
                 active ? "text-primary" : "text-muted-foreground hover:text-foreground"
               )}

@@ -92,6 +92,8 @@ export interface FlightBrief {
   airports: Map<string, Airport>
   /** The aircraft database's record for each aeroplane the duty names, by `normalizeRegistration` — how it is spelled and typed everywhere. */
   fleet?: ReadonlyMap<string, AircraftName>
+  /** Each leg's imported briefing's aeroplane (the OFP's registration and type), by leg; null without one. */
+  planned?: ({ registration: string; aircraftType: string } | null)[]
   /** Runways and frequencies for the destinations, by ICAO (undefined while asked, null when the source has none). */
   airportInfo: Record<string, AirportInfo | null>
   /** Runway geometry (thresholds, true headings) by ICAO — OurAirports; undefined while asked, null when it has none. */

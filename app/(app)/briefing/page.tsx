@@ -41,8 +41,9 @@ import { groupNotams, notamCounts } from "@/lib/briefing/notams"
 import { showToast } from "@/lib/utils/undo-toast"
 import { appAlert } from "@/lib/utils/app-alert"
 import { formatDay } from "@/lib/utils/date"
-import { flightDigits } from "@/lib/briefing/ids"
+import { flightBriefingId } from "@/lib/briefing/ids"
 import { useFlights } from "@/hooks/data/use-flights"
+import { refreshAllData } from "@/hooks/data/use-db"
 import type { FlightLog } from "@/types/entities/flight.types"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { useIsDesktop } from "@/hooks/use-is-desktop"
@@ -63,18 +64,8 @@ const isSection = (s: string | null): s is BriefingSectionKey => !!s && BRIEFING
  * are still the pilot's to read and write.
  */
 function flightOfBriefingId(id: string | null, flights: readonly FlightLog[]): FlightLog | null {
-  const m = id?.match(/^brief:([^:]+):(\d{4}-\d{2}-\d{2}):([A-Z0-9]+)$/i)
-  if (!m) return null
-  const [, digits, date, dep] = m
-  return (
-    flights.find(
-      (f) =>
-        f.date === date &&
-        (f.departureIcao || "").toUpperCase() === dep.toUpperCase() &&
-        !!f.flightNumber &&
-        flightDigits(f.flightNumber.toUpperCase()) === digits,
-    ) ?? null
-  )
+  if (!id?.startsWith("brief:")) return null
+  return flights.find((f) => !!f.flightNumber && !!f.departureIcao && flightBriefingId(f) === id) ?? null
 }
 
 function BriefingPage() {
@@ -95,8 +86,9 @@ function BriefingPage() {
     if (!file) return
     setBusy(true)
     try {
-      const { record, notams, newNotams } = await importBriefingFile(file)
+      const { record, notams, newNotams, aircraft } = await importBriefingFile(file)
       await refreshBriefingCaches()
+      if (aircraft) void refreshAllData()
       showToast(`${record.flightNumber} ${record.dep}–${record.arr} briefing saved · ${notams} NOTAMs, ${newNotams} new`)
       if (record.id !== id) router.replace(`/briefing?id=${encodeURIComponent(record.id)}`, { scroll: false })
     } catch (e) {

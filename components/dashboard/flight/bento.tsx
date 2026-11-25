@@ -28,7 +28,7 @@ import * as React from "react"
 import { createPortal } from "react-dom"
 import { animate, motion, useMotionValue } from "framer-motion"
 import { Move } from "lucide-react"
-import { GRID_GAP_PX, columnsOf, mergeShownOrder, moveTile, nudgeTile, packTiles, sizeLabel, type GridKind, type TileSize } from "@/lib/utils/dashboard/bento"
+import { GRID_GAP_PX, ROW_FLOOR_PX, columnsOf, mergeShownOrder, moveTile, nudgeTile, packTiles, rowsOf, sizeLabel, type GridKind, type TileSize } from "@/lib/utils/dashboard/bento"
 import { DASHBOARD_TILES, setArranging, setTileOrder, setTileSize, type DashboardTile } from "@/hooks/use-dashboard-layout"
 import { haptic } from "@/lib/utils/haptics"
 import { cn } from "@/lib/utils"
@@ -65,8 +65,6 @@ interface Drag {
 
 /** The grid's gap, px (`gap-2`). */
 const GAP = GRID_GAP_PX
-/** A row's floor, px (2.5rem): two rows and the gap are the 3 × 2 grid's 5.5rem. */
-const ROW_MIN_PX = 40
 
 /** Which edge a resize pulls: left / right change the columns, top / bottom the rows. */
 type Edge = "l" | "r" | "t" | "b"
@@ -86,6 +84,7 @@ interface Resize {
 export function BentoGrid({
   grid,
   gridRef,
+  rowPx,
   order,
   fullOrder,
   sizes,
@@ -96,8 +95,10 @@ export function BentoGrid({
 }: {
   /** Six columns (a phone, a narrow panel) or twelve (`gridKindFor` — a desktop's full width). */
   grid: GridKind
-  /** The grid element — the page measures it to choose `grid`. */
+  /** The box the tiles have — the page measures it to choose `grid` and the row height. */
   gridRef?: React.Ref<HTMLDivElement>
+  /** A row's height, px (`rowHeightFor`): a fixed share of the box, never the content's. */
+  rowPx: number
   /** The tiles on show, in order. */
   order: DashboardTile[]
   /** Every tile in the pilot's order, those not applicable now included (a standby's flights). */
@@ -112,11 +113,13 @@ export function BentoGrid({
   face: (id: DashboardTile, size: TileSize) => React.ReactNode
 }) {
   const columns = columnsOf(grid)
+  const gridRows = rowsOf(grid)
+  const row = Math.max(ROW_FLOOR_PX, rowPx)
   const placed = React.useMemo(() => {
     const m = new Map<DashboardTile, { index: number; col: number; row: number; cols: number; rows: number }>()
-    packTiles(order, sizes, columns).forEach((t, index) => m.set(t.id, { index, col: t.col, row: t.row, cols: t.cols, rows: t.rows }))
+    packTiles(order, sizes, columns, gridRows).forEach((t, index) => m.set(t.id, { index, col: t.col, row: t.row, cols: t.cols, rows: t.rows }))
     return m
-  }, [order, sizes, columns])
+  }, [order, sizes, columns, gridRows])
   const sizesRef = React.useRef(sizes)
   React.useEffect(() => {
     sizesRef.current = sizes
@@ -160,9 +163,7 @@ export function BentoGrid({
     const gridEl = slot?.parentElement
     if (!slot || !gridEl) return
     const g = gridEl.getBoundingClientRect()
-    const r = slot.getBoundingClientRect()
     const start = sizesRef.current[id]
-    const p = placed.get(id)
     setActive(id)
     setResize({
       id,
@@ -171,7 +172,7 @@ export function BentoGrid({
       y0: e.clientY,
       start,
       colPitch: (g.width - GAP * (columns - 1)) / columns + GAP,
-      rowPitch: Math.max(ROW_MIN_PX + GAP, (r.height + GAP) / (p?.rows ?? 1)),
+      rowPitch: row + GAP,
       grid,
     })
     haptic("tick")
@@ -302,29 +303,23 @@ export function BentoGrid({
 
   return (
     <>
-      {/* The SCROLLER is a wrapper, not the grid: a grid with a height of its
-          own shares that height out among its rows, and a tile (which clips,
-          so it has no minimum height) was SQUEEZED to fit — a reordered grid
-          taller than the phone cut the duty tile's captions off. Unbounded,
-          every row is as tall as its tallest tile, and only the wrapper
-          scrolls, as a last resort. */}
-      {/* On the WIDE grid the rows also share the page's HEIGHT (a desktop has
-          room under the tiles a phone has not): auto rows stretch to fill a
-          grid taller than its content, and never shrink below it. */}
+      {/* The SCROLLER is a wrapper, not the grid, and it is the BOX the page
+          measures: its height is shared out among the grid's rows
+          (`rowHeightFor`), so every row is one fixed height and a tile's rows
+          are what the pilot chose. Too short for its rows (a phone on its
+          side), the rows keep their floor and only the wrapper scrolls. */}
       <div
-        className={cn("min-h-0 overflow-y-auto overscroll-contain scrollbar-hide", grid === "wide" && "flex-1", arranging && "-m-4 p-4")}
+        ref={gridRef}
+        className={cn("min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-hide", arranging && "-m-4 p-4")}
         data-bento-scroll
       >
       <div
-        ref={gridRef}
         // While arranging, the wrapper gains a margin's room on every side
         // (and gives it back as negative margin, so nothing moves) for the
         // move badges that sit ON each tile's corner — inside it they covered
         // the tile's own corner (a weather hazard, the currency tally).
-        className={cn("grid gap-2", grid === "wide" ? "min-h-full content-stretch" : "content-start")}
-        // A row is as tall as its tallest tile, and a tile two rows tall spans
-        // both; the floor keeps a two-row tile visibly two rows.
-        style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gridAutoRows: `minmax(${ROW_MIN_PX}px, auto)` }}
+        className="grid content-start gap-2"
+        style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gridAutoRows: `${row}px` }}
       >
         {/* The DOM order never changes: the grid places each tile by row and column. */}
         {DASHBOARD_TILES.map((id) => {
