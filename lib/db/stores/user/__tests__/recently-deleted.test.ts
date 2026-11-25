@@ -65,6 +65,7 @@ vi.mock("../sync-queue.store", () => ({
 }));
 
 import {
+  updateFlight,
   deleteFlight,
   restoreFlight,
   permanentlyDeleteFlight,
@@ -230,3 +231,24 @@ describe("isLiveFlight", () => {
     expect(isLiveFlight({ deletedAt: Date.now() })).toBe(false);
   });
 });
+
+/**
+ * A flight is keyed on the UTC date of its actual OUT once there is one, as
+ * the importers write it. An OUT typed by hand onto a row dated by its
+ * schedule has to move it there too (the owner's red-eye, Nov 2026).
+ */
+describe("an OUT typed after midnight UTC", () => {
+  it("moves the flight to the day it left", async () => {
+    rows = [flight("r", "2026-11-18", { scheduledOut: "23:55", outTime: "" })];
+    const saved = await updateFlight("r", { outTime: "00:28" });
+    expect(saved?.date).toBe("2026-11-19");
+  });
+
+  it("leaves an on-time OUT, and a date the edit sets itself, alone", async () => {
+    rows = [flight("r", "2026-11-18", { scheduledOut: "23:55", outTime: "" })];
+    expect((await updateFlight("r", { outTime: "23:58" }))?.date).toBe("2026-11-18");
+    rows = [flight("s", "2026-11-18", { scheduledOut: "23:55", outTime: "" })];
+    expect((await updateFlight("s", { outTime: "00:28", date: "2026-11-18" }))?.date).toBe("2026-11-18");
+  });
+});
+

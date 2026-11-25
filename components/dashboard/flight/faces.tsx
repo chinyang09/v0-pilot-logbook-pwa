@@ -23,7 +23,7 @@ import type { CrewMate } from "@/lib/utils/dashboard/flight-brief"
 import { FACE_WIDE_COLS, type TileSize } from "@/lib/utils/dashboard/bento"
 import { TileRows } from "./tile-rows"
 import { PILOT_ROLES, roleLabel, type LogbookAuthority } from "@/lib/utils/logbook-rules"
-import type { PilotRole } from "@/types/entities/flight.types"
+import type { FlightLog, PilotRole } from "@/types/entities/flight.types"
 import { addDays, localDayKey, lookAheadFor, type LookAhead } from "@/lib/utils/dashboard/currency-dots"
 import { daysLeftAt } from "@/lib/utils/dashboard/currency-summary"
 import { RECENCY_CAUTION_DAYS } from "@/lib/utils/dashboard/legality"
@@ -32,6 +32,8 @@ import { Pager, useRememberedPage } from "./pager"
 import { onwardLines, whereaboutsLines } from "@/lib/lookup/aircraft-whereabouts"
 import { MIN_TURN_MIN } from "@/lib/utils/dashboard/estimated-in"
 import * as React from "react"
+import { normalizeRegistration } from "@/lib/utils/string"
+import { scheduledInMs, scheduledOutMs } from "@/lib/utils/flight-day"
 import { ChevronRight, Plane } from "lucide-react"
 import { formatClockDisplay } from "@/lib/utils/time"
 import { flightInstantMs } from "@/lib/airports/code-changes"
@@ -195,8 +197,19 @@ export function legLine(brief: FlightBrief, i: number): { kind: "inbound" | "onw
     const inbound = duty.lookups?.inbound
     const w = inbound?.status === "done" ? whereaboutsLines(inbound.whereabouts, brief.now, sep) : null
     // The flight number only — where it came from is the card's; the time it
-    // landed is what decides the engines' idle and the APU on the turn.
-    if (w) return { kind: "inbound", text: [w.flight.split(" ")[0], w.primary].filter(Boolean).join(" · "), late: inboundLate(brief, i) }
+    // landed is what decides the engines' idle and the APU on the turn. Its
+    // arrival GATE is where our aeroplane is (the owner, Nov 2026: "one glance
+    // info that I need") — unless it is the departure gate the tile already says.
+    if (w) {
+      const g = duty.lookups?.gates[f.id]
+      const dep = g?.status === "done" ? g.gates.departure.gate : ""
+      const arr = inboundGate(brief)
+      return {
+        kind: "inbound",
+        text: [w.flight.split(" ")[0], arr && arr !== dep && `Arr ${arr}`, w.primary].filter(Boolean).join(" · "),
+        late: inboundLate(brief, i),
+      }
+    }
   }
   if (i === duty.legs.length - 1) {
     const onward = duty.lookups?.onward
@@ -207,6 +220,12 @@ export function legLine(brief: FlightBrief, i: number): { kind: "inbound" | "onw
     if (viaAirport) return { kind: "onward", text: `Next ${viaAirport}` }
   }
   return null
+}
+
+/** The inbound aeroplane's arrival gate — where ours is parked for the turn; "" until published. */
+export function inboundGate(brief: FlightBrief): string {
+  const w = brief.duty.lookups?.inbound
+  return w?.status === "done" ? (w.whereabouts.inbound?.arrivalGate ?? "").trim() : ""
 }
 
 /**
@@ -242,16 +261,45 @@ export function legDelay(brief: FlightBrief, i: number): number | null {
 /** A delay under this is not said — a few minutes either way is the schedule. */
 const DELAY_SAID_MIN = 10
 
-/** "OUT +0:40" in amber, beside a leg's times — the departure, said as such (the times beside it are the schedule). */
-function DelayChip({ minutes }: { minutes: number | null }) {
-  if (minutes === null) return null
-  return <span className="shrink-0 whitespace-pre font-semibold text-status-warning"> · OUT +{formatDutyClock(minutes)}</span>
+/**
+ * " · 23:55–01:50Z" — the leg's SCHEDULE, always (the owner, Nov 2026: show
+ * the schedule, and the actual with how early or late beside it); a leg with
+ * no schedule (entered by hand) shows the times it has.
+ */
+export function scheduleRange(brief: FlightBrief, i: number): string {
+  const f = brief.duty.legs[i]
+  const t = brief.duty.times[i]
+  const sep = brief.display?.clockSeparator
+  if (isHHMM(f?.scheduledOut) && isHHMM(f?.scheduledIn)) return ` · ${formatClockDisplay(f.scheduledOut, sep)}–${formatClockDisplay(f.scheduledIn, sep)}Z`
+  return t?.departMs != null && t?.arriveMs != null ? ` · ${brief.clock(t.departMs).replace(/Z$/, "")}–${brief.clock(t.arriveMs)}` : ""
 }
 
-/** A terminal worth naming: "T1" → "1"; a blank or a source's "0" → "". */
-export function knownTerminal(t: string | undefined | null): string {
-  const v = (t ?? "").trim().replace(/^T/i, "")
-  return v && v !== "0" ? v : ""
+/**
+ * Beside the tile's schedule, what has happened against it: once off blocks
+ * the recorded OUT's "OUT +0:33", once on blocks the IN's; before, a LIVE
+ * delay the sources report ("OUT +0:40", from 10 minutes). Amber from 10 late.
+ */
+function LegChip({ brief, i }: { brief: FlightBrief; i: number }) {
+  const f = brief.duty.legs[i]
+  const t = brief.duty.times[i]
+  if (!f) return null
+  const end = isHHMM(f.inTime) ? ("IN" as const) : isHHMM(f.outTime) ? ("OUT" as const) : null
+  if (end) {
+    // How early or late, said against what it is ("OUT +0:33"); the recorded
+    // time itself is the card's OUT / IN row — on a narrow tile it pushed the
+    // schedule out of the line.
+    const d = offSchedule(f, end, end === "IN" ? (t?.arriveMs ?? null) : (t?.departMs ?? null))
+    const off = offScheduleText(d).replace(/[()]/g, "")
+    if (!off) return null
+    return (
+      <span className={cn("shrink-0 whitespace-pre", d !== null && d >= DELAY_SAID_MIN ? "font-semibold text-status-warning" : "text-muted-foreground")} suppressHydrationWarning>
+        {` · ${end} ${off}`}
+      </span>
+    )
+  }
+  const minutes = legDelay(brief, i)
+  if (minutes === null) return null
+  return <span className="shrink-0 whitespace-pre font-semibold text-status-warning"> · OUT +{formatDutyClock(minutes)}</span>
 }
 
 /**
@@ -266,7 +314,9 @@ export function legAircraft(brief: FlightBrief, i: number): { reg: string; type:
   if (!f) return { reg: "", type: "", expected: false, from: "" }
   const g = duty.lookups?.gates[f.id]
   const own = f.aircraftReg || (i === legNow(brief) ? duty.lookups?.inboundRegistration : "") || (g?.status === "done" ? g.gates.flight.registration : "") || ""
-  if (own) return { reg: own, type: f.aircraftType || "", expected: false, from: "" }
+  // As the aircraft database spells and types it (the Aircraft page's name).
+  const rec = own ? brief.fleet?.get(normalizeRegistration(own)) : undefined
+  if (own) return { reg: rec?.registration || own, type: rec?.typecode || f.aircraftType || "", expected: false, from: "" }
   const prev = duty.legs[i - 1]
   if (prev && prev.arrivalIcao && prev.arrivalIcao === f.departureIcao) {
     const p = legAircraft(brief, i - 1)
@@ -304,10 +354,9 @@ function LegPage({ brief, i, more = false }: { brief: FlightBrief; i: number; mo
       <p className="mt-0.5 flex min-w-0 items-baseline text-[12px] leading-tight tabular-nums text-foreground">
         <span className="min-w-0 truncate" suppressHydrationWarning data-morph={`fl-num-${i}`}>
           <span className="font-semibold">{f.flightNumber || "Flight"}</span>
-          {t?.departMs != null && t?.arriveMs != null && ` · ${clock(t.departMs).replace(/Z$/, "")}–${clock(t.arriveMs)}`}
-          {flown && <span className="text-muted-foreground"> · On blocks</span>}
+          {scheduleRange(brief, i)}
         </span>
-        <DelayChip minutes={legDelay(brief, i)} />
+        <LegChip brief={brief} i={i} />
       </p>
       <p className="flex items-baseline justify-between gap-2 text-[12px] leading-tight tabular-nums">
         <span className="min-w-0 truncate" data-morph={`fl-ac-${i}`}>
@@ -551,15 +600,6 @@ export function CardTable({ rows }: { rows: CardRow[] }) {
   )
 }
 
-/** "00:05" − "22:30" across midnight → "1:35"; "" without both. */
-export function plannedBlock(out?: string, inn?: string): string {
-  if (!out || !inn) return ""
-  const m = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5))
-  if (!/^\d\d:\d\d$/.test(out) || !/^\d\d:\d\d$/.test(inn)) return ""
-  const d = (m(inn) - m(out) + 1440) % 1440
-  return d ? `${Math.floor(d / 60)}:${String(d % 60).padStart(2, "0")}` : ""
-}
-
 /**
  * Leg `i` in the flights CARD, in the order it runs (the owner, Nov 2026:
  * "a revamp on the contents between the timeline and crew. No repetition.
@@ -571,12 +611,13 @@ export function plannedBlock(out?: string, inn?: string): string {
  * is said again.
  */
 /**
- * Leg `i`'s rows, in the order it runs — the flights card's table, and what a
- * TALL wide tile lists under the leg (`TileRows`) once the face's own lines
- * (the rows tagged `morph`) are left out.
+ * Leg `i` in the flights CARD, in the order it runs: the inbound aeroplane,
+ * our aeroplane, the departure gate, OUT and IN (the schedule until recorded,
+ * then the recorded time with its "(+0:33)"), the arrival gate, the flight
+ * after ours. No estimates, no block, no terminals (the owner, Nov 2026).
  */
-export function legRows(brief: FlightBrief, i: number, omitEstIn = false): CardRow[] {
-  const { duty, clock } = brief
+export function legRows(brief: FlightBrief, i: number): CardRow[] {
+  const { duty } = brief
   const f = duty.legs[i]
   const t = duty.times[i]
   const sep = brief.display?.clockSeparator
@@ -585,16 +626,16 @@ export function legRows(brief: FlightBrief, i: number, omitEstIn = false): CardR
   const gates = g?.status === "done" ? g.gates : null
   const line = legLine(brief, i)
   const ac = legAircraft(brief, i)
-  const e = duty.estimate?.legs[i]
   const rows: CardRow[] = []
-  // The aeroplane coming in, on the leg the pilot takes it over for.
+  // The aeroplane coming in, on the leg the pilot takes it over for. Its
+  // arrival gate rides in the line (`legLine`) unless it is our departure gate.
   const inbound = duty.lookups?.inbound
   const w = line?.kind === "inbound" && inbound?.status === "done" ? whereaboutsLines(inbound.whereabouts, brief.now, sep) : null
   if (line?.kind === "inbound") {
     rows.push({
       label: "Inbound",
       value: line.text,
-      sub: [w?.flight.split(" ").slice(1).join(" "), w?.std, w?.gate && `Arr ${w.gate}`].filter(Boolean).join(" · ") || undefined,
+      sub: [w?.flight.split(" ").slice(1).join(" "), w?.std].filter(Boolean).join(" · ") || undefined,
       tone: line.late ? "caution" : undefined,
       morph: `fl-next-${i}`,
     })
@@ -607,65 +648,18 @@ export function legRows(brief: FlightBrief, i: number, omitEstIn = false): CardR
     sub: ac.expected ? `Expected · after ${ac.from || "the leg before"}, not yet confirmed` : undefined,
     morph: `fl-ac-${i}`,
   })
-  // A contact stand named like its gate is the gate said twice.
-  const terminalStand = (x: { gate: string; terminal: string; stand?: string } | undefined) =>
-    // A terminal of "0" is no terminal (a source's blank), never "Terminal 0".
-    [knownTerminal(x?.terminal) && `Terminal ${knownTerminal(x?.terminal)}`, x?.stand && x.stand !== x.gate && `Stand ${x.stand}`].filter(Boolean).join(" · ") || undefined
-  if (gates?.departure.gate || gates?.departure.stand) {
-    rows.push({
-      label: "Departure",
-      value: gates.departure.gate ? `Gate ${gates.departure.gate}` : `Stand ${gates.departure.stand}`,
-      sub: gates.departure.gate ? terminalStand(gates.departure) : undefined,
-      morph: flown ? undefined : `fl-gate-${i}`,
-    })
-  }
-  // The times where they are NOT what the number line says: what flew
-  // against the schedule, or the live estimate against it.
-  const sched = (hhmm?: string) => (hhmm && /^\d{1,2}:\d{2}$/.test(hhmm) ? `${formatClockDisplay(hhmm, sep)}Z` : "")
-  // Against the schedule, one way everywhere: "+0:33", "−0:05", "On time".
-  const minutesOff = (ms: number | null, hhmm: string | undefined, after?: string) => {
-    const s0 = hhmm && /^\d{1,2}:\d{2}$/.test(hhmm) ? flightInstantMs(f.date, hhmm, after ?? null) : null
-    return ms === null || s0 === null ? null : Math.round((ms - s0) / 60_000)
-  }
-  const versus = (ms: number | null, hhmm: string | undefined, after?: string) => {
-    const d = minutesOff(ms, hhmm, after)
-    if (d === null) return ""
-    return Math.abs(d) < 5 ? "On time" : d > 0 ? `+${formatDutyClock(d)}` : `−${formatDutyClock(-d)}`
-  }
-  // Amber only for its OWN lateness (a delay said from 10 minutes).
-  const lateTone = (ms: number | null, hhmm: string | undefined, after?: string) => {
-    const d = minutesOff(ms, hhmm, after)
-    return d !== null && d >= DELAY_SAID_MIN ? ("caution" as const) : undefined
-  }
-  if (f.outTime) {
-    // The number line says what flew; the schedule it flew against, once.
-    const range = sched(f.scheduledOut) && sched(f.scheduledIn) ? `${sched(f.scheduledOut).replace(/Z$/, "")}–${sched(f.scheduledIn)}` : ""
-    const sub = [
-      versus(t?.departMs ?? null, f.scheduledOut) && `OUT ${versus(t?.departMs ?? null, f.scheduledOut)}`,
-      f.inTime && versus(t?.arriveMs ?? null, f.scheduledIn, f.scheduledOut) && `IN ${versus(t?.arriveMs ?? null, f.scheduledIn, f.scheduledOut)}`,
-    ].filter(Boolean).join(" · ")
-    if (range) rows.push({ label: "Scheduled", value: range, sub: sub || undefined })
-    // Off blocks, not yet on: where it is now expected in.
-    if (!f.inTime && e && e.inMs !== null && !omitEstIn)
-      rows.push({ label: "Est. IN", value: clock(e.inMs), sub: versus(e.inMs, f.scheduledIn, f.scheduledOut) || undefined, tone: lateTone(e.inMs, f.scheduledIn, f.scheduledOut) })
-  } else if (e && (e.outKind !== "scheduled" || e.inKind !== "scheduled")) {
-    // Not yet off: the number line is the schedule; the live estimate against it
-    // (a source may give the arrival and not the departure).
-    if (e.outKind !== "scheduled" && e.outMs !== null)
-      rows.push({ label: "Est. OUT", value: clock(e.outMs), sub: versus(e.outMs, f.scheduledOut) || undefined, tone: lateTone(e.outMs, f.scheduledOut) })
-    if (e.inMs !== null && !omitEstIn)
-      rows.push({ label: "Est. IN", value: clock(e.inMs), sub: versus(e.inMs, f.scheduledIn, f.scheduledOut) || undefined, tone: lateTone(e.inMs, f.scheduledIn, f.scheduledOut) })
-  }
-  if (gates?.arrival.gate || gates?.arrival.stand) {
-    rows.push({
-      label: "Arrival",
-      value: gates.arrival.gate ? `Gate ${gates.arrival.gate}` : `Stand ${gates.arrival.stand}`,
-      sub: gates.arrival.gate ? terminalStand(gates.arrival) : undefined,
-      morph: flown ? `fl-gate-${i}` : undefined,
-    })
-  }
-  const block = flown && f.blockTime && f.blockTime !== "00:00" ? f.blockTime : plannedBlock(f.scheduledOut, f.scheduledIn)
-  if (block) rows.push({ label: flown ? "Block" : "Planned Block", value: block })
+  // The gate number alone (the owner, Nov 2026: "remove all terminal … gate
+  // number is good enough"); a stand only where no gate is published.
+  const gateOf = (x: { gate: string; stand?: string } | undefined) => (x?.gate ? `Gate ${x.gate}` : x?.stand ? `Stand ${x.stand}` : "")
+  const dep = gateOf(gates?.departure)
+  if (dep) rows.push({ label: "Departure", value: dep, morph: flown ? undefined : `fl-gate-${i}` })
+  // OUT and IN, ONE row each (the owner, Nov 2026: estimates "not very useful
+  // during flight. And confusing"): the schedule until the time is recorded,
+  // then the recorded time with how early or late it was beside it.
+  rows.push(timeRow(brief, i, "OUT", f.outTime, f.scheduledOut, t?.departMs ?? null))
+  rows.push(timeRow(brief, i, "IN", f.inTime, f.scheduledIn, f.inTime ? (t?.arriveMs ?? null) : null))
+  const arr = gateOf(gates?.arrival)
+  if (arr) rows.push({ label: "Arrival", value: arr, morph: flown ? `fl-gate-${i}` : undefined })
   // The flight that takes the aeroplane over after ours.
   if (line?.kind === "onward") {
     const onward = duty.lookups?.onward
@@ -680,14 +674,56 @@ export function legRows(brief: FlightBrief, i: number, omitEstIn = false): CardR
   return rows
 }
 
+const isHHMM = (t?: string | null): t is string => !!t && /^\d{1,2}:\d{2}$/.test(t)
+
+/** Minutes leg `f`'s recorded OUT or IN is from its schedule (negative early); null without both. */
+export function offSchedule(f: FlightLog, end: "OUT" | "IN", actualMs: number | null): number | null {
+  // The schedule against the OUT the flight is dated by (`lib/utils/flight-day`).
+  const s = end === "OUT" ? scheduledOutMs(f) : scheduledInMs(f)
+  return actualMs === null || s === null ? null : Math.round((actualMs - s) / 60_000)
+}
+
+/** "(+0:33)", "(−0:05)", "" on time — a recorded time against its schedule. */
+export function offScheduleText(min: number | null): string {
+  if (min === null || min === 0) return ""
+  return min > 0 ? `(+${formatDutyClock(min)})` : `(−${formatDutyClock(-min)})`
+}
+
+/** One end of a leg: "23:55Z Sch" until recorded, then "00:28Z (+0:33)" — amber only from 10 minutes late. */
+function timeRow(brief: FlightBrief, i: number, label: "OUT" | "IN", actual: string | undefined, scheduled: string | undefined, actualMs: number | null): CardRow {
+  const f = brief.duty.legs[i]
+  const sep = brief.display?.clockSeparator
+  const z = (hhmm: string) => `${formatClockDisplay(hhmm, sep)}Z`
+  if (isHHMM(actual)) {
+    const d = offSchedule(f, label, actualMs)
+    const off = offScheduleText(d)
+    return {
+      label,
+      value: (
+        <>
+          {z(actual)}
+          {off && <span className="ml-1 text-[12px] font-medium">{off}</span>}
+        </>
+      ),
+      tone: d !== null && d >= DELAY_SAID_MIN ? "caution" : undefined,
+    }
+  }
+  if (!isHHMM(scheduled)) return { label, value: "—" }
+  return {
+    label,
+    value: (
+      <>
+        <span className="mr-1 text-[11px] font-normal text-muted-foreground">Sch</span>
+        {z(scheduled)}
+      </>
+    ),
+  }
+}
+
 function CardLeg({ brief, i }: { brief: FlightBrief; i: number }) {
-  const { duty, clock, code } = brief
+  const { duty, code } = brief
   const f = duty.legs[i]
-  const t = duty.times[i]
-  const flown = !!f.inTime
-  // The duty's last IN, estimated, is the Duty & FDP table's (with how far it
-  // is from the latest IN) — not said twice on the last leg.
-  const rows = legRows(brief, i, i === duty.legs.length - 1 && !!duty.estimate)
+  const rows = legRows(brief, i)
   return (
     <>
       <p className="truncate text-[21px] font-bold leading-tight tracking-tight text-foreground" data-morph={`fl-route-${i}`}>
@@ -695,8 +731,7 @@ function CardLeg({ brief, i }: { brief: FlightBrief; i: number }) {
       </p>
       <p className="mt-0.5 truncate text-[12px] leading-tight tabular-nums text-foreground" suppressHydrationWarning data-morph={`fl-num-${i}`}>
         <span className="font-semibold">{f.flightNumber || "Flight"}</span>
-        {t?.departMs != null && t?.arriveMs != null && ` · ${clock(t.departMs).replace(/Z$/, "")}–${clock(t.arriveMs)}`}
-        {flown && <span className="text-muted-foreground"> · On blocks</span>}
+        {scheduleRange(brief, i)}
       </p>
       <div className="mt-1.5">
         <CardTable rows={rows} />

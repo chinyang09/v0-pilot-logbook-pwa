@@ -70,3 +70,13 @@ describe("estimateDutyIn", () => {
     expect(estimateDutyIn([], {})).toBeNull()
   })
 })
+
+describe("a red-eye dated by its actual OUT", () => {
+  // Scheduled 23:55 on the 18th, off blocks 00:28 — dated the 19th.
+  const tr274 = leg("TR274", { date: "2026-11-19", scheduledOut: "23:55", scheduledIn: "01:50", outTime: "00:28" })
+
+  it("is 33 minutes late, not a day early", () => {
+    const e = estimateDutyIn([tr274], {})!
+    expect(e.legs[0]).toMatchObject({ outMs: at("00:28", "2026-11-19"), inMs: at("02:23", "2026-11-19"), delayMin: 33 })
+  })
+})

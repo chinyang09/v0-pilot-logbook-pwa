@@ -157,7 +157,9 @@ export function AirportPanel({
   const Arrive = night === null ? null : night ? Moon : Sun
   const local = airport?.tz ? getAirportLocalTime(airport.tz).split(" ")[0] : null
   const offset = airport?.tz ? formatTimezoneOffset(getAirportTimeInfo(airport.tz).offset) : null
-  const place = airport?.city || airport?.name || ""
+  // The airport database's NAME — what the Airports page and the briefing
+  // call it (the owner, Nov 2026: one name everywhere, not the city here).
+  const place = airport?.name || airport?.city || ""
 
   const windText = windWords(windDir, c?.windKt)
   const temp =

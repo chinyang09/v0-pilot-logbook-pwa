@@ -24,6 +24,7 @@ import type {
 import type { FlightLog } from "@/types/entities/flight.types"
 import { isPositioningEntry, isSimulatorEntry } from "@/lib/utils/entry-type"
 import { hhmmToMinutes, minutesToHHMM } from "@/lib/utils/time"
+import { scheduledInMinutes, scheduledOutMinutes } from "@/lib/utils/flight-day"
 import {
   acclimatisedOffsetsAtEachDuty,
   CIRCADIAN_REST_MIN,
@@ -533,9 +534,13 @@ function createDutyPeriodFromFlightGroup(
     if (flight.outTime) {
       earliestOut = Math.min(earliestOut, hhmmToMinutes(flight.outTime))
     }
-    // Track scheduled OUT for FDP table lookup (CAAS uses scheduled, not actual)
-    if (flight.scheduledOut) {
-      earliestScheduledOut = Math.min(earliestScheduledOut, hhmmToMinutes(flight.scheduledOut))
+    // Track scheduled OUT for FDP table lookup (CAAS uses scheduled, not
+    // actual) — read against the actual OUT the flight is dated by
+    // (`scheduledOutMinutes`): a 23:55 red-eye off blocks at 00:28 is dated
+    // the next day and was scheduled at −5, the evening before.
+    const schedOut = scheduledOutMinutes(flight)
+    if (schedOut !== null) {
+      earliestScheduledOut = Math.min(earliestScheduledOut, schedOut)
     }
     // An explicitly recorded report — only a duty's first sector normally
     // carries one, but take the earliest so it does not matter which.
@@ -563,14 +568,8 @@ function createDutyPeriodFromFlightGroup(
   }
   if (latestIn === -Infinity) {
     for (const flight of flying) {
-      if (flight.scheduledIn) {
-        let inMin = hhmmToMinutes(flight.scheduledIn)
-        const outRef = flight.scheduledOut
-        if (outRef && inMin < hhmmToMinutes(outRef)) {
-          inMin += 1440
-        }
-        latestIn = Math.max(latestIn, inMin)
-      }
+      const inMin = scheduledInMinutes(flight)
+      if (inMin !== null) latestIn = Math.max(latestIn, inMin)
     }
   }
 
@@ -594,11 +593,17 @@ function createDutyPeriodFromFlightGroup(
   // the FDP maximum.
   let lastOperatedIn = -Infinity
   for (const flight of operated) {
-    const inT = flight.inTime || flight.scheduledIn
-    if (!inT) continue
-    let inMin = hhmmToMinutes(inT)
-    const outT = flight.inTime ? flight.outTime : flight.scheduledOut
-    if (outT && inMin < hhmmToMinutes(outT)) inMin += 1440
+    let inMin: number
+    if (flight.inTime) {
+      inMin = hhmmToMinutes(flight.inTime)
+      if (flight.outTime && inMin < hhmmToMinutes(flight.outTime)) inMin += 1440
+    } else {
+      // Not yet on blocks: its scheduled IN, after its scheduled OUT as read
+      // against the OUT it is dated by.
+      const s = scheduledInMinutes(flight)
+      if (s === null) continue
+      inMin = s
+    }
     lastOperatedIn = Math.max(lastOperatedIn, inMin)
   }
   const fdpEndMinutes = lastOperatedIn === -Infinity ? latestIn : lastOperatedIn
@@ -870,10 +875,14 @@ function collectCircadianInstants(
   // SCHEDULED departure and a SCHEDULED arrival, so a delayed arrival after
   // 0100 does not make a duty a late finish. Each sequence keeps its own day
   // wrap, so an actual time never reads against a scheduled one.
-  let schedCursor = -1
+  // It starts where the first sector's schedule falls against the OUT the
+  // flight is dated by (`scheduledOutMinutes`): a red-eye off blocks after
+  // midnight was scheduled the evening before its date.
+  let schedCursor = (groupFlights[0] && scheduledOutMinutes(groupFlights[0])) ?? -1
   const stepSched = (time?: string): number | undefined => {
     if (!time) return undefined
     let m = hhmmToMinutes(time)
+    while (m - 1440 >= schedCursor) m -= 1440
     while (m < schedCursor) m += 1440
     schedCursor = m
     return (dayStartMinutes + m) * 60_000

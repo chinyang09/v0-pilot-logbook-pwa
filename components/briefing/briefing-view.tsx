@@ -39,6 +39,7 @@ import { stationsOf, type Briefing, type BriefingStation } from "@/lib/briefing/
 import { saveBriefingNote, setNotamFlag } from "@/lib/db"
 import { refreshBriefingCaches, useBriefingNote, useNotamRegister } from "@/hooks/data/use-briefings"
 import { useAirportInfo } from "@/hooks/use-airport-info"
+import { useAirportByIcao } from "@/hooks/data"
 import { useAirportWeather } from "@/hooks/use-airport-weather"
 import { briefStations, metarReadings, stationWindows, WINDOW_MS, type StationWindow } from "@/lib/weather/brief"
 import { StationWeather } from "@/components/dashboard/flight/weather"
@@ -866,11 +867,13 @@ export function briefingAirports(a: FlightAirports): { main: BriefingStation[]; 
 }
 
 function AirportHeader({ station }: { station: BriefingStation }) {
+  // The airport database's name, as everywhere (see `AirportRow`).
+  const name = useAirportByIcao(station.icao)?.name || station.name
   return (
     <div className="flex items-baseline justify-between gap-2 px-4 pb-1 pt-3">
       <p className="min-w-0 truncate text-[15px] font-semibold text-foreground">
         {station.icao}
-        {station.name ? <span className="font-normal text-muted-foreground"> · {station.name}</span> : null}
+        {name ? <span className="font-normal text-muted-foreground"> · {name}</span> : null}
       </p>
       <p className="shrink-0 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">{ROLE_NAME[station.role]}</p>
     </div>
@@ -915,8 +918,11 @@ function AirportRow({
   const runways = (info?.runways ?? []).map((r) => [r.id, formatRunwayLength(r.lengthFt ?? 0, unit)].filter(Boolean).join(" ")).join(" • ")
   const [open, setOpen] = React.useState(defaultOpen)
   const noted = !!(note?.company?.trim() || note?.community?.trim())
-  // With no WX list to name it (no briefing imported), the airport data does.
-  const name = station.name || info?.name || ""
+  // ONE name for an airport everywhere (the owner, Nov 2026: the Flight Deck
+  // said "Ho Chi Minh City" where the airport database says "Tan Son
+  // Nhat…"): the airport database's, else the WX list's, else the source's.
+  const db = useAirportByIcao(station.icao)
+  const name = db?.name || station.name || info?.name || ""
   return (
     <div className="row-divider">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex min-h-12 w-full items-start gap-2 px-4 py-2.5 text-left">
