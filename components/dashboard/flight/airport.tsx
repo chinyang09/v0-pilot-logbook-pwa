@@ -167,18 +167,21 @@ export function AirportPanel({
 
   return (
     <div className="py-2">
-      {/* Where, the time there, and how far. */}
+      {/* Where and the time there: the CODE large (the tile's, flying in),
+          the airport's full name under it in smaller type — wrapping onto a
+          second line rather than cut short (the owner, Nov 2026: swap them,
+          "else the full airport name will always be truncated"). */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-lg font-bold uppercase leading-tight tracking-tight text-foreground" data-morph={place ? mk("place") : mk("code")}>
-            {place || code}
+          <p className="text-lg font-bold leading-tight tracking-tight text-foreground" data-morph={mk("code")}>
+            {code}
           </p>
+          {place && (
+            <p className="line-clamp-2 text-[13px] font-medium leading-snug text-foreground" data-morph={mk("place")}>
+              {place}
+            </p>
+          )}
           <p className="flex flex-wrap items-center gap-x-1.5 text-[13px] tabular-nums text-muted-foreground" suppressHydrationWarning>
-            {place && (
-              <span className="font-semibold text-foreground" data-morph={mk("code")}>
-                {code}
-              </span>
-            )}
             {local && (
               <span>
                 <span data-morph={mk("time")}>{local}</span> {offset}

@@ -20,7 +20,7 @@ import * as React from "react"
 import { useAlternates } from "@/hooks/use-alternates"
 import { useAirportWeather } from "@/hooks/use-airport-weather"
 import { useBriefingsByIds } from "@/hooks/data/use-briefings"
-import { briefingId } from "@/lib/briefing/ids"
+import { flightBriefingId } from "@/lib/briefing/ids"
 import { alternateWindows, type Alternate } from "@/lib/weather/alternates"
 import { briefStations, hazardLine, type StationBrief } from "@/lib/weather/brief"
 import { cn } from "@/lib/utils"
@@ -59,7 +59,7 @@ export function useDutyAlternates(brief: FlightBrief, enabled: boolean) {
 
   // The OFPs' planned alternates, per destination.
   const ids = React.useMemo(
-    () => (enabled ? legs.filter((l) => l.flightNumber).map((l) => briefingId(l.flightNumber, l.date, l.departureIcao || "")) : []),
+    () => (enabled ? legs.filter((l) => l.flightNumber).map((l) => flightBriefingId(l)) : []),
     [legs, enabled],
   )
   const briefings = useBriefingsByIds(ids)

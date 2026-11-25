@@ -75,6 +75,7 @@ import { useRouter } from "next/navigation";
 import { showToast } from "@/lib/utils/undo-toast";
 import { importBriefingFile, isBriefingFile } from "@/lib/briefing/import";
 import { refreshBriefingCaches } from "@/hooks/data/use-briefings";
+import { refreshAllData } from "@/hooks/data/use-db";
 import type { Personnel } from "@/types/entities/crew.types";
 import { nonPicPfRoleOf } from "@/lib/utils/roster/pilot-role";
 import type { ReportTotalsCheck } from "@/lib/utils/roster/report-totals-check";
@@ -316,6 +317,7 @@ export function ImportFlow({ context = "shared", onComplete, request, onBusyChan
           let last: Awaited<ReturnType<typeof importBriefingFile>> | null = null;
           for (const f of briefingFiles) last = await importBriefingFile(f);
           await refreshBriefingCaches();
+          if (last?.aircraft) void refreshAllData();
           files = files.filter((f) => !briefingFiles.includes(f));
           if (last) {
             const r = last.record;

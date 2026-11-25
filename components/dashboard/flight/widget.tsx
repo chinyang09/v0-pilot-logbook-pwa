@@ -337,11 +337,14 @@ export function WidgetSheet({
 
   const cardRef = React.useRef<HTMLDivElement>(null)
   const [height, setHeight] = React.useState<number | null>(null)
+  // The height it OPENED at: the card is centred on it, and stays put after.
+  const [firstHeight, setFirstHeight] = React.useState<number | null>(null)
   React.useLayoutEffect(() => {
     const el = cardRef.current
     if (!el) return
     const ro = new ResizeObserver(([entry]) => {
       const h = entry.borderBoxSize?.[0]?.blockSize ?? el.getBoundingClientRect().height
+      setFirstHeight((prev) => prev ?? h)
       setHeight((prev) => (prev !== null && Math.abs(prev - h) < 0.5 ? prev : h))
     })
     ro.observe(el)
@@ -467,11 +470,16 @@ export function WidgetSheet({
   const maxCard = vh - MARGIN * 2 - 24
   // The content's height, plus the surface's two border pixels.
   const restH = Math.min((height ?? anchor.height) + 2, maxCard)
+  // Centred as it opens; after that its TOP stays where it landed and a
+  // change of content grows or shrinks it downward (kept on screen). It
+  // re-centred on every change of height — the limits card moved under the
+  // finger on each tab (the owner's "flashes when tapped").
+  const pinned = Math.max(MARGIN + 12, (vh - Math.min((firstHeight ?? anchor.height) + 2, maxCard)) / 2)
   const rest = {
     // Over its tile, kept on screen: a phone's tile opens across the screen,
     // a desktop's over itself rather than across the page from it.
     left: wide ? anchor.left : Math.min(vw - MARGIN - width, Math.max(MARGIN, anchor.left + anchor.width / 2 - width / 2)),
-    top: Math.max(MARGIN + 12, (vh - restH) / 2),
+    top: Math.max(MARGIN + 12, Math.min(pinned, vh - MARGIN - restH)),
     width,
     height: restH,
   }

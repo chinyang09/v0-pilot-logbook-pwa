@@ -31,7 +31,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Plane, Trash2, MoreHorizontal, FileText } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { isOperatedFlight } from "@/lib/utils/entry-type";
-import { briefingId } from "@/lib/briefing/ids";
+import { flightBriefingId } from "@/lib/briefing/ids";
 import { cn } from "@/lib/utils";
 import { SwipeableCard } from "@/components/swipeable-card";
 import { primeFlightCache } from "@/components/flight-form";
@@ -817,7 +817,7 @@ export const FlightList = forwardRef<FlightListRef, FlightListProps>(
 
     const router = useRouter();
     const handleBriefing = useCallback(
-      (flight: FlightLog) => router.push(`/briefing?id=${encodeURIComponent(briefingId(flight.flightNumber, flight.date, flight.departureIcao || ""))}`),
+      (flight: FlightLog) => router.push(`/briefing?id=${encodeURIComponent(flightBriefingId(flight))}`),
       [router],
     );
 

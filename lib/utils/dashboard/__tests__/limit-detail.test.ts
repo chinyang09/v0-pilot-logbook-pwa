@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { byTightness, limitDetails } from "../limit-detail"
+import { byTightness, limitDetails, limitOrder } from "../limit-detail"
 import { calculateRollingStats } from "@/lib/utils/roster/fdp-calculator"
 import { DEFAULT_FTL_LIMITS, type DutyPeriod } from "@/types/entities/roster.types"
 
@@ -59,5 +59,21 @@ describe("limitDetails", () => {
   it("has no next impact for a duty already counted", () => {
     const again = limitDetails(past, all, asOf, past[3])
     expect(again.every((x) => x.next === null)).toBe(true)
+  })
+})
+
+describe("limitOrder (the Flight Deck's order)", () => {
+  const xs = [
+    { id: "duty-14", fraction: 0.4 },
+    { id: "duty-28", fraction: 0.5 },
+    { id: "flight-28", fraction: 0.3 },
+    { id: "flight-365", fraction: 0.7 },
+  ]
+  it("keeps the regulation's order while nothing is near a limit — a 12-month figure at 70% does not lead", () => {
+    expect(limitOrder(xs, () => "ok").map((x) => x.id)).toEqual(["duty-14", "duty-28", "flight-28", "flight-365"])
+  })
+  it("leads with a limit in concern, red before amber", () => {
+    const state = (id: string) => (id === "flight-28" ? "caution" : id === "duty-28" ? "fail" : "ok") as "ok" | "caution" | "fail"
+    expect(limitOrder(xs, state).map((x) => x.id)).toEqual(["duty-28", "flight-28", "duty-14", "flight-365"])
   })
 })

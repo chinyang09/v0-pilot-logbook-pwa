@@ -30,14 +30,44 @@ export const WIDE_GRID_COLUMNS = 12
 /** The grid's width from which it is the wide grid, px. */
 export const WIDE_GRID_MIN_PX = 760
 
-export type GridKind = "narrow" | "wide"
+/**
+ * Which grid a screen has: `narrow` (a phone, a narrow panel — six columns),
+ * `wide` (twelve, held LANDSCAPE) or `tall` (twelve, held PORTRAIT — an iPad
+ * upright). Each keeps its own sizes: a layout for one is not the other's.
+ */
+export type GridKind = "narrow" | "wide" | "tall"
 
 export function columnsOf(grid: GridKind): number {
-  return grid === "wide" ? WIDE_GRID_COLUMNS : GRID_COLUMNS
+  return grid === "narrow" ? GRID_COLUMNS : WIDE_GRID_COLUMNS
 }
 
-export function gridKindFor(widthPx: number): GridKind {
-  return widthPx >= WIDE_GRID_MIN_PX ? "wide" : "narrow"
+/**
+ * The ROWS a screen is divided into (the owner, Nov 2026: "need a more
+ * definitive way … on phone max of 4 rows, but on ipad portrait vs landscape
+ * is different"). A row is a FIXED share of the height the Flight Deck has
+ * — never as tall as its content — so a tile one row tall and one two rows
+ * tall are always visibly different, and the default layout fills one screen.
+ */
+export const GRID_ROWS: Record<GridKind, number> = { narrow: 4, wide: 4, tall: 6 }
+
+export function rowsOf(grid: GridKind): number {
+  return GRID_ROWS[grid]
+}
+
+/** The box the Flight Deck's tiles have, `heightPx` its height where known: twelve columns from 760px, `tall` when it is taller than wide. */
+export function gridKindFor(widthPx: number, heightPx = 0): GridKind {
+  if (widthPx < WIDE_GRID_MIN_PX) return "narrow"
+  return heightPx > widthPx ? "tall" : "wide"
+}
+
+/** The least a row is, px: on a screen too short for its rows (a phone on its side) the tiles scroll rather than squash. */
+export const ROW_FLOOR_PX = 96
+
+/** A row's height in a box `heightPx` tall: the box shared out among the grid's rows and their gaps. */
+export function rowHeightFor(grid: GridKind, heightPx: number): number {
+  const rows = rowsOf(grid)
+  if (!(heightPx > 0)) return ROW_FLOOR_PX
+  return Math.max(ROW_FLOOR_PX, Math.floor((heightPx - GRID_GAP_PX * (rows - 1)) / rows))
 }
 
 export interface TileSize {
@@ -58,21 +88,44 @@ export interface PlacedTile<T extends string> {
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(n)))
 
-export function clampSize(size: Partial<TileSize> | undefined, minCols = 1, columns = GRID_COLUMNS): TileSize {
+export function clampSize(size: Partial<TileSize> | undefined, minCols = 1, columns = GRID_COLUMNS, maxRows = MAX_ROWS_SPAN): TileSize {
   return {
     cols: clamp(size?.cols ?? columns, minCols, columns),
-    rows: clamp(size?.rows ?? 1, 1, MAX_ROWS_SPAN),
+    rows: clamp(size?.rows ?? 1, 1, maxRows),
   }
 }
 
-export function packTiles<T extends string>(order: readonly T[], sizes: Record<T, TileSize>, columns = GRID_COLUMNS): PlacedTile<T>[] {
+/**
+ * Place the tiles. `rows` is the screen's (`rowsOf`): no tile is taller than
+ * it, and a layout that ends ONE row short of it has its bottom tiles grown
+ * into that row — the slight adjustment that keeps an empty band off the
+ * bottom of the screen (the owner). A tile the pilot made 1 × 1 is never
+ * grown, there or into a hole: it stays the square they chose.
+ */
+export function packTiles<T extends string>(
+  order: readonly T[],
+  sizes: Record<T, TileSize>,
+  columns = GRID_COLUMNS,
+  rows = MAX_ROWS_SPAN,
+): PlacedTile<T>[] {
+  const clamped = Object.fromEntries(order.map((id) => [id, clampSize(sizes[id], 1, columns, rows)])) as Record<T, TileSize>
   // The order as chosen first; where that leaves a hole no neighbour can
   // take (finer sizes on the six-column grid can), a pass that lets a tile
   // drop back into an earlier gap — whichever leaves fewer holes.
-  const strict = pack(order, sizes, false, columns)
-  if (strict.holes === 0) return strict.placed
-  const dense = pack(order, sizes, true, columns)
-  return dense.holes < strict.holes ? dense.placed : strict.placed
+  const strict = pack(order, clamped, false, columns)
+  const best = strict.holes === 0 ? strict : (() => {
+    const dense = pack(order, clamped, true, columns)
+    return dense.holes < strict.holes ? dense : strict
+  })()
+  return fillBottom(best.placed, clamped, rows)
+}
+
+const isSquare = (s: TileSize) => s.cols === 1 && s.rows === 1
+
+function fillBottom<T extends string>(placed: PlacedTile<T>[], chosen: Record<T, TileSize>, rows: number): PlacedTile<T>[] {
+  const used = placed.reduce((m, p) => Math.max(m, p.row + p.rows), 0)
+  if (used === 0 || rows - used !== 1) return placed
+  return placed.map((p) => (p.row + p.rows === used && !isSquare(chosen[p.id]) ? { ...p, rows: p.rows + 1 } : p))
 }
 
 function pack<T extends string>(
@@ -127,6 +180,8 @@ function pack<T extends string>(
   const claim = (p: PlacedTile<T>, i: number) => {
     for (let y = p.row; y < p.row + p.rows; y++) for (let x = p.col; x < p.col + p.cols; x++) take(y, x, i)
   }
+  // A tile the pilot made 1 × 1 takes no hole: it stays their square.
+  const fixed = (p: PlacedTile<T>) => isSquare(sizes[p.id])
   let changed = true
   while (changed) {
     changed = false
@@ -134,14 +189,14 @@ function pack<T extends string>(
       for (let c = 0; c < columns; c++) {
         if (!free(r, c)) continue
         const left = c > 0 ? at(r, c - 1) : undefined
-        if (left && left.col + left.cols === c && column(left, c)) {
+        if (left && !fixed(left) && left.col + left.cols === c && column(left, c)) {
           left.cols += 1
           claim(left, placed.indexOf(left))
           changed = true
           continue
         }
         const right = c < columns - 1 ? at(r, c + 1) : undefined
-        if (right && right.col === c + 1 && column(right, c)) {
+        if (right && !fixed(right) && right.col === c + 1 && column(right, c)) {
           right.col -= 1
           right.cols += 1
           claim(right, placed.indexOf(right))
@@ -149,7 +204,7 @@ function pack<T extends string>(
           continue
         }
         const above = r > 0 ? at(r - 1, c) : undefined
-        if (above && above.row + above.rows === r) {
+        if (above && !fixed(above) && above.row + above.rows === r) {
           let fitsBelow = true
           for (let x = above.col; x < above.col + above.cols; x++) if (!free(r, x)) fitsBelow = false
           if (fitsBelow) {
@@ -161,7 +216,7 @@ function pack<T extends string>(
         }
         // The tile below grows up into it, where its whole width is free here.
         const below = at(r + 1, c)
-        if (below && below.row === r + 1) {
+        if (below && !fixed(below) && below.row === r + 1) {
           let fitsAbove = true
           for (let x = below.col; x < below.col + below.cols; x++) if (!free(r, x)) fitsAbove = false
           if (fitsAbove) {
@@ -206,13 +261,21 @@ const PHONE_THIRD_PX = (366 + GRID_GAP_PX) / 3
  * wide is a face 4.5 wide, which lays out more (every leg side by side,
  * several airports, the limits in pairs). Rows are the grid's, as before.
  */
-export function faceSizeOn(size: TileSize, grid: GridKind, gridPx: number): TileSize {
-  if (grid === "narrow" || !(gridPx > 0)) return faceSize(size)
+export function faceSizeOn(size: TileSize, grid: GridKind, gridPx: number, rowPx = 0): TileSize {
+  // Rows as a face reads them: its real height in the old grid's rows.
+  const rows = rowPx > 0 ? Math.max(0.5, Math.round(((size.rows * rowPx + size.rows * GRID_GAP_PX) / FACE_ROW_PX) * 2) / 2) : size.rows / 2
+  if (grid === "narrow" || !(gridPx > 0)) return { cols: size.cols / 2, rows }
   const columns = WIDE_GRID_COLUMNS
   const col = (gridPx - GRID_GAP_PX * (columns - 1)) / columns
   const px = size.cols * col + (size.cols - 1) * GRID_GAP_PX
-  return { cols: Math.round(((px + GRID_GAP_PX) / PHONE_THIRD_PX) * 4) / 4, rows: size.rows / 2 }
+  return { cols: Math.round(((px + GRID_GAP_PX) / PHONE_THIRD_PX) * 4) / 4, rows }
 }
+
+/**
+ * The height of one of the old grid's rows, px, gap included — what a face
+ * means by "a row": two of the six-row grid's ~78px rows and their gap.
+ */
+const FACE_ROW_PX = 164
 
 /** A face this wide (in thirds of a phone's row) has room for more than a phone shows. */
 export const FACE_WIDE_COLS = 4.25

@@ -11,6 +11,7 @@ import {
   repairReassignedAirports,
   repairSimulatorEntries,
 } from "@/lib/db"
+import { applyRecentBriefingAircraft } from "@/lib/briefing/apply-aircraft"
 import { useAuth } from "@/components/providers/auth-provider"
 
 /** One pass per sign-in or launch; each repair is idempotent and never fatal. */
@@ -29,6 +30,13 @@ async function repairStoredFlights(): Promise<number> {
     repaired += zones
   } catch (error) {
     console.error("[Sync] timezone repair failed:", error)
+  }
+  try {
+    const planned = await applyRecentBriefingAircraft()
+    if (planned > 0) console.warn(`[Sync] gave ${planned} flights the aeroplane their briefing names`)
+    repaired += planned
+  } catch (error) {
+    console.error("[Sync] briefing aircraft failed:", error)
   }
   try {
     const times = await repairMissingFlightTimes()

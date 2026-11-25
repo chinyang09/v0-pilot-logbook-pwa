@@ -150,7 +150,30 @@ export function limitDetails(
   })
 }
 
-/** The limits tightest first — the least headroom for its size leads (the owner: "the tightest constraint first"). */
+/** The limits tightest first — the least headroom for its size leads. */
 export function byTightness<T extends { fraction: number }>(xs: readonly T[]): T[] {
   return [...xs].sort((a, b) => b.fraction - a.fraction)
+}
+
+type ConcernState = "ok" | "caution" | "fail" | "unknown"
+const CONCERN: Record<ConcernState, number> = { fail: 0, caution: 1, unknown: 1, ok: 2 }
+
+/**
+ * The order the Flight Deck lists the limits in. A limit with cause for
+ * concern leads — red before amber, the tightest first (the owner's "risk
+ * radar") — and the rest keep the REGULATION's order, Duty 14d, Duty 28d,
+ * Flight 28d, Flight 12m. Sorted by fraction alone, a 12-month flight figure
+ * at 70% of 1,000 hours led over a 14-day duty at 40% with nothing near a
+ * limit, and the owner could not see why it was first.
+ */
+export function limitOrder<T extends { id: string }>(xs: readonly T[], stateOf: (id: string) => ConcernState | undefined, fractionOf?: (x: T) => number): T[] {
+  const rank = new Map(LIMIT_WINDOWS.map((w, i) => [w.id as string, i]))
+  const frac = (x: T) => fractionOf?.(x) ?? (x as unknown as { fraction?: number; progress?: number }).fraction ?? (x as unknown as { progress?: number }).progress ?? 0
+  return [...xs].sort((a, b) => {
+    const ca = CONCERN[stateOf(a.id) ?? "ok"]
+    const cb = CONCERN[stateOf(b.id) ?? "ok"]
+    if (ca !== cb) return ca - cb
+    if (ca < 2) return frac(b) - frac(a)
+    return (rank.get(a.id) ?? 9) - (rank.get(b.id) ?? 9)
+  })
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { GRID_COLUMNS, WIDE_GRID_COLUMNS, clampSize, faceSize, faceSizeOn, gridKindFor, moveTile, nudgeTile, packTiles, sizeLabel, type TileSize } from "../bento"
-import { DEFAULT_TILE_SIZES, DEFAULT_WIDE_TILE_SIZES, normaliseTileOrder, normaliseTileSizes, sizesFromV3 } from "@/hooks/use-dashboard-layout"
+import { GRID_COLUMNS, WIDE_GRID_COLUMNS, ROW_FLOOR_PX, clampSize, faceSize, faceSizeOn, gridKindFor, moveTile, nudgeTile, packTiles, rowHeightFor, rowsOf, sizeLabel, type TileSize } from "../bento"
+import { DEFAULT_TALL_TILE_SIZES, DEFAULT_TILE_SIZES, DEFAULT_WIDE_TILE_SIZES, normaliseTileOrder, normaliseTileSizes, sizesFromV4 } from "@/hooks/use-dashboard-layout"
 
 type Id = "flight" | "airport" | "currency" | "limits"
 const DEFAULT_ORDER: Id[] = ["flight", "airport", "currency", "limits"]
@@ -27,10 +27,10 @@ function expectFilled(order: Id[], sizes: Record<Id, TileSize>, allowedHoles = 0
 describe("packTiles on the 6 × 6 grid", () => {
   it("places the default layout: the flight & duty band, the airport station beside the currency over the limits", () => {
     expect(layout(DEFAULT_ORDER, DEFAULTS)).toEqual([
-      "flight@0,0 6x3",
-      "airport@3,0 3x4",
-      "currency@3,3 3x2",
-      "limits@5,3 3x2",
+      "flight@0,0 6x1",
+      "airport@1,0 3x2",
+      "currency@1,3 3x2",
+      "limits@3,0 6x1",
     ])
     expectFilled(DEFAULT_ORDER, DEFAULTS)
   })
@@ -63,9 +63,9 @@ describe("packTiles on the 6 × 6 grid", () => {
       }
   })
 
-  it("leaves at most one cell empty for any other choice of sizes", () => {
+  it("leaves at most one cell empty for any other choice of sizes (none of them a 1 × 1)", () => {
     const any: TileSize[] = []
-    for (let cols = 1; cols <= 6; cols++) for (let rows = 1; rows <= 6; rows++) any.push({ cols, rows })
+    for (let cols = 1; cols <= 6; cols++) for (let rows = 1; rows <= 6; rows++) if (cols > 1 || rows > 1) any.push({ cols, rows })
     for (const w of any)
       for (const c of any) {
         const sizes = { ...DEFAULTS, airport: w, currency: c }
@@ -85,15 +85,16 @@ describe("packTiles on the 6 × 6 grid", () => {
     expect(faceSize({ cols: 3, rows: 4 })).toEqual({ cols: 1.5, rows: 2 })
   })
 
-  it("carries a layout from the 3 × 2 grid across, doubled", () => {
-    const v4 = normaliseTileSizes(sizesFromV3({ currency: { cols: 2, rows: 2 }, flight: { cols: 3, rows: 2 } }))
-    expect(v4.currency).toEqual({ cols: 4, rows: 4 })
-    expect(v4.flight).toEqual({ cols: 6, rows: 4 })
-    expect(v4.limits).toEqual(DEFAULTS.limits)
+  it("carries a layout from the content-high rows across, seven of those to four of these", () => {
+    const v5 = normaliseTileSizes(sizesFromV4({ currency: { cols: 2, rows: 2 }, flight: { cols: 6, rows: 3 }, airport: { cols: 3, rows: 4 } }))
+    expect(v5.currency).toEqual({ cols: 2, rows: 1 })
+    expect(v5.flight).toEqual({ cols: 6, rows: 2 })
+    expect(v5.airport).toEqual({ cols: 3, rows: 2 })
+    expect(v5.limits).toEqual(DEFAULTS.limits)
   })
 
   it("starts the flight & duty tile at its default over a layout from before the duty tile joined it", () => {
-    const old = normaliseTileSizes({ duty: { cols: 6, rows: 2 }, flight: { cols: 6, rows: 2 }, currency: { cols: 2, rows: 2 } })
+    const old = normaliseTileSizes({ duty: { cols: 6, rows: 2 }, flight: { cols: 6, rows: 1 }, currency: { cols: 2, rows: 2 } })
     expect(old.flight).toEqual(DEFAULTS.flight)
     expect(old.currency).toEqual({ cols: 2, rows: 2 })
   })
@@ -125,16 +126,21 @@ describe("the wide grid (a desktop's full width)", () => {
   it("is twelve columns from 760px", () => {
     expect(gridKindFor(759)).toBe("narrow")
     expect(gridKindFor(760)).toBe("wide")
+    // An iPad upright is the TALL grid: more rows.
+    expect(gridKindFor(820, 1050)).toBe("tall")
+    expect(gridKindFor(1180, 700)).toBe("wide")
   })
 
-  it("packs its defaults edge to edge on twelve columns", () => {
-    const placed = packTiles(DEFAULT_ORDER, DEFAULT_WIDE_TILE_SIZES, WIDE_GRID_COLUMNS)
+  it("packs its defaults edge to edge on twelve columns, held either way", () => {
+    const placed = packTiles(DEFAULT_ORDER, DEFAULT_WIDE_TILE_SIZES, WIDE_GRID_COLUMNS, rowsOf("wide"))
     expect(placed.map((p) => `${p.id}@${p.row},${p.col} ${p.cols}x${p.rows}`)).toEqual([
       "flight@0,0 12x2",
-      "airport@2,0 6x4",
-      "currency@2,6 6x2",
-      "limits@4,6 6x2",
+      "airport@2,0 6x2",
+      "currency@2,6 6x1",
+      "limits@3,6 6x1",
     ])
+    const tall = packTiles(DEFAULT_ORDER, DEFAULT_TALL_TILE_SIZES, WIDE_GRID_COLUMNS, rowsOf("tall"))
+    expect(Math.max(...tall.map((p) => p.row + p.rows))).toBe(rowsOf("tall"))
   })
 
   it("reads a narrow grid's face as before, and a wide one's off its real width", () => {
@@ -149,5 +155,51 @@ describe("the wide grid (a desktop's full width)", () => {
     expect(normaliseTileSizes({ flight: { cols: 10, rows: 2 } }, "wide").flight).toEqual({ cols: 10, rows: 2 })
     expect(normaliseTileSizes({ flight: { cols: 10, rows: 2 } }, "narrow").flight).toEqual({ cols: 6, rows: 2 })
     expect(normaliseTileSizes({ flight: { cols: 20, rows: 2 } }, "wide").flight.cols).toBe(12)
+  })
+})
+
+describe("fixed rows (the owner: a definitive grid per device)", () => {
+  it("divides a phone into four rows, an iPad on its side four and upright six", () => {
+    expect(rowsOf("narrow")).toBe(4)
+    expect(rowsOf("wide")).toBe(4)
+    expect(rowsOf("tall")).toBe(6)
+  })
+
+  it("shares the box's height out among the rows, never below the floor", () => {
+    expect(rowHeightFor("narrow", 640)).toBe(Math.floor((640 - 24) / 4))
+    expect(rowHeightFor("narrow", 200)).toBe(ROW_FLOOR_PX)
+  })
+
+  it("gives a tile the rows the pilot chose: 6 × 1 and 6 × 2 differ", () => {
+    const one = packTiles(DEFAULT_ORDER, { ...DEFAULTS, flight: { cols: 6, rows: 1 } }, GRID_COLUMNS, 4)
+    const two = packTiles(DEFAULT_ORDER, { ...DEFAULTS, flight: { cols: 6, rows: 2 } }, GRID_COLUMNS, 4)
+    expect(one.find((p) => p.id === "flight")!.rows).toBe(1)
+    expect(two.find((p) => p.id === "flight")!.rows).toBe(2)
+  })
+
+  it("grows the bottom tiles into a last empty row, but never a 1 × 1", () => {
+    const short = { ...DEFAULTS, currency: { cols: 3, rows: 1 }, limits: { cols: 3, rows: 1 } }
+    const placed = packTiles(DEFAULT_ORDER, short, GRID_COLUMNS, 4)
+    expect(Math.max(...placed.map((p) => p.row + p.rows))).toBe(4)
+    expect(placed.find((p) => p.id === "flight")!.rows).toBe(1)
+    const square = packTiles(DEFAULT_ORDER, { ...short, limits: { cols: 1, rows: 1 } }, GRID_COLUMNS, 4)
+    expect(square.find((p) => p.id === "limits")).toMatchObject({ cols: 1, rows: 1 })
+  })
+
+  it("leaves a gap of more than a row as the pilot made it", () => {
+    const small = { flight: { cols: 6, rows: 1 }, airport: { cols: 3, rows: 1 }, currency: { cols: 3, rows: 1 }, limits: { cols: 6, rows: 0 } } as Record<Id, TileSize>
+    const placed = packTiles(["flight", "airport", "currency"], small, GRID_COLUMNS, 4)
+    expect(Math.max(...placed.map((p) => p.row + p.rows))).toBe(2)
+  })
+
+  it("clamps a tile to the screen's rows", () => {
+    const placed = packTiles(DEFAULT_ORDER, { ...DEFAULTS, airport: { cols: 3, rows: 6 } }, GRID_COLUMNS, 4)
+    expect(placed.find((p) => p.id === "airport")!.rows).toBe(4)
+  })
+
+  it("reads a face's rows off its real height", () => {
+    // A phone's row of ~150px is about one of the old faces' rows; two rows two.
+    expect(faceSizeOn({ cols: 3, rows: 1 }, "narrow", 366, 150).rows).toBe(1)
+    expect(faceSizeOn({ cols: 6, rows: 2 }, "narrow", 366, 150).rows).toBe(2)
   })
 })
