@@ -9,12 +9,14 @@
 import { describe, it, expect } from "vitest"
 import { readFileSync } from "node:fs"
 import path from "node:path"
-import { isBriefingPackage, notamKey, parseBriefing, splitSections } from "../parse"
+import { isBriefingPackage, notamKey, parseBriefing, readRoute, splitSections } from "../parse"
 import { firCrossings, journalOf } from "../journal"
 
 const pages = (name: string): string[][] => JSON.parse(readFileSync(path.join(__dirname, "fixtures", `${name}.pages.json`), "utf8"))
 const out = pages("tr438-wsss-wbgg")
 const back = pages("tr439-wbgg-wsss")
+/** TR552 WSSS–VVTS (25 Nov 26): a route too long for one line of the print. */
+const wrapped = pages("tr552-wsss-vvts")
 
 describe("the package's sections", () => {
   it("are found by their titles, the OFP printed twice", () => {
@@ -240,6 +242,40 @@ describe("TR439 WBGG–WSSS", () => {
     const s2 = b.notams.items.find((n) => n.id === "1A3350/26")!
     expect(s2.section).toBe("Destination Airport")
     expect(outKeys.has(s2.key)).toBe(true)
+  })
+})
+
+describe("TR552 WSSS–VVTS — the route wraps onto a second line", () => {
+  const b = parseBriefing(wrapped)
+
+  it("is a briefing package, and its flight is read", () => {
+    // It was refused: the route ran onto a second line, so the departure
+    // and arrival came back blank ("the OFP's flight could not be read").
+    expect(isBriefingPackage(wrapped.slice(0, 4))).toBe(true)
+    expect(b.flight).toMatchObject({ number: "TR552", date: "2026-11-25", dep: "WSSS", arr: "VVTS", depIata: "SIN", arrIata: "SGN", registration: "9V-NCM" })
+  })
+
+  it("joins the route across the lines it wraps onto", () => {
+    expect(b.route).toMatchObject({
+      text: "WSSS/02C VMR L642 ROBMO L642 EGOLO DCT IPRIX M753 BITOD L637 ANBOV ANBOV5E VVTS/07L",
+      depRunway: "02C",
+      arrRunway: "07L",
+      cruiseFl: 260,
+    })
+    expect(b.sid).toMatchObject({ name: "VMR6A", runway: "02C" })
+    expect(b.star).toMatchObject({ name: "ANBOV5E", runway: "07L" })
+  })
+
+  it("reads the rest of the package as the one-line routes", () => {
+    expect(b.alternates.map((a) => a.icao)).toEqual(["VVPQ", "VVCR", "VVDN"])
+    expect(journalOf(b).initB).toMatchObject({ trip: 4166, altn: 1519, final: 999, block: 7092 })
+    expect(b.notams.items).toHaveLength(70)
+  })
+
+  it("does not take an alternate's line, or a line that never closes, for the route", () => {
+    expect(readRoute(["VVPQ/28R  RNAV GPS   993FT/2400M  0183  160 P009  0036 01519"])).toBeNull()
+    expect(readRoute(["WSSS/02C VMR L642", "SCHED DEP 0530 UTC      SCHED ARR 0745 UTC", "VVTS/07L"])).toBeNull()
+    expect(readRoute(["WSSS/02C DODSO G580 ATETI DCT MOXUN MOXUN1A WBGG/25"])?.[4]).toBe("WBGG")
   })
 })
 
