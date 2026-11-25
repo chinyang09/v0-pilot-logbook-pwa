@@ -188,3 +188,30 @@ describe("the rest after a duty is read at the clock, not when the pipeline ran"
     expect(rest.legalAtUtc).toBe("2026-11-18T22:00:00.000Z")
   })
 })
+
+/**
+ * A red-eye delayed past midnight UTC (Nov 2026). TR274, scheduled 23:55 on
+ * the 18th, off blocks 00:28 — dated the 19th, by its actual OUT, as the
+ * importers write it. Its schedule was read on the 19th, so the report came
+ * out as 01:35 the next morning and the FDP was entered on 09:35 local.
+ */
+describe("a red-eye dated by its actual OUT", () => {
+  const leg = (over: Partial<FlightLog> & { id: string }) => row({ date: "2026-11-19", arrivalTimezone: 7, ...over })
+  const flights = [
+    row({ id: "697", date: "2026-11-18", flightNumber: "TR697", departureIcao: "VTCC", arrivalIcao: "WSSS", scheduledOut: "05:05", scheduledIn: "08:20", outTime: "05:13", inTime: "08:34", blockTime: "03:21" }),
+    leg({ id: "274", flightNumber: "TR274", departureIcao: "WSSS", arrivalIcao: "WIII", scheduledOut: "23:55", scheduledIn: "01:50", outTime: "00:28", offTime: "00:40" }),
+    leg({ id: "275", flightNumber: "TR275", departureIcao: "WIII", arrivalIcao: "WSSS", departureTimezone: 7, arrivalTimezone: 8, scheduledOut: "02:35", scheduledIn: "04:25" }),
+  ]
+  const result = runFDPPipeline(flights, [], new Map(), Date.parse("2026-11-19T01:00:00Z"))
+  const duty = result.allDutyPeriods.find((d) => d.flightIds.includes("274"))!
+
+  it("reports at the rostered 22:55 the evening before, entered on 06:55 local", () => {
+    expect(duty.flightIds).toEqual(["274", "275"])
+    expect(duty.reportTime).toBe("22:55")
+    expect(duty.fdpStartLocal).toBe("06:55")
+  })
+
+  it("plans its FDP to the last scheduled on-blocks", () => {
+    expect(duty.fdpEndTime).toBe("04:25")
+  })
+})

@@ -19,6 +19,7 @@
 import type { FlightLog } from "@/types/entities/flight.types"
 import type { FlightTimesLive } from "@/lib/lookup/flight-suggest"
 import { flightInstantMs } from "@/lib/airports/code-changes"
+import { scheduledInMs, scheduledOutMs } from "@/lib/utils/flight-day"
 
 const isClock = (t?: string | null) => !!t && /^\d{1,2}:\d{2}$/.test(t)
 const MIN = 60_000
@@ -72,8 +73,10 @@ export function estimateDutyIn(
   let carriedKind: EstimateKind = "scheduled"
   for (const f of legs) {
     const t = live[f.id] ?? null
-    const schedOut = isClock(f.scheduledOut) ? flightInstantMs(f.date, f.scheduledOut) : null
-    const schedIn = isClock(f.scheduledIn) ? flightInstantMs(f.date, f.scheduledIn, f.scheduledOut || null) : null
+    // The schedule against the OUT the flight is dated by: a red-eye off
+    // blocks after midnight was scheduled the evening before its date.
+    const schedOut = scheduledOutMs(f)
+    const schedIn = scheduledInMs(f)
     const planned = schedOut !== null && schedIn !== null ? schedIn - schedOut : null
 
     let outMs: number | null = null

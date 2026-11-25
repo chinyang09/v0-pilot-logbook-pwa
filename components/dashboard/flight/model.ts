@@ -4,6 +4,7 @@
  * answer and nothing queries twice.
  */
 
+import type { AircraftName } from "@/hooks/data/use-aircraft-records"
 import type { LimitDetail } from "@/lib/utils/dashboard/limit-detail"
 import type { FlightLog } from "@/types/entities/flight.types"
 import type { DutyPeriod, RestPeriodInfo } from "@/types/entities/roster.types"
@@ -89,6 +90,8 @@ export interface FlightBrief {
   destinations: DestinationVisits[]
   /** The airports the duty touches, by ICAO, once read. */
   airports: Map<string, Airport>
+  /** The aircraft database's record for each aeroplane the duty names, by `normalizeRegistration` — how it is spelled and typed everywhere. */
+  fleet?: ReadonlyMap<string, AircraftName>
   /** Runways and frequencies for the destinations, by ICAO (undefined while asked, null when the source has none). */
   airportInfo: Record<string, AirportInfo | null>
   /** Runway geometry (thresholds, true headings) by ICAO — OurAirports; undefined while asked, null when it has none. */

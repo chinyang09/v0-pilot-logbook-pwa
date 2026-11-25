@@ -14,6 +14,7 @@
  * to avoid.
  */
 
+import { dateForOut } from "@/lib/utils/flight-day"
 import { userDb } from "../../user-db"
 import type { FlightLog, FlightLogCreate } from "@/types/entities/flight.types"
 import { createEntity, updateEntity, purgeEntity, silentDeleteEntity, upsertFromServer } from "./crud-helpers"
@@ -64,7 +65,24 @@ export async function updateFlight(id: string, updates: Partial<FlightLog>): Pro
   // An hour category the pilot set to the block ("USE") moves with it, from
   // every writer — an import replaces OOOI and the block as company-owned
   // fields, and a category left at the OLD block would then read as a pin.
-  return updateEntity<FlightLog>(userDb.flights, "flights", id, updates, blockFollowersPatch)
+  return updateEntity<FlightLog>(userDb.flights, "flights", id, updates, (existing, u) => ({
+    ...blockFollowersPatch(existing, u),
+    ...outDatePatch(existing, u),
+  }))
+}
+
+/**
+ * A flight is keyed on the UTC date of its OUT — the actual once there is one,
+ * as every import writes it. An OUT typed by hand onto a row dated by its
+ * schedule left it there: a 23:55 red-eye stamped off blocks at 00:28 stayed
+ * on the day before, and read on that date its OUT was 24 hours early (the
+ * owner, Nov 2026: the Flight Deck's bar did not follow the actual OUT). The
+ * date follows the OUT (`dateForOut`) unless the edit sets the date itself.
+ */
+function outDatePatch(existing: FlightLog, updates: Partial<FlightLog>): Partial<FlightLog> {
+  if (!("outTime" in updates) || "date" in updates || (updates.outTime || "") === (existing.outTime || "")) return {}
+  const date = dateForOut(existing, updates.outTime)
+  return date !== existing.date ? { date } : {}
 }
 
 /**

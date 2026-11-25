@@ -22,6 +22,8 @@
  */
 
 import * as React from "react"
+import { useDetailPanel } from "@/hooks/use-detail-panel"
+import { useAircraftRecords } from "@/hooks/data/use-aircraft-records"
 import { useFlights } from "@/hooks/data/use-flights"
 import { usePersonnel } from "@/hooks/data/use-crew"
 import { useCurrencies } from "@/hooks/data/use-currencies"
@@ -444,6 +446,18 @@ export function FlightDashboard({ className }: { className?: string }) {
     [stationBriefs, weatherClose, stations.length, wx.loading, wx.refreshing, wx.failed, wx.refreshFailed, wx.weather, wx.refresh],
   )
 
+  // Every aeroplane the duty names, as the aircraft database spells and types it.
+  const fleetRegs = React.useMemo(() => {
+    const out = legs.map((l) => l.aircraftReg || "")
+    const l = lookupsClose ? lookups.lookups : null
+    if (l) {
+      out.push(l.inboundRegistration)
+      for (const g of Object.values(l.gates)) if (g?.status === "done") out.push(g.gates.flight.registration)
+    }
+    return out.filter(Boolean)
+  }, [legs, lookupsClose, lookups.lookups])
+  const fleet = useAircraftRecords(fleetRegs)
+
   /* ── Formatting ──────────────────────────────────────────────────────── */
   const zone = React.useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, [])
   const pref = display?.airportIdentifier
@@ -488,6 +502,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       currency,
       destinations,
       airports,
+      fleet,
       airportInfo,
       runways,
       // The runway in use is NOW, like the METAR — read whatever the duty's distance.
@@ -500,7 +515,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       day: (ms: number) =>
         formatDayAt(ms, display?.useZuluTime === false ? zone : "UTC", { year: false }),
     }),
-    [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, estimate, standby, margin, limitDetail, recency.lapseIso, currencyAsOfMs, crew, legCrew, currency, destinations, airports, airportInfo, runways, weather, weatherStation, iataOf, pref, zone, isActive],
+    [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, estimate, standby, margin, limitDetail, recency.lapseIso, currencyAsOfMs, crew, legCrew, currency, destinations, airports, fleet, airportInfo, runways, weather, weatherStation, iataOf, pref, zone, isActive],
   )
   // The airport card's alternates, asked while the page is up (the route reads
   // the stored TAF snapshot — no request to the source): asked only when the
@@ -578,6 +593,31 @@ export function FlightDashboard({ className }: { className?: string }) {
     [placedSizes, nav],
   )
 
+  // A flight opened FROM a card goes back to that card (the owner, Nov 2026:
+  // "pressing back goes back to flight deck, but the expanded card is no
+  // longer expanded"): once the flight it opened is closed — and nothing else
+  // chosen, and the page still here — the card grows out of its tile again.
+  const { selectedId } = useDetailPanel()
+  const reopen = React.useRef<{ id: WidgetId; flightId: string; shown: boolean } | null>(null)
+  React.useEffect(() => {
+    const r = reopen.current
+    if (!r) return
+    if (selectedId === r.flightId) {
+      r.shown = true
+      return
+    }
+    if (!r.shown) return
+    reopen.current = null
+    if (selectedId || !isActive) return
+    // After the panel's own close has painted: the tile's place is then final.
+    const raf = requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLElement>(`[data-widget="${r.id}"]`)
+      const b = el?.getBoundingClientRect()
+      if (b && b.width > 0) open(r.id, { left: b.left, top: b.top, width: b.width, height: b.height })
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [selectedId, isActive, open])
+
   const loading = flightsLoading || statusLoading
   if (loading) {
     return <Skeleton className={cn("h-full min-h-[24rem] rounded-3xl", className)} />
@@ -634,7 +674,10 @@ export function FlightDashboard({ className }: { className?: string }) {
           render={(dismiss) => {
             const sheetCtx = {
               // A flight opens over this page, not on another route.
-              openFlight: (id: string) => dismiss(() => nav.openFlight(id), { overlay: true }),
+              openFlight: (id: string) => {
+                reopen.current = { id: sheet.id, flightId: id, shown: false }
+                dismiss(() => nav.openFlight(id), { overlay: true })
+              },
               go: (href: string) => dismiss(() => nav.go(href)),
               selectDuty,
             }
