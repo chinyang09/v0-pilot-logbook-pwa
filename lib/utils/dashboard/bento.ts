@@ -310,6 +310,35 @@ export function clampPos(pos: Partial<TilePos> | undefined, minCols = 1, columns
 }
 
 /**
+ * The first free place on the screen (top to bottom, left to right) that
+ * holds a tile of `size` without touching any of `placed` — else the same at
+ * a smaller size: fewer rows first, then fewer columns down to `minCols`.
+ * Null when nothing fits: an added tile is refused rather than pushing
+ * another off the screen.
+ */
+export function findFreePlace(
+  placed: readonly TilePos[],
+  size: TileSize,
+  minCols: number,
+  columns = GRID_COLUMNS,
+  rows = MAX_ROWS_SPAN,
+): TilePos | null {
+  const busy = (c: number, r: number) => placed.some((p) => c >= p.col && c < p.col + p.cols && r >= p.row && r < p.row + p.rows)
+  const fits = (col: number, row: number, cols: number, h: number) => {
+    if (col + cols > columns || row + h > rows) return false
+    for (let r = row; r < row + h; r++) for (let c = col; c < col + cols; c++) if (busy(c, r)) return false
+    return true
+  }
+  for (let cols = Math.min(size.cols, columns); cols >= Math.min(minCols, columns); cols--) {
+    for (let h = Math.min(size.rows, rows); h >= 1; h--) {
+      for (let row = 0; row < rows; row++)
+        for (let col = 0; col < columns; col++) if (fits(col, row, cols, h)) return { col, row, cols, rows: h }
+    }
+  }
+  return null
+}
+
+/**
  * Every tile in a cell of its own. `first` keep the place they ask for (the
  * tile being moved or resized); every other tile keeps its own where it is
  * still free (taken top to bottom), and the rest go, each, to the NEAREST free

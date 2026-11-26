@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { GRID_COLUMNS, WIDE_GRID_COLUMNS, ROW_FLOOR_PX, arrangeTiles, clampPos, clampSize, faceSize, faceSizeOn, gridKindFor, moveTile, nudgeTile, packTiles, placeTile, placeTileOnScreen, positionsFromSizes, resizeFrom, rowHeightFor, rowsOf, rowsUsed, sizeLabel, type TilePos, type TileSize } from "../bento"
+import { findFreePlace } from "../bento"
 import {
   DEFAULT_TALL_TILE_POSITIONS,
   DEFAULT_TILE_POSITIONS,
@@ -121,12 +122,12 @@ describe("moveTile / nudgeTile", () => {
 
 describe("normaliseTileOrder", () => {
   it("puts the airport tile where the weather or destination tile was", () => {
-    expect(normaliseTileOrder(["flight", "weather", "destination", "limits", "currency"])).toEqual(["flight", "airport", "limits", "currency"])
-    expect(normaliseTileOrder(["destination"])).toEqual(["airport", "flight", "currency", "limits"])
+    expect(normaliseTileOrder(["flight", "weather", "destination", "limits", "currency"]).slice(0, 4)).toEqual(["flight", "airport", "limits", "currency"])
+    expect(normaliseTileOrder(["destination"]).slice(0, 4)).toEqual(["airport", "flight", "currency", "limits"])
   })
 
   it("puts the flight & duty tile where the duty tile was", () => {
-    expect(normaliseTileOrder(["limits", "duty", "flight", "airport", "currency"])).toEqual(["limits", "flight", "airport", "currency"])
+    expect(normaliseTileOrder(["limits", "duty", "flight", "airport", "currency"]).slice(0, 4)).toEqual(["limits", "flight", "airport", "currency"])
   })
 })
 
@@ -279,5 +280,24 @@ describe("the home screen (the owner: a fixed grid, tiles placed freely in it)",
   it("starts the flight & duty tile at its default over a layout from before the duty tile joined it", () => {
     const old = normaliseTilePositions({ duty: P(0, 0, 6, 2), flight: P(0, 3, 6, 1) })
     expect(old.flight).toEqual(DEFAULT_TILE_POSITIONS.flight)
+  })
+})
+
+describe("findFreePlace — where an added tile goes", () => {
+  const placed = [
+    { col: 0, row: 0, cols: 6, rows: 2 },
+    { col: 0, row: 2, cols: 3, rows: 4 },
+    { col: 3, row: 2, cols: 3, rows: 2 },
+  ]
+  it("takes the first free place that holds it at its size", () => {
+    expect(findFreePlace(placed, { cols: 3, rows: 2 }, 2, 6, 6)).toEqual({ col: 3, row: 4, cols: 3, rows: 2 })
+  })
+  it("shrinks to fit — fewer rows, then fewer columns — rather than refuse", () => {
+    const full = [...placed, { col: 3, row: 4, cols: 3, rows: 1 }]
+    expect(findFreePlace(full, { cols: 3, rows: 2 }, 2, 6, 6)).toEqual({ col: 3, row: 5, cols: 3, rows: 1 })
+  })
+  it("refuses when no cell is free", () => {
+    const full = [...placed, { col: 3, row: 4, cols: 3, rows: 2 }]
+    expect(findFreePlace(full, { cols: 3, rows: 2 }, 2, 6, 6)).toBeNull()
   })
 })

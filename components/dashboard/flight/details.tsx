@@ -22,7 +22,9 @@ import { REQ_TONE } from "./instruments"
 import { fdpMinutesOf } from "@/lib/utils/roster/fdp-calculator"
 import { SegmentedTabs } from "@/components/ui/segmented-tabs"
 import { limitOrder, type LimitId } from "@/lib/utils/dashboard/limit-detail"
-import { CardTable, FlightCardLegs, type CardRow, crewKey, crewRole, currenciesBySoonest, currencyRows, legNow, limitsOf, marginText, shortDay, shortName } from "./faces"
+import type { LimitAt } from "@/lib/utils/dashboard/deck-timeline"
+import { BriefingBody, DaysOffBody, LogbookBody, SunBody } from "./extra-widgets"
+import { CardTable, FlightCardLegs, type CardRow, crewKey, crewRole, currenciesBySoonest, currencyRows, legNow, limitsOf, marginText, useLimitsAtPointer, shortDay, shortName } from "./faces"
 import { CurrencyDots } from "./currency-dots"
 import { dotAt, dotLayout, localDayKey } from "@/lib/utils/dashboard/currency-dots"
 import { AirportBody } from "./airport-tile"
@@ -37,6 +39,22 @@ export const WIDGET_TITLE: Record<WidgetId, string> = {
   airport: "Airport & Weather",
   currency: "Currency",
   limits: "Limits",
+  sun: "Sun & Night",
+  daysOff: "Days Off",
+  briefing: "Briefing",
+  logbook: "Logbook",
+}
+
+/** What each tile answers — the Add Widget menu's line under its name. */
+export const WIDGET_HINT: Record<WidgetId, string> = {
+  flight: "The legs, gates, aeroplane and the FDP",
+  airport: "Runways in use, weather and the TAF",
+  currency: "Documents and recency, for the duty",
+  limits: "The four rolling limits at the timeline",
+  sun: "Take-offs and landings by day or night",
+  daysOff: "The run since the last day off · para 5",
+  briefing: "Each leg's OFP: cruise, fuel, alternate",
+  logbook: "The month's block, sectors and gaps",
 }
 
 /* ── Building blocks ─────────────────────────────────────────────────────── */
@@ -91,7 +109,6 @@ export interface WidgetCtx {
   openFlight: (id: string) => void
   go: (href: string) => void
   /** Make the dashboard about the duty reporting at `atMs`. */
-  selectDuty?: (atMs: number) => void
 }
 
 /**
@@ -179,14 +196,33 @@ export function widgetContent(
       }
     case "limits":
       return { header: "face", body: <LimitsBody brief={brief} />, actions: [fdp] }
+    case "sun":
+      return { header: "label", body: <SunBody brief={brief} />, actions: [] }
+    case "daysOff":
+      return { header: "label", body: <DaysOffBody brief={brief} />, actions: [fdp] }
+    case "briefing": {
+      // A leg's briefing — or the page that imports one.
+      const openLeg = (i: number) => {
+        const l = brief.duty.legs[i]
+        const id = l?.flightNumber ? flightBriefingId(l) : ""
+        ctx.go(id ? `/briefing?id=${encodeURIComponent(id)}` : "/briefing")
+      }
+      return { header: "label", body: <BriefingBody brief={brief} open={openLeg} />, actions: [] }
+    }
+    case "logbook":
+      return {
+        header: "label",
+        body: <LogbookBody brief={brief} openFlight={ctx.openFlight} />,
+        actions: [{ id: "sum", label: "Summary", run: () => ctx.go(WIDGET_HREF.logbook!) }],
+      }
   }
 }
 
 /** The section each card's footer leads to — warmed when the card opens (`prefetchSection`). */
-export const WIDGET_HREF: Partial<Record<WidgetId, string>> = { flight: "/fdp", limits: "/fdp", currency: "/currencies" }
+export const WIDGET_HREF: Partial<Record<WidgetId, string>> = { flight: "/fdp", limits: "/fdp", currency: "/currencies", daysOff: "/fdp", briefing: "/briefing", logbook: "/summary" }
 
 /** The navigation every body needs, bound to the app's router and panel. */
-export function useWidgetCtx(): Omit<WidgetCtx, "selectDuty"> & { prefetchSection: (id: WidgetId) => void } {
+export function useWidgetCtx(): WidgetCtx & { prefetchSection: (id: WidgetId) => void } {
   const router = useRouter()
   const { setSelectedId } = useDetailPanel()
   return React.useMemo(
@@ -286,8 +322,8 @@ export function dutyRows(brief: FlightBrief): DutyRow[] {
     ]
   }
 
-  /* A later duty, chosen in the header. */
-  if (duty.index > 0 && duty.period) {
+  /* A later duty, or one already flown, chosen on the timeline. */
+  if (duty.index !== 0 && duty.period) {
     const dp = duty.period
     const w = dutyWindow(dp)
     if (!w) return []
@@ -620,7 +656,9 @@ const limitSpan = (min: number) => (Math.abs(min) >= 100 * 60 ? `${Math.trunc(mi
  */
 function LimitsBody({ brief }: { brief: FlightBrief }) {
   const details = brief.limits
-  const reqs = React.useMemo(() => new Map(limitsOf(brief).map((r) => [r.id, r])), [brief])
+  // The figures as the tile reads them, at the timeline's pointer.
+  const { rows: atPointer, atMs } = useLimitsAtPointer(brief)
+  const reqs = React.useMemo(() => new Map<string, LimitAt>(atPointer.map((r) => [r.id, r])), [atPointer])
   // Opens on the limit the tile leads with: one in concern, else the first.
   const ordered = React.useMemo(() => limitOrder(details, (id) => reqs.get(id)?.state), [details, reqs])
   const [chosen, setChosen] = React.useState<LimitId | null>(null)
@@ -628,7 +666,9 @@ function LimitsBody({ brief }: { brief: FlightBrief }) {
   if (!d) return <p className="py-1 text-[13px] text-muted-foreground">Nothing logged yet</p>
   const req = reqs.get(d.id)
   const state = req?.state ?? "ok"
-  const tone = state === "fail" ? "fail" : state === "caution" || state === "unknown" ? "caution" : undefined
+  const remaining = req?.remainingMinutes ?? d.remainingMinutes
+  const used = req?.usedMinutes ?? d.usedMinutes
+  const tone = state === "fail" ? "fail" : state === "caution" ? "caution" : undefined
   const ymd = (ms: number) => new Date(ms).toISOString().slice(0, 10)
   const toneOf = (left: number): "fail" | "caution" | undefined => (left <= 0 ? "fail" : left < d.limitMinutes * 0.1 ? "caution" : undefined)
   const margin = brief.margin?.each.find((e) => e.limit === d.label)
@@ -659,7 +699,7 @@ function LimitsBody({ brief }: { brief: FlightBrief }) {
       ? { label: "If This Duty Runs Late", value: `+${marginText(margin.minutes)}`, tone: margin.minutes <= 0 ? "fail" : margin.minutes < 60 ? "caution" : undefined }
       : { label: "If This Duty Runs Late", value: NONE },
   ]
-  const breach = req?.detail?.some((x) => x.label === "Forecast")
+  const breach = limitsOf(brief).find((r) => r.id === d.id)?.detail?.some((x) => x.label === "Forecast")
   return (
     <div>
       <SegmentedTabs
@@ -674,12 +714,12 @@ function LimitsBody({ brief }: { brief: FlightBrief }) {
           <span
             className={cn("text-[26px] font-semibold leading-none tabular-nums", tone === "fail" ? "text-destructive" : tone === "caution" ? "text-status-warning" : "text-foreground")}
           >
-            {limitSpan(d.remainingMinutes)}
+            {limitSpan(remaining)}
           </span>
           <span className="text-[13px] text-muted-foreground">left of {limitSpan(d.limitMinutes)}</span>
         </p>
         <p className="mt-1 text-[11px] text-muted-foreground" suppressHydrationWarning>
-          {limitSpan(d.usedMinutes)} used · logged duties, {d.days === 365 ? "12 months" : `${d.days} days`} to {shortDay(ymd(brief.now))}
+          {limitSpan(used)} used · {d.days === 365 ? "12 months" : `${d.days} × 24h`} to {atMs === null ? "now" : `${brief.day(atMs).replace(/^\w+,?\s*/, "")} ${brief.clock(atMs)}`}
         </p>
       </div>
       <div className="mt-2">

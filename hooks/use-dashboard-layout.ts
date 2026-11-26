@@ -1,7 +1,7 @@
 "use client"
 
 import { useSyncExternalStore } from "react"
-import { arrangeTiles, clampPos, clampSize, columnsOf, positionsFromSizes, rowsOf, type GridKind, type TileSize, type TilePos } from "@/lib/utils/dashboard/bento"
+import { arrangeTiles, clampPos, clampSize, columnsOf, findFreePlace, positionsFromSizes, rowsOf, type GridKind, type TileSize, type TilePos } from "@/lib/utils/dashboard/bento"
 
 /**
  * The flight dashboard's TILES in the pilot's own order, and whether they are
@@ -20,8 +20,17 @@ import { arrangeTiles, clampPos, clampSize, columnsOf, positionsFromSizes, rowsO
 // airport and weather widget"), and so are the flights and the duty (the
 // owner, Nov 2026: one tactical tile for today — the legs and the FDP on one
 // timeline — beside the limits, the strategic one).
-export const DASHBOARD_TILES = ["flight", "airport", "currency", "limits"] as const
+//
+// Every tile can be ADDED or REMOVED (the owner, Nov 2026: "the ability to add
+// and remove widget from flight deck … that would also mean we need more
+// relevant widgets"): the four the deck starts with, and the ones a pilot can
+// add — the sun and night on the duty's legs, days off (para 5), the leg's
+// OFP from its briefing, and the logbook's month.
+export const DASHBOARD_TILES = ["flight", "airport", "currency", "limits", "sun", "daysOff", "briefing", "logbook"] as const
 export type DashboardTile = (typeof DASHBOARD_TILES)[number]
+
+/** The tiles a new device's deck shows. */
+export const DEFAULT_ENABLED: readonly DashboardTile[] = ["flight", "airport", "currency", "limits"]
 
 const STORAGE_KEY = "ooo:dashboard-tiles"
 
@@ -109,6 +118,11 @@ export const DEFAULT_TILE_POSITIONS: Record<DashboardTile, TilePos> = {
   airport: { col: 0, row: 2, cols: 3, rows: 4 },
   currency: { col: 3, row: 2, cols: 3, rows: 2 },
   limits: { col: 3, row: 4, cols: 3, rows: 2 },
+  // The tiles a pilot adds: their SIZE when added (`addTile` finds the place).
+  sun: { col: 0, row: 6, cols: 3, rows: 2 },
+  daysOff: { col: 3, row: 6, cols: 3, rows: 2 },
+  briefing: { col: 0, row: 8, cols: 6, rows: 2 },
+  logbook: { col: 0, row: 10, cols: 3, rows: 2 },
 }
 
 /**
@@ -122,6 +136,10 @@ export const DEFAULT_WIDE_TILE_POSITIONS: Record<DashboardTile, TilePos> = {
   airport: { col: 0, row: 2, cols: 6, rows: 4 },
   currency: { col: 6, row: 2, cols: 6, rows: 2 },
   limits: { col: 6, row: 4, cols: 6, rows: 2 },
+  sun: { col: 0, row: 6, cols: 4, rows: 2 },
+  daysOff: { col: 4, row: 6, cols: 4, rows: 2 },
+  briefing: { col: 0, row: 8, cols: 8, rows: 2 },
+  logbook: { col: 8, row: 6, cols: 4, rows: 2 },
 }
 
 /** An iPad held upright: twelve columns by EIGHT rows — the same tiles, taller. */
@@ -130,6 +148,10 @@ export const DEFAULT_TALL_TILE_POSITIONS: Record<DashboardTile, TilePos> = {
   airport: { col: 0, row: 2, cols: 6, rows: 6 },
   currency: { col: 6, row: 2, cols: 6, rows: 3 },
   limits: { col: 6, row: 5, cols: 6, rows: 3 },
+  sun: { col: 0, row: 8, cols: 6, rows: 2 },
+  daysOff: { col: 6, row: 8, cols: 6, rows: 2 },
+  briefing: { col: 0, row: 10, cols: 12, rows: 2 },
+  logbook: { col: 0, row: 12, cols: 6, rows: 2 },
 }
 
 const DEFAULTS: Record<GridKind, Record<DashboardTile, TilePos>> = {
@@ -144,6 +166,10 @@ export const TILE_MIN_COLS: Record<DashboardTile, number> = {
   airport: 2,
   currency: 2,
   limits: 2,
+  sun: 2,
+  daysOff: 2,
+  briefing: 3,
+  logbook: 2,
 }
 
 /** The same on the wide grid: a column there is about the narrow grid's at 760px, more beyond it. */
@@ -152,6 +178,10 @@ const TILE_MIN_COLS_WIDE: Record<DashboardTile, number> = {
   airport: 3,
   currency: 3,
   limits: 3,
+  sun: 3,
+  daysOff: 3,
+  briefing: 4,
+  logbook: 3,
 }
 
 export function minColsOf(id: DashboardTile, grid: GridKind): number {
@@ -186,8 +216,12 @@ export function sizesFromV4(stored: unknown): unknown {
   return out
 }
 
-/** Stored places, put right: an unknown tile, or a place it may not take, falls back to its default; overlaps are pushed apart. */
-export function normaliseTilePositions(stored: unknown, grid: GridKind = "narrow"): Record<DashboardTile, TilePos> {
+/**
+ * Stored places, put right: an unknown tile, or a place it may not take, falls
+ * back to its default; overlaps among the tiles ON the deck (`shown`) are
+ * pushed apart — a tile not on it keeps its place without pushing anything.
+ */
+export function normaliseTilePositions(stored: unknown, grid: GridKind = "narrow", shown: readonly DashboardTile[] = DEFAULT_ENABLED): Record<DashboardTile, TilePos> {
   const out = { ...DEFAULTS[grid] }
   if (stored && typeof stored === "object") {
     // A layout from before the flights tile took the duty's in starts the merged tile at its default.
@@ -198,7 +232,7 @@ export function normaliseTilePositions(stored: unknown, grid: GridKind = "narrow
       if (v && typeof v === "object") out[id] = clampPos(v as Partial<TilePos>, minColsOf(id, grid), columnsOf(grid), rowsOf(grid), true)
     }
   }
-  const placed = arrangeTiles(DASHBOARD_TILES, out, columnsOf(grid), rowsOf(grid))
+  const placed = arrangeTiles(shown, out, columnsOf(grid), rowsOf(grid))
   for (const p of placed) out[p.id] = { col: p.col, row: p.row, cols: p.cols, rows: p.rows }
   return out
 }
@@ -217,7 +251,7 @@ export function positionsFromStoredSizes(stored: unknown, tileOrder: readonly Da
         ? clampSize(v, minColsOf(id, grid), columns, fromRows)
         : { cols: d.cols, rows: Math.max(1, Math.round((d.rows * fromRows) / rowsOf(grid))) }
   }
-  return normaliseTilePositions(positionsFromSizes(tileOrder, sizes, columns, fromRows, rowsOf(grid)), grid)
+  return normaliseTilePositions(positionsFromSizes(tileOrder.filter((id) => DEFAULT_ENABLED.includes(id)), sizes, columns, fromRows, rowsOf(grid)), grid)
 }
 
 const positions: Record<GridKind, Record<DashboardTile, TilePos>> = { ...DEFAULTS }
@@ -227,12 +261,13 @@ function hydratePositions(): void {
   if (positionsHydrated) return
   positionsHydrated = true
   hydrate()
+  hydrateEnabled()
   try {
     let changed = false
     for (const grid of ["narrow", "wide", "tall"] as const) {
       const raw = window.localStorage.getItem(KEYS[grid])
       if (raw) {
-        positions[grid] = normaliseTilePositions(JSON.parse(raw), grid)
+        positions[grid] = normaliseTilePositions(JSON.parse(raw), grid, enabled)
         changed = true
         continue
       }
@@ -286,4 +321,87 @@ export function useTileOrder(): DashboardTile[] {
 
 export function useArranging(): boolean {
   return useSyncExternalStore(subscribe, () => arranging, () => false)
+}
+
+/* ── Which tiles are on the deck ─────────────────────────────────────────── */
+
+const ENABLED_KEY = "ooo:dashboard-widgets:v1"
+let enabled: DashboardTile[] = [...DEFAULT_ENABLED]
+let enabledHydrated = false
+
+/** A stored list put right: known tiles, each once. */
+export function normaliseEnabled(stored: unknown): DashboardTile[] {
+  if (!Array.isArray(stored)) return [...DEFAULT_ENABLED]
+  const known = new Set<string>(DASHBOARD_TILES)
+  const out: DashboardTile[] = []
+  for (const raw of stored) if (typeof raw === "string" && known.has(raw) && !out.includes(raw as DashboardTile)) out.push(raw as DashboardTile)
+  return out
+}
+
+function hydrateEnabled(): void {
+  if (enabledHydrated) return
+  enabledHydrated = true
+  try {
+    const raw = window.localStorage.getItem(ENABLED_KEY)
+    if (raw) enabled = normaliseEnabled(JSON.parse(raw))
+  } catch {
+    // The default set stands.
+  }
+}
+
+function saveEnabled(): void {
+  try {
+    window.localStorage.setItem(ENABLED_KEY, JSON.stringify(enabled))
+  } catch {
+    // Kept for this session only.
+  }
+}
+
+function subscribeEnabled(listener: () => void): () => void {
+  listeners.add(listener)
+  hydrateEnabled()
+  hydratePositions()
+  return () => listeners.delete(listener)
+}
+
+export function useEnabledTiles(): readonly DashboardTile[] {
+  return useSyncExternalStore(subscribeEnabled, () => enabled, () => DEFAULT_ENABLED)
+}
+
+/** The grid the deck is drawn on now — where an added tile looks for room. */
+let currentGrid: GridKind = "narrow"
+export function setCurrentGrid(grid: GridKind): void {
+  currentGrid = grid
+}
+
+/**
+ * A tile put on the deck, in the first free place on the grid in use that
+ * holds it — at its usual size, else smaller (down to one row, and its least
+ * columns). False when no cell is free for it: a home screen with no room
+ * says so rather than pushing a tile off it.
+ */
+export function addTile(id: DashboardTile, grid: GridKind = currentGrid): boolean {
+  hydrateEnabled()
+  hydratePositions()
+  if (enabled.includes(id)) return true
+  const columns = columnsOf(grid)
+  const rows = rowsOf(grid)
+  const placed = arrangeTiles(enabled, positions[grid], columns, rows)
+  const want = DEFAULTS[grid][id]
+  const place = findFreePlace(placed, { cols: want.cols, rows: want.rows }, minColsOf(id, grid), columns, rows)
+  if (!place) return false
+  enabled = [...enabled, id]
+  saveEnabled()
+  setTilePositions({ [id]: place }, grid)
+  emit()
+  return true
+}
+
+/** A tile taken off the deck: its cells are left empty, the others where they are. */
+export function removeTile(id: DashboardTile): void {
+  hydrateEnabled()
+  if (!enabled.includes(id)) return
+  enabled = enabled.filter((t) => t !== id)
+  saveEnabled()
+  emit()
 }

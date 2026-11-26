@@ -1,26 +1,20 @@
 "use client"
 
 import { useSyncExternalStore } from "react"
-import type { MenuOption } from "@/components/ui/option-menu"
 
 /**
- * Which duty the Flight Deck is about — chosen in the HEADER (the owner,
- * Nov 2026: "decouple flight selection from the flight card"). It was a
- * menu laid over the flights tile's date line, which the tile's card did not
- * carry, so the duty could not be changed once the card was open.
+ * Which duty the Flight Deck is about — the one under the TIMELINE's pointer
+ * (the owner, Nov 2026: "we can scroll and select a duty … when a duty is
+ * selected, widgets change according to the selected duty"). It was a menu in
+ * the header, and before that a menu over the flights tile's date line.
  *
- * A MODULE STORE, the `useArranging` shape: the page publishes the duties it
- * can be about (`publishDutyChoices`), the header's menu reads them and sets
- * the choice, and the page reads the choice back. `null` is the default —
- * the duty in progress, else the next.
+ * A MODULE STORE, the `useArranging` shape: the timeline sets the duty its
+ * pointer is on (`setChosenDuty`, a duty period's id — `null` is the default,
+ * the duty in progress, else the next), the page reads it back, and the page
+ * publishes what the header's Briefing button needs (`publishDeckDuty`).
  */
 
-export interface DutyMenu {
-  options: Array<MenuOption<string>>
-  /** The button's two lines: where the duty goes over its day — "WIII" over "21 Nov". */
-  word: string
-  day: string
-  dest: string
+export interface DeckDuty {
   /** The duty's report — the key its flights tile remembers the leg on show by. */
   atMs: number
   /** Each leg's briefing id (`briefingId`), and the leg the duty is on. */
@@ -28,9 +22,9 @@ export interface DutyMenu {
   legNow: number
 }
 
-let chosen: number | null = null
-let menu: DutyMenu | null = null
-let menuKey = ""
+let chosen: string | null = null
+let deckDuty: DeckDuty | null = null
+let deckKey = ""
 const listeners = new Set<() => void>()
 const emit = () => listeners.forEach((l) => l())
 const subscribe = (l: () => void) => {
@@ -38,25 +32,25 @@ const subscribe = (l: () => void) => {
   return () => listeners.delete(l)
 }
 
-export function setChosenDuty(atMs: number | null): void {
-  if (chosen === atMs) return
-  chosen = atMs
+export function setChosenDuty(id: string | null): void {
+  if (chosen === id) return
+  chosen = id
   emit()
 }
 
-export function useChosenDuty(): number | null {
+export function useChosenDuty(): string | null {
   return useSyncExternalStore(subscribe, () => chosen, () => null)
 }
 
-/** The page's duties, for the header's menu — a new list only when it says something new. */
-export function publishDutyChoices(next: DutyMenu | null): void {
+/** The page's duty for the header — a new object only when it says something new. */
+export function publishDeckDuty(next: DeckDuty | null): void {
   const key = next ? JSON.stringify(next) : ""
-  if (key === menuKey) return
-  menuKey = key
-  menu = next
+  if (key === deckKey) return
+  deckKey = key
+  deckDuty = next
   emit()
 }
 
-export function useDutyMenu(): DutyMenu | null {
-  return useSyncExternalStore(subscribe, () => menu, () => null)
+export function useDeckDuty(): DeckDuty | null {
+  return useSyncExternalStore(subscribe, () => deckDuty, () => null)
 }

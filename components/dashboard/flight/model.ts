@@ -22,6 +22,8 @@ import type { AirportInfo } from "@/lib/weather/airport-info"
 import type { DelayMargin } from "@/lib/utils/dashboard/delay-margin"
 import type { LogbookAuthority } from "@/lib/utils/logbook-rules"
 import type { DutyInEstimate } from "@/lib/utils/dashboard/estimated-in"
+import type { RollingIndex } from "@/lib/utils/roster/rolling-at"
+import type { DaysOffAt, LegSun, LogbookMonth, OfpBrief, SunEvent } from "@/lib/utils/dashboard/deck-widgets"
 
 export interface FlightBrief {
   status: PilotStatus
@@ -40,9 +42,9 @@ export interface FlightBrief {
     atMs: number | null
     /** On it now. */
     current: boolean
-    /** The duties to choose from, the default first. */
+    /** The duties the timeline can choose, in time order, past ones included. */
     choices: DutyChoice[]
-    /** Which of them this is. */
+    /** Steps from the default (in progress or next): 0 that one, above it later, below it already flown. */
     index: number
     /** The duty period behind it, where the pipeline has one. */
     period: DutyPeriod | null
@@ -73,6 +75,22 @@ export interface FlightBrief {
   }
   /** The four rolling limits in detail: headroom, what fills them, roll-off, the next duty's share (`limitDetails`). */
   limits: LimitDetail[]
+  /** Every duty as the timeline draws it, for the rolling limits at any instant (`limitsAt`). */
+  rolling: RollingIndex
+  /**
+   * What the tiles a pilot ADDS read (`deck-widgets.ts`) — each worked out only
+   * while its tile is on the deck: null otherwise.
+   */
+  extras: {
+    /** Each leg by day or night, and the sun at each airport of the duty from its start. */
+    sun: { legs: LegSun[]; places: Array<{ icao: string; events: SunEvent[] }> } | null
+    daysOff: DaysOffAt | null
+    /** Each leg's OFP in brief, null where no briefing is imported. */
+    ofp: (OfpBrief | null)[]
+    logbook: LogbookMonth
+  }
+  /** The timeline's pointer once it has come to rest; null while it follows now. */
+  pointerMs: number | null
   /** How much later the chosen duty can run inside every limit — FDP and the rolling windows. */
   margin: DelayMargin | null
   /** The first day 90-day recency is NOT met, YYYY-MM-DD (null when it is not met now). */

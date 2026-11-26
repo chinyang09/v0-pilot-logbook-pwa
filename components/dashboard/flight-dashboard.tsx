@@ -57,11 +57,15 @@ import { getAirportByIcao, getAirportsRevision, isAirportTableSeeded, onAirportS
 import type { Airport } from "@/types/entities/airport.types"
 import { cn } from "@/lib/utils"
 import { useTick } from "./flight/instruments"
-import { CurrencyFace, DutyFace, FlightFace, LimitsFace, currencyRows, destinationsOf, favouredAt, inboundLate, legDelay, limitsOf, marginText } from "./flight/faces"
+import { CurrencyFace, DutyFace, FlightFace, LimitsFace, currencyRows, destinationsOf, favouredAt, inboundLate, legDelay, marginText } from "./flight/faces"
 import { TileRows } from "./flight/tile-rows"
 import { dutyTone } from "./flight/duty-clock"
-import { setChosenDuty, useChosenDuty, publishDutyChoices } from "@/hooks/use-dashboard-duty"
-import { destinationOfRoute } from "@/lib/utils/dashboard/destination"
+import { setChosenDuty, useChosenDuty, publishDeckDuty } from "@/hooks/use-dashboard-duty"
+import { requestDeckNow, useDeckSettled } from "@/hooks/use-deck-pointer"
+import { buildDutyTimeline } from "@/lib/utils/roster/duty-timeline"
+import { createRollingIndex } from "@/lib/utils/roster/rolling-at"
+import { limitsAt, limitsTone } from "@/lib/utils/dashboard/deck-timeline"
+import { DeckTimeline } from "./flight/deck-timeline"
 import { flightBriefingId } from "@/lib/briefing/ids"
 import { useBriefingsByIds } from "@/hooks/data/use-briefings"
 import { type WeatherState } from "./flight/weather"
@@ -69,7 +73,11 @@ import { useDutyAlternates } from "./flight/alternates"
 import { AirportFace, airportsOf, stationPoor } from "./flight/airport-tile"
 import { WIDGET_TITLE, dutyRows, useWidgetCtx, widgetContent } from "./flight/details"
 import { BentoGrid } from "./flight/bento"
-import { setArranging, useArranging, useTileOrder, useTilePositions } from "@/hooks/use-dashboard-layout"
+import { setArranging, setCurrentGrid, useArranging, useEnabledTiles, useTileOrder, useTilePositions } from "@/hooks/use-dashboard-layout"
+import { daysOffAt, legSun, logbookMonth, ofpBrief, sunEvents } from "@/lib/utils/dashboard/deck-widgets"
+import { analyseDaysOff } from "@/lib/utils/roster/days-off"
+import { hasCoordinates } from "@/lib/utils/flight-calculations"
+import { BriefingFace, DaysOffFace, LogbookFace, SunFace, briefingTone, daysOffTone, logbookTone } from "./flight/extra-widgets"
 import { arrangeTiles, columnsOf, faceSizeOn, gridKindFor, rowHeightFor, rowsOf, type GridKind, type TileSize } from "@/lib/utils/dashboard/bento"
 import { Widget, WidgetSheet, type WidgetAnchor, type WidgetId } from "./flight/widget"
 import type { DutyChoice, FlightBrief } from "./flight/model"
@@ -78,9 +86,6 @@ import type { RequirementState } from "@/lib/utils/dashboard/legality"
 
 /** How far either side of now a duty's gates and aeroplane are worth asking about. */
 const LOOKUP_WINDOW_MS = 18 * 3600_000
-/** How many duties ahead the flight card can step to. */
-const CHOICES = 14
-
 /** A duty with flying in it — what the flight card can be about. */
 const hasFlying = (dp: DutyPeriod) => !dp.dutyKind || dp.dutyKind === "flight" || dp.dutyKind === "positioning"
 
@@ -108,7 +113,11 @@ function tileTones(brief: FlightBrief): Partial<Record<WidgetId, RequirementStat
     flight: worstOf([dutyTone(brief), flightLate ? "caution" : null].filter((t): t is RequirementState => t !== null)),
     airport: airportPoor ? "caution" : null,
     currency: worstOf(currencyRows(brief).map((r) => r.state)),
-    limits: worstOf(limitsOf(brief).map((r) => r.state)),
+    // The limits as the timeline's pointer reads them (`limitsAt`), once it has come to rest.
+    limits: limitsTone(limitsAt(brief.rolling, brief.pointerMs ?? brief.now)),
+    daysOff: daysOffTone(brief),
+    briefing: briefingTone(brief),
+    logbook: logbookTone(brief),
   }
 }
 
@@ -230,18 +239,33 @@ function faceOf(id: WidgetId, brief: FlightBrief, size: TileSize, inCard = false
           )}
         </>
       )
+    case "sun":
+      return <SunFace brief={brief} />
+    case "daysOff":
+      return <DaysOffFace brief={brief} />
+    case "briefing":
+      return <BriefingFace brief={brief} />
+    case "logbook":
+      return <LogbookFace brief={brief} />
   }
 }
 
 export function FlightDashboard({ className }: { className?: string }) {
   // Which duty the page is about: null is the default (in progress, else
   // next), chosen in the header. Coming back to the page goes back to it.
-  const chosenAt = useChosenDuty()
+  // The duty under the timeline's pointer (null: the default, in progress or
+  // next). Coming back to the page goes back to now.
+  const chosenId = useChosenDuty()
   const isActive = usePageActive("/", () => {
     setChosenDuty(null)
+    requestDeckNow()
     setArranging(false)
   })
+  const pointerMs = useDeckSettled()
   const order = useTileOrder()
+  // The tiles ON the deck (the pilot adds and removes them in Arrange).
+  const enabledList = useEnabledTiles()
+  const enabled = React.useMemo(() => new Set(enabledList), [enabledList])
   // The box the tiles have decides the grid — six columns or twelve, held
   // landscape or upright (`gridKindFor`) — and its ROW height: the box's
   // height shared out among the grid's rows (`rowHeightFor`), so a tile's
@@ -267,6 +291,8 @@ export function FlightDashboard({ className }: { className?: string }) {
     roRef.current = ro
   }, [])
   const { grid, px: gridPx, rowPx } = gridBox
+  // Where an added tile looks for room: the grid on screen.
+  React.useEffect(() => setCurrentGrid(grid), [grid])
   const positions = useTilePositions(grid)
   const faceSizeOf = React.useCallback((size: TileSize) => faceSizeOn(size, grid, gridPx, rowPx), [grid, gridPx, rowPx])
   // A tile with room under its face says the next facts its card holds, as
@@ -283,6 +309,11 @@ export function FlightDashboard({ className }: { className?: string }) {
   const { personnel } = usePersonnel()
   const { currencies } = useCurrencies()
   const { allDutyPeriods, pastDuties } = useFDPData()
+  // The timeline: every duty as blocks (the FDP page's model), and the
+  // rolling limits read off them at the pointer.
+  const flightsById = React.useMemo(() => new Map(flights.map((f) => [f.id, f])), [flights])
+  const blocks = React.useMemo(() => buildDutyTimeline(allDutyPeriods, flightsById), [allDutyPeriods, flightsById])
+  const rolling = React.useMemo(() => createRollingIndex(blocks), [blocks])
   const dayKey = useDayKey()
   const recency = React.useMemo(
     () => ninetyDayRecency(flights),
@@ -319,21 +350,34 @@ export function FlightDashboard({ className }: { className?: string }) {
       ? sbyNow.startMs
       : (nextStandby?.atMs ?? status.duty.next?.reportMs ?? null)
   const defaultId = onDuty ? status.duty.active!.id : sbyNow ? sbyNow.id : (nextStandby?.id ?? status.duty.next?.id ?? null)
+  // Every duty the timeline can select — with flying in it, or a standby —
+  // past ones included, in time order. The default (in progress or next) is
+  // among them; where the pipeline names it otherwise, it is put in where it
+  // falls.
+  const selectable = React.useMemo(
+    () => new Set(allDutyPeriods.filter((dp) => hasFlying(dp) || dp.dutyKind === "standby").map((dp) => dp.id)),
+    [allDutyPeriods],
+  )
   const choices: DutyChoice[] = React.useMemo(() => {
-    const byId = defaultId ? allDutyPeriods.find((dp) => dp.id === defaultId) ?? null : null
-    const after = defaultAt ?? now
-    const later = allDutyPeriods
-      .filter((dp) => hasFlying(dp) || dp.dutyKind === "standby")
+    const list: DutyChoice[] = allDutyPeriods
+      .filter((dp) => selectable.has(dp.id))
       .map((dp) => ({ period: dp, atMs: dutyWindow(dp)?.startMs ?? NaN }))
-      .filter((c) => Number.isFinite(c.atMs) && c.atMs > after + 60_000)
+      .filter((c) => Number.isFinite(c.atMs))
       .sort((a, b) => a.atMs - b.atMs)
-    const list = defaultAt !== null ? [{ atMs: defaultAt, period: byId }, ...later] : later
-    return list.slice(0, CHOICES)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `now` matters only with nothing ahead; the list moves on as duties do
-  }, [allDutyPeriods, defaultAt, defaultId, defaultAt === null ? now : 0])
-  const found = chosenAt === null ? 0 : choices.findIndex((c) => c.atMs === chosenAt)
-  const index = Math.max(0, found)
-  const choice = choices[index] ?? null
+    if (defaultAt !== null && !list.some((c) => c.period?.id === defaultId)) {
+      const byId = defaultId ? allDutyPeriods.find((dp) => dp.id === defaultId) ?? null : null
+      const at = list.findIndex((c) => c.atMs > defaultAt)
+      list.splice(at < 0 ? list.length : at, 0, { atMs: defaultAt, period: byId })
+    }
+    return list
+  }, [allDutyPeriods, selectable, defaultAt, defaultId])
+  const defaultIndex = defaultAt === null ? choices.length : choices.findIndex((c) => (defaultId && c.period?.id === defaultId) || (!c.period && c.atMs === defaultAt))
+  const pickedIndex = chosenId === null ? -1 : choices.findIndex((c) => c.period?.id === chosenId)
+  const at = pickedIndex >= 0 ? pickedIndex : defaultIndex
+  const choice = choices[at] ?? null
+  // Steps from the default: 0 the duty in progress or next, above it a later
+  // duty, below it one already flown.
+  const index = at - Math.max(0, defaultIndex)
   const current = onDuty && index === 0
   const dutyAtMs = choice?.atMs ?? null
   // The chosen duty is a standby: no flights, no airports — its window only.
@@ -349,10 +393,6 @@ export function FlightDashboard({ className }: { className?: string }) {
       code: dp.standbyKind === "airport" ? "Airport Standby" : "Standby",
     }
   }, [choice, index, sbyNow])
-  const selectDuty = React.useCallback(
-    (atMs: number) => setChosenDuty(choices[0]?.atMs === atMs ? null : atMs),
-    [choices],
-  )
   const fdp = React.useMemo(() => {
     if (current || !choice || choice.period?.dutyKind === "standby") return null
     if (index === 0 && status.duty.next) {
@@ -419,7 +459,7 @@ export function FlightDashboard({ className }: { className?: string }) {
     [legs, flights, firstDepart],
   )
   // A later duty forecasts the currencies to its report; the next one is today's.
-  const currencyAsOfMs = index > 0 && dutyAtMs !== null ? dutyAtMs : null
+  const currencyAsOfMs = index !== 0 && dutyAtMs !== null ? dutyAtMs : null
   const currency = React.useMemo(
     () => currencySummary(currencies, dutyAtMs, currencyAsOfMs),
     [currencies, dutyAtMs, currencyAsOfMs],
@@ -486,6 +526,46 @@ export function FlightDashboard({ className }: { className?: string }) {
   }, [legs, planned, lookupsClose, lookups.lookups])
   const fleet = useAircraftRecords(fleetRegs)
 
+  /* ── The tiles a pilot adds — each worked out only while it is on the deck ── */
+  const sunOn = enabled.has("sun")
+  const sun = React.useMemo(() => {
+    if (!sunOn) return null
+    const at = (icao: string) => {
+      const a = airports.get((icao || "").toUpperCase())
+      return a && hasCoordinates(a) ? { lat: a.latitude, lon: a.longitude } : null
+    }
+    const sunLegs = legs.map((l, i) =>
+      legSun({ id: l.id, flight: l.flightNumber || "", departMs: times[i]?.departMs ?? null, arriveMs: times[i]?.arriveMs ?? null, from: at(l.departureIcao), to: at(l.arrivalIcao) }),
+    )
+    // The sun at each airport of the duty, from the duty's start (else now).
+    const from = times[0]?.departMs ?? dutyAtMs ?? 0
+    const places = stations
+      .map((icao) => ({ icao, p: at(icao) }))
+      .filter((x): x is { icao: string; p: { lat: number; lon: number } } => x.p !== null)
+      .map(({ icao, p }) => ({ icao, events: from ? sunEvents(p, from) : [] }))
+    return { legs: sunLegs, places }
+  }, [sunOn, legs, times, airports, stations, dutyAtMs])
+  const daysOffOn = enabled.has("daysOff")
+  const daysOffResult = React.useMemo(() => (daysOffOn ? analyseDaysOff(blocks) : null), [daysOffOn, blocks])
+  const daysOff = React.useMemo(() => {
+    const w = choice?.period ? dutyWindow(choice.period) : null
+    if (!daysOffResult || !w) return null
+    return daysOffAt(daysOffResult, blocks, w.startMs, w.endMs)
+  }, [daysOffResult, blocks, choice])
+  const ofp = React.useMemo(() => {
+    const byId = new Map(planRecords.map((r) => [r.id, r]))
+    return legs.map((l) => {
+      const r = l.flightNumber ? byId.get(flightBriefingId(l)) : undefined
+      return r?.data ? ofpBrief(r.data) : null
+    })
+  }, [legs, planRecords])
+  const logbook = React.useMemo(
+    () => logbookMonth(flights, dutyAtMs ?? now, new Date().toISOString().slice(0, 10)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the month moves with the duty; "today" with dayKey
+    [flights, dutyAtMs, dayKey],
+  )
+  const extras = React.useMemo(() => ({ sun, daysOff, ofp, logbook }), [sun, daysOff, ofp, logbook])
+
   /* ── Formatting ──────────────────────────────────────────────────────── */
   const zone = React.useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, [])
   const pref = display?.airportIdentifier
@@ -511,7 +591,7 @@ export function FlightDashboard({ className }: { className?: string }) {
         index,
         period: choice?.period ?? null,
         fdp,
-        restBefore: index > 0 ? (choice?.period?.restBefore ?? null) : null,
+        restBefore: index !== 0 ? (choice?.period?.restBefore ?? null) : null,
         legs,
         times,
         lookups: lookupsClose ? lookups.lookups : null,
@@ -523,6 +603,9 @@ export function FlightDashboard({ className }: { className?: string }) {
       },
       margin,
       limits: limitDetail,
+      rolling,
+      pointerMs,
+      extras,
       recencyLapseIso: recency.lapseIso,
       currencyAsOfMs: currencyAsOfMs ?? now,
       crew,
@@ -544,53 +627,25 @@ export function FlightDashboard({ className }: { className?: string }) {
       day: (ms: number) =>
         formatDayAt(ms, display?.useZuluTime === false ? zone : "UTC", { year: false }),
     }),
-    [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, estimate, standby, margin, limitDetail, recency.lapseIso, currencyAsOfMs, crew, legCrew, currency, destinations, airports, fleet, planned, airportInfo, runways, weather, weatherStation, iataOf, pref, zone, isActive],
+    [status, now, display, authority, dutyAtMs, current, choices, index, choice, fdp, legs, times, lookupsClose, lookups.lookups, info, lookups.loading, lookups.refresh, estimate, standby, margin, limitDetail, recency.lapseIso, currencyAsOfMs, crew, legCrew, currency, destinations, airports, fleet, planned, airportInfo, runways, weather, weatherStation, iataOf, pref, zone, isActive, rolling, pointerMs, extras],
   )
   // The airport card's alternates, asked while the page is up (the route reads
   // the stored TAF snapshot — no request to the source): asked only when the
   // card opened, they landed after its morph and the card grew at the end.
   useDutyAlternates(brief, isActive && legs.length > 0)
 
-  /* ── The header's duty menu ──────────────────────────────────────────── */
-  // Where each duty GOES and when (the owner, Nov 2026: "I want to see
-  // destination and date of duty"): "WIII · Wed, 18 Nov", the report and
-  // whether it is the duty now or next under it. Published while the page is
-  // on screen.
+  /* ── The header ─────────────────────────────────────────────────────── */
+  // Its Briefing button opens the leg the flights tile is on, of the duty the
+  // timeline has chosen.
   const legBriefings = React.useMemo(
     () => legs.map((l) => (l.flightNumber ? flightBriefingId(l) : "")),
     [legs],
   )
   const legNowIndex = Math.max(0, legs.findIndex((l) => !l.inTime) < 0 ? legs.length - 1 : legs.findIndex((l) => !l.inTime))
-  const legRoute = legs.length ? [legs[0].departureIcao, ...legs.map((l) => l.arrivalIcao)].join("-") : ""
   React.useEffect(() => {
     if (!isActive) return
-    publishDutyChoices(
-      choices.length === 0 || dutyAtMs === null
-        ? null
-        : {
-            options: choices.map((c, i) => {
-              const sby = c.period?.dutyKind === "standby"
-              const dest = sby ? "Standby" : destinationOfRoute(c.period?.route || (i === index ? legRoute : ""), brief.code)
-              return {
-                value: String(c.atMs),
-                label: [dest, brief.day(c.atMs)].filter(Boolean).join(" · "),
-                hint: [
-                  i === 0 ? (current || (sby && standby?.current) ? "Now" : "Next") : null,
-                  `${sby ? "From" : "Report"} ${brief.clock(c.atMs)}`,
-                ]
-                  .filter(Boolean)
-                  .join(" · "),
-              }
-            }),
-            word: index === 0 ? (current || standby?.current ? "Now" : "Next") : "Later",
-            day: brief.day(dutyAtMs).replace(/^\w+,?\s*/, ""),
-            dest: standby ? "SBY" : destinationOfRoute(choices[index]?.period?.route || legRoute, brief.code),
-            atMs: dutyAtMs,
-            briefings: legBriefings,
-            legNow: legNowIndex,
-          },
-    )
-  }, [isActive, choices, dutyAtMs, current, index, brief, legRoute, legBriefings, legNowIndex, standby])
+    publishDeckDuty(dutyAtMs === null ? null : { atMs: dutyAtMs, briefings: legBriefings, legNow: legNowIndex })
+  }, [isActive, dutyAtMs, legBriefings, legNowIndex])
 
   /* ── Opening a widget ────────────────────────────────────────────────── */
   // The tile is hidden for its card's whole life: the card's surface covers
@@ -603,8 +658,8 @@ export function FlightDashboard({ className }: { className?: string }) {
   // Nov 2026: "not applicable"; a home screen keeps its places). The
   // flight & duty tile reads the standby.
   const shown = React.useMemo(
-    () => (standby ? order.filter((id) => id !== "airport") : order),
-    [order, standby],
+    () => order.filter((id) => enabled.has(id) && !(standby && id === "airport")),
+    [order, enabled, standby],
   )
   // Where each tile sits — a card opens from its tile at that size.
   const placedSizes = React.useMemo(
@@ -623,30 +678,20 @@ export function FlightDashboard({ className }: { className?: string }) {
     [placedSizes, nav],
   )
 
-  // A flight opened FROM a card goes back to that card (the owner, Nov 2026:
-  // "pressing back goes back to flight deck, but the expanded card is no
-  // longer expanded"): once the flight it opened is closed — and nothing else
-  // chosen, and the page still here — the card grows out of its tile again.
+  // A flight opened FROM a card is shown OVER the card, which stays open
+  // under it (the owner, Nov 2026: back from the flight, the card should
+  // "stay open without contents moving"): the card is set aside, not closed
+  // (`WidgetSheet`'s `suspended`), and shown again as it was once the flight
+  // has closed. Another flight chosen from the form keeps it set aside; the
+  // page left behind closes it.
   const { selectedId } = useDetailPanel()
-  const reopen = React.useRef<{ id: WidgetId; flightId: string; shown: boolean } | null>(null)
-  React.useEffect(() => {
-    const r = reopen.current
-    if (!r) return
-    if (selectedId === r.flightId) {
-      r.shown = true
-      return
-    }
-    if (!r.shown) return
-    reopen.current = null
-    if (selectedId || !isActive) return
-    // After the panel's own close has painted: the tile's place is then final.
-    const raf = requestAnimationFrame(() => {
-      const el = document.querySelector<HTMLElement>(`[data-widget="${r.id}"]`)
-      const b = el?.getBoundingClientRect()
-      if (b && b.width > 0) open(r.id, { left: b.left, top: b.top, width: b.width, height: b.height })
-    })
-    return () => cancelAnimationFrame(raf)
-  }, [selectedId, isActive, open])
+  const [behind, setBehind] = React.useState<{ flightId: string; seen: boolean } | null>(null)
+  if (behind && !behind.seen && selectedId === behind.flightId) setBehind({ ...behind, seen: true })
+  if (behind?.seen && !selectedId) setBehind(null)
+  if (behind && !isActive) {
+    setBehind(null)
+    setSheet(null)
+  }
 
   // Each tile's face, built once per model: opening a card sets this page's
   // state, and rebuilding every face then (the flights strip, the airport
@@ -690,6 +735,18 @@ export function FlightDashboard({ className }: { className?: string }) {
   )
   return (
     <div className={cn("@container flex min-h-0 flex-1 flex-col", className)}>
+      {/* The timeline: scrolled, it chooses the duty every tile is about. */}
+      <DeckTimeline
+        blocks={blocks}
+        selectable={selectable}
+        selectedId={choice?.period?.id ?? null}
+        now={now}
+        zulu={display?.useZuluTime !== false}
+        clock={brief.clock}
+        day={brief.day}
+        active={isActive}
+      />
+      <div className="h-2 shrink-0" />
       {/* Scrolls only as a LAST RESORT: every tile fits a phone held upright
           (measured: 360×780 and up). Held sideways it is ~390px tall, and the
           tiles scroll rather than being squeezed out of sight. */}
@@ -724,11 +781,10 @@ export function FlightDashboard({ className }: { className?: string }) {
             const sheetCtx = {
               // A flight opens over this page, not on another route.
               openFlight: (id: string) => {
-                reopen.current = { id: sheet.id, flightId: id, shown: false }
-                dismiss(() => nav.openFlight(id), { overlay: true })
+                setBehind({ flightId: id, seen: false })
+                nav.openFlight(id)
               },
               go: (href: string) => dismiss(() => nav.go(href)),
-              selectDuty,
             }
             const { body, actions, header } = widgetContent(sheet.id, brief, sheetCtx)
             return {
@@ -738,6 +794,7 @@ export function FlightDashboard({ className }: { className?: string }) {
             }
           }}
           onClose={() => setSheet(null)}
+          suspended={behind !== null}
         />
       )}
     </div>

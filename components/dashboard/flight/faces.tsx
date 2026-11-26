@@ -11,11 +11,12 @@ import type { Requirement } from "@/lib/utils/dashboard/legality"
 import type { SectorLeg } from "@/lib/utils/dashboard/duty-status"
 import { formatDay } from "@/lib/utils/date"
 import { limitOrder } from "@/lib/utils/dashboard/limit-detail"
+import { limitsAt, type LimitAt } from "@/lib/utils/dashboard/deck-timeline"
+import { useDeckPointer } from "@/hooks/use-deck-pointer"
 import { cn } from "@/lib/utils"
-import { dutyWindow, formatDutyClock } from "@/lib/utils/dashboard/duty-status"
+import { formatDutyClock } from "@/lib/utils/dashboard/duty-status"
 import { REQ_TONE, TONE } from "./instruments"
-import { DutyClockFace, DutyClockStrip, HourLines, dutyClockView } from "./duty-clock"
-import { dutyClock, type DutyClock } from "@/lib/utils/dashboard/duty-clock"
+import { DutyClockFace, dutyClockView } from "./duty-clock"
 import { WidgetLabel } from "./widget"
 import { metarConditions } from "@/lib/weather/brief"
 import { favouredRunway, runwayEndsFrom, type WindOnRunway } from "@/lib/weather/runway-wind"
@@ -88,77 +89,9 @@ export function chainOf(brief: FlightBrief): { legs: SectorLeg[]; route?: string
 
 /** "Now", "Next", "Later" — which duty the card is about. */
 export function dutyWord(brief: FlightBrief): string {
-  return brief.duty.current ? "Now" : brief.duty.index === 0 ? "Next" : "Later"
+  return brief.duty.current ? "Now" : brief.duty.index === 0 ? "Next" : brief.duty.index < 0 ? "Past" : "Later"
 }
 
-
-/**
- * The duty laid on its day (the owner's duty-and-crew widget): a 24-hour
- * strip in the pilot's clock — a tick each hour, a taller one every six with
- * its hour under it — the duty from report to off duty as a track, each leg
- * filled on it (flown in ink, still to fly in the accent) and now as a
- * hairline. The track and the legs are squared off (the owner: so their left
- * and right ends read), and a duty past midnight moves the window on so it is
- * all in view.
- */
-function DayBar({ brief, focus }: { brief: FlightBrief; focus: number | null }) {
-  const { duty, now, display } = brief
-  const zulu = display?.useZuluTime !== false
-  const legs = duty.times
-  const w = duty.period ? dutyWindow(duty.period) : null
-  const start0 = w?.startMs ?? duty.atMs
-  if (start0 === null) return null
-  const end0 = w?.endMs ?? Math.max(...legs.map((t) => t.arriveMs ?? 0), start0 + 3600_000)
-  const H = 3600_000
-  const dayStart = (ms: number) => {
-    const d = new Date(ms)
-    return zulu ? Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) : new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
-  }
-  let from = dayStart(start0)
-  while (end0 > from + 24 * H && from + 6 * H <= start0) from += 6 * H
-  const to = from + 24 * H
-  const pct = (ms: number) => `${Math.max(0, Math.min(100, ((ms - from) / (to - from)) * 100))}%`
-  const span = (a: number, b: number) => ({ left: pct(a), width: `calc(${pct(b)} - ${pct(a)})` })
-  const hourOf = (ms: number) => (zulu ? new Date(ms).getUTCHours() : new Date(ms).getHours())
-  return (
-    // No inset for the first hour, centred on the left edge: it hangs into the
-    // tile's padding. An inset in px would scale with the stretched copy in
-    // the morph and part the tile's labels from the card's.
-    <div aria-hidden className="mb-1.5" data-morph="fl-day" data-morph-stretch>
-      <div className="relative h-6">
-        {/* A line each hour, all one height, every sixth bold — the duty strip's. */}
-        <HourLines ticks={Array.from({ length: 25 }, (_, h) => ({ ms: from + h * H, major: h % 6 === 0 }))} pct={pct} />
-        <div className="absolute inset-x-0 top-0 h-[18px]">
-          <span className="absolute inset-y-0 rounded-[3px] border border-foreground/30 bg-muted" style={span(start0, end0)} />
-          {legs.map((t, i) =>
-            t.departMs !== null && t.arriveMs !== null ? (
-              <span
-                key={i}
-                className={cn(
-                  "absolute inset-y-[3px] rounded-[2px] transition-opacity",
-                  duty.legs[i]?.inTime ? "bg-foreground/55" : "bg-primary",
-                  // The leg the page is about stands out; the others are context.
-                  focus !== null && focus !== i && "opacity-35",
-                )}
-                style={span(t.departMs, t.arriveMs)}
-              />
-            ) : null,
-          )}
-          {now > from && now < to && <span className="absolute -inset-y-0.5 w-0.5 rounded-full bg-foreground" style={{ left: pct(now) }} />}
-        </div>
-      </div>
-      <div className="relative mt-0.5 h-3 text-[9px] tabular-nums text-muted-foreground">
-        {[0, 6, 12, 18].map((h) => (
-          // Centred on its tick, as the duty strip's hours are.
-          <span key={h} data-anchor="center" className="absolute -translate-x-1/2" style={{ left: pct(from + h * H) }}>
-            {String(hourOf(from + h * H)).padStart(2, "0")}
-          </span>
-        ))}
-        <span data-anchor="end" className="absolute right-0">{zulu ? "Z" : "L"}</span>
-      </div>
-    </div>
-  )
-}
 
 /** A crew member's seat as the pilot's logbook rules name it ("PIC", "P2"); a relief pilot is "Relief". */
 export function crewRole(role: string, authority: LogbookAuthority): string {
@@ -462,35 +395,6 @@ function LegPage({ brief, i, more = false }: { brief: FlightBrief; i: number; mo
   )
 }
 
-/** How much of a long rest the flights tile draws before the report: the duty is what it is about. */
-const REST_TILE_H = 3
-
-/**
- * The duty's TIMELINE as the flights tile and its card draw it (the owner,
- * Nov 2026: one timeline for the legs and the FDP): the duty strip
- * (`dutyClock`) with the rest before it cut to its last few hours — a
- * shortfall still red — so the report, the legs and the maximum's cap have
- * the width. Null where the duty clock has nothing to draw.
- */
-export function flightClock(brief: FlightBrief): DutyClock | null {
-  const view = dutyClockView(brief)
-  if (!view || !view.input.duty) return null
-  const { rest, duty } = view.input
-  const trimmed = rest ? { ...rest, startMs: Math.max(rest.startMs, duty.reportMs - REST_TILE_H * 3_600_000) } : null
-  return dutyClock({ ...view.input, rest: trimmed && trimmed.startMs < duty.reportMs ? trimmed : null })
-}
-
-/** The duty's timeline (`flightClock`), else the 24-hour day bar. */
-function DutyTimeline({ brief, focus, compact = false }: { brief: FlightBrief; focus: number | null; compact?: boolean }) {
-  const c = flightClock(brief)
-  if (!c) return <DayBar brief={brief} focus={focus} />
-  return (
-    <div className={compact ? "-mt-2 mb-1" : "-mt-1 mb-1.5"}>
-      <DutyClockStrip clock={c} zulu={brief.display?.useZuluTime !== false} focus={focus} />
-    </div>
-  )
-}
-
 /** A duty figure's caption as the readout has room for it: "Min 10:00 + night" is the rest's, "Report 18 Nov" the report's. */
 export function readoutLabel(label: string): string {
   if (/^min\b/i.test(label)) return "Rest"
@@ -619,7 +523,6 @@ export function FlightFace({
           </span>
         </WidgetLabel>
       )}
-      <DutyTimeline brief={brief} focus={count > 1 && per === 1 ? page : null} compact={compact} />
       <div className="flex min-h-0 min-w-0 flex-1 gap-3">
         {/* A container: beside the FDP the leg has ~200px of a phone, and a
             three-stop route at 21px does not fit it (measured at 360). */}
@@ -869,7 +772,6 @@ export function FlightCardLegs({ brief, openFlight, duty: dutyNode }: { brief: F
           {dutyWord(brief)} · {day(duty.atMs)}
         </span>
       </WidgetLabel>
-      <DutyTimeline brief={brief} focus={count > 1 ? page : null} />
       {count === 0 ? (
         <>
           <p className="truncate text-[21px] font-bold leading-tight tracking-tight text-foreground" data-morph="fl-route">
@@ -1126,24 +1028,41 @@ export function marginTone(minutes: number): string {
  * label ("to 23 Nov": logged duties to the last one off), and in plain words
  * where one is near or at its limit.
  */
+/**
+ * The four limits at the TIMELINE's pointer (the owner, Nov 2026: "limits also
+ * change as we scroll the timeline"): continuous windows read at its instant
+ * (`limitsAt`), now while it follows the clock — re-read each minute the
+ * pointer moves through, and only this tile re-renders for it.
+ */
+export function useLimitsAtPointer(brief: FlightBrief): { rows: LimitAt[]; atMs: number | null } {
+  const pointer = useDeckPointer()
+  const minute = Math.floor((pointer ?? brief.now) / 60_000)
+  const rows = React.useMemo(() => limitsAt(brief.rolling, minute * 60_000), [brief.rolling, minute])
+  return { rows, atMs: pointer }
+}
+
+/** "62" — hours left, rounded DOWN (headroom is never overstated). */
+const hoursLeftOf = (minutes: number) => String(Math.max(0, Math.floor(minutes / 60)))
+
 export function LimitsFace({ brief, size, fill = false }: { brief: FlightBrief; size?: TileSize; fill?: boolean }) {
   // In concern first, else the regulation's order (`limitOrder`).
-  const reqs = limitsOf(brief)
-  const states = new Map(reqs.map((r) => [r.id, r.state]))
-  const limits = limitOrder(reqs, (id) => states.get(id), (r) => r.progress ?? 0)
+  const { rows, atMs } = useLimitsAtPointer(brief)
+  const limits = limitOrder(rows, (id) => rows.find((r) => r.id === id)?.state)
   // A third of the row: the figure alone ("81h").
   const narrow = (size?.cols ?? 3) < 2
   // WIDE: two columns, each with what is used against its limit.
   const wide = (size?.cols ?? 3) >= FACE_WIDE_COLS
-  const last = brief.status.duty.lastDuty?.debriefMs ?? null
   return (
     <>
       <WidgetLabel title>
         Limits
-        {!narrow && last !== null && (
+        {/* Scrolled away from now: the instant they are read at. */}
+        {/* A narrow tile has room for the day alone. */}
+        {atMs !== null && (
           <span className="font-medium normal-case tracking-normal" suppressHydrationWarning>
-            {" · to "}
-            {shortDay(new Date(last).toISOString().slice(0, 10))}
+            {" · "}
+            {brief.day(atMs).replace(/^\w+,?\s*/, "")}
+            {!narrow && ` ${brief.clock(atMs)}`}
           </span>
         )}
       </WidgetLabel>
@@ -1152,8 +1071,8 @@ export function LimitsFace({ brief, size, fill = false }: { brief: FlightBrief; 
       <ul className={cn(wide ? "grid grid-cols-2 gap-x-5 gap-y-2" : fill ? "flex flex-col gap-2" : "flex min-h-0 flex-1 flex-col justify-around gap-1.5")}>
         {limits.map((r) => {
           // What is LEFT is the question ("how much more"); the bar shows what is used.
-          const left = (r.detail?.find((d) => d.label === "Remaining")?.value ?? "").replace(/h$/, "")
-          const fraction = Math.min(1, Math.max(0, r.progress ?? 0))
+          const left = hoursLeftOf(r.remainingMinutes)
+          const fraction = Math.min(1, Math.max(0, r.fraction))
           const fill = r.state === "ok" ? "bg-muted-foreground" : REQ_TONE[r.state].fill
           // Dark cockpit: "left" while there is room; plain words when there is not.
           const word = r.state === "fail" ? " at limit" : r.state === "caution" ? " near limit" : " left"
@@ -1166,7 +1085,7 @@ export function LimitsFace({ brief, size, fill = false }: { brief: FlightBrief; 
                 <span className="shrink-0 tabular-nums" data-morph={`lim-left-${r.id}`}>
                   <span className={cn("font-semibold", r.state === "ok" ? "text-foreground" : REQ_TONE[r.state].icon)}>{left}h</span>
                   {!narrow && <span className={r.state === "ok" ? "text-muted-foreground" : REQ_TONE[r.state].icon}>{word}</span>}
-                  {wide && r.value && <span className="text-muted-foreground"> · {r.value}</span>}
+                  {wide && <span className="text-muted-foreground"> · {Math.floor(r.usedMinutes / 60)} / {Math.round(r.limitMinutes / 60)}h</span>}
                 </span>
               </span>
               <span className="mt-1 block h-1 overflow-hidden rounded-full bg-muted" data-morph={`lim-bar-${r.id}`} data-morph-stretch>
