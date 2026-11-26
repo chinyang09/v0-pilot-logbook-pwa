@@ -648,6 +648,25 @@ export function FlightDashboard({ className }: { className?: string }) {
     return () => cancelAnimationFrame(raf)
   }, [selectedId, isActive, open])
 
+  // Each tile's face, built once per model: opening a card sets this page's
+  // state, and rebuilding every face then (the flights strip, the airport
+  // station, a quarter-year of dots) was a third of the open's first task at
+  // 4× (Nov 2026). Unchanged elements are skipped by React; the model changes
+  // once a minute and with the data, which is when the faces should.
+  const placedFaces = React.useMemo(() => {
+    const out = new Map<WidgetId, { key: string; face: React.ReactNode }>()
+    for (const [id, size] of placedSizes) {
+      const fill = grid !== "narrow" || size.rows >= 1.5
+      out.set(id, { key: `${size.cols}x${size.rows}:${fill}`, face: faceOf(id, brief, size, false, fill) })
+    }
+    return out
+  }, [placedSizes, brief, grid])
+  // A size the tile is not placed at (being resized in Arrange) is drawn fresh.
+  const faceFor = (id: WidgetId, size: TileSize) => {
+    const fill = fillsRoom(size)
+    const hit = placedFaces.get(id)
+    return hit && hit.key === `${size.cols}x${size.rows}:${fill}` ? hit.face : faceOf(id, brief, size, false, fill)
+  }
   const loading = flightsLoading || statusLoading
   if (loading) {
     return <Skeleton className={cn("h-full min-h-[24rem] rounded-3xl", className)} />
@@ -666,7 +685,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       tone={tint[id] ?? null}
       className="flex-1"
     >
-      {faceOf(id, brief, faceSizeOf(size), false, fillsRoom(faceSizeOf(size)))}
+      {faceFor(id, faceSizeOf(size))}
     </Widget>
   )
   return (
@@ -683,14 +702,14 @@ export function FlightDashboard({ className }: { className?: string }) {
         arranging={arranging}
         label={(id) => WIDGET_TITLE[id]}
         tile={tile}
-        face={(id, size) => faceOf(id, brief, faceSizeOf(size), false, fillsRoom(faceSizeOf(size)))}
+        face={(id, size) => faceFor(id, faceSizeOf(size))}
       />
 
       {sheet && (
         <WidgetSheet
           anchor={sheet.anchor}
           title={WIDGET_TITLE[sheet.id]}
-          face={faceOf(sheet.id, brief, sheet.size, false, fillsRoom(sheet.size))}
+          face={faceFor(sheet.id, sheet.size)}
           // The tile opens straight down only where its face IS the card's
           // header: a full-width, one-row tile whose face does not change in
           // the card (the flights face drops its crew panel there; the

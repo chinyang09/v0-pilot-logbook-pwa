@@ -85,7 +85,11 @@ export function CurrencyDots({
   const step = selIndex > 0 ? Math.min(14, Math.max(1, 520 / selIndex)) : 0
   const card = !!onSelect
 
-  const days: React.ReactNode[] = []
+  // Every plain day is ONE path of circles, not a circle each: a year is ~370
+  // days, and as elements they were most of the card's style recalculation on
+  // open and of what the shared morph cloned (measured at 4×, Nov 2026).
+  let plain = ""
+  let todayDot: React.ReactNode = null
   const sweep: React.ReactNode[] = []
   const lit: React.ReactNode[] = []
   for (let i = 0; i < layout.days; i++) {
@@ -95,13 +99,8 @@ export function CurrencyDots({
       sweep.push(<circle key={i} {...p} r={R} className="currency-sweep fill-primary" style={{ animationDelay: `${Math.round(i * step)}ms` }} />)
     }
     if (!here) {
-      days.push(
-        i === 0 ? (
-          <circle key={i} {...p} r={R - 0.6} className="fill-none stroke-foreground" strokeWidth={1.2} />
-        ) : (
-          <circle key={i} {...p} r={R} className="fill-foreground/[0.13]" />
-        ),
-      )
+      if (i === 0) todayDot = <circle {...p} r={R - 0.6} className="fill-none stroke-foreground" strokeWidth={1.2} />
+      else plain += `M${p.cx - R} ${p.cy}a${R} ${R} 0 1 0 ${2 * R} 0a${R} ${R} 0 1 0 ${-2 * R} 0`
       continue
     }
     const lead = (selected && here.find((m) => m.key === selected)) || here[0]
@@ -137,7 +136,8 @@ export function CurrencyDots({
   return (
     <div className={cn("relative", className)} onClick={onSelect ? () => onSelect(null) : undefined}>
       <svg viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full" role="img" aria-label={`Currency expiries, the next ${ahead === "1y" ? "year" : ahead === "6m" ? "six months" : "90 days"}`}>
-        {days}
+        <path d={plain} className="fill-foreground/[0.13]" />
+        {todayDot}
         {/* Keyed on the selection, so each one replays the sweep. */}
         <g key={selected ?? ""}>{sweep}</g>
         {lit}

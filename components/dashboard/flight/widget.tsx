@@ -350,7 +350,8 @@ export function WidgetSheet({
   }, [onClose])
 
   const dialogRef = React.useRef<HTMLDivElement>(null)
-  useDialogFocus(dialogRef, true)
+  // Focus goes in once the card has grown (`OPEN`), not in the middle of it.
+  useDialogFocus(dialogRef, true, undefined, OPEN.duration * 1000 + 60)
   const scrimPressRef = React.useRef(false)
 
   const cardRef = React.useRef<HTMLDivElement>(null)
@@ -472,9 +473,27 @@ export function WidgetSheet({
     [requestClose],
   )
 
+  // The card's content is built ONCE per render prop: the sheet's own state
+  // (its measured height, closing, leaving) re-renders the surface, never the
+  // card — that second pass of the whole body was most of a card's open at 4×
+  // (Nov 2026). A context (`SheetClosingContext`) carries what the body needs.
+  const content = React.useMemo(() => render(dismissCard), [render, dismissCard])
+  const shell = React.useMemo(
+    () => (
+      <CardShell
+        title={title}
+        header={content.header}
+        body={content.body}
+        // A footer action that leads somewhere is already wrapped to
+        // close the card first (`render`'s dismiss) — closing it again
+        // here swallowed the navigation (the owner's report).
+        footer={<WidgetFooter actions={content.actions} run={(a) => a.run()} />}
+      />
+    ),
+    [title, content],
+  )
   if (typeof document === "undefined") return null
 
-  const content = render(dismissCard)
   const measured = height !== null
   const open = measured && !closing
   const vw = window.innerWidth
@@ -570,17 +589,7 @@ export function WidgetSheet({
             animate={{ opacity: crossfade ? (open || leaving ? 1 : 0) : 1 }}
             transition={open ? { duration: 0.2, delay: 0.06, ease: EASE } : { duration: 0.12, ease: EASE }}
           >
-            <SheetClosingContext.Provider value={closing || leaving}>
-              <CardShell
-                title={title}
-                header={content.header}
-                body={content.body}
-                // A footer action that leads somewhere is already wrapped to
-                // close the card first (`render`'s dismiss) — closing it again
-                // here swallowed the navigation (the owner's report).
-                footer={<WidgetFooter actions={content.actions} run={(a) => a.run()} />}
-              />
-            </SheetClosingContext.Provider>
+            <SheetClosingContext.Provider value={closing || leaving}>{shell}</SheetClosingContext.Provider>
           </motion.div>
           {/* The shared elements' copies, in flight. */}
           <div ref={flyRef} aria-hidden className="pointer-events-none absolute inset-0" />
