@@ -46,14 +46,6 @@ import { formatTimezoneOffset } from "@/lib/utils/time"
 import { cn } from "@/lib/utils"
 import { AlternateChip, type AlternateBrief } from "./alternates"
 
-/** A category below VFR — VFR is nominal and lights nothing. */
-const CATEGORY_DOT: Record<Exclude<FlightCategory, "VFR">, string> = {
-  MVFR: "bg-sky-500",
-  IFR: "bg-destructive",
-  LIFR: "bg-fuchsia-500",
-}
-
-
 /** The wind's head (tail, amber) and cross components on one runway: "12kt↓ 6kt→". */
 function Components({ wind }: { wind: WindOnRunway }) {
   return (
@@ -151,7 +143,6 @@ export function AirportPanel({
   const listed = geometry?.length
     ? geometry.map((r) => ({ id: r.id, lengthFt: r.lengthFt }))
     : (info?.runways ?? []).map((r) => ({ id: r.id, lengthFt: r.lengthFt }))
-  const category = metar?.category ?? null
   const night =
     arrivalMs !== null && airport && hasCoordinates(airport) ? isNight(new Date(arrivalMs), airport.latitude, airport.longitude) : null
   const Arrive = night === null ? null : night ? Moon : Sun
@@ -190,14 +181,6 @@ export function AirportPanel({
             {Arrive && <Arrive className="h-3.5 w-3.5" aria-label={night ? "Arrive by night" : "Arrive by day"} />}
           </p>
         </div>
-        {category && category !== "VFR" && (
-          <span className="flex shrink-0 flex-col items-end gap-1 pt-0.5">
-            <span className={cn("h-3 w-3 rounded-full", CATEGORY_DOT[category])} aria-hidden />
-            <span className="text-xs font-semibold text-foreground" data-morph={mk("cat")}>
-              {category}
-            </span>
-          </span>
-        )}
       </div>
 
       {/* The weather there, as a picture. */}

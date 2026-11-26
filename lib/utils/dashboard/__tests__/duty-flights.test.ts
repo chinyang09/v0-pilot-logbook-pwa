@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest"
 import type { FlightLog } from "@/types/entities/flight.types"
-import { dutyFlights, inboundLeg, legDepartureIso } from "../duty-flights"
+import { outboundOf, dutyFlights, inboundLeg, legDepartureIso } from "../duty-flights"
 
 const at = Date.parse("2026-10-30T01:25:00Z")
 const leg = (id: string, scheduledOut: string, over: Partial<FlightLog> = {}) =>
@@ -52,5 +52,18 @@ describe("a duty's legs", () => {
   it("departs at its scheduled OUT on its UTC date", () => {
     expect(legDepartureIso(leg("x", "02:25"))).toBe("2026-10-30T02:25:00.000Z")
     expect(legDepartureIso(leg("x", ""))).toBeNull()
+  })
+})
+
+describe("outboundOf (the traceback to the aeroplane's outbound)", () => {
+  it("pairs a return with its outbound", () => {
+    expect(outboundOf("TR537")).toBe("TR536")
+    expect(outboundOf("tr0275")).toBe("TR274")
+  })
+  it("has nothing for an outbound or something that is not a flight number", () => {
+    expect(outboundOf("TR536")).toBeUndefined()
+    expect(outboundOf("")).toBeUndefined()
+    expect(outboundOf(undefined)).toBeUndefined()
+    expect(outboundOf("TR1")).toBeUndefined()
   })
 })

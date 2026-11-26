@@ -1,35 +1,35 @@
 "use client"
 
 /**
- * The flight dashboard's tiles as a SORTABLE BENTO (the owner, Nov 2026).
+ * The flight dashboard's tiles on a HOME SCREEN (the owner, Nov 2026: "behave
+ * like a mobile phone … a fixed number of grids and it's free and easy to be
+ * placed within the grids").
  *
- * The tiles keep their look; their ORDER and SIZE are the pilot's (per
- * device, `use-dashboard-layout.ts`), placed on a grid three columns wide in
- * which a tile spans 1–3 columns and 1–2 rows, always filled edge to edge
- * (`packTiles`). Arrange — a long press on any tile, which picks it up in
- * the same gesture; Done in the header ends it — lets a tile be picked up
- * and dropped where another is (arrow keys for a keyboard), and RESIZED by
- * dragging any edge of the tile in hand across the grid's cells (Shift +
- * arrows): the
- * other tiles move round it live, so what is seen is the outcome.
+ * The screen is a fixed grid of cells — a phone six by six — and each tile
+ * has a PLACE in it (per device, `use-dashboard-layout.ts`). Arrange — a long
+ * press on any tile, which picks it up in the same gesture; Done in the header
+ * or Escape ends it — shows the cells, and a tile is DROPPED on the cell under
+ * it (arrow keys move it a cell), or RESIZED by dragging any edge of the tile
+ * in hand (Shift + arrows). Tiles it lands on are pushed to the nearest place
+ * they fit (`placeTile`), worked out from where they were when the gesture
+ * began, so a tile carried past and away goes back; a place that would push a
+ * tile off the screen is refused (`placeTileOnScreen`). Empty cells stay empty.
  *
  * - **The DOM never moves.** Every tile stays at its place in the tree and the
- *   grid places it by explicit row and column, so reordering remounts nothing
- *   (a tile's face, its lookups, its sheet) and a drag keeps its node.
+ *   grid places it by explicit row and column, so moving remounts nothing (a
+ *   tile's face, its lookups, its sheet) and a drag keeps its node.
  * - **Layout animates only while arranging.** A `layout` element is measured
  *   on every render; outside Arrange the tiles are plain grid items.
- * - **The tile that is picked up is a COPY** that follows the finger, over a
- *   faded slot; the others move round it. It swaps when the finger enters
- *   another tile, and not back until the finger has left that tile — or the
- *   two would trade places every frame.
+ * - **The tile that is picked up is a COPY** that follows the finger; its own
+ *   slot, faded, shows where it will land.
  */
 
 import * as React from "react"
 import { createPortal } from "react-dom"
 import { animate, motion, useMotionValue } from "framer-motion"
 import { Move } from "lucide-react"
-import { GRID_GAP_PX, ROW_FLOOR_PX, columnsOf, mergeShownOrder, moveTile, nudgeTile, packTiles, rowsOf, sizeLabel, type GridKind, type TileSize } from "@/lib/utils/dashboard/bento"
-import { DASHBOARD_TILES, setArranging, setTileOrder, setTileSize, type DashboardTile } from "@/hooks/use-dashboard-layout"
+import { GRID_GAP_PX, ROW_FLOOR_PX, arrangeTiles, clampPos, columnsOf, placeTileOnScreen, resizeFrom, rowsOf, rowsUsed, sizeLabel, type GridKind, type TilePos, type TileSize } from "@/lib/utils/dashboard/bento"
+import { DASHBOARD_TILES, minColsOf, setArranging, setTilePositions, type DashboardTile } from "@/hooks/use-dashboard-layout"
 import { haptic } from "@/lib/utils/haptics"
 import { cn } from "@/lib/utils"
 
@@ -51,9 +51,6 @@ export function beginArrangeFrom(id: DashboardTile, x: number, y: number): void 
   setArranging(true)
 }
 
-/** Swaps wait this long after the last — a layout settling under the finger is not a new target. */
-const SWAP_COOLDOWN_MS = 140
-
 interface Drag {
   id: DashboardTile
   w: number
@@ -69,16 +66,27 @@ const GAP = GRID_GAP_PX
 /** Which edge a resize pulls: left / right change the columns, top / bottom the rows. */
 type Edge = "l" | "r" | "t" | "b"
 
-/** A tile's resize in progress: where it began, the edge pulled, and the grid's pitch. */
+/** A tile's resize in progress: where it began, the edge pulled, the layout it began on, and the grid's pitch. */
 interface Resize {
   id: DashboardTile
   edge: Edge
   x0: number
   y0: number
-  start: TileSize
+  start: TilePos
+  base: Record<DashboardTile, TilePos>
   colPitch: number
   rowPitch: number
   grid: GridKind
+}
+
+/** A move in progress: the layout it began on, the grid's box and pitch, and the cell last aimed at. */
+interface MoveBase {
+  base: Record<DashboardTile, TilePos>
+  left: number
+  top: number
+  colPitch: number
+  rowPitch: number
+  at: string
 }
 
 export function BentoGrid({
@@ -86,8 +94,7 @@ export function BentoGrid({
   gridRef,
   rowPx,
   order,
-  fullOrder,
-  sizes,
+  positions,
   arranging,
   label,
   tile,
@@ -99,12 +106,10 @@ export function BentoGrid({
   gridRef?: React.Ref<HTMLDivElement>
   /** A row's height, px (`rowHeightFor`): a fixed share of the box, never the content's. */
   rowPx: number
-  /** The tiles on show, in order. */
+  /** The tiles on show (a standby's airport is not). */
   order: DashboardTile[]
-  /** Every tile in the pilot's order, those not applicable now included (a standby's flights). */
-  fullOrder?: DashboardTile[]
-  /** Each tile's chosen size on `grid`. */
-  sizes: Record<DashboardTile, TileSize>
+  /** Each tile's place on `grid`. */
+  positions: Record<DashboardTile, TilePos>
   arranging: boolean
   label: (id: DashboardTile) => string
   /** The tile as the page shows it, at the size it is placed at. */
@@ -115,33 +120,55 @@ export function BentoGrid({
   const columns = columnsOf(grid)
   const gridRows = rowsOf(grid)
   const row = Math.max(ROW_FLOOR_PX, rowPx)
+  const placedList = React.useMemo(() => arrangeTiles(order, positions, columns, gridRows), [order, positions, columns, gridRows])
   const placed = React.useMemo(() => {
-    const m = new Map<DashboardTile, { index: number; col: number; row: number; cols: number; rows: number }>()
-    packTiles(order, sizes, columns, gridRows).forEach((t, index) => m.set(t.id, { index, col: t.col, row: t.row, cols: t.cols, rows: t.rows }))
+    const reading = [...placedList].sort((a, b) => a.row - b.row || a.col - b.col)
+    const m = new Map<DashboardTile, TilePos & { index: number }>()
+    for (const t of placedList) m.set(t.id, { index: reading.indexOf(t), col: t.col, row: t.row, cols: t.cols, rows: t.rows })
     return m
-  }, [order, sizes, columns, gridRows])
-  const sizesRef = React.useRef(sizes)
+  }, [placedList])
+  const totalRows = rowsUsed(placedList, gridRows)
+  /** The layout as it stands — what a move or a resize starts from. */
+  const layoutNow = React.useCallback(() => {
+    const out = { ...positions }
+    for (const p of placedList) out[p.id] = { col: p.col, row: p.row, cols: p.cols, rows: p.rows }
+    return out
+  }, [positions, placedList])
+  const layoutRef = React.useRef(layoutNow)
+  const orderRef = React.useRef(order)
   React.useEffect(() => {
-    sizesRef.current = sizes
-  }, [sizes])
+    layoutRef.current = layoutNow
+    orderRef.current = order
+  }, [layoutNow, order])
+
+  /** The grid's box on screen and one cell's pitch (a column or a row, and the gap). */
+  const pitchOf = (gridEl: HTMLElement) => {
+    const g = gridEl.getBoundingClientRect()
+    return { left: g.left, top: g.top, colPitch: (g.width - GAP * (columns - 1)) / columns + GAP, rowPitch: row + GAP }
+  }
 
   const [resize, setResize] = React.useState<Resize | null>(null)
   const resizeId = resize?.id ?? null
   React.useEffect(() => {
     if (!resize) return
+    let last = ""
     const onMove = (e: PointerEvent) => {
       // An edge pulled OUT grows the tile, pushed IN shrinks it, whichever
-      // side it is (the owner: "increase or decrease size from all
-      // direction"). Where the tile sits stays the packing's.
-      const dx = (e.clientX - resize.x0) / resize.colPitch
-      const dy = (e.clientY - resize.y0) / resize.rowPitch
-      const { edge, start } = resize
-      const cols = Math.round(start.cols + (edge === "r" ? dx : edge === "l" ? -dx : 0))
-      const rows = Math.round(start.rows + (edge === "b" ? dy : edge === "t" ? -dy : 0))
-      const cur = sizesRef.current[resize.id]
-      setTileSize(resize.id, { cols, rows }, resize.grid)
-      const next = sizesRef.current[resize.id]
-      if (cur.cols !== next.cols || cur.rows !== next.rows) haptic("tick")
+      // side it is; the tiles it reaches are pushed aside, from where they
+      // were when the resize began.
+      const horizontal = resize.edge === "l" || resize.edge === "r"
+      const raw = horizontal ? (e.clientX - resize.x0) / resize.colPitch : (e.clientY - resize.y0) / resize.rowPitch
+      const out = resize.edge === "l" || resize.edge === "t" ? -raw : raw
+      const cols = columnsOf(resize.grid)
+      const want = resizeFrom(resize.start, resize.edge, Math.round(out), minColsOf(resize.id, resize.grid), cols, rowsOf(resize.grid))
+      const key = `${want.col},${want.row},${want.cols},${want.rows}`
+      if (key === last) return
+      last = key
+      // No room for what it would push: the tile keeps the last size that had.
+      const next = placeTileOnScreen(orderRef.current, resize.base, resize.id, want, cols, rowsOf(resize.grid), minColsOf(resize.id, resize.grid))
+      if (!next) return
+      setTilePositions(next, resize.grid)
+      haptic("tick")
     }
     const onUp = () => setResize(null)
     window.addEventListener("pointermove", onMove)
@@ -154,38 +181,17 @@ export function BentoGrid({
     }
   }, [resize])
 
-  // A grid's pitch: a column's width plus the gap, a row's height (as this
-  // tile has it) plus the gap — one step of the handle is one cell.
   const startResize = (e: React.PointerEvent<HTMLElement>, id: DashboardTile, edge: Edge) => {
     e.stopPropagation()
     e.preventDefault()
-    const slot = e.currentTarget.closest<HTMLElement>("[data-tile-slot]")
-    const gridEl = slot?.parentElement
-    if (!slot || !gridEl) return
-    const g = gridEl.getBoundingClientRect()
-    const start = sizesRef.current[id]
+    const gridEl = e.currentTarget.closest<HTMLElement>("[data-tile-slot]")?.parentElement
+    if (!gridEl) return
+    const base = layoutRef.current()
+    const { colPitch, rowPitch } = pitchOf(gridEl)
     setActive(id)
-    setResize({
-      id,
-      edge,
-      x0: e.clientX,
-      y0: e.clientY,
-      start,
-      colPitch: (g.width - GAP * (columns - 1)) / columns + GAP,
-      rowPitch: row + GAP,
-      grid,
-    })
+    setResize({ id, edge, x0: e.clientX, y0: e.clientY, start: base[id], base, colPitch, rowPitch, grid })
     haptic("tick")
   }
-
-  const orderRef = React.useRef(order)
-  const fullRef = React.useRef(fullOrder ?? order)
-  React.useEffect(() => {
-    orderRef.current = order
-    fullRef.current = fullOrder ?? order
-  }, [order, fullOrder])
-  // A reorder of the tiles on show keeps the hidden ones where they were.
-  const reorder = (next: DashboardTile[]) => setTileOrder(mergeShownOrder(fullRef.current, next))
 
   const [drag, setDrag] = React.useState<Drag | null>(null)
   // The tile in hand: its frame and its four edge handles are drawn; the
@@ -195,7 +201,7 @@ export function BentoGrid({
   const active = arranging ? activeState : null
   const x = useMotionValue(0)
   const y = useMotionValue(0)
-  const swap = React.useRef<{ target: DashboardTile | null; at: number }>({ target: null, at: 0 })
+  const move = React.useRef<MoveBase | null>(null)
 
   // Escape ends arranging, as Done does.
   React.useEffect(() => {
@@ -207,8 +213,9 @@ export function BentoGrid({
     return () => window.removeEventListener("keydown", onKey)
   }, [arranging])
 
-  // The drag follows the pointer on the WINDOW: the slot it began on moves
-  // under it as the others are reordered.
+  // The drag follows the pointer on the WINDOW, and the tile's place is the
+  // cell its top-left corner is nearest — dropped there, the tiles it covers
+  // pushed aside from where they were when it was picked up.
   const dragId = drag && !drag.dropping ? drag.id : null
   React.useEffect(() => {
     if (!dragId || !drag) return
@@ -216,21 +223,26 @@ export function BentoGrid({
     const onMove = (e: PointerEvent) => {
       x.set(e.clientX - ox)
       y.set(e.clientY - oy)
-      const hit = document
-        .elementsFromPoint(e.clientX, e.clientY)
-        .find((n): n is HTMLElement => n instanceof HTMLElement && !!n.dataset.tileSlot)
-      const target = (hit?.dataset.tileSlot as DashboardTile | undefined) ?? null
-      if (!target || target === dragId) {
-        swap.current.target = null
-        return
-      }
-      const now = performance.now()
-      if (target === swap.current.target || now - swap.current.at < SWAP_COOLDOWN_MS) return
-      swap.current = { target, at: now }
-      reorder(moveTile(orderRef.current, dragId, target))
+      const m = move.current
+      if (!m) return
+      const start = m.base[dragId]
+      const want = clampPos(
+        { ...start, col: Math.round((e.clientX - ox - m.left) / m.colPitch), row: Math.round((e.clientY - oy - m.top) / m.rowPitch) },
+        1,
+        columns,
+        gridRows,
+      )
+      const key = `${want.col},${want.row}`
+      if (key === m.at) return
+      m.at = key
+      // No room on the screen for what it would push: its slot stays where it last could go.
+      const next = placeTileOnScreen(orderRef.current, m.base, dragId, want, columns, gridRows, minColsOf(dragId, grid))
+      if (!next) return
+      setTilePositions(next, grid)
       haptic("tick")
     }
     const onUp = () => {
+      move.current = null
       const slot = document.querySelector<HTMLElement>(`[data-tile-slot="${dragId}"]`)
       const r = slot?.getBoundingClientRect()
       setDrag((d) => (d ? { ...d, dropping: true } : d))
@@ -256,6 +268,15 @@ export function BentoGrid({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one listener set per pick-up; ox/oy are fixed for it
   }, [dragId, x, y])
 
+  /** Where a move starts: the layout as it stands and the grid's box. */
+  const beginMove = (slot: HTMLElement, id: DashboardTile) => {
+    const gridEl = slot.parentElement
+    if (!gridEl) return
+    const base = layoutRef.current()
+    const p = base[id]
+    move.current = { base, ...pitchOf(gridEl), at: `${p.col},${p.row}` }
+  }
+
   // The tile a long press entered Arrange with: picked up where the finger is.
   React.useLayoutEffect(() => {
     if (!arranging) return
@@ -263,15 +284,16 @@ export function BentoGrid({
     if (!p) return
     const slot = document.querySelector<HTMLElement>(`[data-tile-slot="${p.id}"]`)
     const r = slot?.getBoundingClientRect()
-    if (!r) return
+    if (!slot || !r) return
     x.set(r.left)
     y.set(r.top)
-    swap.current = { target: null, at: 0 }
+    beginMove(slot, p.id)
     // A layout effect with nothing else to read from: the pick-up IS the
     // response to the hold, in the commit that entered Arrange.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDrag({ id: p.id, w: r.width, h: r.height, ox: p.x - r.left, oy: p.y - r.top, dropping: false })
     setActive(p.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per entry into Arrange
   }, [arranging, x, y])
 
   const pickUp = (e: React.PointerEvent<HTMLElement>, id: DashboardTile) => {
@@ -280,25 +302,26 @@ export function BentoGrid({
     const r = e.currentTarget.getBoundingClientRect()
     x.set(r.left)
     y.set(r.top)
-    swap.current = { target: null, at: 0 }
+    beginMove(e.currentTarget, id)
     setDrag({ id, w: r.width, h: r.height, ox: e.clientX - r.left, oy: e.clientY - r.top, dropping: false })
     setActive(id)
     haptic("tick")
   }
 
   const onKey = (e: React.KeyboardEvent, id: DashboardTile) => {
-    if (e.shiftKey) {
-      const s0 = sizesRef.current[id]
-      const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key]
-      if (!d) return
-      e.preventDefault()
-      setTileSize(id, { cols: s0.cols + d[0], rows: s0.rows + d[1] }, grid)
-      return
-    }
-    const by = e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : 0
-    if (!by) return
+    const d = ({ ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] } as Record<string, [number, number]>)[e.key]
+    if (!d) return
     e.preventDefault()
-    reorder(nudgeTile(orderRef.current, id, by))
+    const base = layoutRef.current()
+    const p = base[id]
+    // Shift + arrows: the right and bottom edges; arrows alone: a cell.
+    const want = e.shiftKey
+      ? d[0]
+        ? resizeFrom(p, "r", d[0], minColsOf(id, grid), columns, gridRows)
+        : resizeFrom(p, "b", d[1], minColsOf(id, grid), columns, gridRows)
+      : clampPos({ ...p, col: p.col + d[0], row: p.row + d[1] }, 1, columns, gridRows)
+    const next = placeTileOnScreen(order, base, id, want, columns, gridRows, minColsOf(id, grid))
+    if (next) setTilePositions(next, grid)
   }
 
   return (
@@ -319,8 +342,19 @@ export function BentoGrid({
         // move badges that sit ON each tile's corner — inside it they covered
         // the tile's own corner (a weather hazard, the currency tally).
         className="grid content-start gap-2"
-        style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gridAutoRows: `${row}px` }}
+        style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${totalRows}, ${row}px)` }}
       >
+        {/* The CELLS, while arranging — the home screen's grid, so a tile is
+            seen to land on one and an empty one is seen to be free. */}
+        {arranging &&
+          Array.from({ length: totalRows * columns }, (_, i) => (
+            <div
+              key={`cell-${i}`}
+              aria-hidden
+              className="pointer-events-none rounded-xl bg-foreground/[0.05]"
+              style={{ gridColumn: `${(i % columns) + 1}`, gridRow: `${Math.floor(i / columns) + 1}` }}
+            />
+          ))}
         {/* The DOM order never changes: the grid places each tile by row and column. */}
         {DASHBOARD_TILES.map((id) => {
           // A tile not in the order is not applicable to this duty (a standby's flights).
@@ -346,7 +380,7 @@ export function BentoGrid({
               role="button"
               tabIndex={0}
               aria-roledescription="Movable tile"
-              aria-label={`Move ${label(id)}, ${p.index + 1} of ${order.length}, ${sizeLabel(sizes[id])}. Arrow keys move it, Shift and arrows resize it.`}
+              aria-label={`Move ${label(id)}, ${p.index + 1} of ${order.length}, ${sizeLabel(size)} at column ${p.col + 1}, row ${p.row + 1}. Arrow keys move it, Shift and arrows resize it.`}
               onPointerDown={(e) => pickUp(e, id)}
               onKeyDown={(e) => onKey(e, id)}
               onFocus={() => setActive(id)}
@@ -376,7 +410,7 @@ export function BentoGrid({
               {/* Its size, said while it changes. */}
               {resizing && (
                 <span className="pointer-events-none absolute left-1/2 top-1/2 z-[1] flex h-9 min-w-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-[var(--control)] px-3 text-sm font-semibold tabular-nums text-foreground">
-                  {sizeLabel(sizes[id])}
+                  {sizeLabel(size)}
                 </span>
               )}
               {/* The tile in hand: a frame and a handle at the middle of each
@@ -420,7 +454,7 @@ export function BentoGrid({
             animate={{ scale: drag.dropping ? 1 : 1.04 }}
             transition={{ duration: 0.16 }}
           >
-            {face(drag.id, sizes[drag.id])}
+            {face(drag.id, placed.get(drag.id) ?? { cols: columns, rows: 1 })}
           </motion.div>,
           document.body,
         )}

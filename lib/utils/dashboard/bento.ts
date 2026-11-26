@@ -1,18 +1,21 @@
 /**
- * The flight dashboard's BENTO: its tiles in the pilot's own order, placed on
- * a grid SIX columns wide, a tile up to six rows tall (the owner, Nov 2026:
- * "make the bento grid 6x6 … more flexibility to widget size"; it was three
- * columns by two rows).
+ * The flight dashboard's BENTO — a phone's HOME SCREEN (the owner, Nov 2026:
+ * "6 column by 6 row on the Google Pixel 10 … behave like a mobile phone
+ * where you can add widget and then change their size … it doesn't have to
+ * fit to the bottom and there can be spaces between widgets … a fixed number
+ * of grids and it's free and easy to be placed within the grids").
  *
- * Each tile has a SIZE the pilot chose in Arrange — 1 to 6 columns, 1 to 6
- * rows. Tiles are placed in order, left to right and top to bottom, each in
- * the first place it fits from where the last one went (never back above it,
- * so the order reads as chosen). What is left empty is then given to a
- * neighbour — the tile on its left widens, else the one on its right, else
- * the one above grows down — so the grid is always filled edge to edge, and
- * a tile alone on its row takes the whole row.
+ * The screen is a FIXED grid of cells (`columnsOf` × `rowsOf`: a phone six by
+ * six), and every tile has a PLACE in it the pilot chose — its top-left cell
+ * and its size (`TilePos`). Nothing is packed and nothing is grown to fill:
+ * an empty cell stays empty. A tile dropped or resized over others PUSHES
+ * them, each to the nearest place it fits (`placeTile`); where the grid has
+ * none, below it, and the grid scrolls.
  *
- * Pure, so the packing is tested without the page.
+ * `packTiles` — the order-and-size packing this replaced — stays, to carry a
+ * layout stored before it across into places.
+ *
+ * Pure, so the placement is tested without the page.
  */
 
 export const GRID_COLUMNS = 6
@@ -48,7 +51,7 @@ export function columnsOf(grid: GridKind): number {
  * — never as tall as its content — so a tile one row tall and one two rows
  * tall are always visibly different, and the default layout fills one screen.
  */
-export const GRID_ROWS: Record<GridKind, number> = { narrow: 4, wide: 4, tall: 6 }
+export const GRID_ROWS: Record<GridKind, number> = { narrow: 6, wide: 6, tall: 8 }
 
 export function rowsOf(grid: GridKind): number {
   return GRID_ROWS[grid]
@@ -61,7 +64,7 @@ export function gridKindFor(widthPx: number, heightPx = 0): GridKind {
 }
 
 /** The least a row is, px: on a screen too short for its rows (a phone on its side) the tiles scroll rather than squash. */
-export const ROW_FLOOR_PX = 96
+export const ROW_FLOOR_PX = 84
 
 /** A row's height in a box `heightPx` tall: the box shared out among the grid's rows and their gaps. */
 export function rowHeightFor(grid: GridKind, heightPx: number): number {
@@ -279,6 +282,189 @@ const FACE_ROW_PX = 164
 
 /** A face this wide (in thirds of a phone's row) has room for more than a phone shows. */
 export const FACE_WIDE_COLS = 4.25
+
+/* ── Places: the home screen ─────────────────────────────────────────────── */
+
+/** A tile's PLACE: its top-left cell (0-based) and the cells it spans. */
+export interface TilePos {
+  col: number
+  row: number
+  cols: number
+  rows: number
+}
+
+/**
+ * A place put inside the grid: at least `minCols` wide, no wider or taller
+ * than the grid, wholly on it — or, `below`, allowed under its foot, where a
+ * push with no room on the screen sends a tile (a stored layout keeps it there).
+ */
+export function clampPos(pos: Partial<TilePos> | undefined, minCols = 1, columns = GRID_COLUMNS, rows = MAX_ROWS_SPAN, below = false): TilePos {
+  const cols = clamp(pos?.cols ?? columns, Math.min(minCols, columns), columns)
+  const height = clamp(pos?.rows ?? 1, 1, rows)
+  return {
+    cols,
+    rows: height,
+    col: clamp(pos?.col ?? 0, 0, columns - cols),
+    row: below ? Math.max(0, Math.round(pos?.row ?? 0)) : clamp(pos?.row ?? 0, 0, rows - height),
+  }
+}
+
+/**
+ * Every tile in a cell of its own. `first` keep the place they ask for (the
+ * tile being moved or resized); every other tile keeps its own where it is
+ * still free (taken top to bottom), and the rest go, each, to the NEAREST free
+ * place their size fits in the grid — below the grid only where it has none.
+ * Returned in `ids` order.
+ */
+export function arrangeTiles<T extends string>(
+  ids: readonly T[],
+  positions: Record<T, TilePos>,
+  columns = GRID_COLUMNS,
+  rows = MAX_ROWS_SPAN,
+  first: readonly T[] = [],
+): PlacedTile<T>[] {
+  const pos = (id: T) => clampPos(positions[id], 1, columns, rows, true)
+  const rest = ids.filter((id) => !first.includes(id))
+  rest.sort((a, b) => pos(a).row - pos(b).row || pos(a).col - pos(b).col || ids.indexOf(a) - ids.indexOf(b))
+  const order = [...first.filter((id) => ids.includes(id)), ...rest]
+  const taken: boolean[][] = []
+  const fits = (p: TilePos) => {
+    if (p.col < 0 || p.row < 0 || p.col + p.cols > columns) return false
+    for (let y = p.row; y < p.row + p.rows; y++) for (let x = p.col; x < p.col + p.cols; x++) if (taken[y]?.[x]) return false
+    return true
+  }
+  const take = (p: TilePos) => {
+    for (let y = p.row; y < p.row + p.rows; y++) {
+      taken[y] ??= []
+      for (let x = p.col; x < p.col + p.cols; x++) taken[y][x] = true
+    }
+  }
+  const nearest = (p: TilePos): TilePos => {
+    let best: TilePos | null = null
+    let bestD = Infinity
+    for (let r = 0; r + p.rows <= rows; r++)
+      for (let c = 0; c + p.cols <= columns; c++) {
+        const q = { ...p, row: r, col: c }
+        if (!fits(q)) continue
+        const d = (r - p.row) ** 2 + (c - p.col) ** 2
+        if (d < bestD) {
+          best = q
+          bestD = d
+        }
+      }
+    if (best) return best
+    // No room on the screen: the first place below it (the grid scrolls).
+    for (let r = Math.max(0, rows - p.rows + 1); ; r++)
+      for (let c = 0; c + p.cols <= columns; c++) if (fits({ ...p, row: r, col: c })) return { ...p, row: r, col: c }
+  }
+  // Every tile whose place is still free keeps it; only then are the ones
+  // in the way moved, each to the nearest place left — so a drop disturbs
+  // the tiles it lands on and no others.
+  const at = new Map<T, TilePos>()
+  for (const id of order) {
+    const want = pos(id)
+    if (!fits(want)) continue
+    take(want)
+    at.set(id, want)
+  }
+  for (const id of order) {
+    if (at.has(id)) continue
+    const p = nearest(pos(id))
+    take(p)
+    at.set(id, p)
+  }
+  return ids.map((id) => ({ id, ...at.get(id)! }))
+}
+
+/** The rows the placed tiles reach down to — the fixed rows, or more where a push sent a tile below them. */
+export function rowsUsed(placed: readonly TilePos[], rows: number): number {
+  return placed.reduce((m, p) => Math.max(m, p.row + p.rows), rows)
+}
+
+/**
+ * The layout with `id` at `want` (moved, or resized from any edge): it takes
+ * that place, and the tiles it lands on are pushed (`arrangeTiles`). Every
+ * tile in `ids` comes back with its place.
+ */
+export function placeTile<T extends string>(
+  ids: readonly T[],
+  positions: Record<T, TilePos>,
+  id: T,
+  want: TilePos,
+  columns = GRID_COLUMNS,
+  rows = MAX_ROWS_SPAN,
+  minCols = 1,
+): Record<T, TilePos> {
+  const next = { ...positions, [id]: clampPos(want, minCols, columns, rows) } as Record<T, TilePos>
+  const out = { ...positions }
+  for (const p of arrangeTiles(ids, next, columns, rows, [id])) out[p.id] = { col: p.col, row: p.row, cols: p.cols, rows: p.rows }
+  return out
+}
+
+/**
+ * The layout `placeTile` gives, or null where it would push a tile off the
+ * foot of a screen that held them all — a home screen refuses a drop it has
+ * no room for rather than sending a tile out of sight; the tile in hand stays
+ * where it last could go.
+ */
+export function placeTileOnScreen<T extends string>(
+  ids: readonly T[],
+  positions: Record<T, TilePos>,
+  id: T,
+  want: TilePos,
+  columns = GRID_COLUMNS,
+  rows = MAX_ROWS_SPAN,
+  minCols = 1,
+): Record<T, TilePos> | null {
+  const next = placeTile(ids, positions, id, want, columns, rows, minCols)
+  const before = rowsUsed(arrangeTiles(ids, positions, columns, rows), rows)
+  const after = rowsUsed(ids.map((k) => next[k]), rows)
+  return after > rows && after > before ? null : next
+}
+
+/**
+ * A resize from one EDGE: `dCols` / `dRows` cells out (positive) or in. The
+ * right and bottom edges move the far side; the left and top move the near
+ * side and keep the far one where it was.
+ */
+export function resizeFrom(start: TilePos, edge: "l" | "r" | "t" | "b", d: number, minCols: number, columns: number, rows: number): TilePos {
+  const p = { ...start }
+  if (edge === "r") p.cols = Math.min(columns - p.col, Math.max(minCols, start.cols + d))
+  if (edge === "b") p.rows = Math.min(rows - p.row, Math.max(1, start.rows + d))
+  if (edge === "l") {
+    const right = start.col + start.cols
+    p.col = Math.max(0, Math.min(right - minCols, start.col - d))
+    p.cols = right - p.col
+  }
+  if (edge === "t") {
+    const bottom = start.row + start.rows
+    p.row = Math.max(0, Math.min(bottom - 1, start.row - d))
+    p.rows = bottom - p.row
+  }
+  return p
+}
+
+/**
+ * A layout stored as an ORDER and SIZES (before places) on the home screen:
+ * packed as it was drawn on its `fromRows` rows, then every row EDGE moved to
+ * the same share of `toRows` (four rows to a phone became six), so the tiles
+ * open where the pilot left them, in the same proportions, none overlapping.
+ */
+export function positionsFromSizes<T extends string>(
+  order: readonly T[],
+  sizes: Record<T, TileSize>,
+  columns: number,
+  fromRows: number,
+  toRows: number,
+): Record<T, TilePos> {
+  const edge = (r: number) => Math.round((r * toRows) / fromRows)
+  const out = {} as Record<T, TilePos>
+  for (const p of packTiles(order, sizes, columns, fromRows)) {
+    const row = edge(p.row)
+    out[p.id] = { col: p.col, cols: p.cols, row, rows: Math.max(1, edge(p.row + p.rows) - row) }
+  }
+  return out
+}
 
 /** "2 × 1" — a size as Arrange says it. */
 export function sizeLabel(size: TileSize): string {

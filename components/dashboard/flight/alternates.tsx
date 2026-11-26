@@ -24,7 +24,6 @@ import { flightBriefingId } from "@/lib/briefing/ids"
 import { alternateWindows, type Alternate } from "@/lib/weather/alternates"
 import { briefStations, hazardLine, type StationBrief } from "@/lib/weather/brief"
 import { cn } from "@/lib/utils"
-import { CATEGORY_TEXT } from "./weather"
 import { destinationsOf } from "./faces"
 import type { FlightBrief } from "./model"
 
@@ -103,18 +102,13 @@ export function useDutyAlternates(brief: FlightBrief, enabled: boolean) {
 
 /** One alternate on a line: code, how far, and — only when it matters — its weather. */
 export function AlternateChip({ a, code, showWeather }: { a: AlternateBrief; code: (icao: string) => string; showWeather: boolean }) {
-  const worst = showWeather ? (a.brief?.worst ?? null) : null
+  // A hazard only, in amber — no flight category (the owner: no VFR / IFR tags).
   const hazard = showWeather && a.brief?.hazards.length ? hazardLine(a.brief.hazards.slice(0, 1)) : ""
-  const flagged = (worst && worst !== "VFR") || hazard
   return (
     <span className="inline-flex items-baseline gap-1 whitespace-nowrap">
       <span className="font-semibold text-foreground">{code(a.alt.icao)}</span>
       <span className="text-muted-foreground">{a.alt.distNm}nm</span>
-      {flagged && (
-        <span className={cn("font-semibold", worst && worst !== "VFR" ? CATEGORY_TEXT[worst] : "text-status-warning")}>
-          {[worst !== "VFR" ? worst : null, hazard].filter(Boolean).join(" ")}
-        </span>
-      )}
+      {hazard && <span className="font-semibold text-status-warning">{hazard}</span>}
     </span>
   )
 }
