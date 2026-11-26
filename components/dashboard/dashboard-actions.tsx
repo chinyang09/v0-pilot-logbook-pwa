@@ -1,7 +1,11 @@
 "use client"
 
 import * as React from "react"
-import { Calendar, CalendarClock, Check, ScrollText, SlidersHorizontal } from "lucide-react"
+import { Calendar, Check, LocateFixed, Plus, ScrollText, SlidersHorizontal } from "lucide-react"
+import { GlassContainer } from "@/components/ui/glass-container"
+import { DASHBOARD_TILES, addTile, useEnabledTiles, type DashboardTile } from "@/hooks/use-dashboard-layout"
+import { WIDGET_HINT, WIDGET_TITLE } from "./flight/details"
+import { showToast } from "@/lib/utils/undo-toast"
 import { useRouter } from "next/navigation"
 
 import { GlassButtonGroup, GlassGroupButton } from "@/components/ui/glass-icon-button"
@@ -12,7 +16,8 @@ import {
 } from "@/hooks/use-dashboard-period"
 import { AlertsDropdown } from "./alerts-dropdown"
 import { setArranging, useArranging } from "@/hooks/use-dashboard-layout"
-import { setChosenDuty, useChosenDuty, useDutyMenu } from "@/hooks/use-dashboard-duty"
+import { useDeckDuty } from "@/hooks/use-dashboard-duty"
+import { requestDeckNow, useDeckDetached } from "@/hooks/use-deck-pointer"
 import { ChoicePicker, type MenuOption } from "@/components/ui/option-menu"
 import { cn } from "@/lib/utils"
 import { pageOf } from "./flight/pager"
@@ -41,7 +46,7 @@ const MENU_BUTTON = cn(
  *
  * | | |
  * |---|---|
- * | the DUTY menu | which duty the page is about — the one in progress or next, else a later one ("Next · 21 Nov" in the button). It was a menu laid over the flights tile's date line, which the tile's card did not carry, so the duty could not be changed once the card was open |
+ * | Now | only while the timeline has been scrolled away from now: back home, following the clock (the duty menu that was here went with the timeline — the owner: scroll the timeline to choose a duty) |
  * | Briefing | the briefing of the leg the flights tile is on (else the leg the duty is on); a leg with none opens the briefing page to import one |
  * | Done | only while arranging — a long press on a tile enters Arrange |
  *
@@ -49,57 +54,77 @@ const MENU_BUTTON = cn(
  * the Summary and the Discrepancies page carry them.
  */
 export function FlightDeckActions() {
-  const menu = useDutyMenu()
-  const chosen = useChosenDuty()
+  const duty = useDeckDuty()
+  const detached = useDeckDetached()
   const arranging = useArranging()
   const router = useRouter()
   // Read at the tap: the leg the flights tile was swiped to is the one meant.
   const openBriefing = React.useCallback(() => {
-    if (!menu || menu.briefings.length === 0) return
-    const at = pageOf(`flight:${menu.atMs}`) ?? menu.legNow
-    const id = menu.briefings[Math.min(Math.max(0, at), menu.briefings.length - 1)]
+    if (!duty || duty.briefings.length === 0) return
+    const at = pageOf(`flight:${duty.atMs}`) ?? duty.legNow
+    const id = duty.briefings[Math.min(Math.max(0, at), duty.briefings.length - 1)]
     router.push(id ? `/briefing?id=${encodeURIComponent(id)}` : "/briefing")
-  }, [menu, router])
-  const hasLegs = !!menu && menu.briefings.some(Boolean)
+  }, [duty, router])
+  const hasLegs = !!duty && duty.briefings.some(Boolean)
   return (
     <>
-      {menu && menu.options.length > 0 && (
+      {detached && !arranging && (
         <GlassButtonGroup>
-          <ChoicePicker
-            label="Duty"
-            value={chosen === null ? menu.options[0].value : String(chosen)}
-            options={menu.options}
-            onValueChange={(v) => setChosenDuty(v === menu.options[0].value ? null : Number(v))}
-            morph
-            disabled={menu.options.length < 2}
-            className={cn(MENU_BUTTON, "min-w-14")}
-          >
-            {menu.dest ? (
-              <span className="max-w-16 truncate text-[11px] font-bold leading-none tracking-tight">{menu.dest}</span>
-            ) : (
-              <CalendarClock className="h-[15px] w-[15px]" aria-hidden />
-            )}
-            <span className="mt-1 text-[10px] font-semibold leading-none tabular-nums" suppressHydrationWarning>
-              {menu.day}
-            </span>
-          </ChoicePicker>
+          <GlassGroupButton ariaLabel="Back to now" onClick={requestDeckNow}>
+            <LocateFixed className="h-5 w-5" />
+          </GlassGroupButton>
         </GlassButtonGroup>
       )}
+      {/* Arranging: the tiles not on the deck, to add (the owner: "add and remove widget"). */}
+      {arranging && <AddWidget />}
       {(arranging || hasLegs) && (
-      <GlassButtonGroup>
-        {arranging && (
-          <GlassGroupButton ariaLabel="Done arranging" ariaPressed active onClick={() => setArranging(false)}>
-            <Check className="h-5 w-5" />
-          </GlassGroupButton>
-        )}
-        {hasLegs && (
-          <GlassGroupButton ariaLabel="Briefing for this duty" onClick={openBriefing}>
-            <ScrollText className="h-5 w-5" />
-          </GlassGroupButton>
-        )}
-      </GlassButtonGroup>
+        <GlassButtonGroup>
+          {arranging && (
+            <GlassGroupButton ariaLabel="Done arranging" ariaPressed active onClick={() => setArranging(false)}>
+              <Check className="h-5 w-5" />
+            </GlassGroupButton>
+          )}
+          {hasLegs && !arranging && (
+            <GlassGroupButton ariaLabel="Briefing for this duty" onClick={openBriefing}>
+              <ScrollText className="h-5 w-5" />
+            </GlassGroupButton>
+          )}
+        </GlassButtonGroup>
       )}
     </>
+  )
+}
+
+/** The Add Widget menu: every tile not on the deck, what it answers under its name. */
+function AddWidget() {
+  const enabled = useEnabledTiles()
+  const options = React.useMemo<Array<MenuOption<string>>>(
+    () =>
+      DASHBOARD_TILES.filter((id) => !enabled.includes(id)).map((id) => ({
+        value: id,
+        label: WIDGET_TITLE[id],
+        hint: WIDGET_HINT[id],
+      })),
+    [enabled],
+  )
+  return (
+    <GlassContainer cornerRadius={22} overBlur>
+      <ChoicePicker
+        label="Add Widget"
+        value=""
+        options={options}
+        disabled={options.length === 0}
+        onValueChange={(v) => {
+          const id = v as DashboardTile
+          // A home screen with no room says so, rather than pushing a tile off.
+          if (!addTile(id)) showToast(`No room for ${WIDGET_TITLE[id]} — remove a tile or make one smaller`)
+        }}
+        morph
+        className="flex h-11 w-11 items-center justify-center rounded-full text-foreground transition-colors hover:bg-[var(--on-glass-fill-soft)] disabled:opacity-40"
+      >
+        <Plus className="h-5 w-5" />
+      </ChoicePicker>
+    </GlassContainer>
   )
 }
 

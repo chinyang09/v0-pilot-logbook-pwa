@@ -1397,16 +1397,15 @@ tiles (`flight/widget.tsx`, faces in `flight/faces.tsx`, bodies in
 **FLIGHT & DUTY is ONE tile** (the owner, Nov 2026: the flights and the duty
 "operate on the exact same tactical time horizon" and drew the same timeline
 twice; the limits stay apart, the strategic one). The two rows below describe
-its halves. The tile: the eyebrow ("Next · Wed, 18 Nov", "Leg 1/2"), the
-DUTY STRIP (`flightClock` — the duty clock's strip with the rest before the
-report cut to its last 3 hours, a shortfall still red; the report, the legs
-with the one on show lit, the Reg 14 maximum's cap), then the leg a page on
+its halves. The tile: the eyebrow ("Next · Wed, 18 Nov", "Leg 1/2") — NO
+strip of its own any more (round 49: the page's TIMELINE draws the duty,
+below) — then the leg a page on
 the left and the FDP on the right where "No crew yet" was (`DutyReadout`: the
 duty's line in its tone, then the duty clock's three figures a row each —
 FDP left · FDP/max · latest IN on duty, rest · report · FDP/max before it,
 captions shortened by `readoutLabel` — and the leg's flight crew as
 initials). A standby, or no duty with flights, is the duty clock's own face.
-The card: the eyebrow and the same strip, a leg a page (its table), the
+The card: the eyebrow, a leg a page (its table), the
 leg's Open NOT swiped under it (`Pager`'s `below`) with the dots under that,
 then — apart from the legs, never holding the leg's Open (the owner) — the
 DUTY & FDP section, its line and `dutyRows`; the last leg's Est. IN is left to the
@@ -1513,6 +1512,25 @@ landscape flight & duty 12 × 2, the airport 6 × 4, the currency and the limits
 6 × 2 each beside it; upright the same, taller (12 × 2, 6 × 6, 6 × 3, 6 × 3). On
 a standby the airport tile is not drawn and leaves its cells EMPTY.
 
+**Tiles are ADDED and REMOVED in Arrange** (the owner, round 49: "the ability
+to add and remove widget … more relevant widgets"). Arrange gives each tile a
+− at its corner (`removeTile`) and the header a + menu of the tiles not on the
+deck (`AddWidget`, each with a one-line hint); an added tile takes the first
+place it fits (`findFreePlace`: its default size, else fewer rows, else fewer
+columns), and with no room the + refuses with a toast rather than push a tile
+off the screen. Which tiles are on is per device (`ooo:dashboard-widgets:v1`,
+`useEnabledTiles`); a removed tile keeps no place, an added one starts at the
+four originals' defaults. Four tiles join them (`extra-widgets.tsx`, models in
+`lib/utils/dashboard/deck-widgets.ts`, tested), each about the duty the
+timeline has chosen and worked out only while it is ON:
+
+| Tile | Face | Card |
+|---|---|---|
+| Sun & Night | each leg's take-off and landing by day or night, its night minutes; the next sunset / sunrise where it goes | per leg "Day ↑ · Night ↓", "0:40 of 1:55 at night" (civil twilight along the great circle, as the logbook counts night — `legSun`); the next two sun events at each airport (`sunEvents`) |
+| Days Off | the run since the last day off (para 5(4)(a)'s seven dates), the next day off, days off in 14 / 28 | the same against para 5 and its findings within four weeks (`daysOffAt` over `analyseDaysOff`) — amber / red on a finding |
+| Briefing | each leg's OFP: cruise, trip time, block fuel, the alternate, NOTAMs — "No OFP" where none is imported | the same per leg, TOW against its maximum (amber within 1%), Open the briefing (`ofpBrief` via `journalOf`) |
+| Logbook | the duty's month: block, sectors, landings, night, rostered ahead | the same, and every past sector not logged (amber) with Open (`logbookMonth`) |
+
 **ROWS ARE A FIXED SHARE OF THE SCREEN** (the owner, Nov 2026). The box the
 tiles have (`data-bento-scroll`, measured in a ResizeObserver) decides the
 grid — `gridKindFor`: `narrow` (six columns, under 760px), `wide` (twelve,
@@ -1573,20 +1591,31 @@ standby (`dutyClockView`'s standby branch: On / Next / Later Standby, "Not
 called", its window on the strip filled to now; From / Left / Until), its card
 adding Counts Toward Limits (para 6(7)'s 20%) and the 18-hour cap (6(2)(a)).
 
-**The dashboard can be about a LATER duty** (the owner: "a dashboard that
-displays critical info based on flight duty selected"). The duty is chosen in
-the HEADER — a menu that grows out of its button (where the duty GOES over
-its day, "WIII" over "18 Nov" — `destinationOfRoute`, the return home left
-out; each row "WIII · Wed, 18 Nov" over "Next · Report 22:55Z"; formerly "18 Nov" under a clock
-icon; each row the day, then the report and route), up to 14 duties with
-flying in them. It was a menu laid over the flights tile's date line, which
-the tile's CARD did not carry, so the duty could not be changed once the card
-was open (the owner: "decouple flight selection from the flight card"). The
-choice is a module store (`hooks/use-dashboard-duty.ts`): the page publishes
-its duties (`publishDutyChoices`), the header reads them and sets the choice
-(`setChosenDuty`), the page reads it back. Every tile follows the chosen
-duty — the Duty & FDP tile draws its rest before it and its FDP against its
-maximum. Coming back to the page returns to the default.
+**The Flight Deck is read along a TIMELINE** (the owner, Nov 2026: "instead
+of timeline being shown on a flight card, and selection of flights turning the
+pop up … a working timeline, similar to that of FDP, but … the look of the
+timeline we have now. So we can scroll and select a duty. And the widgets all
+work around the scrollable timeline … Limits also changes as we scroll").
+`DeckTimeline` (`flight/deck-timeline.tsx`, model in
+`lib/utils/dashboard/deck-timeline.ts`, tested) is ONE strip over the tiles in
+the duty strip's look — a line an hour, every sixth bold; each rest solid to
+its minimum, a short one red; each duty report → off duty with its FDP darker
+and its legs filled (planned in the accent); the Reg 14 maximum dotted on a
+duty still to fly; now — built off the FDP page's own blocks
+(`buildDutyTimeline`), scrolled sideways under a FIXED POINTER at its centre:
+
+| | Rule |
+|---|---|
+| the duty | the one under the pointer, else the NEXT after it (the one the rest is for), the later-starting where two overlap (`selectAt`); past duties too ("Past · …") — `setChosenDuty` is called only when the pointer crosses into another, so the page re-renders per duty, not per frame |
+| the limits | `limitsAt` — the FDP page's CONTINUOUS windows (`rollingAt`) at the pointer, read per minute it moves through, only the limits tile re-rendering; amber from 80%, red at the limit. The label says the instant once away from now ("Limits · 17 Nov 00:29Z", the day alone in a narrow tile) |
+| now | it follows the clock until scrolled; let go within 10 minutes of now and it snaps home and follows again; the header's Now (a locate icon, shown only away from now) brings it back; leaving and returning to the page resets it |
+| the stores | `hooks/use-deck-pointer.ts` — `pointer` (every frame), `settled` (after 140ms still), `nowRequest`; `hooks/use-dashboard-duty.ts` — the chosen duty id and what the header needs (`publishDeckDuty`: the duty's day and its briefings) |
+| range | two days before the first duty to three after the last, never more than 90 days back or 120 ahead (`deckRange`); labels drawn only round what is on screen; the day labels give way under the pointer's label (`DayLabels`) |
+| a tap | on a duty with flying or a standby brings its middle to the pointer |
+
+The header's duty MENU and the tile's strip are gone with it. `brief.duty.index`
+is now steps from the DEFAULT duty — 0 now/next, > 0 later, < 0 past — and
+every reader of "is this a later duty" asks `index !== 0`.
 
 **Every card has ONE SHELL** (the owner, Nov 2026: "all the cards don't
 follow a uniform shell. Some has header some doesn't"; then "header: Duty,
@@ -1707,12 +1736,15 @@ instead (`header: "label"`), so no name appears twice.
   a spring with a little bounce on the surface carried everything past its
   place and back, and the copies' own spring overshot on top of it — the
   owner's "wobble before settling".
-  A flight opened FROM a card (Open TR438) brings the card BACK when it is
-  closed (the owner, Nov 2026: "pressing back goes back to flight deck, but
-  the expanded card is no longer expanded"): the page remembers which card
-  opened which flight (`reopen`), and once that flight leaves the detail
-  panel — with nothing else chosen, the page still on screen — the card grows
-  out of its tile again (`[data-widget]` measured a frame after the close).
+  A flight opened FROM a card (Open TR438) leaves the card OPEN UNDER IT and
+  comes back to it exactly as it was (the owner, round 49: "stay open without
+  contents moving after returning from flight form"): the sheet is
+  SUSPENDED (`WidgetSheet`'s `suspended` — invisible, `inert`, its focus
+  trap, menu lock and Escape off) while the flight is in the detail panel,
+  and shown again when it leaves — no re-grow from the tile, the page, the
+  leg and the scroll where they were. It used to close the card and grow it
+  again from its tile (`reopen`), which re-ran the morph and reset the card.
+  Leaving the page drops it.
   ANYTHING in the card that goes somewhere — a crew member, a currency, a
   flight, a footer link — closes it first and runs as the close's follow-up
   (`render(dismiss)`); the card stayed over the page it had led to. A FLIGHT
@@ -6168,8 +6200,11 @@ When making changes, be aware of these high-impact files:
 - Do not light a rest that will be done before the next report — "Legal from 22:00Z" is nominal (dark cockpit); only a report inside the rest is red
 - Do not push a tile off the screen to make room for a drop or a resize — refuse it (`placeTileOnScreen`)
 - Do not hardcode a tile's place, or bring back an Arrange button — a long press on a tile enters Arrange with it in hand (`beginArrangeFrom`), and the pilot places and sizes it there. Work a push out from the layout the gesture BEGAN on, never from the last step, or a tile carried past others drags them with it. And do not let the bento GRID scroll itself: the wrapper does, or a tall arrangement squeezes its tiles
-- Do not split the duty back out of the flights tile, or draw a second timeline for it — FLIGHT & DUTY is one tile with one strip (`flightClock`); the FDP figures sit beside the leg (`DutyReadout`) and the duty's table under the legs in its card. The limits stay a tile of their own
-- Do not put the duty chooser back on a tile — it is the Flight Deck's header menu (`use-dashboard-duty.ts`), so it is there whatever card is open
+- Do not split the duty back out of the flights tile, or draw a strip inside it again — the page's timeline (`DeckTimeline`) is the ONE picture of the duties; the FDP figures sit beside the leg (`DutyReadout`) and the duty's table under the legs in its card. The limits stay a tile of their own
+- Do not bring back a duty menu, or choose the duty anywhere but the timeline's pointer (`selectAt` → `setChosenDuty`). Do not set React state per scroll frame for it either: the pointer is a store, the duty is set only when it changes, and only the limits tile and the pointer's label read the pointer
+- Do not read the Flight Deck's limits as whole UTC days — they are `limitsAt`, the FDP page's continuous windows at the pointer, so the deck and the FDP chart agree at any instant
+- Do not close and re-grow a card for a flight opened from it — the sheet is `suspended` under the flight and shown again as it was
+- Do not compute an added tile's model (sun, days off, OFP, logbook) when the tile is off, and do not place an added tile by pushing others — `findFreePlace`, else refuse
 - Do not leave a tile with cause for concern on an ordinary edge — `tileTones` gives every tile its amber / red border, and the reason inside it takes the colour (dark cockpit: nothing when all is well)
 - Do not fly a shared element as its element BOX when it is a line of plain text — `runSharedMorph` boxes it to its glyphs (`textBoxIn`) so the tile's and the card's copies coincide through the crossfade, and an INLINE element's copy gets one line exactly its box's height. Measured: every copy lands within 0.05px of its original at both ends, and the pairs coincide mid-flight; before, copies of inline text landed 1–2px off and the swap to the original snapped. A text with a background or border (the crew's initials) still flies as its box
 - Do not fold documents into a "+N more" requirement or line — the dashboard's currency card lists every document (`currencySummary`), by the name the Currencies page uses

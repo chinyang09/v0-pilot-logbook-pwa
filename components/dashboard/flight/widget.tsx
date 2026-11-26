@@ -31,15 +31,12 @@ import { useDialogFocus } from "@/hooks/use-dialog-focus"
 import { setMenuOpen } from "@/lib/utils/menu-lock"
 import { runSharedMorph } from "./shared-morph"
 import { beginArrangeFrom } from "./bento"
-import { setArranging } from "@/hooks/use-dashboard-layout"
+import { setArranging, type DashboardTile } from "@/hooks/use-dashboard-layout"
 import { ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-export type WidgetId =
-  | "flight"
-  | "airport"
-  | "currency"
-  | "limits"
+/** Every tile the deck can show (`DASHBOARD_TILES`). */
+export type WidgetId = DashboardTile
 
 export interface WidgetAnchor {
   left: number
@@ -332,6 +329,7 @@ export function WidgetSheet({
   tone = null,
   render,
   onClose,
+  suspended = false,
 }: {
   anchor: WidgetAnchor
   title: string
@@ -343,6 +341,15 @@ export function WidgetSheet({
   /** The card's content, handed `dismiss(then?)` for anything that leaves it. */
   render: (dismiss: (then?: () => void, opts?: { overlay?: boolean }) => void) => SheetContent
   onClose: () => void
+  /**
+   * Set aside, NOT closed: a flight opened from the card is up over it (the
+   * owner, Nov 2026: back from the flight, the card should "stay open without
+   * contents moving"). The card stays mounted — its scroll, its leg page,
+   * its place — hidden and out of reach, and is simply shown again when the
+   * flight closes: no grow, no reflow. Its back-history entry stays under
+   * the flight's, so Back closes the flight and then the card.
+   */
+  suspended?: boolean
 }) {
   const closeRef = React.useRef(onClose)
   React.useEffect(() => {
@@ -351,7 +358,7 @@ export function WidgetSheet({
 
   const dialogRef = React.useRef<HTMLDivElement>(null)
   // Focus goes in once the card has grown (`OPEN`), not in the middle of it.
-  useDialogFocus(dialogRef, true, undefined, OPEN.duration * 1000 + 60)
+  useDialogFocus(dialogRef, !suspended, undefined, OPEN.duration * 1000 + 60)
   const scrimPressRef = React.useRef(false)
 
   const cardRef = React.useRef<HTMLDivElement>(null)
@@ -424,17 +431,21 @@ export function WidgetSheet({
   }, [finishClose])
   const requestClose = useBackDismiss(true, startClose)
 
+  // The rows under the card take no taps — released while a flight is up
+  // over it: its form is made of swipe rows too.
   React.useEffect(() => {
+    if (suspended) return
     setMenuOpen(true)
     return () => setMenuOpen(false)
-  }, [])
+  }, [suspended])
   React.useEffect(() => {
+    if (suspended) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") requestClose()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [requestClose])
+  }, [requestClose, suspended])
 
   // Shared elements fly between the tile's face and the card, on the open and
   // on a close back onto the tile (`runSharedMorph`).
@@ -527,7 +538,10 @@ export function WidgetSheet({
 
   return createPortal(
     // Leaving, it takes no taps: the page it led to is already under it.
-    <div className={cn("fixed inset-0 z-[210]", leaving && "pointer-events-none")}>
+    <div
+      className={cn("fixed inset-0 z-[210]", (leaving || suspended) && "pointer-events-none", suspended && "invisible")}
+      inert={suspended || undefined}
+    >
       <motion.div
         className={cn("absolute inset-0", SCRIM)}
         initial={{ opacity: 0 }}

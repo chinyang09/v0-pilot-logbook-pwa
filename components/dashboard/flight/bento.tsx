@@ -27,9 +27,9 @@
 import * as React from "react"
 import { createPortal } from "react-dom"
 import { animate, motion, useMotionValue } from "framer-motion"
-import { Move } from "lucide-react"
+import { Minus, Move } from "lucide-react"
 import { GRID_GAP_PX, ROW_FLOOR_PX, arrangeTiles, clampPos, columnsOf, placeTileOnScreen, resizeFrom, rowsOf, rowsUsed, sizeLabel, type GridKind, type TilePos, type TileSize } from "@/lib/utils/dashboard/bento"
-import { DASHBOARD_TILES, minColsOf, setArranging, setTilePositions, type DashboardTile } from "@/hooks/use-dashboard-layout"
+import { DASHBOARD_TILES, minColsOf, removeTile, setArranging, setTilePositions, type DashboardTile } from "@/hooks/use-dashboard-layout"
 import { haptic } from "@/lib/utils/haptics"
 import { cn } from "@/lib/utils"
 
@@ -399,6 +399,21 @@ export function BentoGrid({
                     otherwise collapsed to nothing — the owner's "blank" tile. */}
                 <div className={cn("flex min-h-0 flex-1 flex-col transition-opacity", lifted ? "opacity-20" : "opacity-45")}>{face(id, size)}</div>
               </div>
+              {/* Off the deck (the owner: "add and remove widget"): its cells are left empty. */}
+              <button
+                type="button"
+                aria-label={`Remove ${label(id)}`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  haptic("tick")
+                  removeTile(id)
+                }}
+                className="absolute -left-2 -top-2 z-[3] flex h-7 w-7 items-center justify-center rounded-full border border-border bg-[var(--control)] text-foreground after:absolute after:-inset-1.5"
+              >
+                <Minus className="h-4 w-4" aria-hidden />
+              </button>
               {active !== id && (
                 <span
                   aria-hidden

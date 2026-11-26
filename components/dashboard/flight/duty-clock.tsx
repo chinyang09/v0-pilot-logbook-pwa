@@ -25,7 +25,7 @@
 import { cn } from "@/lib/utils"
 import { dutyWindow, formatDutyClock, formatRestSpan, restMinimumText } from "@/lib/utils/dashboard/duty-status"
 import { fdpMinutesOf } from "@/lib/utils/roster/fdp-calculator"
-import { clockTicks, dutyClock, type DutyClock, type DutyClockInput } from "@/lib/utils/dashboard/duty-clock"
+import type { DutyClockInput } from "@/lib/utils/dashboard/duty-clock"
 import { DutyBand, Scale, TONE, type Ramp } from "./instruments"
 import type { FlightBrief } from "./model"
 import type { RequirementState } from "@/lib/utils/dashboard/legality"
@@ -87,7 +87,7 @@ export function dutyClockView(brief: FlightBrief): DutyClockView | null {
     const short = !sb.current && r ? !r.compliant : false
     const left = Math.max(0, Math.round((sb.endMs - now) / MIN))
     return {
-      state: sb.current ? `On ${sb.code}` : duty.index === 0 ? `Next ${sb.code}` : `Later ${sb.code}`,
+      state: sb.current ? `On ${sb.code}` : duty.index === 0 ? `Next ${sb.code}` : duty.index < 0 ? `Past ${sb.code}` : `Later ${sb.code}`,
       stateTone: short ? "action_required" : "current",
       headline: short
         ? `Rest short by ${formatDutyClock(r!.requiredRestMinutes - r!.restMinutes)}`
@@ -112,8 +112,8 @@ export function dutyClockView(brief: FlightBrief): DutyClockView | null {
     }
   }
 
-  /* A later duty, chosen in the header. */
-  if (duty.index > 0 && duty.period) {
+  /* A later duty, or one already flown, chosen on the timeline. */
+  if (duty.index !== 0 && duty.period) {
     const dp = duty.period
     const w = dutyWindow(dp)
     if (!w) return null
@@ -123,7 +123,7 @@ export function dutyClockView(brief: FlightBrief): DutyClockView | null {
     const short = r ? !r.compliant : false
     const over = dp.maxFdpMinutes > 0 && planned > dp.maxFdpMinutes
     return {
-      state: "Later Duty",
+      state: duty.index < 0 ? "Past Duty" : "Later Duty",
       stateTone: short || over ? "action_required" : "current",
       headline: short ? `Rest short by ${formatDutyClock(r!.requiredRestMinutes - r!.restMinutes)}` : `Report ${day(w.startMs)}`,
       input: {
@@ -244,113 +244,11 @@ export function dutyClockView(brief: FlightBrief): DutyClockView | null {
   return null
 }
 
-/**
- * The hour lines a time strip is drawn over (the owner's reference, Nov
- * 2026: "all lines are of same height, in 1hr interval, with 6, 12, 18, 24
- * as bolded lines"): one line an hour, every one the strip's full height, the
- * sixth hours darker and a hair wider. The bars are laid over them.
- */
-export function HourLines({ ticks, pct }: { ticks: Array<{ ms: number; major: boolean }>; pct: (ms: number) => string }) {
-  return (
-    <>
-      {ticks.map((t) => (
-        <span
-          key={t.ms}
-          className={cn("absolute inset-y-0 -translate-x-1/2", t.major ? "w-[1.5px] bg-foreground/45" : "w-px bg-foreground/15")}
-          style={{ left: pct(t.ms) }}
-        />
-      ))}
-    </>
-  )
-}
-
-/**
- * The strip: rest, duty, legs and the maximum on one scale in time, over a
- * line each hour (`HourLines`), labelled every few in the pilot's clock.
- */
-export function DutyClockStrip({ clock: c, zulu, focus = null }: { clock: DutyClock; zulu: boolean; focus?: number | null }) {
-  const span = c.toMs - c.fromMs
-  const pct = (ms: number) => `${Math.max(0, Math.min(100, ((ms - c.fromMs) / span) * 100))}%`
-  const range = (a: number, b: number) => ({ left: pct(a), width: `calc(${pct(Math.max(a, b))} - ${pct(a)})` })
-  const hourOf = (ms: number) => (zulu ? new Date(ms).getUTCHours() : new Date(ms).getHours())
-  const ticks = clockTicks(c, hourOf)
-  const { rest, duty } = c
-  const over = duty && duty.maxEndMs !== null && duty.fdpEndMs > duty.maxEndMs
-  return (
-    <div aria-hidden className="mt-2" data-morph="duty-strip" data-morph-stretch>
-      <div className="relative h-6">
-        <HourLines ticks={ticks} pct={pct} />
-        {/* The bars over the lines' top 18px; the lines run on 6px below them. */}
-        <div className="absolute inset-x-0 top-0 h-[18px]">
-        {rest && (
-          <>
-            {/* The rest: its minimum solid, the rest beyond it lighter. */}
-            <span className="absolute inset-y-[6px] rounded-l-[2px] bg-foreground/30" style={range(rest.startMs, Math.min(rest.legalMs, rest.endMs))} />
-            {rest.endMs > rest.legalMs && <span className="absolute inset-y-[6px] bg-foreground/12" style={range(rest.legalMs, rest.endMs)} />}
-            {/* A report inside the minimum: the shortfall, red. */}
-            {rest.short && <span className="absolute inset-y-[4px] bg-destructive" style={range(rest.endMs, rest.legalMs)} />}
-          </>
-        )}
-        {duty && (
-          <>
-            <span className="absolute inset-y-0 rounded-[3px] border border-foreground/30 bg-muted" style={range(duty.reportMs, duty.endMs)} />
-            <span className="absolute inset-y-[1px] rounded-[2px] bg-foreground/10" style={range(duty.fdpStartMs, duty.fdpEndMs)} />
-            {c.legs.map((l, i) =>
-              l.departMs !== null && l.arriveMs !== null ? (
-                <span
-                  key={i}
-                  className={cn(
-                    "absolute inset-y-[3px] rounded-[2px] transition-opacity",
-                    l.flown ? "bg-foreground/55" : "bg-primary",
-                    // The leg the flights tile is swiped to stands out; the others are context.
-                    focus !== null && focus !== i && "opacity-35",
-                  )}
-                  style={range(l.departMs, l.arriveMs)}
-                />
-              ) : null,
-            )}
-            {duty.maxEndMs !== null && (
-              <>
-                {/* The FDP the regulation allows: a dotted outline to its end, and a mark there. */}
-                <span className="absolute -inset-y-[3px] rounded-[4px] border border-dashed border-foreground/55" style={range(duty.fdpStartMs, duty.maxEndMs)} />
-                {over && <span className="absolute inset-y-[3px] bg-destructive" style={range(duty.maxEndMs, duty.fdpEndMs)} />}
-                <span className="absolute -inset-y-1.5 w-0.5 -translate-x-1/2 rounded-full bg-foreground/70" style={{ left: pct(duty.maxEndMs) }} />
-              </>
-            )}
-          </>
-        )}
-        {c.legs.length === 0 && rest && !duty && <span className="absolute -inset-y-1 w-0.5 -translate-x-1/2 bg-foreground/70" style={{ left: pct(rest.legalMs) }} />}
-        <NowMark c={c} pct={pct} />
-        </div>
-      </div>
-      <div className="relative mt-0.5 h-3 text-[9px] tabular-nums text-muted-foreground">
-        {ticks
-          // Clear of both ends: the "Z" at the right, the strip's edge at the left.
-          .filter((t) => t.label && t.ms < c.toMs - c.labelHours * 3_600_000 * 0.4 && t.ms > c.fromMs + c.labelHours * 3_600_000 * 0.15)
-          .map((t) => (
-            <span key={t.ms} data-anchor="center" className="absolute -translate-x-1/2" style={{ left: pct(t.ms) }}>
-              {t.label}
-            </span>
-          ))}
-        <span data-anchor="end" className="absolute right-0">{zulu ? "Z" : "L"}</span>
-      </div>
-    </div>
-  )
-}
-
-/** Now, where it falls inside the strip. */
-function NowMark({ c, pct }: { c: DutyClock; pct: (ms: number) => string }) {
-  if (c.nowMs <= c.fromMs || c.nowMs >= c.toMs) return null
-  return <span className="absolute -inset-y-0.5 w-0.5 rounded-full bg-foreground" style={{ left: pct(c.nowMs) }} />
-}
-
-/** The tile: the state and its line, the strip, the three figures. */
+/** The tile: the state and its line, the three figures (the timeline over the page draws the strip). */
 export function DutyClockFace({ brief, inCard = false }: { brief: FlightBrief; inCard?: boolean }) {
   const view = dutyClockView(brief)
   if (!view) return <DutyBand status={brief.status} now={brief.now} display={brief.display} />
-  const c = dutyClock(view.input)
   const t = TONE[view.stateTone]
-  const zulu = brief.display?.useZuluTime !== false
   const lit = view.stateTone === "action_required" ? "text-destructive" : view.stateTone === "warning" ? "text-status-warning" : "text-foreground"
   return (
     <section aria-label="Duty and FDP">
@@ -362,7 +260,6 @@ export function DutyClockFace({ brief, inCard = false }: { brief: FlightBrief; i
       <p className={cn("mt-1 truncate text-[20px] font-semibold leading-[1.15] tracking-tight", lit)} suppressHydrationWarning data-morph="duty-headline">
         {view.headline}
       </p>
-      {c && <DutyClockStrip clock={c} zulu={zulu} />}
       {/* In the card the three figures are rows of its table, and fly there. */}
       {!inCard && <Scale slots={view.slots} />}
     </section>
