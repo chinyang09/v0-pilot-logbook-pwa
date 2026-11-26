@@ -190,7 +190,10 @@ export function legNow(brief: FlightBrief): number {
  * them. Nothing else: not the rest before the duty (the duty card's), not
  * the leg after (the pilot flies it).
  */
-export function legLine(brief: FlightBrief, i: number): { kind: "inbound" | "onward"; text: string; late?: boolean } | null {
+export function legLine(
+  brief: FlightBrief,
+  i: number,
+): { kind: "inbound" | "onward"; text: string; late?: boolean; next?: string; nightStop?: boolean } | null {
   const { duty } = brief
   const f = duty.legs[i]
   if (!f) return null
@@ -214,14 +217,33 @@ export function legLine(brief: FlightBrief, i: number): { kind: "inbound" | "onw
     }
   }
   if (i === duty.legs.length - 1) {
+    // Changi's terminal "0" on our arrival: the aeroplane NIGHT-STOPS before
+    // its next flight (the owner, Nov 2026) — said first, it decides how the
+    // aeroplane is left.
+    const stop = nightStopAfter(brief, i)
     const onward = duty.lookups?.onward
     const o = onward?.status === "done" ? onwardLines(onward.whereabouts, sep) : null
-    if (o) return { kind: "onward", text: ["Next " + o.flight.split(" ")[0], o.crew].filter(Boolean).join(" · ") }
     const g = duty.lookups?.gates[f.id]
     const viaAirport = g?.status === "done" ? g.gates.onwardFlight : ""
-    if (viaAirport) return { kind: "onward", text: `Next ${viaAirport}` }
+    const next = o ? [o.flight.split(" ")[0], o.crew].filter(Boolean).join(" · ") : viaAirport
+    if (next || stop) return { kind: "onward", text: [stop && "Night stop", next && `Next ${next}`].filter(Boolean).join(" · "), next, nightStop: stop }
   }
   return null
+}
+
+/**
+ * The aeroplane night-stops after leg `i`: Changi's own record gives the
+ * arrival terminal "0" when it is parked for the night before its next
+ * flight (the owner, Nov 2026: "if icargo returns terminal 0, it means it is
+ * a night stop for the next connecting flight"). Only a Singapore arrival —
+ * that is the record that says so.
+ */
+export function nightStopAfter(brief: FlightBrief, i: number): boolean {
+  const f = brief.duty.legs[i]
+  const g = f ? brief.duty.lookups?.gates[f.id] : undefined
+  if (g?.status !== "done") return false
+  const at = g.gates.arrival
+  return (at.airport === "SIN" || at.airport === "WSSS") && at.terminal.trim() === "0"
 }
 
 /** The inbound aeroplane's arrival gate — where ours is parked for the turn; "" until published. */
@@ -351,13 +373,20 @@ export function legLate(brief: FlightBrief, i: number): boolean {
   return legDelay(brief, i) !== null || inboundLate(brief, i)
 }
 
-/** A gate beside its airport: the number, or a dashed placeholder while it is awaited. */
-function GateChip({ gate, asked, side }: { gate?: string; asked: boolean; side: "Departure" | "Arrival" }) {
+/**
+ * A gate beside its airport: the number; the number in a DASHED outline where
+ * it is taken across a short turn (`acrossTurns` — the other leg's gate,
+ * expected, not published); or a dashed placeholder while it is awaited.
+ */
+function GateChip({ gate, from, asked, side }: { gate?: string; from?: string; asked: boolean; side: "Departure" | "Arrival" }) {
   if (!gate && !asked) return null
   return gate ? (
     <span
-      className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-semibold leading-none tracking-normal text-foreground"
-      aria-label={`${side} gate ${gate}`}
+      className={cn(
+        "shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-semibold leading-none tracking-normal",
+        from ? "border border-dashed border-muted-foreground/60 text-muted-foreground" : "bg-muted text-foreground",
+      )}
+      aria-label={from ? `${side} gate ${gate}, expected — ${from}'s gate` : `${side} gate ${gate}`}
     >
       {gate}
     </span>
@@ -395,11 +424,11 @@ function LegPage({ brief, i, more = false }: { brief: FlightBrief; i: number; mo
   return (
     <>
       <p className="flex min-w-0 items-center gap-1.5 text-[17px] font-bold leading-tight tracking-tight text-foreground @[15rem]:text-[21px]">
-        <GateChip gate={gates?.dep} asked={asked} side="Departure" />
+        <GateChip gate={gates?.dep} from={gates?.depFrom} asked={asked} side="Departure" />
         <span className="min-w-0 truncate" data-morph={`fl-route-${i}`}>
           {code(f.departureIcao, f.departureIata)} – {code(f.arrivalIcao, f.arrivalIata)}
         </span>
-        <GateChip gate={gates?.arr} asked={asked} side="Arrival" />
+        <GateChip gate={gates?.arr} from={gates?.arrFrom} asked={asked} side="Arrival" />
       </p>
       {/* The delay keeps its place when the line is short of room: the times give way first. */}
       <p className="mt-0.5 flex min-w-0 items-baseline text-[12px] leading-tight tabular-nums text-foreground">
@@ -701,8 +730,8 @@ export function legRows(brief: FlightBrief, i: number): CardRow[] {
     const o = onward?.status === "done" ? onwardLines(onward.whereabouts, sep) : null
     rows.push({
       label: "Next Flight",
-      value: line.text.replace(/^Next /, ""),
-      sub: [o?.flight.split(" ").slice(1).join(" "), o?.std].filter(Boolean).join(" · ") || undefined,
+      value: line.next || "Night stop",
+      sub: [line.next && line.nightStop && "Night stop", o?.flight.split(" ").slice(1).join(" "), o?.std].filter(Boolean).join(" · ") || undefined,
       morph: `fl-next-${i}`,
     })
   }
@@ -719,8 +748,12 @@ export function legRows(brief: FlightBrief, i: number): CardRow[] {
   // The gate number alone (the owner, Nov 2026: "remove all terminal … gate
   // number is good enough"); a stand only where no gate is published.
   const gateOf = (x: { gate: string; stand?: string } | undefined) => (x?.gate ? `Gate ${x.gate}` : x?.stand ? `Stand ${x.stand}` : "")
+  // Where the leg's own gate is not published, the one across a short turn
+  // (`acrossTurns`), said as expected.
+  const turn = duty.info?.legGates[i]
   const dep = gateOf(gates?.departure)
   if (dep) rows.push({ label: "Departure", value: dep })
+  else if (turn?.depFrom && turn.dep) rows.push({ label: "Departure", value: `Gate ${turn.dep}`, sub: `Expected · ${turn.depFrom} arrives there` })
   // OUT and IN, ONE row each (the owner, Nov 2026: estimates "not very useful
   // during flight. And confusing"): the schedule until the time is recorded,
   // then the recorded time with how early or late it was beside it.
@@ -728,6 +761,7 @@ export function legRows(brief: FlightBrief, i: number): CardRow[] {
   rows.push(timeRow(brief, i, "IN", f.inTime, f.scheduledIn, f.inTime ? (t?.arriveMs ?? null) : null))
   const arr = gateOf(gates?.arrival)
   if (arr) rows.push({ label: "Arrival", value: arr })
+  else if (turn?.arrFrom && turn.arr) rows.push({ label: "Arrival", value: `Gate ${turn.arr}`, sub: `Expected · ${turn.arrFrom} leaves from it` })
   return rows
 }
 

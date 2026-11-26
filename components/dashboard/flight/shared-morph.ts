@@ -363,15 +363,46 @@ export function runSharedMorph({
     runs.push(animate(fc, { opacity: opening ? [1, 0] : [0, 1] }, fade))
     runs.push(animate(cc, { opacity: opening ? [0, 1] : [1, 0] }, fade))
   }
-  if (pairs.length > 0) {
-    runs.push(
-      animate(0 as number, 1 as number, {
-        ...(move as object),
-        onUpdate: (p: number) => {
-          for (const pair of pairs) place(pair, p)
-        },
-      } as Transition),
+  // The movement runs on the COMPOSITOR: each copy's transform as WAAPI
+  // keyframes on the surface's own curve. It was written per frame from a
+  // JavaScript callback (`place` in `onUpdate`), which restyled every copy's
+  // subtree on the main thread each frame — ~10ms of every frame of an open
+  // at 4× (Nov 2026), the jank the owner felt on a Pixel. Between two
+  // keyframes a `translate() scale()` is interpolated part by part, which is
+  // exactly `place`'s lerp; a stretched picture's labels (whose counter-scale
+  // is a RATIO of two lerps) are sampled.
+  const { duration = 0.4, ease } = (move ?? {}) as { duration?: number; ease?: readonly number[] }
+  const easing = Array.isArray(ease) && ease.length === 4 ? `cubic-bezier(${ease.join(",")})` : "ease-out"
+  const timing: KeyframeAnimationOptions = { duration: duration * 1000, easing, fill: "forwards" }
+  const waapi: Animation[] = []
+  const at = (pair: (typeof pairs)[number], p: number) => {
+    const x = lerp(pair.from.x, pair.to.x, p)
+    const y = lerp(pair.from.y, pair.to.y, p)
+    return {
+      f: [lerp(pair.f0[0], pair.f1[0], p), lerp(pair.f0[1], pair.f1[1], p)] as const,
+      c: [lerp(pair.c0[0], pair.c1[0], p), lerp(pair.c0[1], pair.c1[1], p)] as const,
+      t: `translate(${x}px, ${y}px)`,
+    }
+  }
+  const SAMPLES = 8
+  for (const pair of pairs) {
+    const a = at(pair, 0)
+    const b = at(pair, 1)
+    if (typeof pair.fc.animate !== "function") break
+    waapi.push(
+      pair.fc.animate([{ transform: `${a.t} scale(${a.f[0]}, ${a.f[1]})` }, { transform: `${b.t} scale(${b.f[0]}, ${b.f[1]})` }], timing),
+      pair.cc.animate([{ transform: `${a.t} scale(${a.c[0]}, ${a.c[1]})` }, { transform: `${b.t} scale(${b.c[0]}, ${b.c[1]})` }], timing),
     )
+    for (const t of pair.texts) {
+      const inFace = pair.fc.contains(t)
+      const frames: Keyframe[] = []
+      for (let k = 0; k <= SAMPLES; k++) {
+        const s = at(pair, k / SAMPLES)
+        const [sx, sy] = inFace ? s.f : s.c
+        frames.push({ transform: `scaleX(${sy / sx})`, offset: k / SAMPLES })
+      }
+      waapi.push(t.animate(frames, timing))
+    }
   }
 
   let settled = false
@@ -385,9 +416,10 @@ export function runSharedMorph({
     settled = true
     window.clearTimeout(safety)
     for (const r of runs) r.stop()
+    for (const a of waapi) a.cancel()
     for (const c of copies) c.remove()
     for (const el of hidden) el.style.visibility = ""
   }
-  const done = Promise.all(runs.map((r) => r.finished)).then(settle, settle)
+  const done = Promise.all([...runs.map((r) => r.finished), ...waapi.map((a) => a.finished)]).then(settle, settle)
   return { done, cancel: settle }
 }

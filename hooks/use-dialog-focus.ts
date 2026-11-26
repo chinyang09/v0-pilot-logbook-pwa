@@ -17,6 +17,10 @@ const FOCUSABLE =
  * - on open, focus moves IN — to `initial` if given (a wheel), else the first
  *   focusable, else the dialog itself — one frame after the open has painted,
  *   so the focus's own style work never lands on the animation's first frame;
+ *   or, with `afterMs`, once an open animation that long has LANDED (the
+ *   Flight Deck's cards: a focus is a forced style and layout of the card,
+ *   ~15ms at 4×, and in the middle of the surface's growth it was a dropped
+ *   frame);
  * - Tab and Shift-Tab wrap inside the dialog;
  * - on close, focus goes back to whatever opened it, if that is still there.
  *
@@ -30,13 +34,15 @@ export function useDialogFocus(
   ref: RefObject<HTMLElement | null>,
   open: boolean,
   initial?: string,
+  afterMs = 0,
 ): void {
   useEffect(() => {
     if (!open) return
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
     // The box as it was mounted — by the cleanup the ref may already be null.
     const mounted = ref.current
-    let raf = requestAnimationFrame(() => {
+    let raf = 0
+    const begin = () => (raf = requestAnimationFrame(() => {
       raf = requestAnimationFrame(() => {
         const box = ref.current
         if (!box || box.contains(document.activeElement)) return
@@ -47,7 +53,8 @@ export function useDialogFocus(
         if (target === box && !box.hasAttribute("tabindex")) box.tabIndex = -1
         target.focus({ preventScroll: true })
       })
-    })
+    }))
+    const wait = afterMs > 0 ? window.setTimeout(begin, afterMs) : (begin(), 0)
     const onKey = (e: KeyboardEvent) => {
       const box = ref.current
       if (e.key !== "Tab" || !box) return
@@ -75,10 +82,11 @@ export function useDialogFocus(
     document.addEventListener("keydown", onKey, true)
     return () => {
       cancelAnimationFrame(raf)
+      window.clearTimeout(wait)
       document.removeEventListener("keydown", onKey, true)
       const at = document.activeElement
       const lost = !at || at === document.body || (mounted?.contains(at) ?? true)
       if (lost && opener?.isConnected) opener.focus({ preventScroll: true })
     }
-  }, [open, ref, initial])
+  }, [open, ref, initial, afterMs])
 }

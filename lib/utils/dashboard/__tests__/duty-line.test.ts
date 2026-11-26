@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest"
 import type { FlightLog } from "@/types/entities/flight.types"
 import type { DutyLookups } from "@/hooks/use-duty-lookups"
-import { describeDuty } from "../duty-line"
+import { acrossTurns, describeDuty } from "../duty-line"
 
 const legs = [{ id: "a" }, { id: "b" }] as FlightLog[]
 const gates = (dep: string, arr: string) =>
@@ -79,5 +79,46 @@ describe("the duty band's line", () => {
 
   it("says so when the registration has no flights", () => {
     expect(line(lookups({ inbound: { status: "missing" } }))).toBe("9V-NCA · no recent flights found")
+  })
+})
+
+describe("gates across a short turn (the owner: 698 goes into 699's gate)", () => {
+  const leg = (o: Partial<FlightLog>) => ({ id: o.flightNumber, date: "2026-11-26", aircraftReg: "", ...o }) as FlightLog
+  const out = leg({ flightNumber: "TR698", departureIcao: "WSSS", arrivalIcao: "VTCC", scheduledOut: "04:35", scheduledIn: "07:50" })
+  const back = leg({ flightNumber: "TR699", departureIcao: "VTCC", arrivalIcao: "WSSS", scheduledOut: "09:40", scheduledIn: "12:55" })
+
+  it("gives the arrival the next leg's departure gate, marked as taken from it", () => {
+    const g = acrossTurns([out, back], [{ dep: "C11", arr: "" }, { dep: "B14", arr: "" }])
+    expect(g[0]).toEqual({ dep: "C11", arr: "B14", arrFrom: "TR699" })
+    expect(g[1]).toEqual({ dep: "B14", arr: "" })
+  })
+
+  it("gives the departure the leg before's arrival gate", () => {
+    const g = acrossTurns([out, back], [{ dep: "C11", arr: "B12" }, { dep: "", arr: "" }])
+    expect(g[1]).toEqual({ dep: "B12", arr: "", depFrom: "TR698" })
+  })
+
+  it("never overwrites a published gate", () => {
+    const g = acrossTurns([out, back], [{ dep: "C11", arr: "B12" }, { dep: "B14", arr: "" }])
+    expect(g[0].arr).toBe("B12")
+    expect(g[1].dep).toBe("B14")
+    expect(g[0].arrFrom).toBeUndefined()
+  })
+
+  it("takes nothing across a long turn, another airport or another aeroplane", () => {
+    const late = { ...back, scheduledOut: "11:30" }
+    expect(acrossTurns([out, late], [{ dep: "", arr: "" }, { dep: "B14", arr: "" }])[0].arr).toBe("")
+    const elsewhere = { ...back, departureIcao: "VTBS" }
+    expect(acrossTurns([out, elsewhere], [{ dep: "", arr: "" }, { dep: "B14", arr: "" }])[0].arr).toBe("")
+    const swap = [{ ...out, aircraftReg: "9V-NCB" }, { ...back, aircraftReg: "9V-NCK" }]
+    expect(acrossTurns(swap, [{ dep: "", arr: "" }, { dep: "B14", arr: "" }])[0].arr).toBe("")
+    const same = [{ ...out, aircraftReg: "9V-NCB" }, { ...back, aircraftReg: "9VNCB" }]
+    expect(acrossTurns(same, [{ dep: "", arr: "" }, { dep: "B14", arr: "" }])[0].arr).toBe("B14")
+  })
+
+  it("reads a turn across midnight on its schedule", () => {
+    const redEye = leg({ flightNumber: "TR274", date: "2026-11-18", departureIcao: "WSSS", arrivalIcao: "WIII", scheduledOut: "23:55", scheduledIn: "01:50" })
+    const ret = leg({ flightNumber: "TR275", date: "2026-11-19", departureIcao: "WIII", arrivalIcao: "WSSS", scheduledOut: "02:35", scheduledIn: "04:25" })
+    expect(acrossTurns([redEye, ret], [{ dep: "", arr: "" }, { dep: "D3", arr: "" }])[0].arr).toBe("D3")
   })
 })
