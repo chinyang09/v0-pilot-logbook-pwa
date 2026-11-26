@@ -25,7 +25,7 @@ import { useFlights } from "@/hooks/data"
 import { lookup } from "@/lib/lookup/client"
 import { normalizeFlightNumber, type FlightGates } from "@/lib/lookup/flight-suggest"
 import { whereaboutsAnswer, type WhereaboutsAnswer } from "@/hooks/use-aircraft-whereabouts"
-import { dutyFlights, inboundLeg, legArrivalIso, legDepartureIso } from "@/lib/utils/dashboard/duty-flights"
+import { dutyFlights, inboundLeg, legArrivalIso, legDepartureIso, outboundOf } from "@/lib/utils/dashboard/duty-flights"
 import { normalizeRegistration } from "@/lib/utils/string"
 import type { FlightLog } from "@/types/entities/flight.types"
 
@@ -44,35 +44,89 @@ export interface DutyLookups {
    * decides whether to secure it).
    */
   onward: WhereaboutsAnswer | null
+  /**
+   * The aeroplane a leg the logbook has no registration for is flying, found
+   * through a CONNECTING flight (the owner, Nov 2026: "we already know the
+   * connecting flight TR537, we can do a lookup on TR537 aircraft in use"):
+   * the flight that brings it in or takes it on, as the airport's rotation
+   * names them, asked for its registration on the day. By flight id.
+   */
+  viaConnection?: Record<string, { registration: string; via: string }>
 }
 
 const NO_FLIGHTS: FlightLog[] = []
 
 async function fetchDutyLookups(legs: FlightLog[]): Promise<DutyLookups> {
-  const first = inboundLeg(legs)
+  // 1. Every leg's gates — whose flight carries the registration assigned to
+  //    it on the day, where a source has it.
+  const gateAnswers = await Promise.all(
+    legs.map(async (f): Promise<[string, GateState] | null> => {
+      if (normalizeFlightNumber(f.flightNumber || "").length < 3 || !f.date) return null
+      const answer = await lookup.flightGates(f.flightNumber, f.date, f.scheduledOut || undefined)
+      return [f.id, answer.ok ? { status: "done", gates: answer.data } : { status: answer.status === 404 ? "missing" : "failed" }]
+    }),
+  )
+  const gates: Record<string, GateState> = Object.fromEntries(gateAnswers.filter((e): e is [string, GateState] => !!e))
+  const known = (f: FlightLog) => {
+    const g = gates[f.id]
+    return f.aircraftReg || (g?.status === "done" ? g.gates.flight.registration : "") || ""
+  }
+
+  // 2. A leg still without one: the flights its aeroplane connects with — the
+  //    one bringing it in and the one taking it on, as the airport's rotation
+  //    names them — asked for THEIR registration (the same aeroplane).
+  const viaConnection: Record<string, { registration: string; via: string }> = {}
+  await Promise.all(
+    legs.map(async (f) => {
+      if (known(f)) return
+      const g = gates[f.id]
+      if (g?.status !== "done") return
+      const ours = normalizeFlightNumber(f.flightNumber || "")
+      // The inbound flies the same day or the day before; the onward the same day or the next.
+      // And a step further back (the owner: "we can even do a further
+      // traceback"): an inbound RETURN (an odd number, TR537) is flown by the
+      // aeroplane of its OUTBOUND (TR536), assigned earlier.
+      const candidates = [
+        { number: g.gates.inboundFlight, dates: [f.date, shiftDay(f.date, -1)] },
+        { number: outboundOf(g.gates.inboundFlight), dates: [f.date, shiftDay(f.date, -1)] },
+        { number: g.gates.onwardFlight, dates: [f.date, shiftDay(f.date, 1)] },
+      ].filter((c): c is { number: string; dates: string[] } => !!c.number && normalizeFlightNumber(c.number) !== ours)
+      for (const { number, dates } of candidates) {
+        for (const date of dates) {
+          const answer = await lookup.flightSuggest(number, date)
+          const reg = answer.ok && answer.data.basis === "scheduled" ? answer.data.registration : ""
+          if (reg) {
+            viaConnection[f.id] = { registration: reg, via: number }
+            return
+          }
+        }
+      }
+    }),
+  )
+  const regOf = (f: FlightLog | null | undefined) => (f ? known(f) || viaConnection[f.id]?.registration || "" : "")
+
+  // 3. Where the aeroplane is: before the next leg still to fly, and after the last.
+  const first = inboundLeg(legs, regOf)
   const last = legs[legs.length - 1]
-  const lastReg = last?.aircraftReg || first?.aircraftReg || ""
+  const firstReg = regOf(first)
+  const lastReg = regOf(last) || firstReg
   const lastArrives = last ? legArrivalIso(last) : null
-  const [gateAnswers, inbound, onward] = await Promise.all([
-    Promise.all(
-      legs.map(async (f): Promise<[string, GateState] | null> => {
-        if (normalizeFlightNumber(f.flightNumber || "").length < 3 || !f.date) return null
-        const answer = await lookup.flightGates(f.flightNumber, f.date, f.scheduledOut || undefined)
-        return [f.id, answer.ok ? { status: "done", gates: answer.data } : { status: answer.status === 404 ? "missing" : "failed" }]
-      })
-    ),
-    first ? lookup.aircraftWhereabouts(first.aircraftReg, legDepartureIso(first) ?? undefined).then(whereaboutsAnswer) : null,
+  const [inbound, onward] = await Promise.all([
+    first && firstReg ? lookup.aircraftWhereabouts(firstReg, legDepartureIso(first) ?? undefined).then(whereaboutsAnswer) : null,
     // At the last leg's arrival the flight it last departed on is ours; the one after is the onward.
     lastReg && lastArrives ? lookup.aircraftWhereabouts(lastReg, lastArrives).then(whereaboutsAnswer) : null,
   ])
   return {
-    gates: Object.fromEntries(gateAnswers.filter((e): e is [string, GateState] => !!e)),
+    gates,
     inbound,
-    inboundRegistration: first?.aircraftReg ?? "",
+    inboundRegistration: firstReg,
     inboundFlightId: first?.id ?? null,
     onward,
+    viaConnection,
   }
 }
+
+const shiftDay = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10)
 
 export function useDutyLookups(atMs: number | null, opts: { active: boolean; fast?: boolean }) {
   const { flights } = useFlights()

@@ -69,8 +69,8 @@ import { useDutyAlternates } from "./flight/alternates"
 import { AirportFace, airportsOf, stationPoor } from "./flight/airport-tile"
 import { WIDGET_TITLE, dutyRows, useWidgetCtx, widgetContent } from "./flight/details"
 import { BentoGrid } from "./flight/bento"
-import { setArranging, useArranging, useTileOrder, useTileSizes } from "@/hooks/use-dashboard-layout"
-import { columnsOf, faceSizeOn, gridKindFor, packTiles, rowHeightFor, rowsOf, type GridKind, type TileSize } from "@/lib/utils/dashboard/bento"
+import { setArranging, useArranging, useTileOrder, useTilePositions } from "@/hooks/use-dashboard-layout"
+import { arrangeTiles, columnsOf, faceSizeOn, gridKindFor, rowHeightFor, rowsOf, type GridKind, type TileSize } from "@/lib/utils/dashboard/bento"
 import { Widget, WidgetSheet, type WidgetAnchor, type WidgetId } from "./flight/widget"
 import type { DutyChoice, FlightBrief } from "./flight/model"
 import type { DutyPeriod } from "@/types/entities/roster.types"
@@ -267,8 +267,13 @@ export function FlightDashboard({ className }: { className?: string }) {
     roRef.current = ro
   }, [])
   const { grid, px: gridPx, rowPx } = gridBox
-  const sizes = useTileSizes(grid)
+  const positions = useTilePositions(grid)
   const faceSizeOf = React.useCallback((size: TileSize) => faceSizeOn(size, grid, gridPx, rowPx), [grid, gridPx, rowPx])
+  // A tile with room under its face says the next facts its card holds, as
+  // many as fit (`TileRows`): every tile on the wide grid, and on a phone a
+  // tile the pilot made tall enough for them — a home screen has spaces, but
+  // not inside a tile.
+  const fillsRoom = (size: TileSize) => grid !== "narrow" || size.rows >= 1.5
   const arranging = useArranging()
   const now = useTick(isActive)
   const { preferences } = usePreferences()
@@ -594,7 +599,8 @@ export function FlightDashboard({ className }: { className?: string }) {
   // for a flight opened from a card.
   const [sheet, setSheet] = React.useState<{ id: WidgetId; anchor: WidgetAnchor; size: TileSize } | null>(null)
   // On a standby there are no airports to fly to: that tile steps aside and
-  // the others take the grid (the owner, Nov 2026: "not applicable"). The
+  // leaves its cells empty, the others where the pilot put them (the owner,
+  // Nov 2026: "not applicable"; a home screen keeps its places). The
   // flight & duty tile reads the standby.
   const shown = React.useMemo(
     () => (standby ? order.filter((id) => id !== "airport") : order),
@@ -604,9 +610,9 @@ export function FlightDashboard({ className }: { className?: string }) {
   const placedSizes = React.useMemo(
     () =>
       new Map<WidgetId, TileSize>(
-        packTiles(shown, sizes, columnsOf(grid), rowsOf(grid)).map((p) => [p.id, faceSizeOf({ cols: p.cols, rows: p.rows })]),
+        arrangeTiles(shown, positions, columnsOf(grid), rowsOf(grid)).map((p) => [p.id, faceSizeOf({ cols: p.cols, rows: p.rows })]),
       ),
-    [shown, sizes, grid, faceSizeOf],
+    [shown, positions, grid, faceSizeOf],
   )
   const nav = useWidgetCtx()
   const open = React.useCallback(
@@ -660,7 +666,7 @@ export function FlightDashboard({ className }: { className?: string }) {
       tone={tint[id] ?? null}
       className="flex-1"
     >
-      {faceOf(id, brief, faceSizeOf(size), false, grid !== "narrow")}
+      {faceOf(id, brief, faceSizeOf(size), false, fillsRoom(faceSizeOf(size)))}
     </Widget>
   )
   return (
@@ -673,19 +679,18 @@ export function FlightDashboard({ className }: { className?: string }) {
         gridRef={gridRef}
         rowPx={rowPx}
         order={shown}
-        fullOrder={order}
-        sizes={sizes}
+        positions={positions}
         arranging={arranging}
         label={(id) => WIDGET_TITLE[id]}
         tile={tile}
-        face={(id, size) => faceOf(id, brief, faceSizeOf(size), false, grid !== "narrow")}
+        face={(id, size) => faceOf(id, brief, faceSizeOf(size), false, fillsRoom(faceSizeOf(size)))}
       />
 
       {sheet && (
         <WidgetSheet
           anchor={sheet.anchor}
           title={WIDGET_TITLE[sheet.id]}
-          face={faceOf(sheet.id, brief, sheet.size, false, grid !== "narrow")}
+          face={faceOf(sheet.id, brief, sheet.size, false, fillsRoom(sheet.size))}
           // The tile opens straight down only where its face IS the card's
           // header: a full-width, one-row tile whose face does not change in
           // the card (the flights face drops its crew panel there; the

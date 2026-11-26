@@ -110,9 +110,8 @@ export function StationWeather({ b, clock, now }: { b: StationBrief; clock: (ms:
   const hazards = hazardLine(b.hazards).split(" · ").filter(Boolean)
   return (
     <div className="space-y-1.5">
-      {(b.worst || hazards.length > 0) && (
+      {hazards.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
-          {b.worst && <Chip tone={b.worst}>{b.worst}</Chip>}
           {hazards.map((h) => (
             <Chip key={h} tone="warn">
               {h}

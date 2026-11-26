@@ -44,10 +44,11 @@ export function dutyFlights(flights: readonly FlightLog[], atMs: number): Flight
 /**
  * The leg whose aeroplane is worth asking after: the first not yet off blocks
  * (on duty, the next one to fly — a later leg can be another tail), else the
- * first. Only legs that name an aeroplane.
+ * first. Only legs that name an aeroplane — in the logbook, or (`regOf`) as a
+ * source found it: the leg's own lookup, or its connecting flight's.
  */
-export function inboundLeg(legs: readonly FlightLog[]): FlightLog | null {
-  return legs.find((f) => f.aircraftReg && !f.outTime) ?? legs.find((f) => f.aircraftReg) ?? null
+export function inboundLeg(legs: readonly FlightLog[], regOf: (f: FlightLog) => string = (f) => f.aircraftReg): FlightLog | null {
+  return legs.find((f) => regOf(f) && !f.outTime) ?? legs.find((f) => regOf(f)) ?? null
 }
 
 /** When a leg departs, as an ISO instant — its schedule first, else its OUT. */
@@ -65,4 +66,12 @@ export function legArrivalIso(f: Pick<FlightLog, "date" | "scheduledOut" | "sche
   if (!f.date || !time) return null
   const ms = flightInstantMs(f.date, time, out || undefined)
   return ms === null ? null : new Date(ms).toISOString()
+}
+
+/** "TR537" → "TR536": the outbound a return pairs with — an odd number less one. */
+export function outboundOf(number: string | undefined): string | undefined {
+  const m = number?.match(/^([A-Z]{2,3})0*(\d+)$/i)
+  if (!m) return undefined
+  const n = Number(m[2])
+  return n % 2 === 1 && n > 1 ? `${m[1].toUpperCase()}${n - 1}` : undefined
 }

@@ -310,34 +310,49 @@ export function ImportFlow({ context = "shared", onComplete, request, onBusyChan
       // never shows it (it reads in a second, and the toast says so), and
       // closing the dialog in the same step as the navigation let its back
       // marker pop the briefing page straight off the history.
-      try {
-        const briefingFiles: File[] = [];
-        for (const f of files) if (await isBriefingFile(f)) briefingFiles.push(f);
-        if (briefingFiles.length > 0) {
-          let last: Awaited<ReturnType<typeof importBriefingFile>> | null = null;
-          for (const f of briefingFiles) last = await importBriefingFile(f);
-          await refreshBriefingCaches();
-          if (last?.aircraft) void refreshAllData();
-          files = files.filter((f) => !briefingFiles.includes(f));
-          if (last) {
-            const r = last.record;
-            showToast(
-              `${r.flightNumber} ${r.dep}–${r.arr} briefing saved · ${last.notams} NOTAMs${last.newNotams ? `, ${last.newNotams} new` : ""}`,
-            );
-            if (files.length === 0) {
-              setBusy(false);
-              onResetPicker();
-              router.push(`/briefing?id=${encodeURIComponent(r.id)}`);
-              return;
-            }
+      // Several at once (the owner, Nov 2026: two briefings uploaded together
+      // were "rejected"): each is read on its own, so one that cannot be read
+      // no longer takes the others down with it — those are saved, and the
+      // one that failed is named with its reason.
+      const briefingFiles: File[] = [];
+      for (const f of files) if (await isBriefingFile(f)) briefingFiles.push(f);
+      if (briefingFiles.length > 0) {
+        const saved: Awaited<ReturnType<typeof importBriefingFile>>[] = [];
+        const failed: string[] = [];
+        for (const f of briefingFiles) {
+          try {
+            saved.push(await importBriefingFile(f));
+          } catch (error) {
+            failed.push(error instanceof Error ? error.message : `${f.name} could not be read`);
           }
         }
-      } catch (error) {
-        setIsOpen(true);
-        setErrorMsg(error instanceof Error ? error.message : "The briefing could not be read");
-        setBusy(false);
-        onResetPicker();
-        return;
+        if (saved.length) {
+          await refreshBriefingCaches();
+          if (saved.some((s) => s.aircraft)) void refreshAllData();
+        }
+        files = files.filter((f) => !briefingFiles.includes(f));
+        if (failed.length) {
+          setIsOpen(true);
+          setErrorMsg(
+            (saved.length ? `${saved.length} briefing${saved.length > 1 ? "s" : ""} saved. ` : "") + failed.join(" "),
+          );
+          setBusy(false);
+          onResetPicker();
+          return;
+        }
+        const last = saved[saved.length - 1];
+        const r = last.record;
+        showToast(
+          saved.length > 1
+            ? `${saved.length} briefings saved · ${saved.map((s) => s.record.flightNumber).join(", ")}`
+            : `${r.flightNumber} ${r.dep}–${r.arr} briefing saved · ${last.notams} NOTAMs${last.newNotams ? `, ${last.newNotams} new` : ""}`,
+        );
+        if (files.length === 0) {
+          setBusy(false);
+          onResetPicker();
+          router.push(`/briefing?id=${encodeURIComponent(r.id)}`);
+          return;
+        }
       }
 
       setIsOpen(true);

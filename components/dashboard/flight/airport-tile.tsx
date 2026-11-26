@@ -36,11 +36,11 @@
 
 import * as React from "react"
 import { PlaneLanding, PlaneTakeoff, Thermometer, Wind } from "lucide-react"
-import { metarConditions, metarReadings, type FlightCategory, type StationBrief } from "@/lib/weather/brief"
+import { metarConditions, metarReadings, type StationBrief } from "@/lib/weather/brief"
 import { largestCircle, type Circle } from "@/lib/utils/dashboard/largest-circle"
 import { cn } from "@/lib/utils"
 import { Pager, useRememberedPage } from "./pager"
-import { CATEGORY_TEXT, StationWeather, skyOf, weatherStatus } from "./weather"
+import { StationWeather, skyOf, weatherStatus } from "./weather"
 import { RunwayDiagram, windWords } from "./runway-diagram"
 import { AirportPanel } from "./airport"
 import { EnRoute, useDutyAlternates, type AlternateBrief } from "./alternates"
@@ -49,8 +49,6 @@ import { shortDay } from "./faces"
 import { FACE_WIDE_COLS } from "@/lib/utils/dashboard/bento"
 import type { FlightBrief } from "./model"
 
-const RANK: Record<FlightCategory, number> = { VFR: 0, MVFR: 1, IFR: 2, LIFR: 3 }
-const rank = (c: FlightCategory | null | undefined) => (c ? RANK[c] : -1)
 
 /** The duty's airports in the order it meets them, as weather briefs (a brief exists for each, with or without a report). */
 export function airportsOf(brief: FlightBrief): StationBrief[] {
@@ -63,9 +61,9 @@ function useAirportPage(brief: FlightBrief, stations: StationBrief[]) {
   return useRememberedPage(`ap:${brief.duty.atMs}:${stations.map((b) => b.station).join()}`, start, stations.length)
 }
 
-/** Whether an airport's weather needs a look: IFR / LIFR, or a hazard over the duty. */
+/** Whether an airport's weather needs a look: a hazard over the duty (LIFR visibility and ceiling are hazards). */
 export function stationPoor(b: StationBrief): boolean {
-  return rank(b.worst) >= 2 || b.hazards.length > 0
+  return b.hazards.length > 0
 }
 
 /* ── The tile ────────────────────────────────────────────────────────────── */
@@ -155,8 +153,6 @@ function StationFace({ brief, b, size, lead }: { brief: FlightBrief; b: StationB
   const r = b.metar ? metarReadings(b.metar.raw) : null
   // The sky's own hazard (TS, FG…) — the wind's is on the dial.
   const sky = skyOf(c, b.metar?.hazards.find((h) => !/KT$/.test(h)))
-  // Dark cockpit: VFR is not said; a category below it is, in its colour.
-  const cat = b.metar?.category && b.metar.category !== "VFR" ? b.metar.category : null
   const tall = (size?.rows ?? 1) >= 2
   const rwy = useAirportRunways(brief, icao, b.metar?.raw, lead)
   const wind = windWords(c?.windDir, c?.windKt)
@@ -180,18 +176,15 @@ function StationFace({ brief, b, size, lead }: { brief: FlightBrief; b: StationB
         </p>
         {tall && <RunwaysInUse rwy={rwy} morph={key} />}
       </div>
-      {/* Top right: QNH, the category below VFR, the wind. */}
+      {/* Top right: QNH and the wind. No flight category anywhere (the owner,
+          Nov 2026: "I don't need any VFR, IFR, MVFR … taggings") — the cloud
+          and the hazards say what matters. */}
       <div data-corner className="absolute right-0 top-0 flex flex-col items-end gap-1 text-right">
         {r?.qnhHpa ? (
           <p className="leading-none text-foreground" data-morph={key("qnh")}>
             Q{r.qnhHpa}
           </p>
         ) : null}
-        {cat && (
-          <p className={cn("font-semibold leading-none", CATEGORY_TEXT[cat])} data-morph={key("cat")}>
-            {cat}
-          </p>
-        )}
         {wind && (
           <p className="whitespace-nowrap font-semibold leading-none text-foreground">
             <span data-morph={key("wind")}>{wind}</span>
@@ -321,7 +314,7 @@ export function AirportBody({ brief, openFlight }: { brief: FlightBrief; openFli
   if (stations.length === 0) return <p className="py-1 text-[13px] text-muted-foreground">No duty ahead</p>
   return (
     <div>
-      <Pager count={stations.length} page={page} onPage={setPage} morph="ap">
+      <Pager count={stations.length} page={page} onPage={setPage} morph="ap" bleed>
         {(i) => <CardPage brief={brief} b={stations[i]} lead={i === page} near={alternates.near.get(stations[i].station) ?? []} openFlight={openFlight} />}
       </Pager>
       <EnRoute brief={brief} />

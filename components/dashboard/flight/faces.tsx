@@ -310,12 +310,17 @@ function LegChip({ brief, i }: { brief: FlightBrief; i: number }) {
  * before arrived — the leg before's, marked EXPECTED (the owner, Nov 2026:
  * "Aircraft TBA" beside a known tail read as missing data).
  */
-export function legAircraft(brief: FlightBrief, i: number): { reg: string; type: string; expected: boolean; from: string } {
+export function legAircraft(
+  brief: FlightBrief,
+  i: number,
+): { reg: string; type: string; expected: boolean; from: string; via?: boolean } {
   const { duty } = brief
   const f = duty.legs[i]
   if (!f) return { reg: "", type: "", expected: false, from: "" }
   const g = duty.lookups?.gates[f.id]
-  const own = f.aircraftReg || (i === legNow(brief) ? duty.lookups?.inboundRegistration : "") || (g?.status === "done" ? g.gates.flight.registration : "") || ""
+  // The inbound lookup's registration is THIS leg's only where it was asked for
+  // this leg — and then it came from one of the sources below already.
+  const own = f.aircraftReg || (g?.status === "done" ? g.gates.flight.registration : "") || ""
   // As the aircraft database spells and types it (the Aircraft page's name).
   const rec = own ? brief.fleet?.get(normalizeRegistration(own)) : undefined
   if (own) return { reg: rec?.registration || own, type: rec?.typecode || f.aircraftType || "", expected: false, from: "" }
@@ -324,6 +329,14 @@ export function legAircraft(brief: FlightBrief, i: number): { reg: string; type:
   if (plan?.registration) {
     const p = brief.fleet?.get(normalizeRegistration(plan.registration))
     return { reg: p?.registration || plan.registration, type: p?.typecode || f.aircraftType || icaoTypeOfOfp(plan.aircraftType), expected: false, from: "" }
+  }
+  // The flight that brings the aeroplane in, or takes it on, names it
+  // (`DutyLookups.viaConnection` — the owner: "we already know the connecting
+  // flight TR537, we can do a lookup on TR537 aircraft in use").
+  const via = duty.lookups?.viaConnection?.[f.id]
+  if (via) {
+    const v = brief.fleet?.get(normalizeRegistration(via.registration))
+    return { reg: v?.registration || via.registration, type: v?.typecode || f.aircraftType || "", expected: true, from: via.via, via: true }
   }
   const prev = duty.legs[i - 1]
   if (prev && prev.arrivalIcao && prev.arrivalIcao === f.departureIcao) {
@@ -338,6 +351,28 @@ export function legLate(brief: FlightBrief, i: number): boolean {
   return legDelay(brief, i) !== null || inboundLate(brief, i)
 }
 
+/** A gate beside its airport: the number, or a dashed placeholder while it is awaited. */
+function GateChip({ gate, asked, side }: { gate?: string; asked: boolean; side: "Departure" | "Arrival" }) {
+  if (!gate && !asked) return null
+  return gate ? (
+    <span
+      className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-semibold leading-none tracking-normal text-foreground"
+      aria-label={`${side} gate ${gate}`}
+    >
+      {gate}
+    </span>
+  ) : (
+    // A slot the gate will fill, narrow so the route keeps its room on a small phone.
+    <span
+      role="img"
+      className="inline-flex h-[19px] w-6 shrink-0 items-center justify-center rounded-md border border-dashed border-muted-foreground/50 text-[11px] font-medium leading-none text-muted-foreground"
+      aria-label={`${side} gate not yet published`}
+    >
+      –
+    </span>
+  )
+}
+
 /**
  * One leg as the flights tile has it (the owner, Nov 2026: "show aircraft in
  * use, gate, essentially flight info"): the route large; the flight number
@@ -350,13 +385,21 @@ function LegPage({ brief, i, more = false }: { brief: FlightBrief; i: number; mo
   const t = duty.times[i]
   const flown = !!f.inTime
   const gates = duty.info?.legGates[i]
-  const gate = flown ? gates?.arr || "" : gates?.dep || ""
   const { reg, type, expected } = legAircraft(brief, i)
   const line = legLine(brief, i)
+  // The gates BESIDE their airports (the owner, Nov 2026: the departure gate
+  // left of the departure, the arrival gate right of the arrival), a dashed
+  // placeholder while a gate is still to be published — once the duty is
+  // close enough for one to be asked.
+  const asked = !!duty.lookups
   return (
     <>
-      <p className="truncate text-[17px] font-bold leading-tight tracking-tight text-foreground @[15rem]:text-[21px]" data-morph={`fl-route-${i}`}>
-        {code(f.departureIcao, f.departureIata)} – {code(f.arrivalIcao, f.arrivalIata)}
+      <p className="flex min-w-0 items-center gap-1.5 text-[17px] font-bold leading-tight tracking-tight text-foreground @[15rem]:text-[21px]">
+        <GateChip gate={gates?.dep} asked={asked} side="Departure" />
+        <span className="min-w-0 truncate" data-morph={`fl-route-${i}`}>
+          {code(f.departureIcao, f.departureIata)} – {code(f.arrivalIcao, f.arrivalIata)}
+        </span>
+        <GateChip gate={gates?.arr} asked={asked} side="Arrival" />
       </p>
       {/* The delay keeps its place when the line is short of room: the times give way first. */}
       <p className="mt-0.5 flex min-w-0 items-baseline text-[12px] leading-tight tabular-nums text-foreground">
@@ -366,17 +409,10 @@ function LegPage({ brief, i, more = false }: { brief: FlightBrief; i: number; mo
         </span>
         <LegChip brief={brief} i={i} />
       </p>
-      <p className="flex items-baseline justify-between gap-2 text-[12px] leading-tight tabular-nums">
-        <span className="min-w-0 truncate" data-morph={`fl-ac-${i}`}>
-          <span className={cn("font-semibold", reg ? "text-foreground" : "text-muted-foreground")}>{reg || "Aircraft TBA"}</span>
-          {reg && type && <span className="text-muted-foreground"> {type}</span>}
-          {expected && <span className="text-muted-foreground"> · expected</span>}
-        </span>
-        {gate && (
-          <span className="shrink-0 font-semibold text-foreground" data-morph={`fl-gate-${i}`}>
-            {flown ? "Arr " : ""}Gate {gate}
-          </span>
-        )}
+      <p className="truncate text-[12px] leading-tight tabular-nums" data-morph={`fl-ac-${i}`}>
+        <span className={cn("font-semibold", reg ? "text-foreground" : "text-muted-foreground")}>{reg || "Aircraft TBA"}</span>
+        {reg && type && <span className="text-muted-foreground"> {type}</span>}
+        {expected && <span className="text-muted-foreground"> · expected</span>}
       </p>
       <p
         className={cn("truncate text-[11px] leading-tight", line?.late ? "font-semibold text-status-warning" : "text-muted-foreground")}
@@ -657,25 +693,9 @@ export function legRows(brief: FlightBrief, i: number): CardRow[] {
   } else if (gates?.inboundFlight && !flown && !f.outTime) {
     rows.push({ label: "Inbound", value: gates.inboundFlight })
   }
-  rows.push({
-    label: "Aircraft",
-    value: ac.reg ? `${ac.reg}${ac.type ? ` ${ac.type}` : ""}` : "TBA",
-    sub: ac.expected ? `Expected · after ${ac.from || "the leg before"}, not yet confirmed` : undefined,
-    morph: `fl-ac-${i}`,
-  })
-  // The gate number alone (the owner, Nov 2026: "remove all terminal … gate
-  // number is good enough"); a stand only where no gate is published.
-  const gateOf = (x: { gate: string; stand?: string } | undefined) => (x?.gate ? `Gate ${x.gate}` : x?.stand ? `Stand ${x.stand}` : "")
-  const dep = gateOf(gates?.departure)
-  if (dep) rows.push({ label: "Departure", value: dep, morph: flown ? undefined : `fl-gate-${i}` })
-  // OUT and IN, ONE row each (the owner, Nov 2026: estimates "not very useful
-  // during flight. And confusing"): the schedule until the time is recorded,
-  // then the recorded time with how early or late it was beside it.
-  rows.push(timeRow(brief, i, "OUT", f.outTime, f.scheduledOut, t?.departMs ?? null))
-  rows.push(timeRow(brief, i, "IN", f.inTime, f.scheduledIn, f.inTime ? (t?.arriveMs ?? null) : null))
-  const arr = gateOf(gates?.arrival)
-  if (arr) rows.push({ label: "Arrival", value: arr, morph: flown ? `fl-gate-${i}` : undefined })
-  // The flight that takes the aeroplane over after ours.
+  // The flight that takes the aeroplane over after ours — at the TOP with the
+  // inbound (the owner, Nov 2026: "so users know where to look for
+  // connecting flight").
   if (line?.kind === "onward") {
     const onward = duty.lookups?.onward
     const o = onward?.status === "done" ? onwardLines(onward.whereabouts, sep) : null
@@ -686,6 +706,28 @@ export function legRows(brief: FlightBrief, i: number): CardRow[] {
       morph: `fl-next-${i}`,
     })
   }
+  rows.push({
+    label: "Aircraft",
+    value: ac.reg ? `${ac.reg}${ac.type ? ` ${ac.type}` : ""}` : "TBA",
+    sub: ac.via
+      ? `Expected · as ${ac.from}, the connecting flight`
+      : ac.expected
+        ? `Expected · after ${ac.from || "the leg before"}, not yet confirmed`
+        : undefined,
+    morph: `fl-ac-${i}`,
+  })
+  // The gate number alone (the owner, Nov 2026: "remove all terminal … gate
+  // number is good enough"); a stand only where no gate is published.
+  const gateOf = (x: { gate: string; stand?: string } | undefined) => (x?.gate ? `Gate ${x.gate}` : x?.stand ? `Stand ${x.stand}` : "")
+  const dep = gateOf(gates?.departure)
+  if (dep) rows.push({ label: "Departure", value: dep })
+  // OUT and IN, ONE row each (the owner, Nov 2026: estimates "not very useful
+  // during flight. And confusing"): the schedule until the time is recorded,
+  // then the recorded time with how early or late it was beside it.
+  rows.push(timeRow(brief, i, "OUT", f.outTime, f.scheduledOut, t?.departMs ?? null))
+  rows.push(timeRow(brief, i, "IN", f.inTime, f.scheduledIn, f.inTime ? (t?.arriveMs ?? null) : null))
+  const arr = gateOf(gates?.arrival)
+  if (arr) rows.push({ label: "Arrival", value: arr })
   return rows
 }
 

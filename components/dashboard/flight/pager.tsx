@@ -63,7 +63,15 @@ export function Pager({
   perPage = 1,
   dotTone,
   below,
+  bleed = false,
 }: {
+  /**
+   * The window reaches 8px past the content on each side and every page
+   * carries its own 8px gutter, so what a page draws a little OUTSIDE its
+   * text (the airport card's lit TAF periods) stays on that page — it was
+   * clipped on one side and showed on the next page on the other.
+   */
+  bleed?: boolean
   /** What sits under the pages and over the dots, not swiped (the flights card's duty and its Open). */
   below?: React.ReactNode
   /**
@@ -156,7 +164,7 @@ export function Pager({
   }
   return (
     <div
-      className={cn("relative overflow-hidden", fill && "flex min-h-0 flex-1 flex-col")}
+      className={cn("relative overflow-hidden", fill && "flex min-h-0 flex-1 flex-col", bleed && "-mx-2")}
       data-pager
       style={{ touchAction: "pan-y" }}
       onPointerDown={(e) => {
@@ -217,7 +225,7 @@ export function Pager({
           style={{ transform: `translateX(${-page * 100}%)` }}
         >
           {Array.from({ length: count }, (_, i) => (
-            <div key={i} className={cn("w-full shrink-0", fill && "flex flex-col")} aria-hidden={i !== page || undefined}>
+            <div key={i} className={cn("w-full shrink-0", fill && "flex flex-col", bleed && "px-2")} aria-hidden={i !== page || undefined}>
               {pageOf(i)}
             </div>
           ))}

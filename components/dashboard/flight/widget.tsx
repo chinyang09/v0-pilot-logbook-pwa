@@ -208,9 +208,9 @@ export function WidgetLabel({ children, right, title = false }: { children: Reac
 }
 
 /** The bar every card opens with — the section's name (`WIDGET_TITLE`). */
-function CardTitle({ title }: { title: string }) {
+function CardTitle({ title, flush = false }: { title: string; flush?: boolean }) {
   return (
-    <div className={CARD_TITLE_BAR}>
+    <div className={cn(CARD_TITLE_BAR, flush && "mb-0")}>
       <h2 className="truncate text-[15px] font-semibold leading-tight tracking-tight text-foreground">
         <span data-morph="label">{title}</span>
       </h2>
@@ -257,15 +257,33 @@ function WidgetFooter({ actions, run }: { actions: WidgetAction[]; run: (a: Widg
  * the header (its label the title bar — `CardShellContext`), then the body
  * straight under it, then the footer line (drawn by the caller).
  */
-function CardShell({ title, header, body }: { title?: string; header: React.ReactNode | null; body: React.ReactNode | null }) {
+function CardShell({
+  title,
+  header,
+  body,
+  footer,
+}: {
+  title?: string
+  header: React.ReactNode | null
+  body: React.ReactNode | null
+  footer?: React.ReactNode
+}) {
+  // The title bar and the footer STAY; only what is between them scrolls
+  // (the owner, Nov 2026: "card header and footer should not scroll together
+  // with content").
   return (
-    <div className="relative p-3">
-      <CardShellContext.Provider value>
-        {title && <CardTitle title={title} />}
+    <CardShellContext.Provider value>
+      {title && (
+        <div className="shrink-0 px-3 pt-3">
+          <CardTitle title={title} flush />
+        </div>
+      )}
+      <div className={cn("relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain scrollbar-hide px-3 pb-3 pt-3")}>
         {header}
         {body && <div className={cn(header ? "mt-3" : undefined)}>{body}</div>}
-      </CardShellContext.Provider>
-    </div>
+      </div>
+      {footer && <div className="shrink-0">{footer}</div>}
+    </CardShellContext.Provider>
   )
 }
 
@@ -546,19 +564,23 @@ export function WidgetSheet({
           {/* The card, laid out once at its final width; the surface reveals it. */}
           <motion.div
             ref={cardRef}
-            className="absolute left-0 top-0 overflow-y-auto overflow-x-hidden overscroll-contain scrollbar-hide"
+            className="absolute left-0 top-0 flex flex-col overflow-hidden"
             style={{ width: width - 2, maxHeight: maxCard - 2 }}
             initial={{ opacity: crossfade ? 0 : 1 }}
             animate={{ opacity: crossfade ? (open || leaving ? 1 : 0) : 1 }}
             transition={open ? { duration: 0.2, delay: 0.06, ease: EASE } : { duration: 0.12, ease: EASE }}
           >
             <SheetClosingContext.Provider value={closing || leaving}>
-              <CardShell title={title} header={content.header} body={content.body} />
+              <CardShell
+                title={title}
+                header={content.header}
+                body={content.body}
+                // A footer action that leads somewhere is already wrapped to
+                // close the card first (`render`'s dismiss) — closing it again
+                // here swallowed the navigation (the owner's report).
+                footer={<WidgetFooter actions={content.actions} run={(a) => a.run()} />}
+              />
             </SheetClosingContext.Provider>
-            {/* A footer action that leads somewhere is already wrapped to close
-                the card first (`render`'s dismiss) — closing it again here
-                swallowed the navigation (the owner's report). */}
-            <WidgetFooter actions={content.actions} run={(a) => a.run()} />
           </motion.div>
           {/* The shared elements' copies, in flight. */}
           <div ref={flyRef} aria-hidden className="pointer-events-none absolute inset-0" />

@@ -16,7 +16,9 @@ import { applyBriefingAircraft } from "./apply-aircraft"
 export async function isBriefingFile(file: File): Promise<boolean> {
   if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") return false
   try {
-    const head = await pdfToPages(new Uint8Array(await file.arrayBuffer()), 4)
+    // The OFP opens on the second page of the packages seen, after "Important
+    // files" — a package with more attachments listed pushes it later.
+    const head = await pdfToPages(new Uint8Array(await file.arrayBuffer()), 10)
     return isBriefingPackage(head)
   } catch {
     return false
