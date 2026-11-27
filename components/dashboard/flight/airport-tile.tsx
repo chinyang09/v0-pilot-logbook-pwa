@@ -164,6 +164,10 @@ function StationFace({ brief, b, size, lead }: { brief: FlightBrief; b: StationB
       : !b.metar
         ? "No report"
         : null
+  // A third of a phone's row (two cells): four corners of text do not fit
+  // beside each other. The wind takes the foot (compact, "220/15G25"), the
+  // temperature goes, and a hazard in the sky is its picture beside the code.
+  const narrow = (size?.cols ?? 3) < 1.25
   const box = React.useRef<HTMLDivElement>(null)
   const room = useRingRoom(box)
   const ring = room && room.r * 2 >= RING_MIN ? Math.floor(room.r * 2) : null
@@ -171,8 +175,9 @@ function StationFace({ brief, b, size, lead }: { brief: FlightBrief; b: StationB
     <div ref={box} className="relative min-h-0 flex-1 text-[12px] leading-tight tabular-nums">
       {/* Top left: the airport, and the runways in use under it. */}
       <div data-corner className="absolute left-0 top-0 flex flex-col items-start gap-1">
-        <p className="text-[18px] font-bold leading-none tracking-tight text-foreground" data-morph={key("code")}>
-          {brief.code(icao)}
+        <p className="flex items-center gap-1 text-[18px] font-bold leading-none tracking-tight text-foreground">
+          <span data-morph={key("code")}>{brief.code(icao)}</span>
+          {narrow && sky?.warn && <sky.Icon className="h-3.5 w-3.5 shrink-0 text-status-warning" aria-label={sky.text} />}
         </p>
         {tall && <RunwaysInUse rwy={rwy} morph={key} />}
       </div>
@@ -185,7 +190,7 @@ function StationFace({ brief, b, size, lead }: { brief: FlightBrief; b: StationB
             Q{r.qnhHpa}
           </p>
         ) : null}
-        {wind && (
+        {wind && !narrow && (
           <p className="whitespace-nowrap font-semibold leading-none text-foreground">
             <span data-morph={key("wind")}>{wind}</span>
             {c?.gustKt ? <span className="text-status-warning"> G{c.gustKt}</span> : null}
@@ -196,6 +201,13 @@ function StationFace({ brief, b, size, lead }: { brief: FlightBrief; b: StationB
       <div data-corner className="absolute bottom-0 left-0">
         {status ? (
           <p className="text-muted-foreground">{status}</p>
+        ) : narrow ? (
+          c?.windKt !== undefined && c?.windKt !== null ? (
+            <p className="whitespace-nowrap font-semibold leading-none text-foreground" aria-label={wind ?? undefined}>
+              <span data-morph={key("wind")}>{`${c.windDir === null || c.windDir === undefined ? "VRB" : String(c.windDir).padStart(3, "0")}/${c.windKt}`}</span>
+              {c.gustKt ? <span className="text-status-warning">G{c.gustKt}</span> : null}
+            </p>
+          ) : null
         ) : sky ? (
           <p className={cn("flex items-center gap-1 whitespace-nowrap", sky.warn ? "font-semibold text-status-warning" : "text-foreground")}>
             <sky.Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -205,7 +217,7 @@ function StationFace({ brief, b, size, lead }: { brief: FlightBrief; b: StationB
       </div>
       {/* Bottom right: temperature / dew point. */}
       <div data-corner className="absolute bottom-0 right-0">
-        {temp && !status && (
+        {temp && !status && !narrow && (
           <p className="flex items-center gap-0.5 whitespace-nowrap text-foreground">
             <Thermometer className="h-3.5 w-3.5 shrink-0" aria-hidden />
             <span data-morph={key("temp")}>{temp}</span>

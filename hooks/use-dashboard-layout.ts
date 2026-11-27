@@ -1,7 +1,7 @@
 "use client"
 
 import { useSyncExternalStore } from "react"
-import { arrangeTiles, clampPos, clampSize, columnsOf, findFreePlace, positionsFromSizes, rowsOf, type GridKind, type TileSize, type TilePos } from "@/lib/utils/dashboard/bento"
+import { arrangeTiles, clampPos, columnsOf, findFreePlace, rowsOf, type GridKind, type TilePos } from "@/lib/utils/dashboard/bento"
 
 /**
  * The flight dashboard's TILES in the pilot's own order, and whether they are
@@ -26,16 +26,18 @@ import { arrangeTiles, clampPos, clampSize, columnsOf, findFreePlace, positionsF
 // relevant widgets"): the four the deck starts with, and the ones a pilot can
 // add — the sun and night on the duty's legs, days off (para 5), the leg's
 // OFP from its briefing, and the logbook's month.
-export const DASHBOARD_TILES = ["flight", "airport", "currency", "limits", "sun", "daysOff", "briefing", "logbook"] as const
+// The duty is a tile of its own again (the owner, round 50: "split flight and
+// duty widget/card"), the flights tile with its crew on the right.
+export const DASHBOARD_TILES = ["flight", "duty", "airport", "currency", "limits", "sun", "daysOff", "briefing", "logbook"] as const
 export type DashboardTile = (typeof DASHBOARD_TILES)[number]
 
 /** The tiles a new device's deck shows. */
-export const DEFAULT_ENABLED: readonly DashboardTile[] = ["flight", "airport", "currency", "limits"]
+export const DEFAULT_ENABLED: readonly DashboardTile[] = ["flight", "duty", "airport", "currency", "limits"]
 
 const STORAGE_KEY = "ooo:dashboard-tiles"
 
 /** Tiles that became another: a stored order keeps the new one where the first of the old ones was. */
-const RENAMED: Record<string, string> = { weather: "airport", destination: "airport", duty: "flight" }
+const RENAMED: Record<string, string> = { weather: "airport", destination: "airport" }
 
 /** A stored order, put right: unknown ids dropped, duplicates removed, tiles added since appended. */
 export function normaliseTileOrder(stored: unknown): DashboardTile[] {
@@ -109,49 +111,53 @@ const DEFAULT_ORDER: DashboardTile[] = [...DASHBOARD_TILES]
 /* ── Places ─────────────────────────────────────────────────────────────── */
 
 /**
- * Each tile's PLACE by default on a phone's home screen — six columns by six
- * rows: the flights and the duty across the top two rows, the airport station
- * down the left half of the rest, the currency's dots over the limits beside it.
+ * Each tile's PLACE by default on a phone's home screen — six columns by FIVE
+ * rows under the timeline, which takes the sixth (the owner, round 50: "including
+ * the timeline it will be total of 6 rows"): the flights across the top two
+ * rows, the duty beside the currency, the airport station beside the limits.
  */
 export const DEFAULT_TILE_POSITIONS: Record<DashboardTile, TilePos> = {
   flight: { col: 0, row: 0, cols: 6, rows: 2 },
-  airport: { col: 0, row: 2, cols: 3, rows: 4 },
-  currency: { col: 3, row: 2, cols: 3, rows: 2 },
-  limits: { col: 3, row: 4, cols: 3, rows: 2 },
+  duty: { col: 0, row: 2, cols: 3, rows: 1 },
+  currency: { col: 3, row: 2, cols: 3, rows: 1 },
+  airport: { col: 0, row: 3, cols: 3, rows: 2 },
+  limits: { col: 3, row: 3, cols: 3, rows: 2 },
   // The tiles a pilot adds: their SIZE when added (`addTile` finds the place).
-  sun: { col: 0, row: 6, cols: 3, rows: 2 },
-  daysOff: { col: 3, row: 6, cols: 3, rows: 2 },
-  briefing: { col: 0, row: 8, cols: 6, rows: 2 },
-  logbook: { col: 0, row: 10, cols: 3, rows: 2 },
+  sun: { col: 0, row: 5, cols: 3, rows: 1 },
+  daysOff: { col: 3, row: 5, cols: 3, rows: 1 },
+  briefing: { col: 0, row: 6, cols: 6, rows: 1 },
+  logbook: { col: 0, row: 7, cols: 3, rows: 1 },
 }
 
 /**
- * The WIDE grid's (twelve columns by six rows — a desktop, an iPad on its
- * side): the flights and the duty across the top, the legs side by side with
- * the FDP beside them; the airport (its airports side by side) on the left
- * half, the currency over the limits on the right.
+ * The WIDE grid's (twelve columns by five rows under the timeline — a desktop,
+ * an iPad on its side): the flights and the duty across the top, the airport
+ * (its airports side by side) on the left, the currency over the limits on
+ * the right.
  */
 export const DEFAULT_WIDE_TILE_POSITIONS: Record<DashboardTile, TilePos> = {
-  flight: { col: 0, row: 0, cols: 12, rows: 2 },
-  airport: { col: 0, row: 2, cols: 6, rows: 4 },
-  currency: { col: 6, row: 2, cols: 6, rows: 2 },
-  limits: { col: 6, row: 4, cols: 6, rows: 2 },
-  sun: { col: 0, row: 6, cols: 4, rows: 2 },
-  daysOff: { col: 4, row: 6, cols: 4, rows: 2 },
-  briefing: { col: 0, row: 8, cols: 8, rows: 2 },
-  logbook: { col: 8, row: 6, cols: 4, rows: 2 },
+  flight: { col: 0, row: 0, cols: 8, rows: 2 },
+  duty: { col: 8, row: 0, cols: 4, rows: 2 },
+  airport: { col: 0, row: 2, cols: 6, rows: 3 },
+  currency: { col: 6, row: 2, cols: 6, rows: 1 },
+  limits: { col: 6, row: 3, cols: 6, rows: 2 },
+  sun: { col: 0, row: 5, cols: 4, rows: 2 },
+  daysOff: { col: 4, row: 5, cols: 4, rows: 2 },
+  briefing: { col: 0, row: 7, cols: 8, rows: 2 },
+  logbook: { col: 8, row: 5, cols: 4, rows: 2 },
 }
 
-/** An iPad held upright: twelve columns by EIGHT rows — the same tiles, taller. */
+/** An iPad held upright: twelve columns by SEVEN rows under the timeline — the same tiles, taller. */
 export const DEFAULT_TALL_TILE_POSITIONS: Record<DashboardTile, TilePos> = {
-  flight: { col: 0, row: 0, cols: 12, rows: 2 },
-  airport: { col: 0, row: 2, cols: 6, rows: 6 },
-  currency: { col: 6, row: 2, cols: 6, rows: 3 },
-  limits: { col: 6, row: 5, cols: 6, rows: 3 },
-  sun: { col: 0, row: 8, cols: 6, rows: 2 },
-  daysOff: { col: 6, row: 8, cols: 6, rows: 2 },
-  briefing: { col: 0, row: 10, cols: 12, rows: 2 },
-  logbook: { col: 0, row: 12, cols: 6, rows: 2 },
+  flight: { col: 0, row: 0, cols: 8, rows: 2 },
+  duty: { col: 8, row: 0, cols: 4, rows: 2 },
+  airport: { col: 0, row: 2, cols: 6, rows: 5 },
+  currency: { col: 6, row: 2, cols: 6, rows: 2 },
+  limits: { col: 6, row: 4, cols: 6, rows: 3 },
+  sun: { col: 0, row: 7, cols: 6, rows: 2 },
+  daysOff: { col: 6, row: 7, cols: 6, rows: 2 },
+  briefing: { col: 0, row: 9, cols: 12, rows: 2 },
+  logbook: { col: 0, row: 11, cols: 6, rows: 2 },
 }
 
 const DEFAULTS: Record<GridKind, Record<DashboardTile, TilePos>> = {
@@ -160,9 +166,10 @@ const DEFAULTS: Record<GridKind, Record<DashboardTile, TilePos>> = {
   tall: DEFAULT_TALL_TILE_POSITIONS,
 }
 
-/** The fewest columns a tile can take: the duty strip and the day bar need two thirds of a phone's row. */
+/** The fewest columns a tile can take: the flights need half a phone's row for a route. */
 export const TILE_MIN_COLS: Record<DashboardTile, number> = {
-  flight: 4,
+  flight: 3,
+  duty: 2,
   airport: 2,
   currency: 2,
   limits: 2,
@@ -175,6 +182,7 @@ export const TILE_MIN_COLS: Record<DashboardTile, number> = {
 /** The same on the wide grid: a column there is about the narrow grid's at 760px, more beyond it. */
 const TILE_MIN_COLS_WIDE: Record<DashboardTile, number> = {
   flight: 4,
+  duty: 3,
   airport: 3,
   currency: 3,
   limits: 3,
@@ -188,32 +196,13 @@ export function minColsOf(id: DashboardTile, grid: GridKind): number {
   return (grid === "narrow" ? TILE_MIN_COLS : TILE_MIN_COLS_WIDE)[id]
 }
 
-// v6: a tile has a PLACE on a fixed grid (the home screen), where it had a
-// size in an order that was packed. A stored layout of sizes is carried
-// across (`positionsFromSizes`), its rows scaled to the grid's new rows.
+// v7: five rows under the timeline, and the duty a tile of its own again —
+// a v6 layout (six rows, the duty inside the flights tile) is not carried
+// across: the defaults stand, the tiles the pilot added placed after them.
 const KEYS: Record<GridKind, string> = {
-  narrow: "ooo:dashboard-places:v6",
-  wide: "ooo:dashboard-places-wide:v6",
-  tall: "ooo:dashboard-places-tall:v6",
-}
-/** The layouts of sizes before places, and how many of their rows filled the screen. */
-const SIZE_KEYS: Record<GridKind, { key: string; rows: number }[]> = {
-  narrow: [
-    { key: "ooo:dashboard-sizes:v5", rows: 4 },
-    { key: "ooo:dashboard-sizes:v4", rows: 7 },
-  ],
-  wide: [{ key: "ooo:dashboard-sizes-wide:v2", rows: 4 }],
-  tall: [{ key: "ooo:dashboard-sizes-tall:v1", rows: 6 }],
-}
-
-/** A v4 size (rows as tall as their content, seven to a phone) on the four-row grid. */
-export function sizesFromV4(stored: unknown): unknown {
-  if (!stored || typeof stored !== "object") return null
-  const out: Record<string, TileSize> = {}
-  for (const [id, v] of Object.entries(stored as Record<string, Partial<TileSize>>)) {
-    if (v && typeof v === "object") out[id] = { cols: Number(v.cols) || 6, rows: Math.max(1, Math.round(((Number(v.rows) || 1) * 4) / 7)) }
-  }
-  return out
+  narrow: "ooo:dashboard-places:v7",
+  wide: "ooo:dashboard-places-wide:v7",
+  tall: "ooo:dashboard-places-tall:v7",
 }
 
 /**
@@ -224,10 +213,7 @@ export function sizesFromV4(stored: unknown): unknown {
 export function normaliseTilePositions(stored: unknown, grid: GridKind = "narrow", shown: readonly DashboardTile[] = DEFAULT_ENABLED): Record<DashboardTile, TilePos> {
   const out = { ...DEFAULTS[grid] }
   if (stored && typeof stored === "object") {
-    // A layout from before the flights tile took the duty's in starts the merged tile at its default.
-    const premerge = "duty" in (stored as object)
     for (const id of DASHBOARD_TILES) {
-      if (premerge && id === "flight") continue
       const v = (stored as Record<string, unknown>)[id]
       if (v && typeof v === "object") out[id] = clampPos(v as Partial<TilePos>, minColsOf(id, grid), columnsOf(grid), rowsOf(grid), true)
     }
@@ -237,21 +223,24 @@ export function normaliseTilePositions(stored: unknown, grid: GridKind = "narrow
   return out
 }
 
-/** A layout of SIZES (before places) as places, its rows scaled from `fromRows` to the grid's. */
-export function positionsFromStoredSizes(stored: unknown, tileOrder: readonly DashboardTile[], grid: GridKind, fromRows: number): Record<DashboardTile, TilePos> {
-  if (!stored || typeof stored !== "object") return { ...DEFAULTS[grid] }
+/**
+ * The defaults with the tiles the pilot ADDED (`shown`, beyond the defaults'
+ * own) each put in the first free place that holds it — where the grid has
+ * none, below it, and the grid scrolls until the pilot makes room.
+ */
+export function defaultPositions(grid: GridKind, shown: readonly DashboardTile[]): Record<DashboardTile, TilePos> {
+  const out = { ...DEFAULTS[grid] }
   const columns = columnsOf(grid)
-  const premerge = "duty" in (stored as object)
-  const sizes = {} as Record<DashboardTile, TileSize>
-  for (const id of DASHBOARD_TILES) {
-    const v = (stored as Record<string, Partial<TileSize>>)[id]
-    const d = DEFAULTS[grid][id]
-    sizes[id] =
-      v && typeof v === "object" && !(premerge && id === "flight")
-        ? clampSize(v, minColsOf(id, grid), columns, fromRows)
-        : { cols: d.cols, rows: Math.max(1, Math.round((d.rows * fromRows) / rowsOf(grid))) }
+  const rows = rowsOf(grid)
+  const placed: TilePos[] = shown.filter((id) => DEFAULT_ENABLED.includes(id)).map((id) => out[id])
+  for (const id of shown) {
+    if (DEFAULT_ENABLED.includes(id)) continue
+    const d = out[id]
+    const at = findFreePlace(placed, { cols: d.cols, rows: d.rows }, minColsOf(id, grid), columns, rows)
+    if (at) out[id] = at
+    placed.push(out[id])
   }
-  return normaliseTilePositions(positionsFromSizes(tileOrder.filter((id) => DEFAULT_ENABLED.includes(id)), sizes, columns, fromRows, rowsOf(grid)), grid)
+  return normaliseTilePositions(out, grid, shown)
 }
 
 const positions: Record<GridKind, Record<DashboardTile, TilePos>> = { ...DEFAULTS }
@@ -263,24 +252,11 @@ function hydratePositions(): void {
   hydrate()
   hydrateEnabled()
   try {
-    let changed = false
     for (const grid of ["narrow", "wide", "tall"] as const) {
       const raw = window.localStorage.getItem(KEYS[grid])
-      if (raw) {
-        positions[grid] = normaliseTilePositions(JSON.parse(raw), grid, enabled)
-        changed = true
-        continue
-      }
-      for (const old of SIZE_KEYS[grid]) {
-        const v = window.localStorage.getItem(old.key)
-        if (!v) continue
-        const parsed = old.key.endsWith(":v4") ? sizesFromV4(JSON.parse(v)) : JSON.parse(v)
-        positions[grid] = positionsFromStoredSizes(parsed, order, grid, old.key.endsWith(":v4") ? 4 : old.rows)
-        changed = true
-        break
-      }
+      positions[grid] = raw ? normaliseTilePositions(JSON.parse(raw), grid, enabled) : defaultPositions(grid, enabled)
     }
-    if (changed) emit()
+    emit()
   } catch {
     // The defaults stand.
   }
@@ -325,7 +301,9 @@ export function useArranging(): boolean {
 
 /* ── Which tiles are on the deck ─────────────────────────────────────────── */
 
-const ENABLED_KEY = "ooo:dashboard-widgets:v1"
+const ENABLED_KEY = "ooo:dashboard-widgets:v2"
+/** The list before the duty was its own tile again: carried across with the duty after the flights. */
+const ENABLED_KEY_V1 = "ooo:dashboard-widgets:v1"
 let enabled: DashboardTile[] = [...DEFAULT_ENABLED]
 let enabledHydrated = false
 
@@ -344,6 +322,15 @@ function hydrateEnabled(): void {
   try {
     const raw = window.localStorage.getItem(ENABLED_KEY)
     if (raw) enabled = normaliseEnabled(JSON.parse(raw))
+    else {
+      const v1 = window.localStorage.getItem(ENABLED_KEY_V1)
+      if (v1) {
+        const list = normaliseEnabled(JSON.parse(v1)).filter((id) => id !== "duty")
+        const at = list.indexOf("flight")
+        enabled = at < 0 ? ["duty", ...list] : [...list.slice(0, at + 1), "duty", ...list.slice(at + 1)]
+        saveEnabled()
+      }
+    }
   } catch {
     // The default set stands.
   }

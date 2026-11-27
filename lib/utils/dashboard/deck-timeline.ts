@@ -140,3 +140,33 @@ export function hourMarks(
   }
   return out
 }
+
+/**
+ * The duty before or after the one the page is about (the owner, round 50:
+ * "< and > to fast scroll to next duty or previous duty"), among those a
+ * pointer can choose, in order of their report. With nothing chosen, the
+ * first that starts after `atMs` (next) or ends before it (previous).
+ */
+export function neighbourDuty(blocks: readonly Selectable[], selectedId: string | null, atMs: number, dir: -1 | 1): Selectable | null {
+  const sorted = [...blocks].sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs)
+  const i = selectedId ? sorted.findIndex((b) => b.id === selectedId) : -1
+  if (i >= 0) return sorted[i + dir] ?? null
+  if (dir > 0) return sorted.find((b) => b.startMs > atMs) ?? null
+  for (let k = sorted.length - 1; k >= 0; k--) if (sorted[k].endMs < atMs) return sorted[k]
+  return null
+}
+
+/** The fewest and most pixels an hour takes when the timeline is zoomed (the owner: "expanded and contract"). */
+export const DECK_PX_PER_HOUR_MIN = 2
+export const DECK_PX_PER_HOUR_MAX = 72
+
+/**
+ * Every how many hours the timeline draws a tick and a label at its scale:
+ * a tick an hour while an hour has room for one (a bold one each sixth), the
+ * labels as often as they fit beside each other.
+ */
+export function deckSteps(pxPerHour: number): { tick: number; label: number } {
+  const tick = pxPerHour >= 5 ? 1 : pxPerHour >= 1.6 ? 6 : 24
+  const label = pxPerHour >= 28 ? 1 : pxPerHour >= 14 ? 3 : pxPerHour >= 7 ? 6 : pxPerHour >= 3.5 ? 12 : 24
+  return { tick, label }
+}

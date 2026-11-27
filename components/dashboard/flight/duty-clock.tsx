@@ -244,26 +244,62 @@ export function dutyClockView(brief: FlightBrief): DutyClockView | null {
   return null
 }
 
-/** The tile: the state and its line, the three figures (the timeline over the page draws the strip). */
-export function DutyClockFace({ brief, inCard = false }: { brief: FlightBrief; inCard?: boolean }) {
+/**
+ * The tile: the state and its line, the three figures (the timeline over the
+ * page draws the strip). It fits its SIZE (a face's — columns in thirds of a
+ * phone's row, rows in the old grid's): half a phone's row has room for two
+ * of the figures, a third for one; one short row sets the line smaller.
+ */
+export function DutyClockFace({ brief, inCard = false, size }: { brief: FlightBrief; inCard?: boolean; size?: { cols: number; rows: number } }) {
   const view = dutyClockView(brief)
   if (!view) return <DutyBand status={brief.status} now={brief.now} display={brief.display} />
   const t = TONE[view.stateTone]
   const lit = view.stateTone === "action_required" ? "text-destructive" : view.stateTone === "warning" ? "text-status-warning" : "text-foreground"
+  const cols = inCard ? 3 : (size?.cols ?? 3)
+  const short = !inCard && (size?.rows ?? 1) < 0.75
+  const figures = cols >= 2.5 ? 3 : cols >= 1.25 ? 2 : 1
+  // Narrower than a phone's row the captions are one word: "Rest", "Report".
+  const slots = view.slots.slice(0, figures).map((sl) => (cols >= 2.5 ? sl : { ...sl, label: compactCaption(sl.label) }))
   return (
     <section aria-label="Duty and FDP">
       {/* The maximum is not said up here as well: the FDP / Max figure below carries it. */}
-      <p className={cn("flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em]", t.text)} data-morph="duty-state">
+      <p className={cn("flex items-center gap-1.5 truncate text-[10px] font-bold uppercase tracking-[0.14em]", t.text)} data-morph="duty-state">
         {view.state}
       </p>
       {/* The reason, in its colour (dark cockpit: ink when all is well). */}
-      <p className={cn("mt-1 truncate text-[20px] font-semibold leading-[1.15] tracking-tight", lit)} suppressHydrationWarning data-morph="duty-headline">
-        {view.headline}
+      <p
+        className={cn(
+          "truncate font-semibold tracking-tight",
+          short || cols < 2.5 ? "mt-0.5 text-[16px] leading-[1.15]" : "mt-1 text-[20px] leading-[1.15]",
+          cols < 1.25 && "text-[14px]",
+          lit,
+        )}
+        suppressHydrationWarning
+        data-morph="duty-headline"
+      >
+        {cols < 2.5 ? compactHeadline(view.headline) : view.headline}
       </p>
       {/* In the card the three figures are rows of its table, and fly there. */}
-      {!inCard && <Scale slots={view.slots} />}
+      {!inCard && <Scale slots={slots} />}
     </section>
   )
+}
+
+/** The duty's line in fewer words, for a narrow tile: "Legal from 22:00Z" → "Legal 22:00Z". */
+export function compactHeadline(text: string): string {
+  return text
+    .replace(/^Legal from /, "Legal ")
+    .replace(/^Rest short by /, "Short ")
+    .replace(/^Rest until /, "Rest ")
+}
+
+/** A figure's caption in one word, for a tile narrower than a phone's row: "Min 10:00 + night" → "Rest". */
+export function compactCaption(label: string): string {
+  if (/^min\b/i.test(label)) return "Rest"
+  if (/^report\b/i.test(label)) return "Report"
+  if (/^from\b/i.test(label)) return "From"
+  if (/^fdp\s*\/\s*max/i.test(label)) return "FDP"
+  return label
 }
 
 /** The tile's edge: what its figures flag. */

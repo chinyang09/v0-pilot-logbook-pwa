@@ -4,7 +4,7 @@
  * page reads, the roster's forecast ahead of now.
  */
 import { describe, expect, it } from "vitest"
-import { deckRange, hourMarks, limitsAt, limitsTone, selectAt } from "../deck-timeline"
+import { deckRange, deckSteps, hourMarks, limitsAt, limitsTone, neighbourDuty, selectAt } from "../deck-timeline"
 import { buildDutyTimeline } from "@/lib/utils/roster/duty-timeline"
 import { createRollingIndex, rollingAt } from "@/lib/utils/roster/rolling-at"
 import type { DutyPeriod } from "@/types/entities/roster.types"
@@ -144,5 +144,27 @@ describe("hourMarks — the labels under the strip", () => {
       ["21:30", 3],
       ["00:30", 6],
     ])
+  })
+})
+
+describe("neighbourDuty — the < and > buttons", () => {
+  it("steps from the chosen duty to the one before or after it", () => {
+    expect(neighbourDuty([c, a, b], "b", 0, 1)?.id).toBe("c")
+    expect(neighbourDuty([c, a, b], "b", 0, -1)?.id).toBe("a")
+    expect(neighbourDuty([a, b, c], "c", 0, 1)).toBeNull()
+    expect(neighbourDuty([a, b, c], "a", 0, -1)).toBeNull()
+  })
+  it("with nothing chosen, from the instant", () => {
+    expect(neighbourDuty([a, b, c], null, at("2026-11-04T00:00:00Z"), 1)?.id).toBe("b")
+    expect(neighbourDuty([a, b, c], null, at("2026-11-04T00:00:00Z"), -1)?.id).toBe("a")
+  })
+})
+
+describe("deckSteps — ticks and labels at every zoom", () => {
+  it("a tick an hour while an hour has room, labels as often as they fit", () => {
+    expect(deckSteps(30)).toEqual({ tick: 1, label: 1 })
+    expect(deckSteps(17)).toEqual({ tick: 1, label: 3 })
+    expect(deckSteps(8)).toEqual({ tick: 1, label: 6 })
+    expect(deckSteps(3)).toEqual({ tick: 6, label: 24 })
   })
 })

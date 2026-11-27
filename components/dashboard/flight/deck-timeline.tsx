@@ -20,15 +20,31 @@
  * | the limits | read at the pointer, minute by minute (`useDeckPointer`) |
  * | a tap on a duty | brings it to the pointer |
  * | following now | until it is scrolled; back within ten minutes of now it follows again, and the header's Now brings it home |
+ * | < and > | the duty before or after the one chosen (`neighbourDuty`) |
+ * | zoom | a pinch, ctrl-wheel or − / + keys — an hour from 2px to 72px, the pointer's instant held still |
  *
- * The hour lines are two repeating gradients on one element, not a node an
- * hour; the labels under them are drawn only around what is on screen.
+ * It is one ROW of the deck tall (`height`, the grid's row). The hour lines
+ * are drawn as LINES, each on a whole pixel — a thin one an hour, a bold one
+ * each sixth — and only round what is on screen (`deckSteps`): the repeating
+ * gradients they were drawn with landed between device pixels at the strip's
+ * fractional scale and blurred, and the thin ones vanished (the owner's
+ * report, round 50).
  */
 
 import * as React from "react"
 import { cn } from "@/lib/utils"
 import type { DutyBlock } from "@/lib/utils/roster/duty-timeline"
-import { deckRange, hourMarks, selectAt, type Selectable } from "@/lib/utils/dashboard/deck-timeline"
+import { ChevronLeft, ChevronRight } from "lucide-react"
+import {
+  DECK_PX_PER_HOUR_MAX,
+  DECK_PX_PER_HOUR_MIN,
+  deckRange,
+  deckSteps,
+  hourMarks,
+  neighbourDuty,
+  selectAt,
+  type Selectable,
+} from "@/lib/utils/dashboard/deck-timeline"
 import { setChosenDuty } from "@/hooks/use-dashboard-duty"
 import { requestDeckNow, setDeckPointer, setDeckSettled, useDeckNowRequest, useDeckPointer } from "@/hooks/use-deck-pointer"
 
@@ -52,9 +68,17 @@ export interface DeckTimelineProps {
   day: (ms: number) => string
   /** The page is on screen: the timeline follows the clock only then. */
   active: boolean
+  /** Its height, px — one row of the deck's grid. */
+  height: number
 }
 
-export function DeckTimeline({ blocks, selectable, selectedId, now, zulu, clock, day, active }: DeckTimelineProps) {
+/** The top line (the pointer's label, the days) and the bottom one (the hours), px. */
+const TOP_PX = 18
+const FOOT_PX = 14
+/** How strongly a unit of a trackpad pinch's (ctrl-wheel) delta zooms. */
+const WHEEL_ZOOM = 0.01
+
+export function DeckTimeline({ blocks, selectable, selectedId, now, zulu, clock, day, active, height }: DeckTimelineProps) {
   const scrollRef = React.useRef<HTMLDivElement>(null)
   const [width, setWidth] = React.useState(0)
   React.useLayoutEffect(() => {
@@ -65,7 +89,9 @@ export function DeckTimeline({ blocks, selectable, selectedId, now, zulu, clock,
     return () => ro.disconnect()
   }, [])
 
-  const pxH = pxPerHourFor(width || 360)
+  // The scale: the width's default until the pilot zooms (kept while the page is up).
+  const [zoom, setZoom] = React.useState<number | null>(null)
+  const pxH = zoom ?? pxPerHourFor(width || 360)
   const midnight = React.useCallback(
     (ms: number) => {
       const d = new Date(ms)
@@ -82,7 +108,8 @@ export function DeckTimeline({ blocks, selectable, selectedId, now, zulu, clock,
     () => deckRange(blocks, nowDay * 24 * H, midnight),
     [blocks, nowDay, midnight],
   )
-  const pad = width / 2
+  // Whole pixels: every line drawn on the strip lands on one.
+  const pad = Math.round(width / 2)
   const xOf = React.useCallback((ms: number) => ((ms - fromMs) / H) * pxH, [fromMs, pxH])
   const tOf = React.useCallback((x: number) => fromMs + (x / pxH) * H, [fromMs, pxH])
   const inner = xOf(toMs)
@@ -194,37 +221,103 @@ export function DeckTimeline({ blocks, selectable, selectedId, now, zulu, clock,
   }, [viewOf])
   const labelFrom = tOf(Math.max(0, (view - 2) * (width / 2)))
   const labelTo = tOf((view + 4) * (width / 2))
-  const marks = React.useMemo(
-    () => (width ? hourMarks(Math.max(fromMs, labelFrom), Math.min(toMs, labelTo), midnight(fromMs), hourOf, pxH >= 20 ? 3 : 6) : []),
-    [width, fromMs, toMs, labelFrom, labelTo, midnight, hourOf, pxH],
+  const steps = deckSteps(pxH)
+  const ticks = React.useMemo(
+    () => (width ? hourMarks(Math.max(fromMs, labelFrom), Math.min(toMs, labelTo), midnight(fromMs), hourOf, steps.tick) : []),
+    [width, fromMs, toMs, labelFrom, labelTo, midnight, hourOf, steps.tick],
   )
+  const marks = React.useMemo(() => ticks.filter((m) => m.hour % steps.label === 0 || (steps.label >= 24 && m.midnight)), [ticks, steps.label])
 
-  const gridLines = React.useMemo(() => {
-    const minor = "color-mix(in oklch, var(--foreground) 14%, transparent)"
-    const major = "color-mix(in oklch, var(--foreground) 42%, transparent)"
-    // From a midnight of the display clock: every hour, every sixth bold.
-    const offset = xOf(midnight(fromMs))
-    return {
-      backgroundImage: `repeating-linear-gradient(90deg, ${major} 0 1.5px, transparent 1.5px ${6 * pxH}px), repeating-linear-gradient(90deg, ${minor} 0 1px, transparent 1px ${pxH}px)`,
-      backgroundPosition: `${offset - 0.75}px 0, ${offset - 0.5}px 0`,
+  const go = React.useCallback((b: Selectable) => placeAt(b.startMs + (b.endMs - b.startMs) / 2, true), [placeAt])
+  const step = (dir: -1 | 1) => {
+    const b = neighbourDuty(choosable, selectedId, pointerRef.current ?? nowRef.current, dir)
+    if (b) go(b)
+  }
+  const prev = neighbourDuty(choosable, selectedId, pointer ?? now, -1)
+  const next = neighbourDuty(choosable, selectedId, pointer ?? now, 1)
+
+  // Zoom about the pointer: the layout effect above puts the pointer's
+  // instant back under it at the new scale.
+  const zoomBy = React.useCallback(
+    (f: number) => setZoom((z) => Math.min(DECK_PX_PER_HOUR_MAX, Math.max(DECK_PX_PER_HOUR_MIN, (z ?? pxPerHourFor(width || 360)) * f))),
+    [width],
+  )
+  const zoomRef = React.useRef(zoom)
+  React.useEffect(() => {
+    zoomRef.current = zoom
+  }, [zoom])
+  // A pinch (two fingers) and a trackpad's (ctrl-wheel): native listeners, so
+  // the touchmove can stop the browser's own handling of the gesture.
+  React.useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    let pinch: { spread: number; px: number } | null = null
+    let raf = 0
+    let pending: number | null = null
+    const flush = () => {
+      raf = 0
+      if (pending === null) return
+      const px = pending
+      pending = null
+      setZoom(Math.min(DECK_PX_PER_HOUR_MAX, Math.max(DECK_PX_PER_HOUR_MIN, px)))
     }
-  }, [xOf, midnight, fromMs, pxH])
-
-  const go = React.useCallback((b: DutyBlock) => placeAt(b.startMs + (b.endMs - b.startMs) / 2, true), [placeAt])
+    const queue = (px: number) => {
+      pending = px
+      if (!raf) raf = requestAnimationFrame(flush)
+    }
+    const spread = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+    const current = () => zoomRef.current ?? pxPerHourFor(el.clientWidth || 360)
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) pinch = { spread: spread(e.touches), px: current() }
+    }
+    const onMove = (e: TouchEvent) => {
+      if (e.touches.length !== 2 || !pinch) return
+      e.preventDefault()
+      const d = spread(e.touches)
+      if (d > 0 && pinch.spread > 0) queue((pinch.px * d) / pinch.spread)
+    }
+    const onEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) pinch = null
+    }
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      queue((pending ?? current()) * Math.exp(-e.deltaY * WHEEL_ZOOM))
+    }
+    const onGesture = (e: Event) => e.preventDefault()
+    el.addEventListener("touchstart", onStart, { passive: true })
+    el.addEventListener("touchmove", onMove, { passive: false })
+    el.addEventListener("touchend", onEnd, { passive: true })
+    el.addEventListener("touchcancel", onEnd, { passive: true })
+    el.addEventListener("wheel", onWheel, { passive: false })
+    el.addEventListener("gesturestart", onGesture)
+    return () => {
+      cancelAnimationFrame(raf)
+      el.removeEventListener("touchstart", onStart)
+      el.removeEventListener("touchmove", onMove)
+      el.removeEventListener("touchend", onEnd)
+      el.removeEventListener("touchcancel", onEnd)
+      el.removeEventListener("wheel", onWheel)
+      el.removeEventListener("gesturestart", onGesture)
+    }
+  }, [])
+  // The strip between the top line and the hours; the bars in its middle.
+  const stripH = Math.max(28, height - TOP_PX - FOOT_PX)
+  const barH = Math.min(40, Math.max(18, Math.round(stripH * 0.62)))
 
   return (
-    <div className="relative shrink-0 overflow-hidden rounded-2xl border border-border bg-card" aria-label="Duty timeline">
+    <div className="relative shrink-0 overflow-hidden rounded-2xl border border-border bg-card" style={{ height }} aria-label="Duty timeline">
       <div
         ref={scrollRef}
         onScroll={() => {
           onScroll()
           onScrollLabels()
         }}
-        className="overflow-x-auto overflow-y-hidden overscroll-contain scrollbar-hide [mask-image:linear-gradient(90deg,transparent,black_18px,black_calc(100%-18px),transparent)]"
+        className="h-full overflow-x-auto overflow-y-hidden overscroll-contain scrollbar-hide [mask-image:linear-gradient(90deg,transparent,black_28px,black_calc(100%-28px),transparent)]"
         style={{ touchAction: "pan-x" }}
         // A mouse wheel turns the strip as a trackpad's sideways swipe does.
         onWheel={(e) => {
-          if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) scrollRef.current?.scrollBy({ left: e.deltaY })
+          if (!e.ctrlKey && Math.abs(e.deltaY) > Math.abs(e.deltaX)) scrollRef.current?.scrollBy({ left: e.deltaY })
         }}
         role="slider"
         tabIndex={0}
@@ -236,28 +329,45 @@ export function DeckTimeline({ blocks, selectable, selectedId, now, zulu, clock,
         onKeyDown={(e) => {
           const el = scrollRef.current
           if (!el) return
-          const step = e.shiftKey ? 24 : 1
-          if (e.key === "ArrowLeft") el.scrollBy({ left: -step * pxH })
-          else if (e.key === "ArrowRight") el.scrollBy({ left: step * pxH })
+          const k = e.shiftKey ? 24 : 1
+          if (e.key === "ArrowLeft") el.scrollBy({ left: -k * pxH })
+          else if (e.key === "ArrowRight") el.scrollBy({ left: k * pxH })
           else if (e.key === "Home") requestDeckNow()
+          else if (e.key === "+" || e.key === "=") zoomBy(1.5)
+          else if (e.key === "-") zoomBy(1 / 1.5)
+          else if (e.key === "PageDown") step(1)
+          else if (e.key === "PageUp") step(-1)
           else return
           e.preventDefault()
         }}
       >
-        <div className="relative h-[60px]" style={{ width: inner + width }}>
+        <div className="relative h-full" style={{ width: inner + 2 * pad }}>
           <div className="absolute inset-y-0" style={{ left: pad, width: inner }}>
             {/* The days, at their midnights. */}
-            <DayLabels midnights={marks.filter((m) => m.midnight).map((m) => m.ms)} xOf={xOf} day={day} now={now} />
-            {/* The hour lines, the bars over their top 18px. */}
-            <div className="absolute inset-x-0 top-[17px] h-6" style={gridLines}>
-              <Bars blocks={blocks} xOf={xOf} now={now} selectedId={selectedId} selectable={selectable} toMs={toMs} onPick={go} />
-              {now > fromMs && now < toMs && (
-                <span className="absolute -top-0.5 h-[22px] w-0.5 -translate-x-1/2 rounded-full bg-foreground" style={{ left: xOf(now) }} />
-              )}
+            <DayLabels midnights={ticks.filter((m) => m.midnight).map((m) => m.ms)} xOf={xOf} day={day} now={now} />
+            {/* The hour lines, the strip's full height — each on a whole pixel. */}
+            <div aria-hidden className="pointer-events-none absolute inset-x-0" style={{ top: TOP_PX, height: stripH }}>
+              {ticks.map((m) => {
+                const major = m.hour % 6 === 0
+                return (
+                  <span
+                    key={m.ms}
+                    className={cn("absolute inset-y-0", major ? "w-[2px] bg-foreground/45" : "w-px bg-foreground/[0.16]")}
+                    style={{ left: Math.round(xOf(m.ms)) - (major ? 1 : 0) }}
+                  />
+                )
+              })}
             </div>
-            <div className="absolute inset-x-0 top-[43px] h-3 text-[9px] tabular-nums text-muted-foreground">
+            {/* The bars, in the strip's middle. */}
+            <div className="absolute inset-x-0" style={{ top: TOP_PX + Math.round((stripH - barH) / 2), height: barH }}>
+              <Bars blocks={blocks} xOf={xOf} now={now} selectedId={selectedId} selectable={selectable} toMs={toMs} onPick={go} />
+            </div>
+            {now > fromMs && now < toMs && (
+              <span className="pointer-events-none absolute w-0.5 rounded-full bg-foreground" style={{ left: Math.round(xOf(now)) - 1, top: TOP_PX, height: stripH }} />
+            )}
+            <div className="absolute inset-x-0 h-3 text-[9px] tabular-nums text-muted-foreground" style={{ top: TOP_PX + stripH + 1 }}>
               {marks.map((m) => (
-                <span key={m.ms} className="absolute -translate-x-1/2" style={{ left: xOf(m.ms) }}>
+                <span key={m.ms} className={cn("absolute -translate-x-1/2", m.hour % 6 === 0 && "font-semibold text-foreground/75")} style={{ left: Math.round(xOf(m.ms)) }}>
                   {String(m.hour).padStart(2, "0")}
                 </span>
               ))}
@@ -266,9 +376,34 @@ export function DeckTimeline({ blocks, selectable, selectedId, now, zulu, clock,
         </div>
       </div>
       {/* The pointer: fixed at the centre, the instant under it named above. */}
-      <span aria-hidden className="pointer-events-none absolute bottom-[14px] left-1/2 top-[14px] w-0.5 -translate-x-1/2 rounded-full bg-primary" />
+      <span aria-hidden className="pointer-events-none absolute left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-primary" style={{ top: TOP_PX - 2, height: stripH + 4 }} />
       <PointerLabel clock={clock} day={day} now={now} />
+      {/* The duty before and after the chosen one. */}
+      <JumpButton dir={-1} disabled={!prev} onClick={() => step(-1)} top={TOP_PX + stripH / 2} label={prev ? `Previous duty, ${day(prev.startMs)}` : "No earlier duty"} />
+      <JumpButton dir={1} disabled={!next} onClick={() => step(1)} top={TOP_PX + stripH / 2} label={next ? `Next duty, ${day(next.startMs)}` : "No later duty"} />
     </div>
+  )
+}
+
+/** A < or > at the strip's edge: the duty before or after the chosen one. */
+function JumpButton({ dir, disabled, onClick, top, label }: { dir: -1 | 1; disabled: boolean; onClick: () => void; top: number; label: string }) {
+  const Icon = dir < 0 ? ChevronLeft : ChevronRight
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      className={cn(
+        "control-surface absolute flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-foreground transition-opacity",
+        "after:absolute after:-inset-1.5 after:content-['']",
+        dir < 0 ? "left-1.5" : "right-1.5",
+        disabled && "opacity-30",
+      )}
+      style={{ top }}
+    >
+      <Icon className="h-4 w-4" aria-hidden />
+    </button>
   )
 }
 
@@ -337,11 +472,11 @@ const Bars = React.memo(function Bars({
   selectedId: string | null
   selectable: ReadonlySet<string>
   toMs: number
-  onPick: (b: DutyBlock) => void
+  onPick: (b: Selectable) => void
 }) {
   const span = (a: number, b: number) => ({ left: xOf(a), width: Math.max(1, xOf(Math.max(a, b)) - xOf(a)) })
   return (
-    <div aria-hidden className="absolute inset-x-0 top-0 h-[18px]">
+    <div aria-hidden className="absolute inset-0">
       {blocks.map((b) => {
         const rest = b.restBefore
         const after = b.restAfter
@@ -355,21 +490,21 @@ const Bars = React.memo(function Bars({
             {rest && (
               <>
                 <span
-                  className="absolute inset-y-[6px] rounded-l-[2px] bg-foreground/30"
+                  className="absolute inset-y-[33%] rounded-l-[2px] bg-foreground/30"
                   style={span(rest.startMs, Math.min(rest.minimumEndMs ?? b.startMs, b.startMs))}
                 />
                 {rest.minimumEndMs !== null && b.startMs > rest.minimumEndMs && (
-                  <span className="absolute inset-y-[6px] bg-foreground/12" style={span(rest.minimumEndMs, b.startMs)} />
+                  <span className="absolute inset-y-[33%] bg-foreground/12" style={span(rest.minimumEndMs, b.startMs)} />
                 )}
                 {rest.status === "short" && rest.minimumEndMs !== null && rest.minimumEndMs > b.startMs && (
-                  <span className="absolute inset-y-[4px] bg-destructive" style={span(b.startMs, rest.minimumEndMs)} />
+                  <span className="absolute inset-y-[25%] bg-destructive" style={span(b.startMs, rest.minimumEndMs)} />
                 )}
               </>
             )}
             {after && (
               <>
-                <span className="absolute inset-y-[6px] rounded-l-[2px] bg-foreground/30" style={span(after.startMs, after.minimumEndMs)} />
-                <span className="absolute inset-y-[6px] bg-foreground/12" style={span(after.minimumEndMs, toMs)} />
+                <span className="absolute inset-y-[33%] rounded-l-[2px] bg-foreground/30" style={span(after.startMs, after.minimumEndMs)} />
+                <span className="absolute inset-y-[33%] bg-foreground/12" style={span(after.minimumEndMs, toMs)} />
               </>
             )}
             <span
@@ -392,7 +527,7 @@ const Bars = React.memo(function Bars({
               s.positioning || s.simulator ? null : (
                 <span
                   key={s.id}
-                  className={cn("pointer-events-none absolute inset-y-[3px] rounded-[2px]", s.planned ? "bg-primary" : "bg-foreground/55")}
+                  className={cn("pointer-events-none absolute inset-y-[18%] rounded-[2px]", s.planned ? "bg-primary" : "bg-foreground/55")}
                   style={span(s.outMs, s.inMs)}
                 />
               ),
@@ -406,7 +541,7 @@ const Bars = React.memo(function Bars({
                 <span className="pointer-events-none absolute -inset-y-1.5 w-0.5 -translate-x-1/2 rounded-full bg-foreground/70" style={{ left: xOf(b.fdpLimitMs!) }} />
               </>
             )}
-            {over && <span className="pointer-events-none absolute inset-y-[3px] bg-destructive" style={span(b.fdpLimitMs!, b.fdpEndMs)} />}
+            {over && <span className="pointer-events-none absolute inset-y-[18%] bg-destructive" style={span(b.fdpLimitMs!, b.fdpEndMs)} />}
           </React.Fragment>
         )
       })}

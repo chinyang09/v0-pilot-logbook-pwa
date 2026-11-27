@@ -64,7 +64,10 @@ export function Pager({
   dotTone,
   below,
   bleed = false,
+  dots = true,
 }: {
+  /** Draw the dots — a tile one short row tall has no room for them (a swipe still pages). */
+  dots?: boolean
   /**
    * The window reaches 8px past the content on each side and every page
    * carries its own 8px gutter, so what a page draws a little OUTSIDE its
@@ -232,7 +235,7 @@ export function Pager({
         </div>
       </div>
       {below}
-      <div aria-hidden className={cn("flex justify-center", fill ? "pt-1.5" : "mt-1.5")}>
+      <div aria-hidden className={cn("flex justify-center", fill ? "pt-1.5" : "mt-1.5", !dots && "hidden")}>
         {/* The dots themselves fly, not the row: a full-width row centres
             them at the tile's width and at the card's, and its copies
             crossfaded between two places. */}

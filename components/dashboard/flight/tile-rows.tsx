@@ -70,7 +70,7 @@ export function TileRows({
       <div ref={box} className="absolute inset-0 overflow-hidden">
         {/* A caption only over rows that are shown. */}
         {caption && (
-          <p data-caption="" className={cn("pt-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground", fit === 0 && "invisible")}>
+          <p data-caption="" className={cn("truncate pt-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground", fit === 0 && "invisible")}>
             {caption}
           </p>
         )}
