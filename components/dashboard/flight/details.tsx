@@ -15,6 +15,7 @@ import { useRouter } from "next/navigation"
 import { RefreshCw } from "lucide-react"
 import { useDetailPanel } from "@/hooks/use-detail-panel"
 import { dutyWindow, formatDutyClock, formatRestSpan } from "@/lib/utils/dashboard/duty-status"
+import { circadianWords } from "./duty-clock"
 import type { Requirement } from "@/lib/utils/dashboard/legality"
 import { cn } from "@/lib/utils"
 import { formatDay } from "@/lib/utils/date"
@@ -254,6 +255,9 @@ interface DutyRow {
   /** Several values on one row, each under a small helper ("Sch", "Max") —
    *  the card draws these; `value` / `sub` say the same for a plain row. */
   pairs?: { helper: string; value: string; slot?: number }[]
+  /** Said in the card only — context, not a glance (the last duty: the owner,
+   *  round 51: "show last duty in expanded. Not that important in widget"). */
+  cardOnly?: boolean
 }
 
 const MIN_MS = 60_000
@@ -268,6 +272,16 @@ const MIN_MS = 60_000
  * three figures are rows here, and fly into them.
  */
 export function dutyRows(brief: FlightBrief): DutyRow[] {
+  const rows = dutyRowsOf(brief)
+  // What the duty asks of the body (para 4's early start, late finish and
+  // window of circadian low) — said on the face, so the card's alone.
+  const fatigue = circadianWords(brief, true)
+  return rows.length && fatigue.length
+    ? [...rows, { label: "Circadian", value: fatigue.join(" · "), sub: "Plan the sleep before it", cardOnly: true }]
+    : rows
+}
+
+function dutyRowsOf(brief: FlightBrief): DutyRow[] {
   const { status, duty, clock, day } = brief
   const { phase, active, next, lastDuty, rest } = status.duty
   const lastArrive = duty.times.reduce<number | null>((m, t) => (t.arriveMs !== null && (m === null || t.arriveMs > m) ? t.arriveMs : m), null)
@@ -298,7 +312,7 @@ export function dutyRows(brief: FlightBrief): DutyRow[] {
     slot,
   })
   const last: DutyRow[] = lastDuty
-    ? [{ label: "Last Duty", value: lastDuty.route || formatDutyClock(lastDuty.elapsedMinutes), sub: `Off ${clock(lastDuty.debriefMs)} · ${day(lastDuty.debriefMs)}` }]
+    ? [{ label: "Last Duty", value: lastDuty.route || formatDutyClock(lastDuty.elapsedMinutes), sub: `Off ${clock(lastDuty.debriefMs)} · ${day(lastDuty.debriefMs)}`, cardOnly: true }]
     : []
 
   /* A STANDBY: its window, what it counts toward the limits (para 6(7):
