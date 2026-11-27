@@ -78,7 +78,7 @@ import { daysOffAt, legSun, logbookMonth, ofpBrief, sunEvents } from "@/lib/util
 import { analyseDaysOff } from "@/lib/utils/roster/days-off"
 import { hasCoordinates } from "@/lib/utils/flight-calculations"
 import { BriefingFace, DaysOffFace, LogbookFace, SunFace, briefingTone, daysOffTone, logbookTone } from "./flight/extra-widgets"
-import { arrangeTiles, columnsOf, faceSizeOn, gridKindFor, rowHeightFor, rowsOf, type GridKind, type TileSize } from "@/lib/utils/dashboard/bento"
+import { ROW_FLOOR_PX, arrangeTiles, columnsOf, faceSizeOn, gridKindFor, rowHeightFor, rowsOf, type GridKind, type TileSize } from "@/lib/utils/dashboard/bento"
 import { Widget, WidgetSheet, type WidgetAnchor, type WidgetId } from "./flight/widget"
 import type { DutyChoice, FlightBrief } from "./flight/model"
 import type { DutyPeriod } from "@/types/entities/roster.types"
@@ -108,9 +108,9 @@ function tileTones(brief: FlightBrief): Partial<Record<WidgetId, RequirementStat
   // The flights tile: a leg still to fly that the sources now expect late,
   // or whose inbound aeroplane lands too late to turn round in time.
   const flightLate = brief.duty.legs.some((_, i) => legDelay(brief, i) !== null || inboundLate(brief, i))
-  // One tile for the flights and the duty: the worse of the two.
   return {
-    flight: worstOf([dutyTone(brief), flightLate ? "caution" : null].filter((t): t is RequirementState => t !== null)),
+    duty: dutyTone(brief),
+    flight: flightLate ? "caution" : null,
     airport: airportPoor ? "caution" : null,
     currency: worstOf(currencyRows(brief).map((r) => r.state)),
     // The limits as the timeline's pointer reads them (`limitsAt`), once it has come to rest.
@@ -166,41 +166,24 @@ function faceOf(id: WidgetId, brief: FlightBrief, size: TileSize, inCard = false
   // card holds (`TileRows`).
   const wide = !inCard && fill
   switch (id) {
-    case "flight":
-      // A standby, or no duty with flights, is the duty clock's own face; on
-      // the wide grid it says the rest of its card's table under it.
-      if (brief.duty.atMs === null || brief.duty.standby)
-        return (
-          <>
-            <DutyFace brief={brief} inCard={inCard} />
-            {wide && (
-              <TileRows
-                stacked
-                rows={dutyRows(brief)
-                  .filter((r) => r.slot === undefined)
-                  .map((r) => ({ key: r.label, label: r.label, value: r.value, sub: r.sub, tone: r.tone }))}
-              />
-            )}
-          </>
-        )
+    case "duty":
+      // The duty clock's face; a tile with room says the rest of its card's table under it.
       return (
-        <FlightFace
-          brief={brief}
-          size={size}
-          inCard={inCard}
-          fill={wide}
-          dutyMore={
-            wide ? (
-              <TileRows
-                stacked
-                rows={dutyRows(brief)
-                  .filter((r) => r.slot === undefined)
-                  .map((r) => ({ key: r.label, label: r.label, value: r.value, sub: r.sub, tone: r.tone }))}
-              />
-            ) : undefined
-          }
-        />
+        <>
+          <DutyFace brief={brief} inCard={inCard} size={size} />
+          {/* Narrower than a phone's row, the value alone: its words would be cut. */}
+          {wide && (
+            <TileRows
+              stacked
+              rows={dutyRows(brief)
+                .filter((r) => r.slot === undefined)
+                .map((r) => ({ key: r.label, label: r.label, value: r.value, sub: size.cols >= 2.5 ? r.sub : undefined, tone: r.tone }))}
+            />
+          )}
+        </>
       )
+    case "flight":
+      return <FlightFace brief={brief} size={size} inCard={inCard} fill={wide} />
     case "airport":
       return <AirportFace brief={brief} size={size} />
     case "currency":
@@ -210,9 +193,9 @@ function faceOf(id: WidgetId, brief: FlightBrief, size: TileSize, inCard = false
         <>
           <LimitsFace brief={brief} size={size} fill={wide} />
           {/* How much later the duty can run inside each window (the card's). */}
-          {wide && brief.margin && (
+          {wide && brief.margin && size.cols >= 1.25 && (
             <TileRows
-              caption="If This Duty Runs Late"
+              caption={size.cols >= 2.5 ? "If This Duty Runs Late" : "If Late"}
               rows={brief.margin.each
                 .filter((e) => e.limit !== "FDP")
                 .map((e) => ({
@@ -242,11 +225,11 @@ function faceOf(id: WidgetId, brief: FlightBrief, size: TileSize, inCard = false
     case "sun":
       return <SunFace brief={brief} />
     case "daysOff":
-      return <DaysOffFace brief={brief} />
+      return <DaysOffFace brief={brief} size={size} />
     case "briefing":
       return <BriefingFace brief={brief} />
     case "logbook":
-      return <LogbookFace brief={brief} />
+      return <LogbookFace brief={brief} size={size} />
   }
 }
 
@@ -266,10 +249,10 @@ export function FlightDashboard({ className }: { className?: string }) {
   // The tiles ON the deck (the pilot adds and removes them in Arrange).
   const enabledList = useEnabledTiles()
   const enabled = React.useMemo(() => new Set(enabledList), [enabledList])
-  // The box the tiles have decides the grid — six columns or twelve, held
-  // landscape or upright (`gridKindFor`) — and its ROW height: the box's
-  // height shared out among the grid's rows (`rowHeightFor`), so a tile's
-  // rows are a fixed size, not its content's. Read in a ResizeObserver; the
+  // The deck's box decides the grid — six columns or twelve, held landscape
+  // or upright (`gridKindFor`) — and its ROW height: the box's height shared
+  // out among the grid's rows and the timeline's (`rowHeightFor`), so a
+  // tile's rows are a fixed size, not its content's, and the timeline is one. Read in a ResizeObserver; the
   // first answer is rendered before the frame paints (flushSync), so a
   // desktop never shows the phone's grid.
   const [gridBox, setGridBox] = React.useState<{ grid: GridKind; px: number; rowPx: number }>({ grid: "narrow", px: 0, rowPx: 0 })
@@ -658,7 +641,7 @@ export function FlightDashboard({ className }: { className?: string }) {
   // Nov 2026: "not applicable"; a home screen keeps its places). The
   // flight & duty tile reads the standby.
   const shown = React.useMemo(
-    () => order.filter((id) => enabled.has(id) && !(standby && id === "airport")),
+    () => order.filter((id) => enabled.has(id) && !(standby && (id === "airport" || id === "flight"))),
     [order, enabled, standby],
   )
   // Where each tile sits — a card opens from its tile at that size.
@@ -734,7 +717,7 @@ export function FlightDashboard({ className }: { className?: string }) {
     </Widget>
   )
   return (
-    <div className={cn("@container flex min-h-0 flex-1 flex-col", className)}>
+    <div ref={gridRef} className={cn("@container flex min-h-0 flex-1 flex-col", className)}>
       {/* The timeline: scrolled, it chooses the duty every tile is about. */}
       <DeckTimeline
         blocks={blocks}
@@ -745,6 +728,7 @@ export function FlightDashboard({ className }: { className?: string }) {
         clock={brief.clock}
         day={brief.day}
         active={isActive}
+        height={Math.max(ROW_FLOOR_PX, rowPx)}
       />
       <div className="h-2 shrink-0" />
       {/* Scrolls only as a LAST RESORT: every tile fits a phone held upright
@@ -752,7 +736,6 @@ export function FlightDashboard({ className }: { className?: string }) {
           tiles scroll rather than being squeezed out of sight. */}
       <BentoGrid
         grid={grid}
-        gridRef={gridRef}
         rowPx={rowPx}
         order={shown}
         positions={positions}

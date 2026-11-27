@@ -117,28 +117,66 @@ export function daysOffTone(brief: FlightBrief): "fail" | "caution" | null {
   return null
 }
 
-export function DaysOffFace({ brief }: { brief: FlightBrief }) {
+/**
+ * The run since the last day off as SEVEN PILLS (para 5(4)(a) allows seven
+ * dates between days off): one lit per date worked, the run's last past
+ * seven red. A picture reads before "Day 6 of 7" does (the owner, round 50:
+ * "use lesser words, diagrams, charts").
+ */
+function RunPills({ day, tone }: { day: number; tone: string }) {
+  const n = Math.max(7, day)
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-[3px]" aria-label={`Date ${day} of 7 since the last day off`}>
+      {Array.from({ length: n }, (_, i) => (
+        <span
+          key={i}
+          className={cn(
+            "h-2 min-w-0 flex-1 rounded-full",
+            i >= day ? "bg-foreground/15" : i >= 7 ? "bg-destructive" : tone === "fail" ? "bg-destructive" : tone === "caution" ? "bg-status-warning" : "bg-foreground/70",
+          )}
+        />
+      ))}
+    </span>
+  )
+}
+
+export function DaysOffFace({ brief, size }: { brief: FlightBrief; size: { cols: number; rows: number } }) {
   const d = brief.extras.daysOff
-  const tone = daysOffTone(brief)
+  const tone = daysOffTone(brief) ?? ""
   const lit = tone === "fail" ? "text-destructive" : tone === "caution" ? "text-status-warning" : "text-foreground"
+  // The run's own colour is the run's: amber on its seventh date, red past it
+  // — another para 5 finding (back from a trip) is the line under it, in its colour.
+  const runTone = d?.runDay == null ? "" : d.runDay > 7 ? "fail" : d.runDay === 7 ? "caution" : ""
+  const runLit = runTone === "fail" ? "text-destructive" : runTone === "caution" ? "text-status-warning" : "text-foreground"
+  const short = size.rows < 0.75
+  const roomy = size.cols >= 2.5
+  const next = d?.nextOff ? brief.day(d.nextOff.startMs).replace(/^\w+,?\s*/, "") : null
   return (
     <>
-      <WidgetLabel title>Days Off</WidgetLabel>
+      <WidgetLabel title right={short && next && roomy ? <span className="text-[10px] font-semibold text-muted-foreground">Off {next}</span> : undefined}>
+        Days Off
+      </WidgetLabel>
       {!d ? (
         <p className="text-[12px] text-muted-foreground">No duty chosen</p>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col justify-between gap-1">
-          <p className="flex items-baseline gap-1.5">
-            <span className={cn("text-[22px] font-semibold leading-none tabular-nums", lit)}>{d.runDay !== null ? `Day ${d.runDay}` : "—"}</span>
-            {d.runDay !== null && <span className="text-[11px] text-muted-foreground">of 7</span>}
+        <div className="flex min-h-0 flex-1 flex-col gap-1.5">
+          <p className="flex items-center gap-2">
+            <span className={cn("shrink-0 text-[22px] font-semibold leading-none tabular-nums", runLit)}>{d.runDay ?? "—"}</span>
+            {d.runDay !== null && <RunPills day={d.runDay} tone={runTone} />}
           </p>
-          <p className="truncate text-[11px] text-muted-foreground" suppressHydrationWarning>
-            Next off <span className="font-semibold text-foreground">{d.nextOff ? brief.day(d.nextOff.startMs) : "none rostered"}</span>
-          </p>
-          <p className="truncate text-[11px] tabular-nums text-muted-foreground">
-            <span className="font-semibold text-foreground">{d.in14}</span> in 14d · <span className="font-semibold text-foreground">{d.in28}</span> in 28d
-          </p>
-          {d.findings[0] && <p className={cn("truncate text-[11px] font-semibold", lit)}>{d.findings[0].label}</p>}
+          {!(short && roomy) && (
+            <p className="truncate text-[11px] text-muted-foreground" suppressHydrationWarning>
+              Off <span className="font-semibold text-foreground">{next ?? "—"}</span>
+            </p>
+          )}
+          {!short && (
+            <>
+              <p className="truncate text-[11px] tabular-nums text-muted-foreground">
+                <span className="font-semibold text-foreground">{d.in14}</span>/14d · <span className="font-semibold text-foreground">{d.in28}</span>/28d
+              </p>
+              {roomy && d.findings[0] && <p className={cn("truncate text-[11px] font-semibold", lit)}>{d.findings[0].label}</p>}
+            </>
+          )}
         </div>
       )}
     </>
@@ -261,27 +299,47 @@ export function logbookTone(brief: FlightBrief): "caution" | null {
   return brief.extras.logbook.unlogged.length ? "caution" : null
 }
 
-export function LogbookFace({ brief }: { brief: FlightBrief }) {
+export function LogbookFace({ brief, size }: { brief: FlightBrief; size: { cols: number; rows: number } }) {
   const m = brief.extras.logbook
+  const short = size.rows < 0.75
+  // The month as a bar: sectors flown against all of them (flown + still rostered), gaps in amber.
+  const total = m.sectors + m.rostered + m.unlogged.length
   return (
     <>
-      <WidgetLabel title>
+      <WidgetLabel
+        title
+        right={m.unlogged.length > 0 ? <span className="text-[10px] font-semibold text-status-warning">{m.unlogged.length} not logged</span> : undefined}
+      >
         Logbook
         <span className="font-medium normal-case tracking-normal"> · {monthName(m.month)}</span>
       </WidgetLabel>
-      <div className="flex min-h-0 flex-1 flex-col justify-between gap-1">
+      <div className="flex min-h-0 flex-1 flex-col gap-1.5">
         <p className="flex items-baseline gap-1.5">
           <span className="text-[22px] font-semibold leading-none tabular-nums text-foreground">{formatDutyClock(m.blockMinutes)}</span>
-          <span className="text-[11px] text-muted-foreground">block</span>
+          <span className="truncate text-[11px] text-muted-foreground">block</span>
         </p>
-        <p className="truncate text-[11px] tabular-nums text-muted-foreground">
-          <span className="font-semibold text-foreground">{m.sectors}</span> sectors · <span className="font-semibold text-foreground">{m.landings}</span> ldg
-          {m.nightMinutes > 0 && <> · {formatDutyClock(m.nightMinutes)} N</>}
-        </p>
-        {m.unlogged.length > 0 ? (
-          <p className="truncate text-[11px] font-semibold text-status-warning">{m.unlogged.length} not logged</p>
-        ) : (
-          <p className="truncate text-[11px] text-muted-foreground">{m.rostered ? `${m.rostered} still rostered` : " "}</p>
+        {total > 0 && (
+          <span className="flex h-1.5 overflow-hidden rounded-full bg-foreground/15" aria-label={`${m.sectors} of ${total} sectors flown`}>
+            <span className="h-full bg-foreground/70" style={{ width: `${(m.sectors / total) * 100}%` }} />
+            <span className="h-full bg-status-warning" style={{ width: `${(m.unlogged.length / total) * 100}%` }} />
+          </span>
+        )}
+        {!short && (
+          <>
+            <p className="truncate text-[11px] tabular-nums text-muted-foreground">
+              <span className="font-semibold text-foreground">{m.sectors}</span> sec · <span className="font-semibold text-foreground">{m.landings}</span> ldg
+            </p>
+            {m.nightMinutes > 0 && (
+              <p className="truncate text-[11px] tabular-nums text-muted-foreground">
+                <span className="font-semibold text-foreground">{formatDutyClock(m.nightMinutes)}</span> night
+              </p>
+            )}
+            {m.rostered > 0 && (
+              <p className="truncate text-[11px] tabular-nums text-muted-foreground">
+                <span className="font-semibold text-foreground">{m.rostered}</span> to fly
+              </p>
+            )}
+          </>
         )}
       </div>
     </>

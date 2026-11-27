@@ -8,18 +8,15 @@
  * The screen is a FIXED grid of cells (`columnsOf` × `rowsOf`: a phone six by
  * six), and every tile has a PLACE in it the pilot chose — its top-left cell
  * and its size (`TilePos`). Nothing is packed and nothing is grown to fill:
- * an empty cell stays empty. A tile dropped or resized over others PUSHES
- * them, each to the nearest place it fits (`placeTile`); where the grid has
- * none, below it, and the grid scrolls.
- *
- * `packTiles` — the order-and-size packing this replaced — stays, to carry a
- * layout stored before it across into places.
+ * an empty cell stays empty. A tile dropped or resized over others BUMPS
+ * them down a row at a time (`pushTilesDown`), else each to the nearest place
+ * it fits (`placeTile`); a place that leaves no room is refused.
  *
  * Pure, so the placement is tested without the page.
  */
 
 export const GRID_COLUMNS = 6
-export const MAX_ROWS_SPAN = 6
+export const MAX_ROWS_SPAN = 5
 
 /**
  * A WIDE grid has twelve columns (the owner, Nov 2026: on a desktop the
@@ -45,13 +42,18 @@ export function columnsOf(grid: GridKind): number {
 }
 
 /**
- * The ROWS a screen is divided into (the owner, Nov 2026: "need a more
+ * The ROWS a screen gives its tiles (the owner, Nov 2026: "need a more
  * definitive way … on phone max of 4 rows, but on ipad portrait vs landscape
  * is different"). A row is a FIXED share of the height the Flight Deck has
  * — never as tall as its content — so a tile one row tall and one two rows
  * tall are always visibly different, and the default layout fills one screen.
+ * The TIMELINE over the tiles takes one more row of the same height (the
+ * owner, round 50: "including the timeline it will be total of 6 rows").
  */
-export const GRID_ROWS: Record<GridKind, number> = { narrow: 6, wide: 6, tall: 8 }
+export const GRID_ROWS: Record<GridKind, number> = { narrow: 5, wide: 5, tall: 7 }
+
+/** Rows the timeline takes over the tiles. */
+export const TIMELINE_ROWS = 1
 
 export function rowsOf(grid: GridKind): number {
   return GRID_ROWS[grid]
@@ -66,9 +68,13 @@ export function gridKindFor(widthPx: number, heightPx = 0): GridKind {
 /** The least a row is, px: on a screen too short for its rows (a phone on its side) the tiles scroll rather than squash. */
 export const ROW_FLOOR_PX = 84
 
-/** A row's height in a box `heightPx` tall: the box shared out among the grid's rows and their gaps. */
+/**
+ * A row's height in a box `heightPx` tall — the WHOLE Flight Deck, the
+ * timeline's row included: the box shared out among the tiles' rows, the
+ * timeline's and their gaps.
+ */
 export function rowHeightFor(grid: GridKind, heightPx: number): number {
-  const rows = rowsOf(grid)
+  const rows = rowsOf(grid) + TIMELINE_ROWS
   if (!(heightPx > 0)) return ROW_FLOOR_PX
   return Math.max(ROW_FLOOR_PX, Math.floor((heightPx - GRID_GAP_PX * (rows - 1)) / rows))
 }
@@ -96,145 +102,6 @@ export function clampSize(size: Partial<TileSize> | undefined, minCols = 1, colu
     cols: clamp(size?.cols ?? columns, minCols, columns),
     rows: clamp(size?.rows ?? 1, 1, maxRows),
   }
-}
-
-/**
- * Place the tiles. `rows` is the screen's (`rowsOf`): no tile is taller than
- * it, and a layout that ends ONE row short of it has its bottom tiles grown
- * into that row — the slight adjustment that keeps an empty band off the
- * bottom of the screen (the owner). A tile the pilot made 1 × 1 is never
- * grown, there or into a hole: it stays the square they chose.
- */
-export function packTiles<T extends string>(
-  order: readonly T[],
-  sizes: Record<T, TileSize>,
-  columns = GRID_COLUMNS,
-  rows = MAX_ROWS_SPAN,
-): PlacedTile<T>[] {
-  const clamped = Object.fromEntries(order.map((id) => [id, clampSize(sizes[id], 1, columns, rows)])) as Record<T, TileSize>
-  // The order as chosen first; where that leaves a hole no neighbour can
-  // take (finer sizes on the six-column grid can), a pass that lets a tile
-  // drop back into an earlier gap — whichever leaves fewer holes.
-  const strict = pack(order, clamped, false, columns)
-  const best = strict.holes === 0 ? strict : (() => {
-    const dense = pack(order, clamped, true, columns)
-    return dense.holes < strict.holes ? dense : strict
-  })()
-  return fillBottom(best.placed, clamped, rows)
-}
-
-const isSquare = (s: TileSize) => s.cols === 1 && s.rows === 1
-
-function fillBottom<T extends string>(placed: PlacedTile<T>[], chosen: Record<T, TileSize>, rows: number): PlacedTile<T>[] {
-  const used = placed.reduce((m, p) => Math.max(m, p.row + p.rows), 0)
-  if (used === 0 || rows - used !== 1) return placed
-  return placed.map((p) => (p.row + p.rows === used && !isSquare(chosen[p.id]) ? { ...p, rows: p.rows + 1 } : p))
-}
-
-function pack<T extends string>(
-  order: readonly T[],
-  sizes: Record<T, TileSize>,
-  dense: boolean,
-  columns: number,
-): { placed: PlacedTile<T>[]; holes: number } {
-  const cells: (number | undefined)[][] = []
-  const free = (r: number, c: number) => cells[r]?.[c] === undefined
-  const take = (r: number, c: number, i: number) => {
-    cells[r] ??= []
-    cells[r][c] = i
-  }
-  const fits = (r: number, c: number, cols: number, rows: number) => {
-    if (c + cols > columns) return false
-    for (let y = r; y < r + rows; y++) for (let x = c; x < c + cols; x++) if (!free(y, x)) return false
-    return true
-  }
-
-  const placed: PlacedTile<T>[] = []
-  // The cursor: a tile is placed at or after where the last one went.
-  let cr = 0
-  let cc = 0
-  order.forEach((id, i) => {
-    const { cols, rows } = clampSize(sizes[id], 1, columns)
-    let r = dense ? 0 : cr
-    let c = dense ? 0 : cc
-    while (!fits(r, c, cols, rows)) {
-      c += 1
-      if (c >= columns) {
-        c = 0
-        r += 1
-      }
-    }
-    for (let y = r; y < r + rows; y++) for (let x = c; x < c + cols; x++) take(y, x, i)
-    placed.push({ id, col: c, row: r, cols, rows })
-    cr = r
-    cc = c + cols
-  })
-
-  // Give every hole to a neighbour, until none can take one.
-  const lastRow = placed.reduce((m, p) => Math.max(m, p.row + p.rows - 1), -1)
-  const at = (r: number, c: number) => {
-    const i = cells[r]?.[c]
-    return i === undefined ? undefined : placed[i]
-  }
-  const column = (p: PlacedTile<T>, c: number) => {
-    for (let y = p.row; y < p.row + p.rows; y++) if (!free(y, c)) return false
-    return true
-  }
-  const claim = (p: PlacedTile<T>, i: number) => {
-    for (let y = p.row; y < p.row + p.rows; y++) for (let x = p.col; x < p.col + p.cols; x++) take(y, x, i)
-  }
-  // A tile the pilot made 1 × 1 takes no hole: it stays their square.
-  const fixed = (p: PlacedTile<T>) => isSquare(sizes[p.id])
-  let changed = true
-  while (changed) {
-    changed = false
-    for (let r = 0; r <= lastRow; r++) {
-      for (let c = 0; c < columns; c++) {
-        if (!free(r, c)) continue
-        const left = c > 0 ? at(r, c - 1) : undefined
-        if (left && !fixed(left) && left.col + left.cols === c && column(left, c)) {
-          left.cols += 1
-          claim(left, placed.indexOf(left))
-          changed = true
-          continue
-        }
-        const right = c < columns - 1 ? at(r, c + 1) : undefined
-        if (right && !fixed(right) && right.col === c + 1 && column(right, c)) {
-          right.col -= 1
-          right.cols += 1
-          claim(right, placed.indexOf(right))
-          changed = true
-          continue
-        }
-        const above = r > 0 ? at(r - 1, c) : undefined
-        if (above && !fixed(above) && above.row + above.rows === r) {
-          let fitsBelow = true
-          for (let x = above.col; x < above.col + above.cols; x++) if (!free(r, x)) fitsBelow = false
-          if (fitsBelow) {
-            above.rows += 1
-            claim(above, placed.indexOf(above))
-            changed = true
-            continue
-          }
-        }
-        // The tile below grows up into it, where its whole width is free here.
-        const below = at(r + 1, c)
-        if (below && !fixed(below) && below.row === r + 1) {
-          let fitsAbove = true
-          for (let x = below.col; x < below.col + below.cols; x++) if (!free(r, x)) fitsAbove = false
-          if (fitsAbove) {
-            below.row -= 1
-            below.rows += 1
-            claim(below, placed.indexOf(below))
-            changed = true
-          }
-        }
-      }
-    }
-  }
-  let holes = 0
-  for (let r = 0; r <= lastRow; r++) for (let c = 0; c < columns; c++) if (free(r, c)) holes++
-  return { placed, holes }
 }
 
 /**
@@ -411,9 +278,45 @@ export function rowsUsed(placed: readonly TilePos[], rows: number): number {
 }
 
 /**
+ * The tiles BUMPED DOWN out of the way of `id` at its new place (the owner,
+ * round 50: enlarging a tile sent the one under it "all the way down to the
+ * bottom"; a home screen bumps each one down a row). Every other tile keeps
+ * its column and moves down only as far as it must to clear what is already
+ * placed above it — taken top to bottom, so a tile bumped down bumps the one
+ * under it in turn. A tile nothing lands on stays where it was.
+ */
+export function pushTilesDown<T extends string>(
+  ids: readonly T[],
+  positions: Record<T, TilePos>,
+  id: T,
+  columns = GRID_COLUMNS,
+  rows = MAX_ROWS_SPAN,
+): Record<T, TilePos> {
+  const pos = (k: T) => clampPos(positions[k], 1, columns, rows, true)
+  const out = {} as Record<T, TilePos>
+  const placed: TilePos[] = []
+  const hits = (p: TilePos) =>
+    placed.some((q) => p.col < q.col + q.cols && q.col < p.col + p.cols && p.row < q.row + q.rows && q.row < p.row + p.rows)
+  if (ids.includes(id)) {
+    out[id] = pos(id)
+    placed.push(out[id])
+  }
+  const rest = ids.filter((k) => k !== id).sort((a, b) => pos(a).row - pos(b).row || pos(a).col - pos(b).col)
+  for (const k of rest) {
+    const p = { ...pos(k) }
+    while (hits(p)) p.row += 1
+    out[k] = p
+    placed.push(p)
+  }
+  return out
+}
+
+/**
  * The layout with `id` at `want` (moved, or resized from any edge): it takes
- * that place, and the tiles it lands on are pushed (`arrangeTiles`). Every
- * tile in `ids` comes back with its place.
+ * that place, and the tiles it lands on are BUMPED DOWN (`pushTilesDown`) —
+ * or, where that would run past the screen's foot and room is left elsewhere,
+ * each moved to the nearest place it fits (`arrangeTiles`). Every tile in
+ * `ids` comes back with its place.
  */
 export function placeTile<T extends string>(
   ids: readonly T[],
@@ -425,6 +328,8 @@ export function placeTile<T extends string>(
   minCols = 1,
 ): Record<T, TilePos> {
   const next = { ...positions, [id]: clampPos(want, minCols, columns, rows) } as Record<T, TilePos>
+  const pushed = pushTilesDown(ids, next, id, columns, rows)
+  if (rowsUsed(ids.map((k) => pushed[k]), rows) <= rows) return { ...positions, ...pushed }
   const out = { ...positions }
   for (const p of arrangeTiles(ids, next, columns, rows, [id])) out[p.id] = { col: p.col, row: p.row, cols: p.cols, rows: p.rows }
   return out
@@ -471,28 +376,6 @@ export function resizeFrom(start: TilePos, edge: "l" | "r" | "t" | "b", d: numbe
     p.rows = bottom - p.row
   }
   return p
-}
-
-/**
- * A layout stored as an ORDER and SIZES (before places) on the home screen:
- * packed as it was drawn on its `fromRows` rows, then every row EDGE moved to
- * the same share of `toRows` (four rows to a phone became six), so the tiles
- * open where the pilot left them, in the same proportions, none overlapping.
- */
-export function positionsFromSizes<T extends string>(
-  order: readonly T[],
-  sizes: Record<T, TileSize>,
-  columns: number,
-  fromRows: number,
-  toRows: number,
-): Record<T, TilePos> {
-  const edge = (r: number) => Math.round((r * toRows) / fromRows)
-  const out = {} as Record<T, TilePos>
-  for (const p of packTiles(order, sizes, columns, fromRows)) {
-    const row = edge(p.row)
-    out[p.id] = { col: p.col, cols: p.cols, row, rows: Math.max(1, edge(p.row + p.rows) - row) }
-  }
-  return out
 }
 
 /** "2 × 1" — a size as Arrange says it. */

@@ -1394,30 +1394,23 @@ builds ONE model a minute (`FlightBrief`, `flight/model.ts`) and draws it as
 tiles (`flight/widget.tsx`, faces in `flight/faces.tsx`, bodies in
 `flight/details.tsx`):
 
-**FLIGHT & DUTY is ONE tile** (the owner, Nov 2026: the flights and the duty
-"operate on the exact same tactical time horizon" and drew the same timeline
-twice; the limits stay apart, the strategic one). The two rows below describe
-its halves. The tile: the eyebrow ("Next · Wed, 18 Nov", "Leg 1/2") — NO
-strip of its own any more (round 49: the page's TIMELINE draws the duty,
-below) — then the leg a page on
-the left and the FDP on the right where "No crew yet" was (`DutyReadout`: the
-duty's line in its tone, then the duty clock's three figures a row each —
-FDP left · FDP/max · latest IN on duty, rest · report · FDP/max before it,
-captions shortened by `readoutLabel` — and the leg's flight crew as
-initials). A standby, or no duty with flights, is the duty clock's own face.
-The card: the eyebrow, a leg a page (its table), the
-leg's Open NOT swiped under it (`Pager`'s `below`) with the dots under that,
-then — apart from the legs, never holding the leg's Open (the owner) — the
-DUTY & FDP section, its line and `dutyRows`; the last leg's Est. IN is left to the
-duty's Estimated IN row (with how far it is from the latest IN). Footer:
-Refresh, Briefing, FDP. Its edge is the worse of the duty's and the legs'.
-On the wide grid the tile runs the full width (12 × 2), the legs side by
-side, the rest of the duty's table under the readout.
+**FLIGHT and DUTY are TWO tiles again** (round 50; the owner: "split flight
+and duty widget/card. Bring back previous flight card. Where crew is displayed
+on the right"). Round 49 had merged them, with the FDP figures beside the leg
+where the crew panel was; the deck's TIMELINE now draws the duty, so the duty
+tile is its line and figures alone (`DutyFace` → `DutyClockFace`, no strip),
+and the flight tile is the legs with the CREW PANEL down its right
+(`CrewPanel`: names where the tile is roomy, initials where it is narrower,
+none narrower still). Titles: "Flight & Crew", "Duty & FDP" (`WIDGET_TITLE`);
+the duty card is `DutyBody` (its line, then `dutyRows`), the flight card the
+legs and the crew (`FlightBody`). Each tile has its own edge: the duty's state
+(`dutyTone`), the flight's late leg. On a standby the flight tile, like the
+airport tile, is not drawn and the duty tile reads the standby.
 
 | Tile | Glance | Its card adds | Footer |
 |---|---|---|---|
-| Duty & FDP — now the FLIGHT & DUTY tile's duty half (`flight/duty-clock.tsx`; the owner, Nov 2026: "use the timeline … track FDP … depict the max FDP on the timeline") | the phase, the line in its tone ("Legal from 22:00Z", "Rest short by 3:00" red, "Sector 2 of 3") — no "Max 12:15" beside it, the FDP / Max figure below says it (the owner's screenshot read it twice); ONE STRIP in time (`dutyClock`, `lib/utils/dashboard/duty-clock.ts`, tested) — the rest from its start (the last 16h of a long one) to the report, solid to where its minimum is met, red from a report inside it; the duty from report to off duty, its FDP darker to the last on-blocks, each leg; the Reg 14 MAXIMUM a dotted outline from the FDP's start with a mark at its end, the FDP past it red; now; a line every hour behind it, all one height, every sixth bold (`HourLines`), labelled every 3/6/12; then three figures: on duty FDP left · FDP / max · latest on-blocks; off duty rest / its minimum · report · FDP planned / max; a LATER duty its own (rest before it from `restBefore`). A standby, or nothing known, keeps `DutyBand` | a TWO-COLUMN TABLE, label left and value right, in the order the day RUNS (`dutyRows`; the owner, Nov 2026: "2 columns, left are headers, right are values. In chronological order"): Last Duty, Rest (FORECAST to the report, not as of now), Report, FDP (scheduled / max), IN — ONE row, the last leg's scheduled IN and the maximum's latest IN side by side under small "Sch" and "Max" helpers (`DutyRow.pairs`), then ESTIMATED IN (`estimateRow`: the duty's last on-blocks from the logbook and the live sources — `estimateDutyIn`, below — "0:40 late · 1:10 to latest", amber within the hour of the latest IN, red past it; "As scheduled" while nothing is asked). No Further Delay or Waiver Max IN rows (the owner, Nov 2026: "taking up too much space and attention for daily use" — the commander's discretion is the FDP page's), and no Spare row (the estimate's "to latest" says it, and reacts). On duty Report, FDP so far / max, FDP Left, then the same IN and estimate (the face's latest IN flies into the "Max" figure); a later duty its rest, report and the same rows. The face's three figures are rows here and FLY into them (`slot-<n>-v`); under the title bar the card keeps the face's state, line and strip (`DutyClockFace inCard`) | FDP › |
-| Flights & Crew — now the FLIGHT & DUTY tile's flights half (the chosen duty, a LEG A PAGE — the owner, Nov 2026: "tracks individual flights, swipeable to first or second leg") | Now / Next / Later · day, "Leg 1/2"; the duty's day bar with the leg on show lit (the others dimmed); the LEG — its route large, flight number and times, its gate, its last line (`legLine`, below); dots under it (`Pager`, controlled, its page remembered by `useRememberedPage` so the card opens on the leg swiped to); that LEG's crew in the panel (`FlightBrief.legCrew`), the panel and its divider running the tile's FULL height. It opens on the leg the duty is on (`legNow`). Before this: a 24-hour DAY BAR (`DayBar` — a line each hour behind the bars, all one height and every sixth bold (`HourLines`, the owner's reference), its hour centred under it, in the pilot's clock, shifted in 6h steps so the duty fits; the duty track and each leg SQUARED off and 18px tall so their ends read, flown legs in ink, a now marker); the route large ("WSSS–WIII–WSSS", 17px under a 15rem column, 21px above); first out – last in with the FDP/max; flight numbers · "One more leg" · the next gate · the aeroplane line — or, for a later duty, the rest before it. Now (the owner, Nov 2026: "show aircraft in use, gate, essentially flight info") each leg page carries its GATES BESIDE ITS AIRPORTS — the departure gate left of the departure, the arrival gate right of the arrival, each a small chip, a narrow dashed slot while one is awaited (`GateChip`; the owner, Nov 2026) — and its AEROPLANE — registration and type, else "Aircraft TBA" — on a line of its own, then ONE line for the turn (`legLine`; the owner, Nov 2026: no "then VVTS–WSSS", no rest — the duty card has it): on the leg the pilot TAKES OVER, when the inbound landed and at which gate ("TR289 · Arr D41 · Landed 19:31Z · 29m ago" — it decides idle power and the APU after start; the gate is where our aeroplane is, one-glance information, left out only where it is the departure gate the tile already says — `inboundGate`); on the LAST leg, the flight that takes the aeroplane over after it and when its crew report at the aircraft, its STD − 1h ("Next TR290 · crew 05:30Z" — whether to secure the aeroplane, and an INIT request for them) — read off `aircraft/whereabouts` asked at our last leg's arrival (`DutyLookups.onward`, `onwardLines`), else Changi's onward flight; the CREW on a panel at the right across the row, under the duty in a narrower two-row tile, none in a narrower one-row tile (`CrewPanel`: initials, name, the seat AS THE PILOT'S LOGBOOK RULES NAME IT — `crewRole` → `roleLabel`, "PIC" / "P2" under CAAS, "Relief" — · times flown together or "New", "+ N more") | under the title bar the duty's eyebrow and day bar, then a LEG A PAGE swiped as the tile is (`FlightCardLegs`, `CardLeg`; the owner, Nov 2026: "place pagination dots below 'open trxxx'", "a revamp on the contents between the timeline and crew. No repetition. Content from widget move to position"): the route and number line as the tile has them, then the leg's two-column TABLE (`CardTable`, the duty card's shape) in the order it runs — Inbound (the tile's last line flies here; its origin and STD under it), Next Flight (the tile's onward line flies here — at the TOP beside the inbound, the owner: "so users know where to look for connecting flight"), Aircraft (the tile's aeroplane flies here), Departure gate — the GATE NUMBER only, a stand only where no gate is published (the tile's gate flies here), OUT and IN ONE row each (the owner, Nov 2026: the estimates were "not very useful during flight. And confusing"): the schedule under a small "Sch" until the time is recorded, then the recorded time with how early or late beside it, "00:28Z (+0:33)" (`timeRow`, `offSchedule` — amber from 10 minutes late), Arrival gate. No Est. OUT / Est. IN, no Block row, no terminals. The number line is the SCHEDULE always (`scheduleRange`); the tile puts "OUT +0:33" beside it once off blocks (`LegChip` — before, a live delay "OUT +0:40"), never "On blocks" — then "Open TR438" as an action capsule and the dots under it. NO Report or Off Duty — those are the Duty card's. Then the crew, a row each (a tap opens their card) — ALL of it: the flight crew, then the CABIN under a caption of its own (`CrewMate.cabin`; the owner, Nov 2026: "include all crew member. But for logbook we only focus on flight crew") from the flight's `cabinCrew`, flown-together counted by crew id (`cabinKey`); the tile's panel keeps the flight crew | Refresh (only once gates are asked), Briefing |
+| Duty & FDP (`flight/duty-clock.tsx`; the owner, Nov 2026: "use the timeline … track FDP … depict the max FDP on the timeline") | the phase, the line in its tone ("Legal from 22:00Z", "Rest short by 3:00" red, "Sector 2 of 3") — no "Max 12:15" beside it, the FDP / Max figure below says it (the owner's screenshot read it twice); (the strip below is what the tile drew before the deck's timeline took it over — `dutyClock` still feeds the card) ONE STRIP in time (`dutyClock`, `lib/utils/dashboard/duty-clock.ts`, tested) — the rest from its start (the last 16h of a long one) to the report, solid to where its minimum is met, red from a report inside it; the duty from report to off duty, its FDP darker to the last on-blocks, each leg; the Reg 14 MAXIMUM a dotted outline from the FDP's start with a mark at its end, the FDP past it red; now; a line every hour behind it, all one height, every sixth bold (`HourLines`), labelled every 3/6/12; then three figures: on duty FDP left · FDP / max · latest on-blocks; off duty rest / its minimum · report · FDP planned / max; a LATER duty its own (rest before it from `restBefore`). A standby, or nothing known, keeps `DutyBand` | a TWO-COLUMN TABLE, label left and value right, in the order the day RUNS (`dutyRows`; the owner, Nov 2026: "2 columns, left are headers, right are values. In chronological order"): Last Duty, Rest (FORECAST to the report, not as of now), Report, FDP (scheduled / max), IN — ONE row, the last leg's scheduled IN and the maximum's latest IN side by side under small "Sch" and "Max" helpers (`DutyRow.pairs`), then ESTIMATED IN (`estimateRow`: the duty's last on-blocks from the logbook and the live sources — `estimateDutyIn`, below — "0:40 late · 1:10 to latest", amber within the hour of the latest IN, red past it; "As scheduled" while nothing is asked). No Further Delay or Waiver Max IN rows (the owner, Nov 2026: "taking up too much space and attention for daily use" — the commander's discretion is the FDP page's), and no Spare row (the estimate's "to latest" says it, and reacts). On duty Report, FDP so far / max, FDP Left, then the same IN and estimate (the face's latest IN flies into the "Max" figure); a later duty its rest, report and the same rows. The face's three figures are rows here and FLY into them (`slot-<n>-v`); under the title bar the card keeps the face's state, line and strip (`DutyClockFace inCard`) | FDP › |
+| Flights & Crew (the chosen duty, a LEG A PAGE — the owner, Nov 2026: "tracks individual flights, swipeable to first or second leg") | Now / Next / Later · day, "Leg 1/2"; the duty's day bar with the leg on show lit (the others dimmed); the LEG — its route large, flight number and times, its gate, its last line (`legLine`, below); dots under it (`Pager`, controlled, its page remembered by `useRememberedPage` so the card opens on the leg swiped to); that LEG's crew in the panel (`FlightBrief.legCrew`), the panel and its divider running the tile's FULL height. It opens on the leg the duty is on (`legNow`). Before this: a 24-hour DAY BAR (`DayBar` — a line each hour behind the bars, all one height and every sixth bold (`HourLines`, the owner's reference), its hour centred under it, in the pilot's clock, shifted in 6h steps so the duty fits; the duty track and each leg SQUARED off and 18px tall so their ends read, flown legs in ink, a now marker); the route large ("WSSS–WIII–WSSS", 17px under a 15rem column, 21px above); first out – last in with the FDP/max; flight numbers · "One more leg" · the next gate · the aeroplane line — or, for a later duty, the rest before it. Now (the owner, Nov 2026: "show aircraft in use, gate, essentially flight info") each leg page carries its GATES BESIDE ITS AIRPORTS — the departure gate left of the departure, the arrival gate right of the arrival, each a small chip, a narrow dashed slot while one is awaited (`GateChip`; the owner, Nov 2026) — and its AEROPLANE — registration and type, else "Aircraft TBA" — on a line of its own, then ONE line for the turn (`legLine`; the owner, Nov 2026: no "then VVTS–WSSS", no rest — the duty card has it): on the leg the pilot TAKES OVER, when the inbound landed and at which gate ("TR289 · Arr D41 · Landed 19:31Z · 29m ago" — it decides idle power and the APU after start; the gate is where our aeroplane is, one-glance information, left out only where it is the departure gate the tile already says — `inboundGate`); on the LAST leg, the flight that takes the aeroplane over after it and when its crew report at the aircraft, its STD − 1h ("Next TR290 · crew 05:30Z" — whether to secure the aeroplane, and an INIT request for them) — read off `aircraft/whereabouts` asked at our last leg's arrival (`DutyLookups.onward`, `onwardLines`), else Changi's onward flight; the CREW on a panel at the right across the row, under the duty in a narrower two-row tile, none in a narrower one-row tile (`CrewPanel`: initials, name, the seat AS THE PILOT'S LOGBOOK RULES NAME IT — `crewRole` → `roleLabel`, "PIC" / "P2" under CAAS, "Relief" — · times flown together or "New", "+ N more") | under the title bar the duty's eyebrow and day bar, then a LEG A PAGE swiped as the tile is (`FlightCardLegs`, `CardLeg`; the owner, Nov 2026: "place pagination dots below 'open trxxx'", "a revamp on the contents between the timeline and crew. No repetition. Content from widget move to position"): the route and number line as the tile has them, then the leg's two-column TABLE (`CardTable`, the duty card's shape) in the order it runs — Inbound (the tile's last line flies here; its origin and STD under it), Next Flight (the tile's onward line flies here — at the TOP beside the inbound, the owner: "so users know where to look for connecting flight"), Aircraft (the tile's aeroplane flies here), Departure gate — the GATE NUMBER only, a stand only where no gate is published (the tile's gate flies here), OUT and IN ONE row each (the owner, Nov 2026: the estimates were "not very useful during flight. And confusing"): the schedule under a small "Sch" until the time is recorded, then the recorded time with how early or late beside it, "00:28Z (+0:33)" (`timeRow`, `offSchedule` — amber from 10 minutes late), Arrival gate. No Est. OUT / Est. IN, no Block row, no terminals. The number line is the SCHEDULE always (`scheduleRange`); the tile puts "OUT +0:33" beside it once off blocks (`LegChip` — before, a live delay "OUT +0:40"), never "On blocks" — then "Open TR438" as an action capsule and the dots under it. NO Report or Off Duty — those are the Duty card's. Then the crew, a row each (a tap opens their card) — ALL of it: the flight crew, then the CABIN under a caption of its own (`CrewMate.cabin`; the owner, Nov 2026: "include all crew member. But for logbook we only focus on flight crew") from the flight's `cabinCrew`, flown-together counted by crew id (`cabinKey`); the tile's panel keeps the flight crew | Refresh (only once gates are asked), Briefing |
 | Airport (`flight/airport-tile.tsx`; the owner, Nov 2026: "combine airport and weather widget … they will synergise well together" — it was a Weather tile and a Destination tile) | one airport of the duty a PAGE — every one it touches, departure and return to base included (`airportsOf`, the weather briefs) — opening on where it goes next, swiped between with dots at the FOOT (`Pager` with `fill`), drawn as a STATION after the owner's widget, the RUNWAY DIAGRAM in the middle and the text in the four corners. The diagram (`RunwayDiagram`, `flight/runway-diagram.tsx`, shared with the card) is as LARGE as the tile allows clear of the text — `largestCircle` (`lib/utils/dashboard/largest-circle.ts`, tested) over the corners' boxes, re-read by a ResizeObserver whenever the tile or a corner changes size, in layout values (`offset*`, which the card's scaling morph does not move); left out under 40px (the owner, Nov 2026: "allow ring to occupy as much space as possible without any text covering it or it covering any text"). In it: the airport's runways to scale off their thresholds inside a ring of dots, the one LANDING on in the accent with a dashed approach coming in over its threshold to an arrowhead, the one DEPARTING from in ink with an arrowhead leaving past its far end, the rest muted (with nothing from the traffic, the wind's runway carries the approach, muted), and the wind a wedge on the rim where it comes FROM (amber at 25kt or a gust). Top left the code (18px) and, two rows tall and more, the runways IN USE under it, one a line ("✈↓ 25L" over "✈↑ 25R"); top right the QNH ("Q1011", 12px) and the wind in words ("220° 15kt G25"); bottom left CAVOK where the METAR says so (`Conditions.cavok`), else the LOW cloud — the lowest ceiling at or below 3,500ft, else the lowest layer there, as the METAR writes it (`cloudLayer`: "BKN011", "SCT008CB"; `skyOf`, `LOW_CLOUD_FT`) — else poor visibility or rain, else NOTHING (the owner: "at 30000, it is not of concern", then "up to 3,500ft"); bottom right temperature / dew point. No local time or zone (the owner: the card has them), no alert icon. No distance, no TAF on the tile | the SAME airport, swiped the same way (the page is shared — `useRememberedPage`, `ap:<duty>:<airports>`; each page as tall as itself, the pager's window following it): above, the airport as a PICTURE (`AirportPanel`, after a station-weather widget the owner sent) — the CODE large (the tile's, flying in) and the airport's NAME under it in smaller type, as the airport database gives it, WRAPPING to two lines rather than cut short (the owner, Nov 2026: "swap font size and swap position … else the full airport name will always be truncated"; one name everywhere, below), local time and UTC offset, day or night on arrival (no distance — the owner: it means nothing there); the wind and gust (amber) • temperature / dew point • QNH on ONE line, and ONLY those (visibility, ceiling and the frequencies went — the owner); the runways IN USE, a row each ("✈↓ 25L 13kt↓ 7kt→ 2 arr · 20m", "✈↑ 25R …"), else the one the wind favours ("by wind"), beside the same `RunwayDiagram` (`runwayShown`); its runways with length; the TAF aerodromes NEAR it with their weather; last there and arrivals this year. Below, its reports (`StationWeather`): its hazards as chips — NO flight category anywhere, VFR / MVFR / IFR / LIFR (the owner, Nov 2026: "I don't need any VFR, IFR, MVFR taggings"; an alternate's chip is its hazard alone) — the METAR's raw text, and the LATEST TAF WHOLE (captioned "TAF · 18Z–24Z"), its lines NOT indented (a lit period's wash reaches past the text) with the periods over the duty's times there lit — the wash reaching past the text but never past its PAGE (`Pager`'s `bleed`: the bleed is inside each page, not a negative margin on the track, which cut the wash off at one edge and drew it into the next page), each TAGGED at its right with the legs it covers as a glyph and the flight's digits ("✈↑ 275", "✈↓ 274" — the owner, Nov 2026: "TR275 DEP 02:35Z" under every lit period cluttered the card), the rest muted. Then EN ROUTE and when the weather was checked. The code, time, category, QNH, temperature, the runways in use, the dots, the wind's words and the runway diagram FLY from the tile into their places (`ap-*` morph keys, on the page on show only) | Refresh |
 | Currency | a DOT CALENDAR (`CurrencyDots`, `lib/utils/dashboard/currency-dots.ts`, tested; after a "days of the year" widget the owner sent): a dot a day, seven to a column (Monday at the top), running AHEAD from today — or, for a LATER duty, from ITS day (`FlightBrief.currencyAsOfMs`; the owner, Nov 2026: every other tile forecasts the chosen duty): each document's days left and state as they will stand then (`currencySummary`'s `asOfMs`, `daysLeftAt` on the Singapore day; one gone by then is a caution "before duty", still renewable), recency's days to its lapse from that day, the label "· at 22 Nov" and the card "As at …" — 90 days (13 weeks) in a third of the row, six months in two thirds, a year across it, calendar dates so a 29 February is a dot — each currency's last valid day lit in its state's colour (ink, amber, red; dark cockpit), the CLOSEST ringed, today an ink ring, month names under it; then the closest by name and figure (`currenciesBySoonest` — gone first, then by expiry; recency judged against the DUTY, "before duty" when it lapses first), more of them in a tall tile; "+2" beside the label, in the worst one's colour, counts flags past the rows named | the year ahead as dots, every expiry INK — a tap on a dot or a row SELECTS that currency (a second tap deselects): its dot alone in colour (its state's, else the accent), the others dimmed, and the days from today up to it LIGHT UP one after another, about half a second in all, and stay faintly lit (`.currency-sweep`) — how many days, at a glance (the owner, Nov 2026: no colour code; "the highlighted dot will be the only one colour coded"); then ONE line each: name, expiry (or "before duty"), days left, flag — recency with T/O, LDG and its lapse. A row no longer navigates: the Currencies page is the footer's | Currencies › |
 | Limits | the FOUR rolling limits as bars with the hours LEFT, in the REGULATION's order — Duty 14d, Duty 28d, Flight 28d, Flight 12m — with a limit in CONCERN (amber / red) moved to the top, the tightest first (`limitOrder`; the owner, Nov 2026, asked why Flight 12m led: sorted by the fraction used alone, a 12-month figure at 70% of 1,000h led over everything with nothing near a limit), "near limit" / "at limit" in words where it applies, and the basis in the label where there is room ("Limits · to 18 Nov" — logged duties to the last one's day). No "Delay": the FDP is the duty tile's. On the wide grid the rows under it are "If This Duty Runs Late", else (a standby) when each limit frees up | `LimitsBody` (`limitDetails`, `lib/utils/dashboard/limit-detail.ts`, tested): ONE limit at a time on `SegmentedTabs`, opening on the one the tile leads with — the figure left "of 90:00", the basis ("11:04 used · logged duties, 14 days to 18 Nov"), then a table: Frees Up (the oldest day rolling out, +what it frees, when), Next Duty (what the chosen duty adds and leaves in the window ending on its day, the roster before it counted), Tightest Ahead (the least left on a rostered day within 60 days), If This Duty Runs Late — the SAME four rows for every limit, "—" where one has nothing to say, so the card keeps its height under the tabs (a limit with fewer rows moved the card on every tap: the owner's "flashes when tapped"); and "Breach ahead". No list of the window's duties (the owner: "too cluttered, not of much use"). All off the same `calculateRollingStats` the bars use, so the card and the tile cannot disagree | FDP › |
@@ -1475,8 +1468,11 @@ on the Google Pixel 10 … behave like a mobile phone where you can add widget
 and then change their size … it doesn't have to fit to the bottom and there
 can be spaces between widgets … a fixed number of grids and it's free and easy
 to be placed within the grids"; it was an ORDER of sizes packed edge to edge).
-The screen is a fixed grid — a phone six columns by SIX rows, twelve by six
-held landscape, twelve by eight upright (`columnsOf`, `rowsOf`) — and every
+The screen is a fixed grid under the timeline — a phone six columns by FIVE
+tile rows, twelve by five held landscape, twelve by seven upright (`columnsOf`,
+`rowsOf`, `GRID_ROWS`), the timeline taking one more row above them
+(`TIMELINE_ROWS`; round 50: "including the timeline it will be total of 6
+rows") — and every
 tile has a PLACE in it, its top-left cell and its size (`TilePos`). Nothing is
 packed or grown to fill: an empty cell stays empty. A LONG PRESS on any tile
 (450ms held still — the owner: "similar to how Android and Apple do it"; there
@@ -1490,27 +1486,34 @@ last picked up, pressed or focused is the ACTIVE one and wears a frame with a
 round handle at the middle of each edge (`data-edge` t / r / b / l): an edge
 pulled out grows it that way, pushed in shrinks it, the far edge staying put
 when the near one moves (`resizeFrom`; Shift + arrows move the right and
-bottom edges; the flight & duty tile takes four columns at least,
-`TILE_MIN_COLS`). Tiles a move or a resize lands on are PUSHED, each to the
-nearest place it fits, every other tile keeping its own (`placeTile` →
-`arrangeTiles`, tested in `bento.test.ts`) — worked out from the layout as it
+bottom edges; the flight tile takes three columns at least and the duty two —
+four and three on the wide grid, `TILE_MIN_COLS`). Tiles a move or a resize
+lands on are BUMPED DOWN, the way a phone's home screen does it (round 50: a
+tile enlarged over the one below sent it to the foot of the screen):
+`pushTilesDown` places the tile in hand first, then every other tile in
+reading order, each moved down only as far as it must to clear what is
+already placed — so the tile below moves down a row, the ones under it a row
+each, and nothing else moves. Only when that cascade would run off the foot
+does `placeTile` fall back to the nearest place each fits (`arrangeTiles`);
+tested in `bento.test.ts`. All of it is worked out from the layout as it
 was when the gesture BEGAN, so a tile carried past another and away leaves it
 where it was. A place that would push a tile off the foot of a screen that
 held them all is REFUSED, as a home screen refuses a drop it has no room for
 (`placeTileOnScreen`): the tile in hand keeps the last place that fitted.
 Only a layout loaded that way (a size too tall for the rows) puts a tile below
 the foot, and the grid then scrolls. The places are per device and per grid
-(`ooo:dashboard-places:v6`, `-wide:v6`, `-tall:v6`, `use-dashboard-layout.ts`);
-a layout stored as sizes (`ooo:dashboard-sizes:v5`, `-wide:v2`, `-tall:v1`,
-v4) is carried across once — packed as it was drawn (`packTiles`, kept for
-that alone), every row EDGE moved to the same share of the new rows
-(`positionsFromSizes`) — and stored places that overlap are pushed apart on
-load (`normaliseTilePositions`). The defaults: a phone's flight & duty across
-the top two rows (6 × 2), the airport station down the left of the rest
-(3 × 4), the currency's dots over the limits beside it (3 × 2 each);
-landscape flight & duty 12 × 2, the airport 6 × 4, the currency and the limits
-6 × 2 each beside it; upright the same, taller (12 × 2, 6 × 6, 6 × 3, 6 × 3). On
-a standby the airport tile is not drawn and leaves its cells EMPTY.
+(`ooo:dashboard-places:v7`, `-wide:v7`, `-tall:v7`, `use-dashboard-layout.ts`;
+v7 because the rows changed and the duty tile came back — an older layout is
+not carried across, the defaults are taken). Stored places that overlap are
+pushed apart on load (`normaliseTilePositions`). The defaults
+(`defaultPositions`, an enabled extra tile at the first place it fits): a
+phone's flight across the top two rows (6 × 2), the duty and the currency side
+by side under it (3 × 1 each), the airport and the limits beside each other
+under those (3 × 2 each); landscape the flight 8 × 2 with the duty 4 × 2
+beside it, the airport 6 × 3, the currency 6 × 1 over the limits 6 × 2; upright
+the same with the airport 6 × 5, the currency 6 × 2 and the limits 6 × 3. On a
+standby the flight and airport tiles are not drawn and leave their cells
+EMPTY.
 
 **Tiles are ADDED and REMOVED in Arrange** (the owner, round 49: "the ability
 to add and remove widget … more relevant widgets"). Arrange gives each tile a
@@ -1518,9 +1521,9 @@ to add and remove widget … more relevant widgets"). Arrange gives each tile a
 deck (`AddWidget`, each with a one-line hint); an added tile takes the first
 place it fits (`findFreePlace`: its default size, else fewer rows, else fewer
 columns), and with no room the + refuses with a toast rather than push a tile
-off the screen. Which tiles are on is per device (`ooo:dashboard-widgets:v1`,
-`useEnabledTiles`); a removed tile keeps no place, an added one starts at the
-four originals' defaults. Four tiles join them (`extra-widgets.tsx`, models in
+off the screen. Which tiles are on is per device (`ooo:dashboard-widgets:v2`,
+`useEnabledTiles`; a v1 list gets the duty tile inserted after the flight's);
+a removed tile keeps no place, an added one takes the first place it fits. Four tiles join them (`extra-widgets.tsx`, models in
 `lib/utils/dashboard/deck-widgets.ts`, tested), each about the duty the
 timeline has chosen and worked out only while it is ON:
 
@@ -1534,18 +1537,37 @@ timeline has chosen and worked out only while it is ON:
 **ROWS ARE A FIXED SHARE OF THE SCREEN** (the owner, Nov 2026). The box the
 tiles have (`data-bento-scroll`, measured in a ResizeObserver) decides the
 grid — `gridKindFor`: `narrow` (six columns, under 760px), `wide` (twelve,
-landscape) or `tall` (twelve, portrait) — and is shared out among its ROWS
-(`rowHeightFor`, never under `ROW_FLOOR_PX` 84, below which the wrapper
-scrolls), so a tile one row tall and one two rows tall always differ. A face
+landscape) or `tall` (twelve, portrait). The WHOLE deck's height — the
+timeline's row included — is shared out among its ROWS (`rowHeightFor`: the
+tile rows plus `TIMELINE_ROWS`, never under `ROW_FLOOR_PX` 84, below which
+the wrapper scrolls), and the timeline is drawn one row tall, so a tile one row tall and one two rows tall always differ. A face
 reads its rows off its real height (`faceSizeOn`'s `rowPx`, in the old grid's
 164px rows) and its columns in THIRDS of a phone's row. A stored order puts
-the flight & duty tile where the duty tile was, and the airport tile where the
-weather or the destination tile was (`normaliseTileOrder`'s `RENAMED`); a
-stored layout that still names `duty` gives the merged tile its default. The
+the airport tile where the weather or the destination tile was
+(`normaliseTileOrder`'s `RENAMED`). The
 grid scrolls in a WRAPPER (`data-bento-scroll`), never itself. The grid places
 each tile by explicit row and column, so the DOM never moves and a move
 remounts nothing; `layout` animation runs only while arranging; the tile being
 dragged is a copy that follows the finger.
+
+**Every face adapts to its SIZE, not only its box** (round 50; the owner: "at
+smaller size, words get cutoff … widget should be less words, quick glance,
+attention grabbing … use lesser words, diagrams, charts"). A face reads its
+size in face units (`faceSizeOn`: columns in thirds of a phone's row — three
+grid columns are 1.5 — rows off its real height, one grid row ≈ 0.5) and
+takes a smaller VARIANT rather than truncating: SHORT is rows < 0.75 (one
+grid row), NARROW cols < 1.25, ROOMY cols ≥ 2.5. Measured by putting each
+tile alone at every size (no clipped text). What each drops:
+
+| Face | As it shrinks |
+|---|---|
+| Flight (`flightFaceSize`) | the leg's lines 3 → 2 → 1, the gates under 2.5 cols, the crew panel names → initials → none, the eyebrow without its weekday ("Leg 1/2" → "1/2"), the turn line without its "… ago" and, narrow, its "Arr …" (`compactLegLine`) |
+| Duty (`DutyClockFace`) | figures 3 → 2 → 1, their captions one word under 2.5 cols (`compactCaption`: Rest, Report, FDP), the headline shorter ("Legal 22:00Z", `compactHeadline`) and smaller |
+| Currency | one row tall: the figures over their names side by side, as many as fit (3 / 2 / 1); "+1" in the label |
+| Limits | one row tall: the two tightest only, or the four in pairs where roomy; "If Late" for the caption under 2.5 cols |
+| Airport | narrow: the wind as "220/15G25" at the foot, no temperature, a hazard as an icon by the code |
+| Days Off | the run as seven pills (amber at the seventh day, red past it), "Off <day>", "12/14d · 17/28d" where not short |
+| Logbook | a flown / not-logged BAR, the not-logged count in the label, the figures only where not short |
 
 **ONE CARD PER SECTION, no fact in two places** (the owner, Nov 2026). The
 Status tile is gone: its annunciator led with whatever was most pressing —
@@ -1584,9 +1606,9 @@ the weather's own picture (fog, rain, snow, thunder) in amber.
 showing the other widgets that are not applicable"). The default duty is the
 flight duty in progress, else a standby in progress (not called out), else a
 standby before the next flight duty's report, else that duty; the header lists
-standbys too ("SBY", "From …"). With a standby chosen the airport tile is not
+standbys too ("SBY", "From …"). With a standby chosen the flight and airport tiles are not
 drawn (`shown`; Arrange still moves it — `mergeShownOrder` keeps a hidden
-tile's place), no lookups are asked, and the flight & duty tile reads the
+tile's place), no lookups are asked, and the duty tile reads the
 standby (`dutyClockView`'s standby branch: On / Next / Later Standby, "Not
 called", its window on the strip filled to now; From / Left / Until), its card
 adding Counts Toward Limits (para 6(7)'s 20%) and the 18-hour cap (6(2)(a)).
@@ -1602,7 +1624,17 @@ the duty strip's look — a line an hour, every sixth bold; each rest solid to
 its minimum, a short one red; each duty report → off duty with its FDP darker
 and its legs filled (planned in the accent); the Reg 14 maximum dotted on a
 duty still to fly; now — built off the FDP page's own blocks
-(`buildDutyTimeline`), scrolled sideways under a FIXED POINTER at its centre:
+(`buildDutyTimeline`), scrolled sideways under a FIXED POINTER at its centre.
+It is ONE GRID ROW tall (round 50: "make the timeline taller"). Its ticks are
+DOM lines on WHOLE pixels — a 1px hairline every hour, a 2px bold one every
+sixth (round 50: the repeating gradient that drew them had a fractional
+period and blurred some ticks into soft bands that meant nothing). It ZOOMS
+(round 50: "need to be able to expanded and contract") — a pinch, ctrl-wheel,
+or + / − — between `DECK_PX_PER_HOUR_MIN` 2 and `_MAX` 72 px an hour, holding
+the time under the pointer; the tick and label steps follow the scale
+(`deckSteps`: hourly ticks from 5px an hour, labels every 1 / 3 / 6 / 12 /
+24h). A < and a > at either end JUMP to the previous / next duty
+(`neighbourDuty`, PageUp / PageDown too), dimmed where there is none:
 
 | | Rule |
 |---|---|
@@ -1620,7 +1652,7 @@ every reader of "is this a later duty" asks `index !== 0`.
 **Every card has ONE SHELL** (the owner, Nov 2026: "all the cards don't
 follow a uniform shell. Some has header some doesn't"; then "header: Duty,
 Flight and Crew, Currency, Airport and Weather, Limits"): the SECTION'S NAME
-(`WIDGET_TITLE` — Flight & Duty, Airport & Weather, Currency, Limits) as
+(`WIDGET_TITLE` — Flight & Crew, Duty & FDP, Airport & Weather, Currency, Limits) as
 a TITLE BAR with a hairline under it (`CardTitle`, `CARD_TITLE_BAR`), then what
 the card holds, then the footer line (`CardShell`). The title bar and the
 footer STAY PUT and only what is between them scrolls (the owner, Nov 2026:
@@ -6180,11 +6212,11 @@ When making changes, be aware of these high-impact files:
 - Do not say a delay from the schedule alone, or on every leg — `legDelay` speaks from 10 minutes and only for a live estimate; the duty tile's line only when the estimate is within the hour of the latest IN (`estimateConcern`)
 - Do not show the currencies as of TODAY on a LATER duty — `currencyAsOfMs` forecasts them to its report (`currencySummary`'s `asOfMs`), dots and figures alike, and the tile and card say the day
 - Do not give the face and the card two copies of a shared fact that crossfade — tag both `data-morph` with one key and let `runSharedMorph` fly it. And do not put a spring with any bounce on the card's surface or the flying copies — one eased tween for both, or what travels wobbles before it settles
-- Do not size the bento's rows by their content again (`minmax(…, auto)`) — a row is a fixed share of the box (`rowHeightFor` over `rowsOf`: a phone 6, an iPad landscape 6, upright 8), or a 6 × 1 and a 6 × 2 tile come out the same height. And do not pack the tiles or grow one into an empty cell: a tile has a PLACE (`TilePos`) and an empty cell stays empty, as on a home screen
+- Do not size the bento's rows by their content again (`minmax(…, auto)`) — a row is a fixed share of the box (`rowHeightFor` over `rowsOf` plus the timeline's row: a phone 5 + 1, an iPad landscape 5 + 1, upright 7 + 1), or a 6 × 1 and a 6 × 2 tile come out the same height. And do not pack the tiles or grow one into an empty cell: a tile has a PLACE (`TilePos`) and an empty cell stays empty, as on a home screen
 - Do not sort the limits by the fraction used alone — `limitOrder`: in concern first, else the regulation's order; and keep the limits card's rows the same set for every limit, or the card changes height (and moved) under the tabs
 - Do not date a flight's briefing by the flight's own date — `flightBriefingId`: the OFP dates it by its scheduled OUT, which a red-eye's actual OUT has moved a day on
 - Do not let the OFP's aeroplane overwrite a FLOWN flight's, or a signed or locked one's (`briefingAircraftPatch`); and keep the launch pass (`applyRecentBriefingAircraft`) out of `lib/briefing/import.ts`, which pulls in the PDF reader
-- Do not size dashboard tiles in twelfths or tap through width chips again — a phone is six cells by six, a tile placed and sized in them by the active tile's edge handles (`resizeFrom`, `placeTile`, `setTilePositions`); and hand every face its placed SIZE in thirds (`faceSizeOn`) rather than letting it guess from the viewport
+- Do not size dashboard tiles in twelfths or tap through width chips again — a phone is six columns by five tile rows, a tile placed and sized in them by the active tile's edge handles (`resizeFrom`, `placeTile`, `setTilePositions`); and hand every face its placed SIZE in thirds (`faceSizeOn`) rather than letting it guess from the viewport
 - Do not put an alert icon (⚠, an octagon, a state glyph) back on the Flight Deck — concern is the tile's edge and the reason's colour; a tally is "+2" in colour. And do not mark a menu's chosen row with a tick: it is lit like the nav's tab
 - Do not draw a landing arrowhead under the runway's round cap — it hid its tip and read backwards; the approach comes in dashed to an arrowhead clear of the cap (`RunwayDiagram`)
 - Do not size the airport tile's runway diagram by a fixed number or put a line of text across the middle of the tile — the text keeps to the corners and the ring takes the largest circle clear of them (`largestCircle`, measured in `offset*` layout values in a ResizeObserver). And do not name cloud above 3,000ft on the tile (`LOW_CLOUD_FT`): a high layer is no concern on the approach
@@ -6199,8 +6231,9 @@ When making changes, be aware of these high-impact files:
 - Do not ask aviationweather.gov for airport data per look or from the browser — `/api/lookup/airport-info` batches the ids, MongoDB keeps each 30 days, the device 30 more. And do not ask it for alternates at all: they come from the TAF snapshot's own position index
 - Do not light a rest that will be done before the next report — "Legal from 22:00Z" is nominal (dark cockpit); only a report inside the rest is red
 - Do not push a tile off the screen to make room for a drop or a resize — refuse it (`placeTileOnScreen`)
-- Do not hardcode a tile's place, or bring back an Arrange button — a long press on a tile enters Arrange with it in hand (`beginArrangeFrom`), and the pilot places and sizes it there. Work a push out from the layout the gesture BEGAN on, never from the last step, or a tile carried past others drags them with it. And do not let the bento GRID scroll itself: the wrapper does, or a tall arrangement squeezes its tiles
-- Do not split the duty back out of the flights tile, or draw a strip inside it again — the page's timeline (`DeckTimeline`) is the ONE picture of the duties; the FDP figures sit beside the leg (`DutyReadout`) and the duty's table under the legs in its card. The limits stay a tile of their own
+- Do not hardcode a tile's place, or bring back an Arrange button — a long press on a tile enters Arrange with it in hand (`beginArrangeFrom`), and the pilot places and sizes it there. Work a push out from the layout the gesture BEGAN on, never from the last step, or a tile carried past others drags them with it. And bump the tiles in the way DOWN a row at a time (`pushTilesDown`), never send one to the nearest free place first — that sent the tile under an enlarged one to the foot of the screen. And do not let the bento GRID scroll itself: the wrapper does, or a tall arrangement squeezes its tiles
+- Do not merge the duty back into the flight tile, or draw a strip inside either again — the page's timeline (`DeckTimeline`) is the ONE picture of the duties; the duty tile is its line and figures, the flight tile its legs with the crew on the right. And draw the timeline's ticks as whole-pixel lines, never a repeating gradient (a fractional period blurs them)
+- Do not let a face truncate its way down to a small tile — give it a smaller variant (fewer figures, one-word captions, a picture in place of words; the short / narrow / roomy rules in `faces.tsx`, `duty-clock.tsx`, `extra-widgets.tsx`) and check it with each tile alone at every size
 - Do not bring back a duty menu, or choose the duty anywhere but the timeline's pointer (`selectAt` → `setChosenDuty`). Do not set React state per scroll frame for it either: the pointer is a store, the duty is set only when it changes, and only the limits tile and the pointer's label read the pointer
 - Do not read the Flight Deck's limits as whole UTC days — they are `limitsAt`, the FDP page's continuous windows at the pointer, so the deck and the FDP chart agree at any instant
 - Do not close and re-grow a card for a flight opened from it — the sheet is `suspended` under the flight and shown again as it was
