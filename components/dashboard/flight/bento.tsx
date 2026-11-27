@@ -5,14 +5,15 @@
  * like a mobile phone … a fixed number of grids and it's free and easy to be
  * placed within the grids").
  *
- * The screen is a fixed grid of cells — a phone six by six — and each tile
+ * The screen is a fixed grid of cells — a phone six by five — and each tile
  * has a PLACE in it (per device, `use-dashboard-layout.ts`). Arrange — a long
  * press on any tile, which picks it up in the same gesture; Done in the header
  * or Escape ends it — shows the cells, and a tile is DROPPED on the cell under
- * it (arrow keys move it a cell), or RESIZED by dragging any edge of the tile
- * in hand (Shift + arrows). Tiles it lands on are pushed to the nearest place
- * they fit (`placeTile`), worked out from where they were when the gesture
- * began, so a tile carried past and away goes back; a place that would push a
+ * it (arrow keys move it a cell), or RESIZED by dragging any part of an edge
+ * of the tile in hand (Shift + arrows). Tiles it lands on are bumped down a
+ * row at a time (`placeTile` → `pushTilesDown`), worked out from where they
+ * were when the gesture began, so a tile carried past and away goes back; a
+ * place that would push a
  * tile off the screen is refused (`placeTileOnScreen`). Empty cells stay empty.
  *
  * - **The DOM never moves.** Every tile stays at its place in the tree and the
@@ -27,7 +28,7 @@
 import * as React from "react"
 import { createPortal } from "react-dom"
 import { animate, motion, useMotionValue } from "framer-motion"
-import { Minus, Move } from "lucide-react"
+import { Minus } from "lucide-react"
 import { GRID_GAP_PX, ROW_FLOOR_PX, arrangeTiles, clampPos, columnsOf, placeTileOnScreen, resizeFrom, rowsOf, rowsUsed, sizeLabel, type GridKind, type TilePos, type TileSize } from "@/lib/utils/dashboard/bento"
 import { DASHBOARD_TILES, minColsOf, removeTile, setArranging, setTilePositions, type DashboardTile } from "@/hooks/use-dashboard-layout"
 import { haptic } from "@/lib/utils/haptics"
@@ -194,9 +195,8 @@ export function BentoGrid({
   }
 
   const [drag, setDrag] = React.useState<Drag | null>(null)
-  // The tile in hand: its frame and its four edge handles are drawn; the
-  // others show only that they can be moved. A tap (or a pick-up) on another
-  // takes the handles to it.
+  // The tile in hand: its frame and its four edges, each a grip, are drawn.
+  // A tap (or a pick-up) on another takes them to it.
   const [activeState, setActive] = React.useState<DashboardTile | null>(null)
   const active = arranging ? activeState : null
   const x = useMotionValue(0)
@@ -414,23 +414,18 @@ export function BentoGrid({
               >
                 <Minus className="h-4 w-4" aria-hidden />
               </button>
-              {active !== id && (
-                <span
-                  aria-hidden
-                  className="pointer-events-none absolute -right-1.5 -top-1.5 z-[1] flex h-6 w-6 items-center justify-center rounded-full border border-border bg-[var(--control)] text-foreground"
-                >
-                  <Move className="h-3.5 w-3.5" />
-                </span>
-              )}
               {/* Its size, said while it changes. */}
               {resizing && (
                 <span className="pointer-events-none absolute left-1/2 top-1/2 z-[1] flex h-9 min-w-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-[var(--control)] px-3 text-sm font-semibold tabular-nums text-foreground">
                   {sizeLabel(size)}
                 </span>
               )}
-              {/* The tile in hand: a frame and a handle at the middle of each
-                  edge (the owner's sketch, after a home-screen widget) — drag
-                  an edge out to grow the tile that way, in to shrink it. */}
+              {/* The tile in hand: a frame, and EVERY EDGE a grip (the owner,
+                  round 51: "any part of the edges … to resize") — a band
+                  along each side, half in and half out of the tile, carrying
+                  a small dot at its middle to show it. Drag an edge out to
+                  grow the tile that way, in to shrink it. The bands stop
+                  short of the corners, where the − sits. */}
               {active === id && (
                 <>
                   <span aria-hidden className="pointer-events-none absolute -inset-[3px] z-[1] rounded-[18px] border-2 border-foreground/85" />
@@ -441,14 +436,18 @@ export function BentoGrid({
                       data-edge={edge}
                       onPointerDown={(e) => startResize(e, id, edge)}
                       className={cn(
-                        "absolute z-[2] h-5 w-5 rounded-full border-2 border-foreground/85 bg-[var(--control)] after:absolute after:-inset-3",
-                        edge === "t" && "-top-[13px] left-1/2 -translate-x-1/2 cursor-ns-resize",
-                        edge === "b" && "-bottom-[13px] left-1/2 -translate-x-1/2 cursor-ns-resize",
-                        edge === "l" && "-left-[13px] top-1/2 -translate-y-1/2 cursor-ew-resize",
-                        edge === "r" && "-right-[13px] top-1/2 -translate-y-1/2 cursor-ew-resize",
+                        "absolute z-[2] flex items-center justify-center",
+                        (edge === "t" || edge === "b") && "inset-x-5 h-6 cursor-ns-resize",
+                        (edge === "l" || edge === "r") && "inset-y-5 w-6 cursor-ew-resize",
+                        edge === "t" && "-top-3",
+                        edge === "b" && "-bottom-3",
+                        edge === "l" && "-left-3",
+                        edge === "r" && "-right-3",
                       )}
                       style={{ touchAction: "none" }}
-                    />
+                    >
+                      <span className="pointer-events-none h-2.5 w-2.5 rounded-full border-[1.5px] border-foreground/85 bg-[var(--control)]" />
+                    </span>
                   ))}
                 </>
               )}

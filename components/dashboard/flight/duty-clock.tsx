@@ -44,6 +44,30 @@ interface DutyClockView {
 }
 
 /**
+ * What the duty asks of the body (round 51 — the research's first finding:
+ * the strongest predictors of fatigue are the sleep before a duty and how far
+ * it runs into the window of circadian low): para 4's three terms off the
+ * duty period, in ACCLIMATED time — an early start, a late finish, a take-off
+ * or landing in the WOCL. Words for a tile ("Early"), and for the card.
+ */
+export function circadianWords(brief: FlightBrief, long = false): string[] {
+  const c = brief.duty.standby ? undefined : brief.duty.period?.circadian
+  if (!c?.disruptive) return []
+  const out: string[] = []
+  if (c.earlyStart) out.push(long ? "Early start" : "Early")
+  if (c.lateFinish) out.push(long ? "Late finish" : "Late")
+  if (c.woclOperation) out.push(long ? "Through the WOCL" : "WOCL")
+  return out
+}
+
+/** How long until a report within the day, as the report figure's caption: "2:55 to go" (never "In …" — IN is the on-blocks time). */
+const REPORT_COUNTDOWN_MS = 24 * 60 * MIN
+function reportCaption(reportMs: number, now: number, day: string): string {
+  const to = reportMs - now
+  return to > 0 && to <= REPORT_COUNTDOWN_MS ? `${formatDutyClock(Math.round(to / MIN))} to go` : `Report ${day}`
+}
+
+/**
  * A reported delay that eats into the FDP maximum, said as the tile's line
  * (the owner, Nov 2026: react to real-time changes, and grab attention only
  * where it belongs): past the latest IN in red, within the hour of it in
@@ -136,7 +160,7 @@ export function dutyClockView(brief: FlightBrief): DutyClockView | null {
         r
           ? { value: formatRestSpan(r.restMinutes), label: `Min ${formatDutyClock(r.requiredRestMinutes)}`, tone: short ? "fail" : undefined }
           : { value: "—", label: "Rest" },
-        { value: clock(w.startMs), label: `Report ${shortDayOf(day(w.startMs))}` },
+        { value: clock(w.startMs), label: duty.index > 0 ? reportCaption(w.startMs, now, shortDayOf(day(w.startMs))) : `Report ${shortDayOf(day(w.startMs))}` },
         {
           value: `${formatDutyClock(planned)}${dp.maxFdpMinutes > 0 ? `/${formatDutyClock(dp.maxFdpMinutes)}` : ""}`,
           label: "FDP / Max",
@@ -214,7 +238,9 @@ export function dutyClockView(brief: FlightBrief): DutyClockView | null {
           label: `Min ${next.restMinimum || formatDutyClock(next.restRequiredMinutes)}`,
           tone: short ? "fail" : undefined,
         },
-        { value: clock(next.reportMs), label: `Report ${shortDayOf(day(next.reportMs))}` },
+        // Within the day, how long until it (the question before a duty is
+        // when to sleep and when to leave): "2:55 to go".
+        { value: clock(next.reportMs), label: reportCaption(next.reportMs, now, shortDayOf(day(next.reportMs))), live: true },
         {
           value: next.plannedFdpMinutes > 0 ? `${formatDutyClock(next.plannedFdpMinutes)}${next.maxFdpMinutes > 0 ? `/${formatDutyClock(next.maxFdpMinutes)}` : ""}` : "—",
           label: "FDP / Max",
@@ -259,13 +285,23 @@ export function DutyClockFace({ brief, inCard = false, size }: { brief: FlightBr
   const short = !inCard && (size?.rows ?? 1) < 0.75
   const figures = cols >= 2.5 ? 3 : cols >= 1.25 ? 2 : 1
   // Narrower than a phone's row the captions are one word: "Rest", "Report".
+  const fatigue = circadianWords(brief)
   const slots = view.slots.slice(0, figures).map((sl) => (cols >= 2.5 ? sl : { ...sl, label: compactCaption(sl.label) }))
   return (
     <section aria-label="Duty and FDP">
       {/* The maximum is not said up here as well: the FDP / Max figure below carries it. */}
-      <p className={cn("flex items-center gap-1.5 truncate text-[10px] font-bold uppercase tracking-[0.14em]", t.text)} data-morph="duty-state">
-        {view.state}
-      </p>
+      <div className="flex min-w-0 items-baseline gap-2">
+        <p className={cn("flex min-w-0 items-center gap-1.5 truncate text-[10px] font-bold uppercase tracking-[0.14em]", t.text)} data-morph="duty-state">
+          {view.state}
+        </p>
+        {/* What the duty asks of the body: an early start, a late finish, the
+            WOCL — a fact to plan sleep by, not a fault, so muted. */}
+        {fatigue.length > 0 && cols >= 1.25 && (
+          <span className="ml-auto shrink-0 truncate text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground" data-morph="duty-circadian">
+            {fatigue.join(" · ")}
+          </span>
+        )}
+      </div>
       {/* The reason, in its colour (dark cockpit: ink when all is well). */}
       <p
         className={cn(
@@ -297,6 +333,7 @@ export function compactHeadline(text: string): string {
 export function compactCaption(label: string): string {
   if (/^min\b/i.test(label)) return "Rest"
   if (/^report\b/i.test(label)) return "Report"
+  if (/to go$/i.test(label)) return label
   if (/^from\b/i.test(label)) return "From"
   if (/^fdp\s*\/\s*max/i.test(label)) return "FDP"
   return label

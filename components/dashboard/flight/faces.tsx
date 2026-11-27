@@ -681,6 +681,19 @@ export function legRows(brief: FlightBrief, i: number): CardRow[] {
         : undefined,
     morph: `fl-ac-${i}`,
   })
+  // The TURN before this leg: the time on the ground since the leg before
+  // landed (recorded IN, else its schedule), against this leg's OUT —
+  // what the turnaround allows for the walk-round, fuel and the brief.
+  const turnMin = turnBefore(brief, i)
+  if (turnMin !== null) {
+    const prev = duty.legs[i - 1]
+    rows.push({
+      label: "Turn",
+      value: formatDutyClock(Math.max(0, turnMin)),
+      sub: `At ${brief.code(prev.arrivalIcao, prev.arrivalIata)}${turnMin < MIN_TURN_MIN ? " · short" : ""}`,
+      tone: turnMin < MIN_TURN_MIN ? "caution" : undefined,
+    })
+  }
   // The gate number alone (the owner, Nov 2026: "remove all terminal … gate
   // number is good enough"); a stand only where no gate is published.
   const gateOf = (x: { gate: string; stand?: string } | undefined) => (x?.gate ? `Gate ${x.gate}` : x?.stand ? `Stand ${x.stand}` : "")
@@ -702,6 +715,34 @@ export function legRows(brief: FlightBrief, i: number): CardRow[] {
 }
 
 const isHHMM = (t?: string | null): t is string => !!t && /^\d{1,2}:\d{2}$/.test(t)
+
+/**
+ * Minutes on the ground before leg `i` (round 51: the turnaround is what a
+ * pilot plans the walk-round, fuel and the brief into) — the leg before's
+ * IN (recorded, else live, else scheduled) to this leg's OUT (the same);
+ * null for the first leg, or where either end is unknown.
+ */
+export function turnBefore(brief: FlightBrief, i: number): number | null {
+  if (i <= 0) return null
+  const est = brief.duty.estimate
+  const a = brief.duty.times[i - 1]
+  const b = brief.duty.times[i]
+  const inMs = brief.duty.legs[i - 1]?.inTime ? a?.arriveMs : (est?.legs[i - 1]?.inMs ?? a?.arriveMs)
+  const outMs = brief.duty.legs[i]?.outTime ? b?.departMs : (est?.legs[i]?.outMs ?? b?.departMs)
+  if (inMs == null || outMs == null) return null
+  return Math.round((outMs - inMs) / 60_000)
+}
+
+/** An hour after the leg should have landed (the live estimate, else the schedule) with no IN recorded: a gap in the logbook. */
+const UNLOGGED_AFTER_MS = 60 * 60_000
+function unloggedLeg(brief: FlightBrief, i: number): boolean {
+  const f = brief.duty.legs[i]
+  if (!f || isHHMM(f.inTime)) return false
+  const sched = scheduledInMs(f)
+  const est = brief.duty.estimate?.legs[i]?.inMs ?? null
+  const due = Math.max(sched ?? 0, est ?? 0)
+  return due > 0 && brief.now > due + UNLOGGED_AFTER_MS
+}
 
 /** Minutes leg `f`'s recorded OUT or IN is from its schedule (negative early); null without both. */
 export function offSchedule(f: FlightLog, end: "OUT" | "IN", actualMs: number | null): number | null {
@@ -736,8 +777,13 @@ function timeRow(brief: FlightBrief, i: number, label: "OUT" | "IN", actual: str
     }
   }
   if (!isHHMM(scheduled)) return { label, value: "—" }
+  // After the flight: landed by now, and nothing in the logbook (the pilot's
+  // last job of the day, the record).
+  const gap = label === "IN" && unloggedLeg(brief, i)
   return {
     label,
+    sub: gap ? "Not logged" : undefined,
+    tone: gap ? "caution" : undefined,
     value: (
       <>
         <span className="mr-1 text-[11px] font-normal text-muted-foreground">Sch</span>
